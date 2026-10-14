@@ -13,6 +13,7 @@ export type StandingAuthority = {
   approvedGoal: string;
   state: AuthorityState;
   repositoryRemote: string;
+  targetBranch: string;
   allowedSystems: SystemCategory[];
   excludedSystems: SystemCategory[];
   allowedActions: AuthorityAction[];
@@ -193,11 +194,7 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   const actualBaseSha = runGit(repositoryPath, ["rev-parse", "--verify", `${baseSha}^{commit}`]);
   const actualHeadSha = runGit(repositoryPath, ["rev-parse", "--verify", `${headSha}^{commit}`]);
   const repositoryRemote = runGit(repositoryPath, ["remote", "get-url", "origin"]);
-  const changedFiles = runGitBuffer(repositoryPath, ["diff", "--name-only", "-z", "--diff-filter=ACMR", actualBaseSha, actualHeadSha])
-    .toString("utf8")
-    .split("\0")
-    .filter(Boolean)
-    .sort();
+  const changedFiles = listChangedPaths(repositoryPath, actualBaseSha, actualHeadSha);
   const diff = runGitBuffer(repositoryPath, ["diff", "--no-ext-diff", "--binary", actualBaseSha, actualHeadSha]);
 
   return {
@@ -228,6 +225,30 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
     });
   }
 
+  let trustedBaseSha: string;
+  try {
+    trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority.targetBranch);
+  } catch (error) {
+    return pullRequestDeny("The approved pull-request target could not be verified in the repository.", {
+      targetBranch: authority.targetBranch,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (verifiedRange.baseSha !== trustedBaseSha) {
+    return pullRequestDeny("Candidate base commit does not match the verified pull-request target.", {
+      candidateBaseSha: verifiedRange.baseSha,
+      trustedBaseSha,
+      targetBranch: authority.targetBranch,
+    });
+  }
+  if (!isAncestor(repositoryPath, trustedBaseSha, verifiedRange.headSha)) {
+    return pullRequestDeny("Candidate head is not a descendant of the verified pull-request target.", {
+      trustedBaseSha,
+      candidateHeadSha: verifiedRange.headSha,
+    });
+  }
+
   if (candidate.baseSha !== verifiedRange.baseSha || candidate.headSha !== verifiedRange.headSha || candidate.repositoryRemote !== verifiedRange.repositoryRemote || candidate.repositoryRemote !== authority.repositoryRemote || candidate.diffSha256 !== verifiedRange.diffSha256 || !sameFiles(candidate.changedFiles, verifiedRange.changedFiles)) {
     return pullRequestDeny("Candidate metadata does not match the verified Git commit range.", {
       declaredRemote: candidate.repositoryRemote,
@@ -242,7 +263,7 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   }
   const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
   if (protectedFiles.length) return pullRequestDeny("Verified candidate changes a protected release-control or production-sensitive path.", { protectedFiles });
-  const independentlyClassified = verifiedRange.changedFiles.map((file) => classifyPath(file, readGitBlob(repositoryPath, verifiedRange.headSha, file)));
+  const independentlyClassified = verifiedRange.changedFiles.map((file) => classifyPath(file, readChangedGitBlob(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file)));
   if (independentlyClassified.some((item) => item.risk !== "low" || item.system === "unknown")) {
     return pullRequestDeny("Every verified changed file must classify as low risk.", { classifications: independentlyClassified });
   }
@@ -252,6 +273,10 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   }
   const requiredEvidence: ReleaseEvidenceKind[] = ["scope", "tests", "preview", "independent-review"];
   if (independentlyClassified.some((item) => item.system === "ui")) requiredEvidence.push("browser-qa");
+  const failedEvidence = candidate.evidence.filter((item) => requiredEvidence.includes(item.kind) && item.candidateHead === candidate.headSha && item.status === "fail");
+  if (failedEvidence.length) {
+    return pullRequestDeny("Pull-request evidence includes a failed result for the current candidate head.", { failedEvidence });
+  }
   const missing = requiredEvidence.filter((kind) => !candidate.evidence.some((item) => item.kind === kind && item.status === "pass" && item.candidateHead === candidate.headSha && (kind !== "independent-review" || (item.independent === true && typeof item.actorId === "string" && item.actorId.trim().length > 0 && item.actorId !== task.implementerId))));
   if (missing.length) return pullRequestDeny("Pull-request evidence is missing, failed, stale, or non-independent.", { missing, candidateHead: candidate.headSha });
   return {
@@ -296,6 +321,53 @@ function runGit(repositoryPath: string, args: string[]) {
 
 function runGitBuffer(repositoryPath: string, args: string[]) {
   return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function listChangedPaths(repositoryPath: string, baseSha: string, headSha: string) {
+  const fields = runGitBuffer(repositoryPath, ["diff", "--name-status", "-z", "--find-renames=50%", "--diff-filter=ACMRD", baseSha, headSha])
+    .toString("utf8")
+    .split("\0");
+  const paths: string[] = [];
+
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++];
+    if (!status) continue;
+    if (status.startsWith("R")) {
+      const from = fields[index++];
+      const to = fields[index++];
+      if (from) paths.push(from);
+      if (to) paths.push(to);
+      continue;
+    }
+    const path = fields[index++];
+    if (path) paths.push(path);
+  }
+
+  return Array.from(new Set(paths)).sort();
+}
+
+function resolveTrustedTargetBase(repositoryPath: string, targetBranch: string) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(targetBranch) || targetBranch.includes("..") || targetBranch.includes("@{") || targetBranch.startsWith("-")) {
+    throw new Error("Standing authority target branch is invalid.");
+  }
+  return runGit(repositoryPath, ["rev-parse", "--verify", `refs/remotes/origin/${targetBranch}^{commit}`]);
+}
+
+function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: string) {
+  try {
+    execFileSync("git", ["-C", repositoryPath, "merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readChangedGitBlob(repositoryPath: string, baseSha: string, headSha: string, file: string) {
+  try {
+    return readGitBlob(repositoryPath, headSha, file);
+  } catch {
+    return readGitBlob(repositoryPath, baseSha, file);
+  }
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {

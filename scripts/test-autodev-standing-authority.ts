@@ -23,6 +23,7 @@ const authority: StandingAuthority = {
   approvedGoal: "Deliver bounded, reversible low-risk DZN interface polish.",
   state: "active",
   repositoryRemote: "https://github.com/rafaeldeak-lab/dzn-network.git",
+  targetBranch: "main",
   allowedSystems: ["ui", "docs", "tests"],
   excludedSystems: ["auth", "billing", "stripe", "nitrado", "adm", "database", "cloudflare-worker", "github-actions", "autodev", "release"],
   allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"],
@@ -120,6 +121,41 @@ const protectedPath = assessLowRiskPullRequest(authority, {
 }, protectedFixture.path);
 assert.equal(protectedPath.pullRequestEligible, false, "Protected paths must be rejected from the verified Git range.");
 
+const deletedProtectedFixture = makeDeletedProtectedFixture();
+const deletedProtectedRange = inspectGitRange(deletedProtectedFixture.path, deletedProtectedFixture.baseSha, deletedProtectedFixture.headSha);
+assert.ok(deletedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Deleted protected files must remain in the verified file set.");
+const deletedProtected = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...deletedProtectedRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: deletedProtectedFixture.headSha })),
+  },
+}, deletedProtectedFixture.path);
+assert.equal(deletedProtected.pullRequestEligible, false, "Deleting a protected path must prevent pull-request eligibility.");
+
+const renamedProtectedFixture = makeRenamedProtectedFixture();
+const renamedProtectedRange = inspectGitRange(renamedProtectedFixture.path, renamedProtectedFixture.baseSha, renamedProtectedFixture.headSha);
+assert.ok(renamedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "The source path of a protected rename must remain in the verified file set.");
+const renamedProtected = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...renamedProtectedRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: renamedProtectedFixture.headSha })),
+  },
+}, renamedProtectedFixture.path);
+assert.equal(renamedProtected.pullRequestEligible, false, "Renaming a protected path must prevent pull-request eligibility.");
+
+const targetBypassFixture = makeTargetBypassFixture();
+const targetBypassRange = inspectGitRange(targetBypassFixture.path, targetBypassFixture.untrustedBaseSha, targetBypassFixture.headSha);
+const targetBypass = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...targetBypassRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: targetBypassFixture.headSha })),
+  },
+}, targetBypassFixture.path);
+assert.equal(targetBypass.pullRequestEligible, false, "The candidate base must match the trusted pull-request target tip.");
+
 const outOfScopeFixture = makeGitFixture("components/events/authority-note.tsx", "export const eventNote = 'scope';\n");
 const outOfScopeRange = inspectGitRange(outOfScopeFixture.path, outOfScopeFixture.baseSha, outOfScopeFixture.headSha);
 const outOfScope = assessLowRiskPullRequest(authority, {
@@ -164,6 +200,15 @@ assert.equal(missingPrAction.pullRequestEligible, false, "A task must explicitly
 const wrongRemote = assessLowRiskPullRequest({ ...authority, repositoryRemote: "https://github.com/other/repository.git" }, candidateTask, fixture.path);
 assert.equal(wrongRemote.pullRequestEligible, false, "The verified Git range must belong to the authority's approved repository.");
 
+const failedEvidence = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...candidateTask.candidate!,
+    evidence: [...candidateTask.candidate!.evidence, { kind: "tests", status: "fail", candidateHead: fixture.headSha, detail: "A later verification failed." }],
+  },
+}, fixture.path);
+assert.equal(failedEvidence.pullRequestEligible, false, "A current-head failed verification must block pull-request eligibility.");
+
 const regression = assessPostMergeHealth(authority, candidateTask, "fail", "Production health check regressed.");
 assert.equal(regression.shouldPauseFurtherWork, true);
 assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health check passed.").shouldPauseFurtherWork, false);
@@ -171,6 +216,9 @@ assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health che
 rmSync(fixture.path, { force: true, recursive: true });
 rmSync(protectedFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });
+rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
+rmSync(renamedProtectedFixture.path, { force: true, recursive: true });
+rmSync(targetBypassFixture.path, { force: true, recursive: true });
 
 console.log("AutoDev standing-authority controller tests passed.");
 
@@ -185,10 +233,68 @@ function makeGitFixture(file: string, changedContent: string) {
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "baseline"]);
   const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
   writeFileSync(join(path, file), changedContent);
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "candidate"]);
   return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeDeletedProtectedFixture() {
+  const path = makeFixtureRepository();
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const baseline = true;\n");
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const status = 'ready';\n");
+  rmSync(join(path, "scripts/autodev/release-control.ts"));
+  runGit(path, ["add", "-A"]);
+  runGit(path, ["commit", "--quiet", "-m", "delete protected control"]);
+  return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeRenamedProtectedFixture() {
+  const path = makeFixtureRepository();
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
+  mkdirSync(join(path, "components/games"), { recursive: true });
+  runGit(path, ["mv", "scripts/autodev/release-control.ts", "components/games/release-control.ts"]);
+  runGit(path, ["commit", "--quiet", "-m", "rename protected control"]);
+  return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeTargetBypassFixture() {
+  const path = makeFixtureRepository();
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const baseline = true;\n");
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "target baseline"]);
+  const trustedBaseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", trustedBaseSha]);
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = false;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "protected intermediate change"]);
+  const untrustedBaseSha = runGit(path, ["rev-parse", "HEAD"]);
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const status = 'ready';\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "allowed-looking change"]);
+  return { path, trustedBaseSha, untrustedBaseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeFixtureRepository() {
+  const path = mkdtempSync(join(tmpdir(), "dzn-standing-authority-"));
+  mkdirSync(join(path, "components/games"), { recursive: true });
+  mkdirSync(join(path, "scripts/autodev"), { recursive: true });
+  runGit(path, ["init", "--quiet"]);
+  runGit(path, ["config", "user.email", "dzn-tests@example.invalid"]);
+  runGit(path, ["config", "user.name", "DZN Tests"]);
+  runGit(path, ["remote", "add", "origin", "https://github.com/rafaeldeak-lab/dzn-network.git"]);
+  return path;
 }
 
 function runGit(repositoryPath: string, args: string[]) {
