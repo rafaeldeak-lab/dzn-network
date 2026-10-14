@@ -53,13 +53,19 @@ export type CandidateEvidence = {
   detail: string;
 };
 
+export type TrustedEvidenceReceipt = CandidateEvidence & {
+  authorityId: string;
+  taskId: string;
+  recordedAt: string;
+  source: "authority-controller";
+};
+
 export type ReleaseCandidate = {
   baseSha: string;
   headSha: string;
   repositoryRemote: string;
   changedFiles: string[];
   diffSha256: string;
-  evidence: CandidateEvidence[];
 };
 
 export type VerifiedGitRange = {
@@ -102,8 +108,20 @@ export type AuthorityTask = {
     runnerId: string;
     acquiredAt: string;
     expiresAt: string;
+    runtimeDeadline?: string;
   };
   candidate?: ReleaseCandidate;
+};
+
+export type TrustedAuthorityTaskRecord = {
+  source: "authority-controller";
+  recordedAt: string;
+  task: AuthorityTask;
+};
+
+export type AuthorityControllerRecords = {
+  getTaskRecord(authorityId: string, taskId: string): TrustedAuthorityTaskRecord | undefined;
+  getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
 };
 
 export type AuthorityDecision = {
@@ -223,7 +241,7 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
   }
   if (requiresLiveLease(nextState)) {
-    const leaseDecision = assessTaskLease(task, now, actingRunnerId);
+    const leaseDecision = assessTaskLease(authority, task, now, actingRunnerId);
     if (!leaseDecision.ok) return leaseDecision;
   }
   const requiredAction = task.state === "blocked" && nextState === "authorised"
@@ -257,17 +275,42 @@ export function acquireTaskLease(authority: StandingAuthority, task: AuthorityTa
   const authorityDecision = assessTaskAuthority(authority, authoritativeTask);
   if (!authorityDecision.ok) return authorityDecision;
   const activeLease = authoritativeTask.lease;
-  if (activeLease && new Date(activeLease.expiresAt).getTime() > now.getTime() && activeLease.runnerId !== runnerId) {
-    return deny("task_locked", "Task is already leased by another runner.", { runnerId: activeLease.runnerId, expiresAt: activeLease.expiresAt });
+  if (authoritativeTask.implementerId && authoritativeTask.implementerId !== runnerId) {
+    return deny("task_locked", "Task implementation is already bound to another runner.", { taskId: authoritativeTask.id, implementerId: authoritativeTask.implementerId });
   }
-  const activeLeases = activeTasks.filter((item) => item.authorityId === authority.id && item.id !== task.id && item.lease && new Date(item.lease.expiresAt).getTime() > now.getTime());
+  if (activeLease) {
+    const runtimeDeadline = resolveLeaseRuntimeDeadline(authority, activeLease);
+    const expiresAt = new Date(activeLease.expiresAt).getTime();
+    if (!runtimeDeadline || !Number.isFinite(expiresAt) || expiresAt <= now.getTime() || runtimeDeadline.getTime() <= now.getTime()) {
+      return deny("lease_inactive", "Task lease has expired or cannot be renewed beyond its original runtime deadline.", {
+        taskId: authoritativeTask.id,
+        expiresAt: activeLease.expiresAt,
+        runtimeDeadline: activeLease.runtimeDeadline ?? null,
+      });
+    }
+    if (activeLease.runnerId !== runnerId) {
+      return deny("task_locked", "Task is already leased by another runner.", { runnerId: activeLease.runnerId, expiresAt: activeLease.expiresAt });
+    }
+  }
+  const activeLeases = activeTasks.filter((item) => item.authorityId === authority.id && item.id !== task.id && item.lease && leaseOccupiesCapacity(authority, item.lease, now));
   if (activeLeases.length >= authority.maxConcurrentTasks) {
     return deny("resource_limit_exceeded", "Authority concurrency limit has been reached.", { maxConcurrentTasks: authority.maxConcurrentTasks, activeLeases: activeLeases.length });
   }
-  const expiresAt = new Date(now.getTime() + authority.maxRuntimeMinutes * 60_000).toISOString();
+  const acquiredAt = activeLease?.acquiredAt ?? now.toISOString();
+  const runtimeDeadline = activeLease
+    ? resolveLeaseRuntimeDeadline(authority, activeLease)
+    : new Date(now.getTime() + authority.maxRuntimeMinutes * 60_000);
+  if (!runtimeDeadline) {
+    return deny("lease_inactive", "Task lease has no valid runtime deadline.", { taskId: authoritativeTask.id });
+  }
   return {
     ...allow("Task lease acquired."),
-    task: { ...authoritativeTask, lease: { runnerId, acquiredAt: now.toISOString(), expiresAt }, updatedAt: now.toISOString() },
+    task: {
+      ...authoritativeTask,
+      implementerId: authoritativeTask.implementerId || runnerId,
+      lease: { runnerId, acquiredAt, expiresAt: runtimeDeadline.toISOString(), runtimeDeadline: runtimeDeadline.toISOString() },
+      updatedAt: now.toISOString(),
+    },
   };
 }
 
@@ -291,12 +334,22 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
   const now = new Date();
+  let taskRecord: TrustedAuthorityTaskRecord | undefined;
+  try {
+    taskRecord = controllerRecords.getTaskRecord(authority.id, taskId);
+  } catch {
+    return pullRequestDeny("The controller-owned task record could not be read for pull-request preparation.", { taskId });
+  }
+  if (!isTrustedTaskRecord(taskRecord, authority, taskId)) {
+    return pullRequestDeny("Pull-request preparation requires a current controller-owned task record.", { taskId });
+  }
+  const task = taskRecord.task;
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
-  const leaseDecision = assessTaskLease(task, now, actingRunnerId);
+  const leaseDecision = assessTaskLease(authority, task, now, actingRunnerId);
   if (!leaseDecision.ok) return pullRequestDeny(leaseDecision.message, leaseDecision.details);
   if (!task.requestedActions.includes("prepare-pr")) return pullRequestDeny("The task did not request pull-request preparation.");
   if (!task.implementerId.trim()) return pullRequestDeny("Pull-request preparation requires a named implementation actor.");
@@ -361,7 +414,12 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   const nonRegularFiles = verifiedRange.changedFiles.filter((file) => hasNonRegularGitEntry(repositoryPath, verifiedRange.baseSha, file)
     || hasNonRegularGitEntry(repositoryPath, verifiedRange.headSha, file));
   if (nonRegularFiles.length) return pullRequestDeny("Verified candidate includes a non-regular Git entry.", { nonRegularFiles });
-  const independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
+  let independentlyClassified: RiskClassification[];
+  try {
+    independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
+  } catch {
+    return pullRequestDeny("Every verified changed file must be readable and classifiable before pull-request preparation.");
+  }
   if (independentlyClassified.some((item) => item.risk !== "low" || item.system === "unknown")) {
     return pullRequestDeny("Every verified changed file must classify as low risk.", { classifications: independentlyClassified });
   }
@@ -371,14 +429,20 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   }
   const requiredCriteria = getRequiredAcceptanceCriteria(authority, independentlyClassified.some((item) => item.system === "ui"));
   const requiredCriterionIds = new Set(requiredCriteria.map((criterion) => criterion.id));
-  const failedEvidence = candidate.evidence.filter((item) => requiredCriterionIds.has(item.kind) && item.candidateHead === candidate.headSha && item.status === "fail");
+  let trustedEvidence: TrustedEvidenceReceipt[];
+  try {
+    trustedEvidence = controllerRecords.getEvidenceReceipts(authority.id, task.id, candidate.headSha)
+      .filter((item) => isTrustedEvidenceReceipt(item, authority, task, candidate.headSha));
+  } catch {
+    return pullRequestDeny("The controller-owned acceptance evidence could not be read for pull-request preparation.", { taskId: task.id });
+  }
+  const failedEvidence = trustedEvidence.filter((item) => requiredCriterionIds.has(item.kind) && item.status === "fail");
   if (failedEvidence.length) {
     return pullRequestDeny("Pull-request evidence includes a failed result for the current candidate head.", { failedEvidence });
   }
   const missing = requiredCriteria
-    .filter((criterion) => !candidate.evidence.some((item) => item.kind === criterion.id
+    .filter((criterion) => !trustedEvidence.some((item) => item.kind === criterion.id
       && item.status === "pass"
-      && item.candidateHead === candidate.headSha
       && (!criterion.requiresIndependentActor || (item.independent === true && typeof item.actorId === "string" && item.actorId.trim().length > 0 && item.actorId !== task.implementerId))))
     .map((criterion) => criterion.id);
   if (missing.length) return pullRequestDeny("Pull-request evidence is missing, failed, stale, or non-independent.", { missing, candidateHead: candidate.headSha });
@@ -451,7 +515,7 @@ function runGit(repositoryPath: string, args: string[]) {
 }
 
 function runGitBuffer(repositoryPath: string, args: string[]) {
-  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function listChangedPaths(repositoryPath: string, baseSha: string, headSha: string) {
@@ -534,7 +598,7 @@ function requiresLiveLease(nextState: AuthorityTaskState) {
   return nextState === "implementing" || nextState === "validating" || nextState === "ready-to-release";
 }
 
-function assessTaskLease(task: AuthorityTask, at: Date, actingRunnerId?: string): AuthorityDecision {
+function assessTaskLease(authority: StandingAuthority, task: AuthorityTask, at: Date, actingRunnerId?: string): AuthorityDecision {
   if (!task.lease) {
     return deny("lease_inactive", "Task must retain a live lease before it can continue lifecycle or pull-request work.", { taskId: task.id });
   }
@@ -544,11 +608,20 @@ function assessTaskLease(task: AuthorityTask, at: Date, actingRunnerId?: string)
       leaseRunnerId: task.lease.runnerId,
     });
   }
+  if (task.implementerId !== task.lease.runnerId) {
+    return deny("task_locked", "Task implementation actor must match the controller-recorded lease owner.", {
+      taskId: task.id,
+      implementerId: task.implementerId,
+      leaseRunnerId: task.lease.runnerId,
+    });
+  }
   const expiresAt = new Date(task.lease.expiresAt).getTime();
-  if (!Number.isFinite(expiresAt) || expiresAt <= at.getTime()) {
+  const runtimeDeadline = resolveLeaseRuntimeDeadline(authority, task.lease);
+  if (!Number.isFinite(expiresAt) || !runtimeDeadline || expiresAt <= at.getTime() || runtimeDeadline.getTime() <= at.getTime()) {
     return deny("lease_inactive", "Task lease has expired and must be reacquired before lifecycle or pull-request work can continue.", {
       taskId: task.id,
       expiresAt: task.lease.expiresAt,
+      runtimeDeadline: task.lease.runtimeDeadline ?? null,
       at: at.toISOString(),
     });
   }
@@ -560,17 +633,50 @@ function isValidTimestamp(value: string) {
 }
 
 function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: string, file: string): RiskClassification[] {
-  return [baseSha, headSha].flatMap((commitSha) => {
-    try {
-      return [classifyPath(file, readGitBlob(repositoryPath, commitSha, file))];
-    } catch {
-      return [];
-    }
+  const classifications = [baseSha, headSha].flatMap((commitSha) => {
+    if (!readGitTreeEntry(repositoryPath, commitSha, file)) return [];
+    return [classifyPath(file, readGitBlob(repositoryPath, commitSha, file))];
   });
+  if (classifications.length === 0) throw new Error("Changed path was unavailable in both verified commits.");
+  return classifications;
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {
   return execFileSync("git", ["-C", repositoryPath, "show", `${commitSha}:${file}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function isTrustedTaskRecord(record: TrustedAuthorityTaskRecord | undefined, authority: StandingAuthority, taskId: string): record is TrustedAuthorityTaskRecord {
+  if (!record) return false;
+  return record.source === "authority-controller"
+    && isValidTimestamp(record.recordedAt)
+    && record.task.id === taskId
+    && record.task.authorityId === authority.id;
+}
+
+function isTrustedEvidenceReceipt(receipt: TrustedEvidenceReceipt | undefined, authority: StandingAuthority, task: AuthorityTask, candidateHeadSha: string) {
+  if (!receipt) return false;
+  return receipt.source === "authority-controller"
+    && receipt.authorityId === authority.id
+    && receipt.taskId === task.id
+    && receipt.candidateHead === candidateHeadSha
+    && isValidTimestamp(receipt.recordedAt);
+}
+
+function resolveLeaseRuntimeDeadline(authority: StandingAuthority, lease: NonNullable<AuthorityTask["lease"]>) {
+  if (lease.runtimeDeadline) {
+    const deadline = new Date(lease.runtimeDeadline);
+    return Number.isFinite(deadline.getTime()) ? deadline : undefined;
+  }
+  const acquiredAt = new Date(lease.acquiredAt);
+  if (!Number.isFinite(acquiredAt.getTime())) return undefined;
+  return new Date(acquiredAt.getTime() + authority.maxRuntimeMinutes * 60_000);
+}
+
+function leaseOccupiesCapacity(authority: StandingAuthority, lease: NonNullable<AuthorityTask["lease"]>, now: Date) {
+  const expiresAt = new Date(lease.expiresAt).getTime();
+  const runtimeDeadline = resolveLeaseRuntimeDeadline(authority, lease);
+  if (!Number.isFinite(expiresAt) || !runtimeDeadline) return true;
+  return expiresAt > now.getTime() && runtimeDeadline.getTime() > now.getTime();
 }
 
 function sameFiles(left: string[], right: string[]) {

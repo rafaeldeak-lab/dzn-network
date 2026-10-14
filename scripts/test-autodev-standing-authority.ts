@@ -14,7 +14,9 @@ import {
   recordTrustedMerge,
   transitionTask,
   type AuthorityTask,
+  type AuthorityControllerRecords,
   type StandingAuthority,
+  type TrustedEvidenceReceipt,
   type TrustedPullRequestTarget,
 } from "./autodev/standing-authority";
 
@@ -67,7 +69,7 @@ function task(overrides: Partial<AuthorityTask> = {}): AuthorityTask {
     attempts: 0,
     createdAt: now,
     updatedAt: now,
-    implementerId: "implementation-runner-a",
+    implementerId: "",
     ...overrides,
   };
 }
@@ -90,15 +92,22 @@ assert.equal(authorised.ok, true);
 const leased = acquireTaskLease(authority, authorised.task!, [], "runner-a");
 assert.equal(leased.ok, true);
 assert.equal(leased.task?.lease?.runnerId, "runner-a");
+assert.equal(leased.task?.implementerId, "runner-a", "The implementation actor must be fixed when its runner acquires the lease.");
+assert.ok(leased.task?.lease?.runtimeDeadline, "A new lease must record its non-extendable runtime deadline.");
+const renewedLease = acquireTaskLease(authority, leased.task!, [leased.task!], "runner-a");
+assert.equal(renewedLease.ok, true);
+assert.equal(renewedLease.task?.lease?.acquiredAt, leased.task?.lease?.acquiredAt, "Renewing a lease must preserve its original acquisition time.");
+assert.equal(renewedLease.task?.lease?.runtimeDeadline, leased.task?.lease?.runtimeDeadline, "Renewing a lease must preserve its original runtime deadline.");
+assert.equal(renewedLease.task?.lease?.expiresAt, leased.task?.lease?.expiresAt, "Renewing a lease must not extend the runtime deadline.");
 const implementing = transitionTask(authority, leased.task!, "implementing", "runner-a");
 assert.equal(transitionTask(authority, leased.task!, "implementing", "runner-b").code, "task_locked", "Only the runner that holds the lease can advance the task.");
 const validating = transitionTask(authority, implementing.task!, "validating", "runner-a");
 const ready = transitionTask(authority, validating.task!, "ready-to-release", "runner-a");
 assert.equal(ready.ok, true);
 assert.equal(transitionTask(authority, task(), "released", "runner-a").code, "invalid_transition");
-assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", "runner-a").code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", "runner-a").code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "authorised", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", "runner-a").code, "lease_inactive");
+assert.equal(transitionTask(authority, task({ state: "authorised", implementerId: "runner-a", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", "runner-a").code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "implementing", implementerId: "runner-a", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", "runner-a").code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "authorised", implementerId: "runner-a", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", "runner-a").code, "lease_inactive");
 assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", "runner-a").code, "action_denied");
 const retried = transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", "runner-a");
 assert.equal(retried.ok, true);
@@ -111,7 +120,8 @@ const persistedBlockedTask = task({
   state: "blocked",
   attempts: authority.maxAttemptsPerTask - 1,
   requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"],
-  lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" },
+  implementerId: "runner-a",
+  lease: leased.task!.lease,
 });
 const staleLeaseSnapshot = task({
   state: "authorised",
@@ -127,18 +137,9 @@ const verifiedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.hea
 
 const candidateTask = task({
   state: "ready-to-release",
+  implementerId: ready.task!.implementerId,
   lease: ready.task!.lease,
-  candidate: {
-    ...verifiedRange,
-    evidence: [
-      { kind: "scope", status: "pass", candidateHead: fixture.headSha, detail: "Classifier records UI-only low risk." },
-      { kind: "tests", status: "pass", candidateHead: fixture.headSha, detail: "Targeted tests passed." },
-      { kind: "preview", status: "pass", candidateHead: fixture.headSha, detail: "Preview deployment passed." },
-      { kind: "browser-qa", status: "pass", candidateHead: fixture.headSha, detail: "Desktop and mobile QA passed." },
-      { kind: "independent-review", status: "pass", candidateHead: fixture.headSha, independent: true, actorId: "release-reviewer-b", detail: "Independent review found no issues." },
-      { kind: "accessibility", status: "pass", candidateHead: fixture.headSha, detail: "Keyboard and contrast checks passed." },
-    ],
-  },
+  candidate: verifiedRange,
 });
 const eligible = assessFixture(authority, candidateTask, fixture);
 assert.equal(eligible.pullRequestEligible, true);
@@ -172,16 +173,10 @@ const expiredLeaseAssessment = assessFixture(authority, {
 }, fixture);
 assert.equal(expiredLeaseAssessment.pullRequestEligible, false, "An expired lease must block pull-request eligibility.");
 
-const staleChecks = assessFixture(authority, {
-  ...candidateTask,
-  candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.baseSha })) },
-}, fixture);
+const staleChecks = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.baseSha));
 assert.equal(staleChecks.pullRequestEligible, false);
 
-const missingConfiguredAcceptance = assessFixture(authority, {
-  ...candidateTask,
-  candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.filter((item) => item.kind !== "accessibility") },
-}, fixture);
+const missingConfiguredAcceptance = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.headSha).filter((item) => item.kind !== "accessibility"));
 assert.equal(missingConfiguredAcceptance.pullRequestEligible, false, "Every configured authority acceptance criterion must pass for the current candidate head.");
 
 const mismatchedFiles = assessFixture(authority, {
@@ -194,10 +189,7 @@ const protectedFixture = makeGitFixture("scripts/autodev/release-control.ts", "e
 const protectedRange = inspectGitRange(protectedFixture.path, protectedFixture.baseSha, protectedFixture.headSha);
 const protectedPath = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...protectedRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: protectedFixture.headSha })),
-  },
+  candidate: protectedRange,
 }, protectedFixture);
 assert.equal(protectedPath.pullRequestEligible, false, "Protected paths must be rejected from the verified Git range.");
 
@@ -206,10 +198,7 @@ const deletedProtectedRange = inspectGitRange(deletedProtectedFixture.path, dele
 assert.ok(deletedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Deleted protected files must remain in the verified file set.");
 const deletedProtected = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...deletedProtectedRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: deletedProtectedFixture.headSha })),
-  },
+  candidate: deletedProtectedRange,
 }, deletedProtectedFixture);
 assert.equal(deletedProtected.pullRequestEligible, false, "Deleting a protected path must prevent pull-request eligibility.");
 
@@ -218,10 +207,7 @@ const renamedProtectedRange = inspectGitRange(renamedProtectedFixture.path, rena
 assert.ok(renamedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "The source path of a protected rename must remain in the verified file set.");
 const renamedProtected = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...renamedProtectedRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: renamedProtectedFixture.headSha })),
-  },
+  candidate: renamedProtectedRange,
 }, renamedProtectedFixture);
 assert.equal(renamedProtected.pullRequestEligible, false, "Renaming a protected path must prevent pull-request eligibility.");
 
@@ -230,10 +216,7 @@ const typeChangedProtectedRange = inspectGitRange(typeChangedProtectedFixture.pa
 assert.ok(typeChangedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Type changes to protected files must remain in the verified file set.");
 const typeChangedProtected = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...typeChangedProtectedRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: typeChangedProtectedFixture.headSha })),
-  },
+  candidate: typeChangedProtectedRange,
 }, typeChangedProtectedFixture);
 assert.equal(typeChangedProtected.pullRequestEligible, false, "Changing a protected path into a symlink must prevent pull-request eligibility.");
 
@@ -241,10 +224,7 @@ const typeChangedUiFixture = makeTypeChangedUiFixture();
 const typeChangedUiRange = inspectGitRange(typeChangedUiFixture.path, typeChangedUiFixture.baseSha, typeChangedUiFixture.headSha);
 const typeChangedUi = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...typeChangedUiRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: typeChangedUiFixture.headSha })),
-  },
+  candidate: typeChangedUiRange,
 }, typeChangedUiFixture);
 assert.equal(typeChangedUi.pullRequestEligible, false, "A non-regular UI Git entry must be rejected before content classification.");
 
@@ -252,10 +232,7 @@ const targetBypassFixture = makeTargetBypassFixture();
 const targetBypassRange = inspectGitRange(targetBypassFixture.path, targetBypassFixture.untrustedBaseSha, targetBypassFixture.headSha);
 const targetBypass = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...targetBypassRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: targetBypassFixture.headSha })),
-  },
+  candidate: targetBypassRange,
 }, targetBypassFixture);
 assert.equal(targetBypass.pullRequestEligible, false, "The candidate base must match the trusted pull-request target tip.");
 
@@ -263,10 +240,7 @@ const outOfScopeFixture = makeGitFixture("components/events/authority-note.tsx",
 const outOfScopeRange = inspectGitRange(outOfScopeFixture.path, outOfScopeFixture.baseSha, outOfScopeFixture.headSha);
 const outOfScope = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...outOfScopeRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: outOfScopeFixture.headSha })),
-  },
+  candidate: outOfScopeRange,
 }, outOfScopeFixture);
 assert.equal(outOfScope.pullRequestEligible, false, "Every verified file must be within the authority scope.");
 
@@ -274,20 +248,11 @@ const removedAuthGuardFixture = makeAuthGuardRemovalFixture();
 const removedAuthGuardRange = inspectGitRange(removedAuthGuardFixture.path, removedAuthGuardFixture.baseSha, removedAuthGuardFixture.headSha);
 const removedAuthGuard = assessFixture(authority, {
   ...candidateTask,
-  candidate: {
-    ...removedAuthGuardRange,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: removedAuthGuardFixture.headSha })),
-  },
+  candidate: removedAuthGuardRange,
 }, removedAuthGuardFixture);
 assert.equal(removedAuthGuard.pullRequestEligible, false, "Removing protected behavior must retain the stricter base-content classification.");
 
-const selfReviewed = assessFixture(authority, {
-  ...candidateTask,
-  candidate: {
-    ...candidateTask.candidate!,
-    evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "implementation-runner-a" } : item),
-  },
-}, fixture);
+const selfReviewed = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.headSha, "runner-a"));
 assert.equal(selfReviewed.pullRequestEligible, false, "An implementer cannot supply its own independent review.");
 
 const missingImplementer = assessFixture(authority, {
@@ -296,13 +261,7 @@ const missingImplementer = assessFixture(authority, {
 }, fixture);
 assert.equal(missingImplementer.pullRequestEligible, false, "Pull-request preparation requires a named implementation actor.");
 
-const anonymousReview = assessFixture(authority, {
-  ...candidateTask,
-  candidate: {
-    ...candidateTask.candidate!,
-    evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "" } : item),
-  },
-}, fixture);
+const anonymousReview = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.headSha, ""));
 assert.equal(anonymousReview.pullRequestEligible, false, "Pull-request preparation requires a named independent review actor.");
 
 const missingPrAction = assessFixture(authority, {
@@ -323,20 +282,32 @@ const credentialedRemoteMismatch = assessFixture(authority, {
   candidate: {
     ...sanitizedRange,
     repositoryRemote: credentialedRemote,
-    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.headSha })),
   },
 }, fixture);
 assert.equal(credentialedRemoteMismatch.pullRequestEligible, false);
 assert.equal(JSON.stringify(credentialedRemoteMismatch.details).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
 
-const failedEvidence = assessFixture(authority, {
-  ...candidateTask,
-  candidate: {
-    ...candidateTask.candidate!,
-    evidence: [...candidateTask.candidate!.evidence, { kind: "tests", status: "fail", candidateHead: fixture.headSha, detail: "A later verification failed." }],
-  },
-}, fixture);
+const failedEvidence = assessFixture(authority, candidateTask, fixture, "runner-a", [
+  ...trustedEvidenceFor(candidateTask, fixture.headSha),
+  trustedEvidenceReceipt(candidateTask, { kind: "tests", status: "fail", candidateHead: fixture.headSha, detail: "A later verification failed." }),
+]);
 assert.equal(failedEvidence.pullRequestEligible, false, "A current-head failed verification must block pull-request eligibility.");
+
+const untrustedEvidence = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.headSha).map((item) => ({ ...item, source: "untrusted-runner" as "authority-controller" })));
+assert.equal(untrustedEvidence.pullRequestEligible, false, "Self-reported evidence must not satisfy controller-owned release evidence requirements.");
+
+const unavailableControllerRecord = assessLowRiskPullRequest(authority, candidateTask.id, fixture.path, trustedTargetFor(fixture.baseSha), "runner-a", {
+  getTaskRecord: () => {
+    throw new Error("controller record unavailable");
+  },
+  getEvidenceReceipts: () => [],
+});
+assert.equal(unavailableControllerRecord.pullRequestEligible, false, "An unavailable controller record must fail closed.");
+
+const unreadableBlobFixture = makeGitFixture("components/games/large-controller-note.tsx", `export const note = \"${"a".repeat(1_100_000)}\";\n`);
+const unreadableBlobRange = inspectGitRange(unreadableBlobFixture.path, unreadableBlobFixture.baseSha, unreadableBlobFixture.headSha);
+const unreadableBlob = assessFixture(authority, { ...candidateTask, candidate: unreadableBlobRange }, unreadableBlobFixture);
+assert.equal(unreadableBlob.pullRequestEligible, false, "A changed blob that cannot be fully classified must fail closed.");
 
 const regression = assessPostMergeHealth(authority, candidateTask, "fail", "Production health check regressed.");
 assert.equal(regression.shouldPauseFurtherWork, true);
@@ -351,6 +322,7 @@ rmSync(typeChangedProtectedFixture.path, { force: true, recursive: true });
 rmSync(typeChangedUiFixture.path, { force: true, recursive: true });
 rmSync(targetBypassFixture.path, { force: true, recursive: true });
 rmSync(removedAuthGuardFixture.path, { force: true, recursive: true });
+rmSync(unreadableBlobFixture.path, { force: true, recursive: true });
 
 console.log("AutoDev standing-authority controller tests passed.");
 
@@ -461,8 +433,40 @@ function makeAuthGuardRemovalFixture() {
   return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
 }
 
-function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }, actingRunnerId = "runner-a") {
-  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId);
+function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }, actingRunnerId = "runner-a", evidence = trustedEvidenceFor(taskArg, taskArg.candidate?.headSha ?? "")) {
+  return assessLowRiskPullRequest(authorityArg, taskArg.id, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId, controllerRecords(authorityArg, taskArg, evidence));
+}
+
+function controllerRecords(authorityArg: StandingAuthority, taskArg: AuthorityTask, evidence: TrustedEvidenceReceipt[]): AuthorityControllerRecords {
+  return {
+    getTaskRecord: (authorityId, taskId) => authorityId === authorityArg.id && taskId === taskArg.id
+      ? { source: "authority-controller", recordedAt: now, task: taskArg }
+      : undefined,
+    getEvidenceReceipts: (authorityId, taskId, candidateHeadSha) => authorityId === authorityArg.id && taskId === taskArg.id && candidateHeadSha === taskArg.candidate?.headSha
+      ? evidence
+      : [],
+  };
+}
+
+function trustedEvidenceFor(taskArg: AuthorityTask, candidateHead: string, independentActorId = "release-reviewer-b") {
+  return [
+    trustedEvidenceReceipt(taskArg, { kind: "scope", status: "pass", candidateHead, detail: "Classifier records UI-only low risk." }),
+    trustedEvidenceReceipt(taskArg, { kind: "tests", status: "pass", candidateHead, detail: "Targeted tests passed." }),
+    trustedEvidenceReceipt(taskArg, { kind: "preview", status: "pass", candidateHead, detail: "Preview deployment passed." }),
+    trustedEvidenceReceipt(taskArg, { kind: "browser-qa", status: "pass", candidateHead, detail: "Desktop and mobile QA passed." }),
+    trustedEvidenceReceipt(taskArg, { kind: "independent-review", status: "pass", candidateHead, independent: true, actorId: independentActorId, detail: "Independent review found no issues." }),
+    trustedEvidenceReceipt(taskArg, { kind: "accessibility", status: "pass", candidateHead, detail: "Keyboard and contrast checks passed." }),
+  ];
+}
+
+function trustedEvidenceReceipt(taskArg: AuthorityTask, evidence: Omit<TrustedEvidenceReceipt, "authorityId" | "taskId" | "recordedAt" | "source">): TrustedEvidenceReceipt {
+  return {
+    ...evidence,
+    authorityId: authority.id,
+    taskId: taskArg.id,
+    recordedAt: now,
+    source: "authority-controller",
+  };
 }
 
 function trustedTargetFor(headSha: string): TrustedPullRequestTarget {
