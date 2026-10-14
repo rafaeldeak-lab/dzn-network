@@ -11,6 +11,7 @@ import {
   assessTaskAuthority,
   inspectGitRange,
   makeTaskDeduplicationKey,
+  recordTrustedMerge,
   transitionTask,
   type AuthorityTask,
   type StandingAuthority,
@@ -86,19 +87,21 @@ assert.equal(assessTaskAuthority(authority, task({ attempts: 3 })).code, "resour
 
 const authorised = transitionTask(authority, task(), "authorised", now);
 assert.equal(authorised.ok, true);
-const implementing = transitionTask(authority, authorised.task!, "implementing", now);
+const leased = acquireTaskLease(authority, authorised.task!, [], "runner-a", new Date(now));
+assert.equal(leased.ok, true);
+assert.equal(leased.task?.lease?.runnerId, "runner-a");
+const implementing = transitionTask(authority, leased.task!, "implementing", now);
 const validating = transitionTask(authority, implementing.task!, "validating", now);
 const ready = transitionTask(authority, validating.task!, "ready-to-release", now);
 assert.equal(ready.ok, true);
 assert.equal(transitionTask(authority, task(), "released", now).code, "invalid_transition");
-assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"] }), "implementing", now).code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"] }), "validating", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "authorised", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", now).code, "lease_inactive");
 assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", now).code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now).ok, true);
-
-const leased = acquireTaskLease(authority, ready.task!, [], "runner-a", new Date(now));
-assert.equal(leased.ok, true);
-assert.equal(leased.task?.lease?.runnerId, "runner-a");
+const retried = transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now);
+assert.equal(retried.ok, true);
+assert.equal(retried.task?.attempts, 1, "Reauthorising a blocked task must consume a retry attempt.");
 assert.equal(acquireTaskLease(authority, ready.task!, [leased.task!], "runner-b", new Date(now)).code, "task_locked");
 assert.equal(acquireTaskLease(authority, task({ id: "parallel-task", state: "authorised" }), [leased.task!], "runner-b", new Date(now)).code, "resource_limit_exceeded");
 
@@ -107,6 +110,7 @@ const verifiedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.hea
 
 const candidateTask = task({
   state: "ready-to-release",
+  lease: ready.task!.lease,
   candidate: {
     ...verifiedRange,
     evidence: [
@@ -122,6 +126,33 @@ const candidateTask = task({
 const eligible = assessFixture(authority, candidateTask, fixture);
 assert.equal(eligible.pullRequestEligible, true);
 assert.equal(eligible.requiresSeparateHumanMerge, true, "Eligibility alone must never merge a PR.");
+assert.equal(transitionTask(authority, candidateTask, "released", now).code, "invalid_transition", "A trusted merged-pull-request receipt is required to record release.");
+assert.equal(recordTrustedMerge(authority, candidateTask, {
+  repositoryRemote: authority.repositoryRemote,
+  branch: authority.targetBranch,
+  candidateHeadSha: fixture.headSha,
+  mergeCommitSha: fixture.headSha,
+  pullRequestNumber: 330,
+  mergedAt: now,
+  source: "untrusted-source" as "pull-request-provider",
+}).code, "release_denied");
+const released = recordTrustedMerge(authority, candidateTask, {
+  repositoryRemote: authority.repositoryRemote,
+  branch: authority.targetBranch,
+  candidateHeadSha: fixture.headSha,
+  mergeCommitSha: fixture.headSha,
+  pullRequestNumber: 330,
+  mergedAt: now,
+  source: "pull-request-provider",
+});
+assert.equal(released.ok, true);
+assert.equal(released.task?.state, "released");
+
+const expiredLeaseAssessment = assessFixture(authority, {
+  ...candidateTask,
+  lease: { ...candidateTask.lease!, expiresAt: "2026-10-13T22:30:00.000Z" },
+}, fixture);
+assert.equal(expiredLeaseAssessment.pullRequestEligible, false, "An expired lease must block pull-request eligibility.");
 
 const staleChecks = assessFixture(authority, {
   ...candidateTask,
@@ -360,7 +391,7 @@ function makeAuthGuardRemovalFixture() {
 }
 
 function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }) {
-  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha));
+  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), new Date(now));
 }
 
 function trustedTargetFor(headSha: string): TrustedPullRequestTarget {
