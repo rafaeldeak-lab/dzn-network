@@ -14,6 +14,7 @@ import {
   transitionTask,
   type AuthorityTask,
   type StandingAuthority,
+  type TrustedPullRequestTarget,
 } from "./autodev/standing-authority";
 
 const now = "2026-10-13T23:00:00.000Z";
@@ -71,6 +72,8 @@ const validating = transitionTask(authority, implementing.task!, "validating", n
 const ready = transitionTask(authority, validating.task!, "ready-to-release", now);
 assert.equal(ready.ok, true);
 assert.equal(transitionTask(authority, task(), "released", now).code, "invalid_transition");
+assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"] }), "implementing", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"] }), "validating", now).code, "action_denied");
 
 const leased = acquireTaskLease(authority, ready.task!, [], "runner-a", new Date(now));
 assert.equal(leased.ok, true);
@@ -94,134 +97,145 @@ const candidateTask = task({
     ],
   },
 });
-const eligible = assessLowRiskPullRequest(authority, candidateTask, fixture.path);
+const eligible = assessFixture(authority, candidateTask, fixture);
 assert.equal(eligible.pullRequestEligible, true);
 assert.equal(eligible.requiresSeparateHumanMerge, true, "Eligibility alone must never merge a PR.");
 
-const staleChecks = assessLowRiskPullRequest(authority, {
+const staleChecks = assessFixture(authority, {
   ...candidateTask,
   candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.baseSha })) },
-}, fixture.path);
+}, fixture);
 assert.equal(staleChecks.pullRequestEligible, false);
 
-const mismatchedFiles = assessLowRiskPullRequest(authority, {
+const mismatchedFiles = assessFixture(authority, {
   ...candidateTask,
   candidate: { ...candidateTask.candidate!, changedFiles: ["scripts/autodev/standing-authority.ts"] },
-}, fixture.path);
+}, fixture);
 assert.equal(mismatchedFiles.pullRequestEligible, false, "Candidate file lists must match the exact Git range.");
 
 const protectedFixture = makeGitFixture("scripts/autodev/release-control.ts", "export const blocked = true;\n");
 const protectedRange = inspectGitRange(protectedFixture.path, protectedFixture.baseSha, protectedFixture.headSha);
-const protectedPath = assessLowRiskPullRequest(authority, {
+const protectedPath = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...protectedRange,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: protectedFixture.headSha })),
   },
-}, protectedFixture.path);
+}, protectedFixture);
 assert.equal(protectedPath.pullRequestEligible, false, "Protected paths must be rejected from the verified Git range.");
 
 const deletedProtectedFixture = makeDeletedProtectedFixture();
 const deletedProtectedRange = inspectGitRange(deletedProtectedFixture.path, deletedProtectedFixture.baseSha, deletedProtectedFixture.headSha);
 assert.ok(deletedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Deleted protected files must remain in the verified file set.");
-const deletedProtected = assessLowRiskPullRequest(authority, {
+const deletedProtected = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...deletedProtectedRange,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: deletedProtectedFixture.headSha })),
   },
-}, deletedProtectedFixture.path);
+}, deletedProtectedFixture);
 assert.equal(deletedProtected.pullRequestEligible, false, "Deleting a protected path must prevent pull-request eligibility.");
 
 const renamedProtectedFixture = makeRenamedProtectedFixture();
 const renamedProtectedRange = inspectGitRange(renamedProtectedFixture.path, renamedProtectedFixture.baseSha, renamedProtectedFixture.headSha);
 assert.ok(renamedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "The source path of a protected rename must remain in the verified file set.");
-const renamedProtected = assessLowRiskPullRequest(authority, {
+const renamedProtected = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...renamedProtectedRange,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: renamedProtectedFixture.headSha })),
   },
-}, renamedProtectedFixture.path);
+}, renamedProtectedFixture);
 assert.equal(renamedProtected.pullRequestEligible, false, "Renaming a protected path must prevent pull-request eligibility.");
 
 const targetBypassFixture = makeTargetBypassFixture();
 const targetBypassRange = inspectGitRange(targetBypassFixture.path, targetBypassFixture.untrustedBaseSha, targetBypassFixture.headSha);
-const targetBypass = assessLowRiskPullRequest(authority, {
+const targetBypass = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...targetBypassRange,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: targetBypassFixture.headSha })),
   },
-}, targetBypassFixture.path);
+}, targetBypassFixture);
 assert.equal(targetBypass.pullRequestEligible, false, "The candidate base must match the trusted pull-request target tip.");
 
 const outOfScopeFixture = makeGitFixture("components/events/authority-note.tsx", "export const eventNote = 'scope';\n");
 const outOfScopeRange = inspectGitRange(outOfScopeFixture.path, outOfScopeFixture.baseSha, outOfScopeFixture.headSha);
-const outOfScope = assessLowRiskPullRequest(authority, {
+const outOfScope = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...outOfScopeRange,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: outOfScopeFixture.headSha })),
   },
-}, outOfScopeFixture.path);
+}, outOfScopeFixture);
 assert.equal(outOfScope.pullRequestEligible, false, "Every verified file must be within the authority scope.");
 
-const selfReviewed = assessLowRiskPullRequest(authority, {
+const removedAuthGuardFixture = makeAuthGuardRemovalFixture();
+const removedAuthGuardRange = inspectGitRange(removedAuthGuardFixture.path, removedAuthGuardFixture.baseSha, removedAuthGuardFixture.headSha);
+const removedAuthGuard = assessFixture(authority, {
+  ...candidateTask,
+  candidate: {
+    ...removedAuthGuardRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: removedAuthGuardFixture.headSha })),
+  },
+}, removedAuthGuardFixture);
+assert.equal(removedAuthGuard.pullRequestEligible, false, "Removing protected behavior must retain the stricter base-content classification.");
+
+const selfReviewed = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...candidateTask.candidate!,
     evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "implementation-runner-a" } : item),
   },
-}, fixture.path);
+}, fixture);
 assert.equal(selfReviewed.pullRequestEligible, false, "An implementer cannot supply its own independent review.");
 
-const missingImplementer = assessLowRiskPullRequest(authority, {
+const missingImplementer = assessFixture(authority, {
   ...candidateTask,
   implementerId: "",
-}, fixture.path);
+}, fixture);
 assert.equal(missingImplementer.pullRequestEligible, false, "Pull-request preparation requires a named implementation actor.");
 
-const anonymousReview = assessLowRiskPullRequest(authority, {
+const anonymousReview = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...candidateTask.candidate!,
     evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "" } : item),
   },
-}, fixture.path);
+}, fixture);
 assert.equal(anonymousReview.pullRequestEligible, false, "Pull-request preparation requires a named independent review actor.");
 
-const missingPrAction = assessLowRiskPullRequest(authority, {
+const missingPrAction = assessFixture(authority, {
   ...candidateTask,
   requestedActions: ["investigate", "implement-in-branch", "validate"],
-}, fixture.path);
+}, fixture);
 assert.equal(missingPrAction.pullRequestEligible, false, "A task must explicitly request pull-request preparation.");
 
-const wrongRemote = assessLowRiskPullRequest({ ...authority, repositoryRemote: "https://github.com/other/repository.git" }, candidateTask, fixture.path);
+const wrongRemote = assessFixture({ ...authority, repositoryRemote: "https://github.com/other/repository.git" }, candidateTask, fixture);
 assert.equal(wrongRemote.pullRequestEligible, false, "The verified Git range must belong to the authority's approved repository.");
 
 const credentialedRemote = "https://x-access-token:do-not-expose-this-token@github.com/rafaeldeak-lab/dzn-network.git";
 runGit(fixture.path, ["remote", "set-url", "origin", credentialedRemote]);
 const sanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
 assert.equal(sanitizedRange.repositoryRemote, authority.repositoryRemote, "Credential-bearing HTTPS remotes must be normalized before they enter candidate metadata.");
-const credentialedRemoteMismatch = assessLowRiskPullRequest(authority, {
+const credentialedRemoteMismatch = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...sanitizedRange,
     repositoryRemote: credentialedRemote,
     evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.headSha })),
   },
-}, fixture.path);
+}, fixture);
 assert.equal(credentialedRemoteMismatch.pullRequestEligible, false);
 assert.equal(JSON.stringify(credentialedRemoteMismatch.details).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
 
-const failedEvidence = assessLowRiskPullRequest(authority, {
+const failedEvidence = assessFixture(authority, {
   ...candidateTask,
   candidate: {
     ...candidateTask.candidate!,
     evidence: [...candidateTask.candidate!.evidence, { kind: "tests", status: "fail", candidateHead: fixture.headSha, detail: "A later verification failed." }],
   },
-}, fixture.path);
+}, fixture);
 assert.equal(failedEvidence.pullRequestEligible, false, "A current-head failed verification must block pull-request eligibility.");
 
 const regression = assessPostMergeHealth(authority, candidateTask, "fail", "Production health check regressed.");
@@ -234,6 +248,7 @@ rmSync(outOfScopeFixture.path, { force: true, recursive: true });
 rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
 rmSync(renamedProtectedFixture.path, { force: true, recursive: true });
 rmSync(targetBypassFixture.path, { force: true, recursive: true });
+rmSync(removedAuthGuardFixture.path, { force: true, recursive: true });
 
 console.log("AutoDev standing-authority controller tests passed.");
 
@@ -295,10 +310,38 @@ function makeTargetBypassFixture() {
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "protected intermediate change"]);
   const untrustedBaseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", untrustedBaseSha]);
   writeFileSync(join(path, "components/games/games-hub.tsx"), "export const status = 'ready';\n");
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "allowed-looking change"]);
-  return { path, trustedBaseSha, untrustedBaseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+  return { path, baseSha: trustedBaseSha, untrustedBaseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeAuthGuardRemovalFixture() {
+  const path = makeFixtureRepository();
+  mkdirSync(join(path, "components/profile"), { recursive: true });
+  writeFileSync(join(path, "components/profile/card.tsx"), "export function Card() { return useAuth().user.name; }\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "auth-protected baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
+  writeFileSync(join(path, "components/profile/card.tsx"), "export function Card() { return 'public'; }\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "remove auth guard"]);
+  return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }) {
+  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha));
+}
+
+function trustedTargetFor(headSha: string): TrustedPullRequestTarget {
+  return {
+    repositoryRemote: authority.repositoryRemote,
+    branch: authority.targetBranch,
+    headSha,
+    source: "pull-request-provider",
+  };
 }
 
 function makeFixtureRepository() {
