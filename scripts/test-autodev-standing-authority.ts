@@ -35,7 +35,23 @@ const authority: StandingAuthority = {
   maxChangedFiles: 5,
   subscriptionOnly: true,
   maxExtraMonthlySpendUsd: 0,
-  acceptanceCriteria: ["Targeted tests pass", "Preview passes", "Independent review is green"],
+  approvedTasks: [
+    {
+      taskId: "task-ui-nav-spacing",
+      title: "Tighten public navigation spacing",
+      system: "ui",
+      allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"],
+    },
+    {
+      taskId: "parallel-task",
+      title: "Tighten public navigation spacing",
+      system: "ui",
+      allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"],
+    },
+  ],
+  acceptanceCriteria: [
+    { id: "accessibility", description: "Keyboard and contrast checks pass." },
+  ],
   approvedAt: now,
 };
 
@@ -61,6 +77,9 @@ assert.equal(dedupeA, dedupeB, "Equivalent tasks must deduplicate deterministica
 
 assert.equal(assessTaskAuthority(authority, task()).ok, true);
 assert.equal(assessTaskAuthority(authority, task({ system: "billing" })).code, "authority_scope_denied");
+assert.equal(assessTaskAuthority(authority, task({ title: "Replace every public screen" })).code, "authority_scope_denied");
+assert.equal(assessTaskAuthority(authority, task({ id: "unapproved-task" })).code, "authority_scope_denied");
+assert.equal(assessTaskAuthority({ ...authority, acceptanceCriteria: [{ id: "independent-review", description: "Try to weaken the mandatory review." }] }, task()).code, "authority_scope_denied");
 assert.equal(assessTaskAuthority({ ...authority, state: "revoked", revokedAt: now }, task()).code, "authority_inactive");
 assert.equal(assessTaskAuthority({ ...authority, maxExtraMonthlySpendUsd: 1 }, task()).code, "resource_limit_exceeded");
 assert.equal(assessTaskAuthority(authority, task({ attempts: 3 })).code, "resource_limit_exceeded");
@@ -74,6 +93,8 @@ assert.equal(ready.ok, true);
 assert.equal(transitionTask(authority, task(), "released", now).code, "invalid_transition");
 assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"] }), "implementing", now).code, "action_denied");
 assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"] }), "validating", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", now).code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now).ok, true);
 
 const leased = acquireTaskLease(authority, ready.task!, [], "runner-a", new Date(now));
 assert.equal(leased.ok, true);
@@ -94,6 +115,7 @@ const candidateTask = task({
       { kind: "preview", status: "pass", candidateHead: fixture.headSha, detail: "Preview deployment passed." },
       { kind: "browser-qa", status: "pass", candidateHead: fixture.headSha, detail: "Desktop and mobile QA passed." },
       { kind: "independent-review", status: "pass", candidateHead: fixture.headSha, independent: true, actorId: "release-reviewer-b", detail: "Independent review found no issues." },
+      { kind: "accessibility", status: "pass", candidateHead: fixture.headSha, detail: "Keyboard and contrast checks passed." },
     ],
   },
 });
@@ -106,6 +128,12 @@ const staleChecks = assessFixture(authority, {
   candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.baseSha })) },
 }, fixture);
 assert.equal(staleChecks.pullRequestEligible, false);
+
+const missingConfiguredAcceptance = assessFixture(authority, {
+  ...candidateTask,
+  candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.filter((item) => item.kind !== "accessibility") },
+}, fixture);
+assert.equal(missingConfiguredAcceptance.pullRequestEligible, false, "Every configured authority acceptance criterion must pass for the current candidate head.");
 
 const mismatchedFiles = assessFixture(authority, {
   ...candidateTask,

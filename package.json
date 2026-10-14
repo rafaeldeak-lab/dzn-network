@@ -93,7 +93,7 @@
     "test:discord-server-announcements": "tsx scripts/test-discord-server-announcements.ts",
     "test:cron-auth-contract": "tsx scripts/test-cron-auth-contract.ts",
     "test:github-workflows": "tsx scripts/test-github-workflow-boundary.ts",
-    "test:autodev": "tsx scripts/test-autodev-system.ts",
+    "test:autodev": "tsx scripts/test-autodev-system.ts && npm run test:autodev-standing-authority",
     "test:autodev-codex": "tsx scripts/test-autodev-codex-pipeline.ts",
     "test:autodev-standing-authority": "tsx scripts/test-autodev-standing-authority.ts",
     "test:agent-foundation": "tsx scripts/test-agent-foundation.ts",
