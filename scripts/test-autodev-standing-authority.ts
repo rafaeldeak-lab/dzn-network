@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   acquireTaskLease,
-  assessLowRiskRelease,
-  assessPostReleaseHealth,
+  assessLowRiskPullRequest,
+  assessPostMergeHealth,
   assessTaskAuthority,
+  inspectGitRange,
   makeTaskDeduplicationKey,
   transitionTask,
   type AuthorityTask,
@@ -19,7 +24,7 @@ const authority: StandingAuthority = {
   state: "active",
   allowedSystems: ["ui", "docs", "tests"],
   excludedSystems: ["auth", "billing", "stripe", "nitrado", "adm", "database", "cloudflare-worker", "github-actions", "autodev", "release"],
-  allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure", "auto-release-low-risk"],
+  allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"],
   policyVersion: "dzn-standing-authority-v1",
   maxConcurrentTasks: 1,
   maxAttemptsPerTask: 3,
@@ -37,7 +42,7 @@ function task(overrides: Partial<AuthorityTask> = {}): AuthorityTask {
     authorityId: authority.id,
     title: "Tighten public navigation spacing",
     system: "ui",
-    requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "auto-release-low-risk"],
+    requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"],
     state: "proposed",
     attempts: 0,
     createdAt: now,
@@ -71,77 +76,116 @@ assert.equal(leased.task?.lease?.runnerId, "runner-a");
 assert.equal(acquireTaskLease(authority, ready.task!, [leased.task!], "runner-b", new Date(now)).code, "task_locked");
 assert.equal(acquireTaskLease(authority, task({ id: "parallel-task", state: "authorised" }), [leased.task!], "runner-b", new Date(now)).code, "resource_limit_exceeded");
 
+const fixture = makeGitFixture("components/games/games-hub.tsx", "export const status = 'ready';\n");
+const verifiedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
+
 const candidateTask = task({
   state: "ready-to-release",
   candidate: {
-    baseSha: "base-commit",
-    headSha: "candidate-commit",
-    changedFiles: ["components/games/games-hub.tsx", "components/games/games-hub.module.css"],
-    classifications: [
-      { file: "components/games/games-hub.tsx", system: "ui", risk: "low" },
-      { file: "components/games/games-hub.module.css", system: "ui", risk: "low" },
-    ],
+    ...verifiedRange,
     evidence: [
-      { kind: "scope", status: "pass", candidateHead: "candidate-commit", detail: "Classifier records UI-only low risk." },
-      { kind: "tests", status: "pass", candidateHead: "candidate-commit", detail: "Targeted tests passed." },
-      { kind: "preview", status: "pass", candidateHead: "candidate-commit", detail: "Preview deployment passed." },
-      { kind: "browser-qa", status: "pass", candidateHead: "candidate-commit", detail: "Desktop and mobile QA passed." },
-      { kind: "independent-review", status: "pass", candidateHead: "candidate-commit", independent: true, actorId: "release-reviewer-b", detail: "Independent review found no issues." },
+      { kind: "scope", status: "pass", candidateHead: fixture.headSha, detail: "Classifier records UI-only low risk." },
+      { kind: "tests", status: "pass", candidateHead: fixture.headSha, detail: "Targeted tests passed." },
+      { kind: "preview", status: "pass", candidateHead: fixture.headSha, detail: "Preview deployment passed." },
+      { kind: "browser-qa", status: "pass", candidateHead: fixture.headSha, detail: "Desktop and mobile QA passed." },
+      { kind: "independent-review", status: "pass", candidateHead: fixture.headSha, independent: true, actorId: "release-reviewer-b", detail: "Independent review found no issues." },
     ],
   },
 });
-const eligible = assessLowRiskRelease(authority, candidateTask);
-assert.equal(eligible.releaseEligible, true);
-assert.equal(eligible.requiresTrustedController, true, "Eligibility alone must not merge a PR.");
+const eligible = assessLowRiskPullRequest(authority, candidateTask, fixture.path);
+assert.equal(eligible.pullRequestEligible, true);
+assert.equal(eligible.requiresSeparateHumanMerge, true, "Eligibility alone must never merge a PR.");
 
-const staleChecks = assessLowRiskRelease(authority, {
+const staleChecks = assessLowRiskPullRequest(authority, {
   ...candidateTask,
-  candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: "old-commit" })) },
-});
-assert.equal(staleChecks.releaseEligible, false);
+  candidate: { ...candidateTask.candidate!, evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.baseSha })) },
+}, fixture.path);
+assert.equal(staleChecks.pullRequestEligible, false);
 
-const protectedPath = assessLowRiskRelease(authority, {
+const mismatchedFiles = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   candidate: { ...candidateTask.candidate!, changedFiles: ["scripts/autodev/standing-authority.ts"] },
-});
-assert.equal(protectedPath.releaseEligible, false);
+}, fixture.path);
+assert.equal(mismatchedFiles.pullRequestEligible, false, "Candidate file lists must match the exact Git range.");
 
-const unknownRisk = assessLowRiskRelease(authority, {
+const protectedFixture = makeGitFixture("scripts/autodev/release-control.ts", "export const blocked = true;\n");
+const protectedRange = inspectGitRange(protectedFixture.path, protectedFixture.baseSha, protectedFixture.headSha);
+const protectedPath = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   candidate: {
-    ...candidateTask.candidate!,
-    changedFiles: ["functions/api/billing/checkout.ts"],
-    classifications: [{ file: "functions/api/billing/checkout.ts", system: "ui", risk: "low" }],
+    ...protectedRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: protectedFixture.headSha })),
   },
-});
-assert.equal(unknownRisk.releaseEligible, false, "Caller-provided classifications cannot downgrade a protected path.");
+}, protectedFixture.path);
+assert.equal(protectedPath.pullRequestEligible, false, "Protected paths must be rejected from the verified Git range.");
 
-const selfReviewed = assessLowRiskRelease(authority, {
+const outOfScopeFixture = makeGitFixture("components/events/authority-note.tsx", "export const eventNote = 'scope';\n");
+const outOfScopeRange = inspectGitRange(outOfScopeFixture.path, outOfScopeFixture.baseSha, outOfScopeFixture.headSha);
+const outOfScope = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...outOfScopeRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: outOfScopeFixture.headSha })),
+  },
+}, outOfScopeFixture.path);
+assert.equal(outOfScope.pullRequestEligible, false, "Every verified file must be within the authority scope.");
+
+const selfReviewed = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   candidate: {
     ...candidateTask.candidate!,
     evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "implementation-runner-a" } : item),
   },
-});
-assert.equal(selfReviewed.releaseEligible, false, "An implementer cannot supply its own independent release review.");
+}, fixture.path);
+assert.equal(selfReviewed.pullRequestEligible, false, "An implementer cannot supply its own independent review.");
 
-const missingImplementer = assessLowRiskRelease(authority, {
+const missingImplementer = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   implementerId: "",
-});
-assert.equal(missingImplementer.releaseEligible, false, "Automatic release requires a named implementation actor.");
+}, fixture.path);
+assert.equal(missingImplementer.pullRequestEligible, false, "Pull-request preparation requires a named implementation actor.");
 
-const anonymousReview = assessLowRiskRelease(authority, {
+const anonymousReview = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   candidate: {
     ...candidateTask.candidate!,
     evidence: candidateTask.candidate!.evidence.map((item) => item.kind === "independent-review" ? { ...item, actorId: "" } : item),
   },
-});
-assert.equal(anonymousReview.releaseEligible, false, "Automatic release requires a named independent review actor.");
+}, fixture.path);
+assert.equal(anonymousReview.pullRequestEligible, false, "Pull-request preparation requires a named independent review actor.");
 
-const regression = assessPostReleaseHealth(authority, candidateTask, "fail", "Production health check regressed.");
-assert.equal(regression.shouldPauseFurtherReleases, true);
-assert.equal(assessPostReleaseHealth(authority, candidateTask, "pass", "Health check passed.").shouldPauseFurtherReleases, false);
+const missingPrAction = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  requestedActions: ["investigate", "implement-in-branch", "validate"],
+}, fixture.path);
+assert.equal(missingPrAction.pullRequestEligible, false, "A task must explicitly request pull-request preparation.");
+
+const regression = assessPostMergeHealth(authority, candidateTask, "fail", "Production health check regressed.");
+assert.equal(regression.shouldPauseFurtherWork, true);
+assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health check passed.").shouldPauseFurtherWork, false);
+
+rmSync(fixture.path, { force: true, recursive: true });
+rmSync(protectedFixture.path, { force: true, recursive: true });
+rmSync(outOfScopeFixture.path, { force: true, recursive: true });
 
 console.log("AutoDev standing-authority controller tests passed.");
+
+function makeGitFixture(file: string, changedContent: string) {
+  const path = mkdtempSync(join(tmpdir(), "dzn-standing-authority-"));
+  mkdirSync(join(path, file, ".."), { recursive: true });
+  runGit(path, ["init", "--quiet"]);
+  runGit(path, ["config", "user.email", "dzn-tests@example.invalid"]);
+  runGit(path, ["config", "user.name", "DZN Tests"]);
+  writeFileSync(join(path, file), "export const baseline = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  writeFileSync(join(path, file), changedContent);
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "candidate"]);
+  return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function runGit(repositoryPath: string, args: string[]) {
+  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "utf8" }).trim();
+}
