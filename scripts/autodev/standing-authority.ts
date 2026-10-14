@@ -12,6 +12,7 @@ export type StandingAuthority = {
   id: string;
   approvedGoal: string;
   state: AuthorityState;
+  repositoryRemote: string;
   allowedSystems: SystemCategory[];
   excludedSystems: SystemCategory[];
   allowedActions: AuthorityAction[];
@@ -40,6 +41,7 @@ export type CandidateEvidence = {
 export type ReleaseCandidate = {
   baseSha: string;
   headSha: string;
+  repositoryRemote: string;
   changedFiles: string[];
   diffSha256: string;
   evidence: CandidateEvidence[];
@@ -48,6 +50,7 @@ export type ReleaseCandidate = {
 export type VerifiedGitRange = {
   baseSha: string;
   headSha: string;
+  repositoryRemote: string;
   changedFiles: string[];
   diffSha256: string;
 };
@@ -189,16 +192,18 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
 
   const actualBaseSha = runGit(repositoryPath, ["rev-parse", "--verify", `${baseSha}^{commit}`]);
   const actualHeadSha = runGit(repositoryPath, ["rev-parse", "--verify", `${headSha}^{commit}`]);
-  const changedFiles = runGit(repositoryPath, ["diff", "--name-only", "--diff-filter=ACMR", actualBaseSha, actualHeadSha])
-    .split(/\r?\n/)
-    .map((file) => file.trim())
+  const repositoryRemote = runGit(repositoryPath, ["remote", "get-url", "origin"]);
+  const changedFiles = runGitBuffer(repositoryPath, ["diff", "--name-only", "-z", "--diff-filter=ACMR", actualBaseSha, actualHeadSha])
+    .toString("utf8")
+    .split("\0")
     .filter(Boolean)
     .sort();
-  const diff = runGit(repositoryPath, ["diff", "--no-ext-diff", "--binary", actualBaseSha, actualHeadSha]);
+  const diff = runGitBuffer(repositoryPath, ["diff", "--no-ext-diff", "--binary", actualBaseSha, actualHeadSha]);
 
   return {
     baseSha: actualBaseSha,
     headSha: actualHeadSha,
+    repositoryRemote,
     changedFiles,
     diffSha256: createHash("sha256").update(diff).digest("hex"),
   };
@@ -223,8 +228,10 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
     });
   }
 
-  if (candidate.baseSha !== verifiedRange.baseSha || candidate.headSha !== verifiedRange.headSha || candidate.diffSha256 !== verifiedRange.diffSha256 || !sameFiles(candidate.changedFiles, verifiedRange.changedFiles)) {
+  if (candidate.baseSha !== verifiedRange.baseSha || candidate.headSha !== verifiedRange.headSha || candidate.repositoryRemote !== verifiedRange.repositoryRemote || candidate.repositoryRemote !== authority.repositoryRemote || candidate.diffSha256 !== verifiedRange.diffSha256 || !sameFiles(candidate.changedFiles, verifiedRange.changedFiles)) {
     return pullRequestDeny("Candidate metadata does not match the verified Git commit range.", {
+      declaredRemote: candidate.repositoryRemote,
+      verifiedRemote: verifiedRange.repositoryRemote,
       declaredFiles: candidate.changedFiles,
       verifiedFiles: verifiedRange.changedFiles,
     });
@@ -285,6 +292,10 @@ function isCommitSha(value: string) {
 
 function runGit(repositoryPath: string, args: string[]) {
   return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function runGitBuffer(repositoryPath: string, args: string[]) {
+  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {

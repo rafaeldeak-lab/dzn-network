@@ -22,6 +22,7 @@ const authority: StandingAuthority = {
   id: "authority-frontend-polish",
   approvedGoal: "Deliver bounded, reversible low-risk DZN interface polish.",
   state: "active",
+  repositoryRemote: "https://github.com/rafaeldeak-lab/dzn-network.git",
   allowedSystems: ["ui", "docs", "tests"],
   excludedSystems: ["auth", "billing", "stripe", "nitrado", "adm", "database", "cloudflare-worker", "github-actions", "autodev", "release"],
   allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"],
@@ -160,6 +161,9 @@ const missingPrAction = assessLowRiskPullRequest(authority, {
 }, fixture.path);
 assert.equal(missingPrAction.pullRequestEligible, false, "A task must explicitly request pull-request preparation.");
 
+const wrongRemote = assessLowRiskPullRequest({ ...authority, repositoryRemote: "https://github.com/other/repository.git" }, candidateTask, fixture.path);
+assert.equal(wrongRemote.pullRequestEligible, false, "The verified Git range must belong to the authority's approved repository.");
+
 const regression = assessPostMergeHealth(authority, candidateTask, "fail", "Production health check regressed.");
 assert.equal(regression.shouldPauseFurtherWork, true);
 assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health check passed.").shouldPauseFurtherWork, false);
@@ -176,6 +180,7 @@ function makeGitFixture(file: string, changedContent: string) {
   runGit(path, ["init", "--quiet"]);
   runGit(path, ["config", "user.email", "dzn-tests@example.invalid"]);
   runGit(path, ["config", "user.name", "DZN Tests"]);
+  runGit(path, ["remote", "add", "origin", "https://github.com/rafaeldeak-lab/dzn-network.git"]);
   writeFileSync(join(path, file), "export const baseline = true;\n");
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "baseline"]);
