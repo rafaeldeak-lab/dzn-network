@@ -8,6 +8,19 @@ export type AuthorityTaskState = "proposed" | "authorised" | "implementing" | "v
 export type AuthorityAction = "investigate" | "implement-in-branch" | "validate" | "prepare-pr" | "retry-branch-failure";
 export type ReleaseEvidenceKind = "scope" | "tests" | "preview" | "browser-qa" | "independent-review";
 
+export type ApprovedTaskBinding = {
+  taskId: string;
+  title: string;
+  system: SystemCategory;
+  allowedActions: AuthorityAction[];
+};
+
+export type AuthorityAcceptanceCriterion = {
+  id: string;
+  description: string;
+  requiresIndependentActor?: boolean;
+};
+
 export type StandingAuthority = {
   id: string;
   approvedGoal: string;
@@ -24,14 +37,15 @@ export type StandingAuthority = {
   maxChangedFiles: number;
   subscriptionOnly: boolean;
   maxExtraMonthlySpendUsd: number;
-  acceptanceCriteria: string[];
+  approvedTasks: ApprovedTaskBinding[];
+  acceptanceCriteria: AuthorityAcceptanceCriterion[];
   approvedAt: string;
   revokedAt?: string;
   revocationReason?: string;
 };
 
 export type CandidateEvidence = {
-  kind: ReleaseEvidenceKind;
+  kind: ReleaseEvidenceKind | (string & {});
   status: "pass" | "fail" | "skip";
   candidateHead: string;
   independent?: boolean;
@@ -139,6 +153,18 @@ const REQUIRED_ACTION_FOR_STATE: Partial<Record<AuthorityTaskState, AuthorityAct
   "ready-to-release": "prepare-pr",
 };
 
+const REQUIRED_RELEASE_CRITERIA: AuthorityAcceptanceCriterion[] = [
+  { id: "scope", description: "Verified scope check passes." },
+  { id: "tests", description: "Targeted tests pass." },
+  { id: "preview", description: "Preview validation passes." },
+  { id: "independent-review", description: "An independent review passes.", requiresIndependentActor: true },
+];
+
+const BROWSER_QA_CRITERION: AuthorityAcceptanceCriterion = {
+  id: "browser-qa",
+  description: "Browser QA passes for UI changes.",
+};
+
 export function makeTaskDeduplicationKey(authorityId: string, title: string, system: SystemCategory) {
   return createHash("sha256")
     .update(`${authorityId}\n${system}\n${title.trim().toLowerCase().replace(/\s+/g, " ")}`)
@@ -153,6 +179,13 @@ export function assessTaskAuthority(authority: StandingAuthority, task: Authorit
   if (!authority.allowedSystems.includes(task.system) || authority.excludedSystems.includes(task.system)) {
     return deny("authority_scope_denied", "Task system is outside the approved standing-authority scope.", { system: task.system });
   }
+  const approvedTask = authority.approvedTasks.find((binding) => binding.taskId === task.id);
+  if (!approvedTask || normalizeTaskTitle(approvedTask.title) !== normalizeTaskTitle(task.title) || approvedTask.system !== task.system) {
+    return deny("authority_scope_denied", "Task is not bound to an approved task record.", { taskId: task.id, system: task.system });
+  }
+  if (task.requestedActions.some((action) => !approvedTask.allowedActions.includes(action))) {
+    return deny("action_denied", "Task requests an action outside its approved task record.", { taskId: task.id, requestedActions: task.requestedActions });
+  }
   if (task.requestedActions.some((action) => !authority.allowedActions.includes(action) || NON_DELEGABLE_ACTIONS.has(action))) {
     return deny("action_denied", "Task requests an action outside the approved authority.", { requestedActions: task.requestedActions });
   }
@@ -165,6 +198,9 @@ export function assessTaskAuthority(authority: StandingAuthority, task: Authorit
   if (task.attempts >= authority.maxAttemptsPerTask) {
     return deny("resource_limit_exceeded", "Task reached the approved retry limit.", { attempts: task.attempts, maxAttemptsPerTask: authority.maxAttemptsPerTask });
   }
+  if (!hasValidAcceptanceCriteria(authority.acceptanceCriteria)) {
+    return deny("authority_scope_denied", "Standing authority acceptance criteria must be uniquely identified and describable.");
+  }
   return allow("Task is within the active authority scope.");
 }
 
@@ -174,7 +210,9 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
   }
-  const requiredAction = REQUIRED_ACTION_FOR_STATE[nextState];
+  const requiredAction = task.state === "blocked" && nextState === "authorised"
+    ? "retry-branch-failure"
+    : REQUIRED_ACTION_FOR_STATE[nextState];
   if (requiredAction && !task.requestedActions.includes(requiredAction)) {
     return deny("action_denied", "Task did not request the action required for this state transition.", { nextState, requiredAction });
   }
@@ -295,13 +333,18 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   if (outOfScope.length) {
     return pullRequestDeny("Every verified changed file must be within the standing-authority system scope.", { outOfScope });
   }
-  const requiredEvidence: ReleaseEvidenceKind[] = ["scope", "tests", "preview", "independent-review"];
-  if (independentlyClassified.some((item) => item.system === "ui")) requiredEvidence.push("browser-qa");
-  const failedEvidence = candidate.evidence.filter((item) => requiredEvidence.includes(item.kind) && item.candidateHead === candidate.headSha && item.status === "fail");
+  const requiredCriteria = getRequiredAcceptanceCriteria(authority, independentlyClassified.some((item) => item.system === "ui"));
+  const requiredCriterionIds = new Set(requiredCriteria.map((criterion) => criterion.id));
+  const failedEvidence = candidate.evidence.filter((item) => requiredCriterionIds.has(item.kind) && item.candidateHead === candidate.headSha && item.status === "fail");
   if (failedEvidence.length) {
     return pullRequestDeny("Pull-request evidence includes a failed result for the current candidate head.", { failedEvidence });
   }
-  const missing = requiredEvidence.filter((kind) => !candidate.evidence.some((item) => item.kind === kind && item.status === "pass" && item.candidateHead === candidate.headSha && (kind !== "independent-review" || (item.independent === true && typeof item.actorId === "string" && item.actorId.trim().length > 0 && item.actorId !== task.implementerId))));
+  const missing = requiredCriteria
+    .filter((criterion) => !candidate.evidence.some((item) => item.kind === criterion.id
+      && item.status === "pass"
+      && item.candidateHead === candidate.headSha
+      && (!criterion.requiresIndependentActor || (item.independent === true && typeof item.actorId === "string" && item.actorId.trim().length > 0 && item.actorId !== task.implementerId))))
+    .map((criterion) => criterion.id);
   if (missing.length) return pullRequestDeny("Pull-request evidence is missing, failed, stale, or non-independent.", { missing, candidateHead: candidate.headSha });
   return {
     ...allow("Candidate is eligible only for pull-request preparation. A separate human-approved merge remains mandatory."),
@@ -423,4 +466,21 @@ function sameFiles(left: string[], right: string[]) {
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
   return sortedLeft.every((file, index) => file === sortedRight[index]);
+}
+
+function normalizeTaskTitle(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function hasValidAcceptanceCriteria(criteria: AuthorityAcceptanceCriterion[]) {
+  const ids = criteria.map((criterion) => criterion.id.trim());
+  return criteria.every((criterion) => criterion.id.trim().length > 0 && criterion.description.trim().length > 0)
+    && new Set(ids).size === ids.length
+    && ids.every((id) => !REQUIRED_RELEASE_CRITERIA.some((criterion) => criterion.id === id) && id !== BROWSER_QA_CRITERION.id);
+}
+
+function getRequiredAcceptanceCriteria(authority: StandingAuthority, includesUi: boolean) {
+  const criteria = [...authority.acceptanceCriteria, ...REQUIRED_RELEASE_CRITERIA];
+  if (includesUi) criteria.push(BROWSER_QA_CRITERION);
+  return Array.from(new Map(criteria.map((criterion) => [criterion.id, criterion])).values());
 }
