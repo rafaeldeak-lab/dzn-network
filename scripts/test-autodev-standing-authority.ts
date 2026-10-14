@@ -200,6 +200,21 @@ assert.equal(missingPrAction.pullRequestEligible, false, "A task must explicitly
 const wrongRemote = assessLowRiskPullRequest({ ...authority, repositoryRemote: "https://github.com/other/repository.git" }, candidateTask, fixture.path);
 assert.equal(wrongRemote.pullRequestEligible, false, "The verified Git range must belong to the authority's approved repository.");
 
+const credentialedRemote = "https://x-access-token:do-not-expose-this-token@github.com/rafaeldeak-lab/dzn-network.git";
+runGit(fixture.path, ["remote", "set-url", "origin", credentialedRemote]);
+const sanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
+assert.equal(sanitizedRange.repositoryRemote, authority.repositoryRemote, "Credential-bearing HTTPS remotes must be normalized before they enter candidate metadata.");
+const credentialedRemoteMismatch = assessLowRiskPullRequest(authority, {
+  ...candidateTask,
+  candidate: {
+    ...sanitizedRange,
+    repositoryRemote: credentialedRemote,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: fixture.headSha })),
+  },
+}, fixture.path);
+assert.equal(credentialedRemoteMismatch.pullRequestEligible, false);
+assert.equal(JSON.stringify(credentialedRemoteMismatch.details).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
+
 const failedEvidence = assessLowRiskPullRequest(authority, {
   ...candidateTask,
   candidate: {

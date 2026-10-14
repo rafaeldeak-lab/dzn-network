@@ -193,7 +193,7 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
 
   const actualBaseSha = runGit(repositoryPath, ["rev-parse", "--verify", `${baseSha}^{commit}`]);
   const actualHeadSha = runGit(repositoryPath, ["rev-parse", "--verify", `${headSha}^{commit}`]);
-  const repositoryRemote = runGit(repositoryPath, ["remote", "get-url", "origin"]);
+  const repositoryRemote = normalizeRepositoryRemote(runGit(repositoryPath, ["remote", "get-url", "origin"]));
   const changedFiles = listChangedPaths(repositoryPath, actualBaseSha, actualHeadSha);
   const diff = runGitBuffer(repositoryPath, ["diff", "--no-ext-diff", "--binary", actualBaseSha, actualHeadSha]);
 
@@ -249,12 +249,19 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
     });
   }
 
-  if (candidate.baseSha !== verifiedRange.baseSha || candidate.headSha !== verifiedRange.headSha || candidate.repositoryRemote !== verifiedRange.repositoryRemote || candidate.repositoryRemote !== authority.repositoryRemote || candidate.diffSha256 !== verifiedRange.diffSha256 || !sameFiles(candidate.changedFiles, verifiedRange.changedFiles)) {
+  const baseMatches = candidate.baseSha === verifiedRange.baseSha;
+  const headMatches = candidate.headSha === verifiedRange.headSha;
+  const candidateRemoteMatches = candidate.repositoryRemote === verifiedRange.repositoryRemote;
+  const authorityRemoteMatches = verifiedRange.repositoryRemote === authority.repositoryRemote;
+  const diffMatches = candidate.diffSha256 === verifiedRange.diffSha256;
+  const filesMatch = sameFiles(candidate.changedFiles, verifiedRange.changedFiles);
+  if (!baseMatches || !headMatches || !candidateRemoteMatches || !authorityRemoteMatches || !diffMatches || !filesMatch) {
     return pullRequestDeny("Candidate metadata does not match the verified Git commit range.", {
-      declaredRemote: candidate.repositoryRemote,
-      verifiedRemote: verifiedRange.repositoryRemote,
-      declaredFiles: candidate.changedFiles,
-      verifiedFiles: verifiedRange.changedFiles,
+      baseMatches,
+      headMatches,
+      repositoryRemoteMatches: candidateRemoteMatches && authorityRemoteMatches,
+      diffMatches,
+      filesMatch,
     });
   }
   if (verifiedRange.changedFiles.length === 0) return pullRequestDeny("Verified candidate range has no changed files.");
@@ -351,6 +358,14 @@ function resolveTrustedTargetBase(repositoryPath: string, targetBranch: string) 
     throw new Error("Standing authority target branch is invalid.");
   }
   return runGit(repositoryPath, ["rev-parse", "--verify", `refs/remotes/origin/${targetBranch}^{commit}`]);
+}
+
+function normalizeRepositoryRemote(remote: string) {
+  if (!/^https?:\/\//i.test(remote)) return remote;
+  const parsed = new URL(remote);
+  parsed.username = "";
+  parsed.password = "";
+  return parsed.toString();
 }
 
 function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: string) {
