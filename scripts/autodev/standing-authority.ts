@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-import { classifyPath, type SystemCategory } from "./risk-classifier";
+import { classifyPath, type RiskClassification, type SystemCategory } from "./risk-classifier";
 
 export type AuthorityState = "active" | "paused" | "revoked";
 export type AuthorityTaskState = "proposed" | "authorised" | "implementing" | "validating" | "ready-to-release" | "released" | "blocked" | "reverted";
@@ -54,6 +54,13 @@ export type VerifiedGitRange = {
   repositoryRemote: string;
   changedFiles: string[];
   diffSha256: string;
+};
+
+export type TrustedPullRequestTarget = {
+  repositoryRemote: string;
+  branch: string;
+  headSha: string;
+  source: "pull-request-provider";
 };
 
 export type AuthorityTask = {
@@ -126,6 +133,12 @@ const ALLOWED_TRANSITIONS: Record<AuthorityTaskState, AuthorityTaskState[]> = {
   reverted: [],
 };
 
+const REQUIRED_ACTION_FOR_STATE: Partial<Record<AuthorityTaskState, AuthorityAction>> = {
+  implementing: "implement-in-branch",
+  validating: "validate",
+  "ready-to-release": "prepare-pr",
+};
+
 export function makeTaskDeduplicationKey(authorityId: string, title: string, system: SystemCategory) {
   return createHash("sha256")
     .update(`${authorityId}\n${system}\n${title.trim().toLowerCase().replace(/\s+/g, " ")}`)
@@ -160,6 +173,10 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   if (!authorityDecision.ok && nextState !== "blocked") return authorityDecision;
   if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
+  }
+  const requiredAction = REQUIRED_ACTION_FOR_STATE[nextState];
+  if (requiredAction && !task.requestedActions.includes(requiredAction)) {
+    return deny("action_denied", "Task did not request the action required for this state transition.", { nextState, requiredAction });
   }
   return {
     ...allow(`Task transitioned from ${task.state} to ${nextState}.`),
@@ -206,7 +223,7 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget): PullRequestAssessment {
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
@@ -227,7 +244,7 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
 
   let trustedBaseSha: string;
   try {
-    trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority.targetBranch);
+    trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority, trustedTarget);
   } catch (error) {
     return pullRequestDeny("The approved pull-request target could not be verified in the repository.", {
       targetBranch: authority.targetBranch,
@@ -270,7 +287,7 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   }
   const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
   if (protectedFiles.length) return pullRequestDeny("Verified candidate changes a protected release-control or production-sensitive path.", { protectedFiles });
-  const independentlyClassified = verifiedRange.changedFiles.map((file) => classifyPath(file, readChangedGitBlob(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file)));
+  const independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
   if (independentlyClassified.some((item) => item.risk !== "low" || item.system === "unknown")) {
     return pullRequestDeny("Every verified changed file must classify as low risk.", { classifications: independentlyClassified });
   }
@@ -353,11 +370,21 @@ function listChangedPaths(repositoryPath: string, baseSha: string, headSha: stri
   return Array.from(new Set(paths)).sort();
 }
 
-function resolveTrustedTargetBase(repositoryPath: string, targetBranch: string) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(targetBranch) || targetBranch.includes("..") || targetBranch.includes("@{") || targetBranch.startsWith("-")) {
+function resolveTrustedTargetBase(repositoryPath: string, authority: StandingAuthority, trustedTarget: TrustedPullRequestTarget) {
+  if (!isBranchName(trustedTarget.branch) || trustedTarget.branch !== authority.targetBranch) {
     throw new Error("Standing authority target branch is invalid.");
   }
-  return runGit(repositoryPath, ["rev-parse", "--verify", `refs/remotes/origin/${targetBranch}^{commit}`]);
+  if (trustedTarget.source !== "pull-request-provider" || !isCommitSha(trustedTarget.headSha)) {
+    throw new Error("Trusted pull-request target must provide an immutable provider-sourced commit SHA.");
+  }
+  if (normalizeRepositoryRemote(trustedTarget.repositoryRemote) !== authority.repositoryRemote) {
+    throw new Error("Trusted pull-request target does not belong to the approved repository.");
+  }
+  return runGit(repositoryPath, ["rev-parse", "--verify", `${trustedTarget.headSha}^{commit}`]);
+}
+
+function isBranchName(value: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) && !value.includes("..") && !value.includes("@{") && !value.startsWith("-");
 }
 
 function normalizeRepositoryRemote(remote: string) {
@@ -377,12 +404,14 @@ function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: 
   }
 }
 
-function readChangedGitBlob(repositoryPath: string, baseSha: string, headSha: string, file: string) {
-  try {
-    return readGitBlob(repositoryPath, headSha, file);
-  } catch {
-    return readGitBlob(repositoryPath, baseSha, file);
-  }
+function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: string, file: string): RiskClassification[] {
+  return [baseSha, headSha].flatMap((commitSha) => {
+    try {
+      return [classifyPath(file, readGitBlob(repositoryPath, commitSha, file))];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {
