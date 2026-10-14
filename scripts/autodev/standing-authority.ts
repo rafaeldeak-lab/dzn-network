@@ -77,6 +77,16 @@ export type TrustedPullRequestTarget = {
   source: "pull-request-provider";
 };
 
+export type TrustedMergedPullRequestReceipt = {
+  repositoryRemote: string;
+  branch: string;
+  candidateHeadSha: string;
+  mergeCommitSha: string;
+  pullRequestNumber: number;
+  mergedAt: string;
+  source: "pull-request-provider";
+};
+
 export type AuthorityTask = {
   id: string;
   authorityId: string;
@@ -106,6 +116,7 @@ export type AuthorityDecision = {
     | "resource_limit_exceeded"
     | "invalid_transition"
     | "task_locked"
+    | "lease_inactive"
     | "release_denied";
   message: string;
   details?: Record<string, unknown>;
@@ -141,7 +152,7 @@ const ALLOWED_TRANSITIONS: Record<AuthorityTaskState, AuthorityTaskState[]> = {
   authorised: ["implementing", "blocked"],
   implementing: ["validating", "blocked"],
   validating: ["ready-to-release", "blocked"],
-  "ready-to-release": ["released", "blocked"],
+  "ready-to-release": ["blocked"],
   released: ["reverted"],
   blocked: ["authorised"],
   reverted: [],
@@ -210,6 +221,10 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
   }
+  if (requiresLiveLease(nextState)) {
+    const leaseDecision = assessTaskLease(task, new Date(at));
+    if (!leaseDecision.ok) return leaseDecision;
+  }
   const requiredAction = task.state === "blocked" && nextState === "authorised"
     ? "retry-branch-failure"
     : REQUIRED_ACTION_FOR_STATE[nextState];
@@ -218,7 +233,12 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   }
   return {
     ...allow(`Task transitioned from ${task.state} to ${nextState}.`),
-    task: { ...task, state: nextState, updatedAt: at },
+    task: {
+      ...task,
+      state: nextState,
+      attempts: task.state === "blocked" && nextState === "authorised" ? task.attempts + 1 : task.attempts,
+      updatedAt: at,
+    },
   };
 }
 
@@ -261,10 +281,12 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, at: Date = new Date()): PullRequestAssessment {
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
+  const leaseDecision = assessTaskLease(task, at);
+  if (!leaseDecision.ok) return pullRequestDeny(leaseDecision.message, leaseDecision.details);
   if (!task.requestedActions.includes("prepare-pr")) return pullRequestDeny("The task did not request pull-request preparation.");
   if (!task.implementerId.trim()) return pullRequestDeny("Pull-request preparation requires a named implementation actor.");
   const candidate = task.candidate;
@@ -351,6 +373,34 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
     pullRequestEligible: true,
     requiresSeparateHumanMerge: true,
     shouldPauseFurtherWork: false,
+  };
+}
+
+export function recordTrustedMerge(authority: StandingAuthority, task: AuthorityTask, receipt: TrustedMergedPullRequestReceipt): AuthorityDecision & { task?: AuthorityTask } {
+  const authorityDecision = assessTaskAuthority(authority, task);
+  if (!authorityDecision.ok) return authorityDecision;
+  if (task.state !== "ready-to-release") {
+    return deny("invalid_transition", "Only a ready-to-release task can be marked released by a trusted merge receipt.", { state: task.state });
+  }
+  if (!task.candidate || !isCommitSha(task.candidate.headSha)) {
+    return deny("release_denied", "A ready-to-release task must retain an immutable candidate before release can be recorded.");
+  }
+  if (receipt.source !== "pull-request-provider"
+    || normalizeRepositoryRemote(receipt.repositoryRemote) !== authority.repositoryRemote
+    || receipt.branch !== authority.targetBranch
+    || receipt.candidateHeadSha !== task.candidate.headSha
+    || !isCommitSha(receipt.mergeCommitSha)
+    || !Number.isSafeInteger(receipt.pullRequestNumber)
+    || receipt.pullRequestNumber < 1
+    || !isValidTimestamp(receipt.mergedAt)) {
+    return deny("release_denied", "Release requires a valid provider-sourced merged-pull-request receipt.", {
+      targetBranch: authority.targetBranch,
+      pullRequestNumber: receipt.pullRequestNumber,
+    });
+  }
+  return {
+    ...allow("Trusted provider merge receipt recorded."),
+    task: { ...task, state: "released", lease: undefined, updatedAt: receipt.mergedAt },
   };
 }
 
@@ -445,6 +495,29 @@ function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: 
   } catch {
     return false;
   }
+}
+
+function requiresLiveLease(nextState: AuthorityTaskState) {
+  return nextState === "implementing" || nextState === "validating" || nextState === "ready-to-release";
+}
+
+function assessTaskLease(task: AuthorityTask, at: Date): AuthorityDecision {
+  if (!task.lease) {
+    return deny("lease_inactive", "Task must retain a live lease before it can continue lifecycle or pull-request work.", { taskId: task.id });
+  }
+  const expiresAt = new Date(task.lease.expiresAt).getTime();
+  if (!Number.isFinite(expiresAt) || expiresAt <= at.getTime()) {
+    return deny("lease_inactive", "Task lease has expired and must be reacquired before lifecycle or pull-request work can continue.", {
+      taskId: task.id,
+      expiresAt: task.lease.expiresAt,
+      at: at.toISOString(),
+    });
+  }
+  return allow("Task lease is active.");
+}
+
+function isValidTimestamp(value: string) {
+  return Number.isFinite(new Date(value).getTime());
 }
 
 function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: string, file: string): RiskClassification[] {
