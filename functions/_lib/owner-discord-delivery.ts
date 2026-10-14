@@ -85,6 +85,8 @@ type DeliveryDiagnostic = {
     targetRole: boolean;
     targetRoleBelowBot: boolean;
     botHasAdministrator: boolean;
+    botHasUnexpectedGuildPermissions: boolean;
+    botHasUnexpectedInviteChannelPermissions: boolean;
   };
 };
 
@@ -104,6 +106,9 @@ const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
 const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
+const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 
 export function isOwnerDiscordDeliveryEnabled(env: Env) {
   return deliveryFlagsEnabled(env) && Boolean(readInviteDeliveryConfiguration(env));
@@ -237,7 +242,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
   if (access.status !== "approved") return problem(409, "Only an approved owner-access request can receive the Discord owner role.");
   if (access.requester_discord_id !== user.discord_id) return problem(403, "Use the same Discord account that made this owner-access request.");
 
-  const configuration = readRoleDeliveryConfiguration(env);
+  const configuration = readInviteDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
   const lease = await acquireRoleMutationLease(env, {
     requestId: access.id,
@@ -253,7 +258,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
       return problem(409, "This owner-access request no longer has a currently verified live server. Refresh the page before finishing Discord access.");
     }
     attempt = await startAttempt(env, access, "role_grant", configuration, user);
-    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}`);
     if (membership.response.status === 404) {
@@ -760,8 +765,10 @@ async function checkDiscordRoleConfiguration(
     const botHighestPosition = Math.max(0, ...[...botRoleIds].map((roleId) => Number(roleById.get(roleId)?.position ?? 0)));
     const targetRolePosition = Number(targetRole?.position ?? -1);
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, configuration.guildId);
+    const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, configuration.guildId);
     const hasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
-    const canManageRoles = hasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
+    const hasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, basePermissions);
+    const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const checks = {
       botTokenConfigured: true,
       botIdentity: true,
@@ -773,6 +780,8 @@ async function checkDiscordRoleConfiguration(
       targetRole: Boolean(targetRole),
       targetRoleBelowBot: Boolean(targetRole && targetRolePosition < botHighestPosition),
       botHasAdministrator: hasAdministrator,
+      botHasUnexpectedGuildPermissions: hasUnexpectedGuildPermissions,
+      botHasUnexpectedInviteChannelPermissions: false,
     };
     if (!targetRole) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role was not found in the central DZN Discord server.", httpStatus: null, checks };
     const roleIsAllowed = purpose === "cleanup"
@@ -788,7 +797,25 @@ async function checkDiscordRoleConfiguration(
       checks,
     };
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
-    if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
+    if (hasAdministrator && purpose === "delivery") {
+      return {
+        ok: false as const,
+        status: "permission_missing" as const,
+        message: "DZN Bot has Administrator. Remove Administrator and grant only Manage Roles plus View Channel and Create Instant Invite on the private invite channel before owner delivery can run.",
+        httpStatus: null,
+        checks,
+      };
+    }
+    if (hasUnexpectedGuildPermissions && purpose === "delivery") {
+      return {
+        ok: false as const,
+        status: "permission_missing" as const,
+        message: "DZN Bot has guild permissions outside the owner-delivery allowlist. Grant Manage Roles only through a bot role, and grant View Channel plus Create Instant Invite only through the configured private-channel overwrite before owner delivery can run.",
+        httpStatus: null,
+        checks,
+      };
+    }
+    if (!canManageRoles && !(purpose === "cleanup" && hasAdministrator)) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
     return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
   } catch {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
@@ -814,11 +841,16 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
       return { ok: false as const, status: "not_configured" as const, message: "The configured private invite channel does not belong to the central DZN Discord server.", httpStatus: null, checks: rolePreflight.checks };
     }
     const channelPermissions = evaluateChannelPermissions(rolePreflight.basePermissions, channel, configuration.guildId, rolePreflight.botRoleIds, rolePreflight.botId);
-    const canViewInviteChannel = rolePreflight.checks.botHasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
-    const canCreateInvite = rolePreflight.checks.botHasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
-    const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite };
+    const channelScopedPermissions = getBotChannelOverwritePermissions(channel, rolePreflight.botRoleIds, rolePreflight.botId);
+    const canViewInviteChannel = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
+    const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
+    const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelPermissions);
+    const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite, botHasUnexpectedInviteChannelPermissions: hasUnexpectedInviteChannelPermissions };
+    if (hasUnexpectedInviteChannelPermissions) {
+      return { ok: false as const, status: "permission_missing" as const, message: "The configured private invite channel grants DZN Bot permissions outside the owner-delivery allowlist. Keep only View Channel, Create Invite, and the required Manage Roles permission before owner delivery can run.", httpStatus: null, checks };
+    }
     if (!canViewInviteChannel || !canCreateInvite) {
-      return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs View Channel and Create Invite on the private invite channel.", httpStatus: null, checks };
+      return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs an explicit private-channel overwrite granting View Channel and Create Invite.", httpStatus: null, checks };
     }
     return { ok: true as const, status: "ready" as const, message: "DZN owner Discord delivery is ready for controlled requests.", httpStatus: null, checks };
   } catch {
@@ -847,6 +879,24 @@ function getBotGuildPermissions(roles: DiscordRole[], botRoleIds: Set<string>, g
   }, BigInt(0));
 }
 
+function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<string>, guildId: string) {
+  return roles.reduce((permissions, role) => {
+    const roleId = String(role.id ?? "");
+    return roleId !== guildId && botRoleIds.has(roleId) ? permissions | parseBits(role.permissions) : permissions;
+  }, BigInt(0));
+}
+
+function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, effectivePermissions: bigint) {
+  return (
+    (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
+    (effectivePermissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0)
+  );
+}
+
+function hasUnexpectedOwnerDeliveryChannelPermissions(permissions: bigint) {
+  return (permissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
+}
+
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {
   if (hasPermission(base, DISCORD_ADMINISTRATOR)) return base;
   const overwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
@@ -860,6 +910,18 @@ function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guild
   }
   value = (value & ~roleDeny) | roleAllow;
   return applyOverwrite(value, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
+}
+
+function getBotChannelOverwritePermissions(channel: DiscordChannel, botRoleIds: Set<string>, botId: string) {
+  const overwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
+  let roleAllow = BigInt(0);
+  for (const overwrite of overwrites) {
+    if (String(overwrite.type) !== "0" || !botRoleIds.has(String(overwrite.id))) continue;
+    roleAllow |= parseBits(overwrite.allow);
+  }
+  // Discord combines all bot-role overwrites before its member-specific overwrite;
+  // a role allow wins over a role deny, so only explicit role allows grant access.
+  return applyOverwrite(roleAllow, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
 }
 
 function applyOverwrite(permissions: bigint, overwrite: DiscordPermissionOverwrite | undefined) {
@@ -1130,7 +1192,7 @@ function diagnostic(status: DeliveryDiagnostic["status"], message: string, check
 }
 
 function diagnosticChecks(): DeliveryDiagnostic["checks"] {
-  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannel: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleBelowBot: false, botHasAdministrator: false };
+  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannel: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
 }
 
 function safeAttempt(row: Record<string, unknown>): OwnerDiscordDeliveryAttempt | null {

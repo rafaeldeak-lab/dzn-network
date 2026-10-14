@@ -56,7 +56,11 @@ const retainedRoleOwner: SessionUser = { id: "retained_role_closure_owner", disc
 const preflightFailedOwner: SessionUser = { id: "preflight_failed_owner", discord_id: "900000000000000013", username: "Preflight Failed Owner", avatar: null };
 const inFlightInviteOwner: SessionUser = { id: "in_flight_invite_owner", discord_id: "900000000000000014", username: "In-flight Invite Owner", avatar: null };
 const leaseRaceOwner: SessionUser = { id: "lease_race_owner", discord_id: "900000000000000016", username: "Lease Race Owner", avatar: null };
-const botPermissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
+const botPermissions = (BigInt(1) << BigInt(28)).toString();
+const privateInviteChannelPermissions = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
+const viewChannel = BigInt(1) << BigInt(10);
+const administrator = BigInt(1) << BigInt(3);
+const manageChannels = BigInt(1) << BigInt(4);
 
 function localD1(sqlite: Sqlite) {
   const prepare = (sql: string, bindings: unknown[] = []): LocalStatement => {
@@ -261,7 +265,12 @@ async function run() {
     let pendingInvitePreflight: { started: () => void; wait: Promise<void> } | null = null;
     let failBotIdentityPreflight = false;
     let activeBotPermissions = botPermissions;
+    let activeEveryonePermissions = "0";
     let activeVerifiedOwnerRolePermissions = "0";
+    let channelScopedPermissionsGranted = true;
+    let channelRoleOverwritePermissions = privateInviteChannelPermissions;
+    let channelMemberOverwrite: { allow: string; deny: string } | null = null;
+    let channelEveryoneOverwritePermissions = "0";
     const calls: Array<{ path: string; method: string }> = [];
     const discordFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -279,7 +288,7 @@ async function run() {
       }
       if (url.pathname === `/api/v10/guilds/${guildId}/members/${botUserId}`) return Response.json({ roles: [botRoleId] });
       if (url.pathname === `/api/v10/guilds/${guildId}/roles`) return Response.json([
-        { id: guildId, position: 0, permissions: "0" },
+        { id: guildId, position: 0, permissions: activeEveryonePermissions },
         { id: verifiedOwnerRoleId, position: 5, permissions: activeVerifiedOwnerRolePermissions },
         { id: botRoleId, position: 10, permissions: activeBotPermissions },
       ]);
@@ -291,7 +300,18 @@ async function run() {
           await gate.wait;
         }
         return inviteChannelAvailable
-          ? Response.json({ id: inviteChannelId, guild_id: guildId, type: 0, permission_overwrites: [] })
+          ? Response.json({
+            id: inviteChannelId,
+            guild_id: guildId,
+            type: 0,
+            permission_overwrites: channelScopedPermissionsGranted
+              ? [
+                { id: guildId, type: 0, deny: viewChannel.toString(), allow: channelEveryoneOverwritePermissions },
+                { id: botRoleId, type: 0, deny: "0", allow: channelRoleOverwritePermissions },
+                ...(channelMemberOverwrite ? [{ id: botUserId, type: 1, deny: channelMemberOverwrite.deny, allow: channelMemberOverwrite.allow }] : []),
+              ]
+              : [],
+          })
           : new Response(null, { status: 404 });
       }
       if (url.pathname === `/api/v10/channels/${inviteChannelId}/invites` && method === "POST") return Response.json({ code: "owner-private-join" });
@@ -348,12 +368,67 @@ async function run() {
       assert.equal(diagnostic.checks.targetRoleBelowBot, true);
       assert.equal(diagnostic.checks.canCreateInvite, true);
       assert.equal(diagnostic.checks.botHasAdministrator, false, "The delivery workflow must work with least-privilege role permissions rather than Administrator.");
+      assert.equal(diagnostic.checks.botHasUnexpectedGuildPermissions, false, "The least-privilege fixture must contain only the owner-delivery allowlist.");
 
-      activeBotPermissions = (BigInt(1) << BigInt(3)).toString();
+      channelScopedPermissionsGranted = false;
+      const missingChannelOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(missingChannelOverwriteDiagnostic.ok, false, "Guild-level permissions must not substitute for the private invite-channel overwrite.");
+      assert.equal(missingChannelOverwriteDiagnostic.status, "permission_missing");
+      assert.equal(missingChannelOverwriteDiagnostic.checks.canViewInviteChannel, false);
+      assert.equal(missingChannelOverwriteDiagnostic.checks.canCreateInvite, false);
+      assert.match(missingChannelOverwriteDiagnostic.message, /explicit private-channel overwrite/, "The diagnostic must explain the channel-scoped requirement.");
+      channelScopedPermissionsGranted = true;
+
+      channelRoleOverwritePermissions = (BigInt(privateInviteChannelPermissions) | manageChannels).toString();
+      const unsafeRoleOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(unsafeRoleOverwriteDiagnostic.ok, false, "An extra permission in the bot role's private-channel overwrite must block owner delivery.");
+      assert.equal(unsafeRoleOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
+      assert.match(unsafeRoleOverwriteDiagnostic.message, /private invite channel grants DZN Bot permissions outside the owner-delivery allowlist/, "The diagnostic must explain the effective private-channel permission allowlist.");
+      channelRoleOverwritePermissions = privateInviteChannelPermissions;
+
+      channelMemberOverwrite = { allow: manageChannels.toString(), deny: "0" };
+      const unsafeMemberOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(unsafeMemberOverwriteDiagnostic.ok, false, "An extra permission in the bot member's private-channel overwrite must block owner delivery.");
+      assert.equal(unsafeMemberOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
+      channelMemberOverwrite = null;
+
+      channelEveryoneOverwritePermissions = manageChannels.toString();
+      const unsafeEveryoneOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(unsafeEveryoneOverwriteDiagnostic.ok, false, "An extra permission inherited from the channel's @everyone overwrite must block owner delivery.");
+      assert.equal(unsafeEveryoneOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
+      channelEveryoneOverwritePermissions = "0";
+
+      activeBotPermissions = administrator.toString();
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
-      assert.equal(administratorDiagnostic.ok, true, "The diagnostic must still safely report the current live Administrator grant while the bot is being reduced.");
+      assert.equal(administratorDiagnostic.ok, false, "Administrator must block invite and role-grant delivery.");
+      assert.equal(administratorDiagnostic.status, "permission_missing");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
+      assert.match(administratorDiagnostic.message, /Remove Administrator/, "The diagnostic must require least-privilege bot permissions before delivery.");
       activeBotPermissions = botPermissions;
+
+      activeBotPermissions = (BigInt(botPermissions) | viewChannel).toString();
+      const guildScopedViewDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(guildScopedViewDiagnostic.ok, false, "View Channel must be granted through the private invite-channel overwrite, not a bot role.");
+      assert.equal(guildScopedViewDiagnostic.checks.botHasUnexpectedGuildPermissions, true);
+      activeBotPermissions = botPermissions;
+
+      activeBotPermissions = (BigInt(botPermissions) | manageChannels).toString();
+      const extraPermissionDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(extraPermissionDiagnostic.ok, false, "Extra bot guild permissions must block new owner delivery.");
+      assert.equal(extraPermissionDiagnostic.status, "permission_missing");
+      assert.equal(extraPermissionDiagnostic.checks.botHasUnexpectedGuildPermissions, true, "The owner console must expose extra bot guild permissions.");
+      assert.match(extraPermissionDiagnostic.message, /outside the owner-delivery allowlist/, "The diagnostic must explain why extra bot guild permissions are blocked.");
+      activeBotPermissions = botPermissions;
+
+      activeEveryonePermissions = administrator.toString();
+      const inheritedAdministratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(inheritedAdministratorDiagnostic.ok, false, "Inherited @everyone Administrator must block owner delivery.");
+      assert.equal(inheritedAdministratorDiagnostic.checks.botHasAdministrator, true, "The diagnostic must expose inherited Administrator.");
+      activeEveryonePermissions = manageChannels.toString();
+      const inheritedExtraPermissionDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(inheritedExtraPermissionDiagnostic.ok, false, "Inherited @everyone management permissions must block owner delivery.");
+      assert.equal(inheritedExtraPermissionDiagnostic.checks.botHasUnexpectedGuildPermissions, true, "The diagnostic must expose inherited forbidden permissions.");
+      activeEveryonePermissions = "0";
 
       const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);
       assert.equal(everyoneRoleDiagnostic.ok, false, "The central guild's @everyone role must never be accepted as the owner role.");
@@ -395,6 +470,15 @@ async function run() {
       assert.equal(applicantHasRole, false, "Unsafe configured role permissions must stop before Discord role assignment.");
       assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "PUT"), false, "DZN must not call Discord role assignment for an unsafe configured role.");
       activeVerifiedOwnerRolePermissions = "0";
+
+      channelEveryoneOverwritePermissions = manageChannels.toString();
+      const unsafeChannelClaim = await claimOwnerDiscordAccessRole(env, request("POST", { requestId: "approved_request" }, applicantSession.token, "https://dzn.test"), { requestId: "approved_request" }, discordFetch);
+      assert.equal(unsafeChannelClaim.ok, false, "An unsafe private invite channel must block direct owner-role delivery.");
+      assert.equal(unsafeChannelClaim.status, 409, "Unsafe channel permissions must prevent any role assignment.");
+      assert.equal(applicantHasRole, false, "The direct owner-role path must not assign the role when the channel preflight fails.");
+      assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "PUT"), false, "DZN must not call Discord role assignment when the private invite channel is overprivileged.");
+      channelEveryoneOverwritePermissions = "0";
+
       const roleResponse = await applicantDeliveryRoute(context(env, request("POST", { action: "claim", requestId: "approved_request" }, applicantSession.token, "https://dzn.test")));
       assert.equal(roleResponse.status, 200);
       assert.equal(applicantHasRole, true);
@@ -408,12 +492,14 @@ async function run() {
       assert.equal(outsiderRevoke.ok, false);
       assert.equal(outsiderRevoke.status, 403, "The delivery helper must still reject a non-owner if another route calls it incorrectly.");
       await db.prepare("UPDATE dzn_owner_discord_access_requests SET status = 'revoked' WHERE id = 'approved_request'").run();
+      activeBotPermissions = (BigInt(botPermissions) | manageChannels).toString();
       activeVerifiedOwnerRolePermissions = (BigInt(1) << BigInt(28)).toString();
       const revokeResponse = await ownerDeliveryRoute(context(env, request("POST", { action: "revoke_role", requestId: "approved_request" }, ownerSession.token, "https://dzn.test")));
       assert.equal(revokeResponse.status, 200);
       assert.equal(applicantHasRole, false);
       assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE"), true, "Revocation must only remove the configured Verified Server Owner role.");
       activeVerifiedOwnerRolePermissions = "0";
+      activeBotPermissions = botPermissions;
       const revokeActor = await db.prepare("SELECT actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'approved_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ actor_user_id: string; actor_discord_id: string }>();
       assert.equal(revokeActor?.actor_user_id, owner.id, "The delivery ledger must identify the platform owner that removed a role.");
       assert.equal(revokeActor?.actor_discord_id, owner.discord_id, "The delivery ledger must retain the platform owner identity for the role-removal audit.");
