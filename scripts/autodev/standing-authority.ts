@@ -215,14 +215,15 @@ export function assessTaskAuthority(authority: StandingAuthority, task: Authorit
   return allow("Task is within the active authority scope.");
 }
 
-export function transitionTask(authority: StandingAuthority, task: AuthorityTask, nextState: AuthorityTaskState, at: string, actingRunnerId?: string): AuthorityDecision & { task?: AuthorityTask } {
+export function transitionTask(authority: StandingAuthority, task: AuthorityTask, nextState: AuthorityTaskState, actingRunnerId?: string): AuthorityDecision & { task?: AuthorityTask } {
+  const now = new Date();
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok && nextState !== "blocked") return authorityDecision;
   if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
   }
   if (requiresLiveLease(nextState)) {
-    const leaseDecision = assessTaskLease(task, new Date(at), actingRunnerId);
+    const leaseDecision = assessTaskLease(task, now, actingRunnerId);
     if (!leaseDecision.ok) return leaseDecision;
   }
   const requiredAction = task.state === "blocked" && nextState === "authorised"
@@ -244,16 +245,18 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
       ...task,
       state: nextState,
       attempts: nextAttempts,
-      updatedAt: at,
+      updatedAt: now.toISOString(),
     },
   };
 }
 
-export function acquireTaskLease(authority: StandingAuthority, task: AuthorityTask, activeTasks: AuthorityTask[], runnerId: string, now: Date): AuthorityDecision & { task?: AuthorityTask } {
-  const authorityDecision = assessTaskAuthority(authority, task);
-  if (!authorityDecision.ok) return authorityDecision;
+export function acquireTaskLease(authority: StandingAuthority, task: AuthorityTask, activeTasks: AuthorityTask[], runnerId: string): AuthorityDecision & { task?: AuthorityTask } {
+  const now = new Date();
   const persistedTask = activeTasks.find((item) => item.id === task.id);
-  const activeLease = persistedTask?.lease ?? task.lease;
+  const authoritativeTask = persistedTask ?? task;
+  const authorityDecision = assessTaskAuthority(authority, authoritativeTask);
+  if (!authorityDecision.ok) return authorityDecision;
+  const activeLease = authoritativeTask.lease;
   if (activeLease && new Date(activeLease.expiresAt).getTime() > now.getTime() && activeLease.runnerId !== runnerId) {
     return deny("task_locked", "Task is already leased by another runner.", { runnerId: activeLease.runnerId, expiresAt: activeLease.expiresAt });
   }
@@ -264,7 +267,7 @@ export function acquireTaskLease(authority: StandingAuthority, task: AuthorityTa
   const expiresAt = new Date(now.getTime() + authority.maxRuntimeMinutes * 60_000).toISOString();
   return {
     ...allow("Task lease acquired."),
-    task: { ...task, lease: { runnerId, acquiredAt: now.toISOString(), expiresAt }, updatedAt: now.toISOString() },
+    task: { ...authoritativeTask, lease: { runnerId, acquiredAt: now.toISOString(), expiresAt }, updatedAt: now.toISOString() },
   };
 }
 
@@ -288,11 +291,12 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, at: Date = new Date()): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment {
+  const now = new Date();
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
-  const leaseDecision = assessTaskLease(task, at, actingRunnerId);
+  const leaseDecision = assessTaskLease(task, now, actingRunnerId);
   if (!leaseDecision.ok) return pullRequestDeny(leaseDecision.message, leaseDecision.details);
   if (!task.requestedActions.includes("prepare-pr")) return pullRequestDeny("The task did not request pull-request preparation.");
   if (!task.implementerId.trim()) return pullRequestDeny("Pull-request preparation requires a named implementation actor.");
@@ -354,6 +358,9 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, task: Aut
   }
   const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
   if (protectedFiles.length) return pullRequestDeny("Verified candidate changes a protected release-control or production-sensitive path.", { protectedFiles });
+  const nonRegularFiles = verifiedRange.changedFiles.filter((file) => hasNonRegularGitEntry(repositoryPath, verifiedRange.baseSha, file)
+    || hasNonRegularGitEntry(repositoryPath, verifiedRange.headSha, file));
+  if (nonRegularFiles.length) return pullRequestDeny("Verified candidate includes a non-regular Git entry.", { nonRegularFiles });
   const independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
   if (independentlyClassified.some((item) => item.risk !== "low" || item.system === "unknown")) {
     return pullRequestDeny("Every verified changed file must classify as low risk.", { classifications: independentlyClassified });
@@ -468,6 +475,25 @@ function listChangedPaths(repositoryPath: string, baseSha: string, headSha: stri
   }
 
   return Array.from(new Set(paths)).sort();
+}
+
+function hasNonRegularGitEntry(repositoryPath: string, commitSha: string, file: string) {
+  const entry = readGitTreeEntry(repositoryPath, commitSha, file);
+  return entry !== undefined && (entry.objectType !== "blob" || !isRegularFileMode(entry.mode));
+}
+
+function readGitTreeEntry(repositoryPath: string, commitSha: string, file: string) {
+  const raw = runGitBuffer(repositoryPath, ["ls-tree", "-z", commitSha, "--", file]).toString("utf8");
+  if (!raw) return undefined;
+  const [entry] = raw.split("\0");
+  const [header] = entry.split("\t", 1);
+  const [mode, objectType] = header.split(" ");
+  if (!mode || !objectType) throw new Error("Git tree entry could not be parsed.");
+  return { mode, objectType };
+}
+
+function isRegularFileMode(mode: string) {
+  return mode === "100644" || mode === "100755";
 }
 
 function resolveTrustedTargetBase(repositoryPath: string, authority: StandingAuthority, trustedTarget: TrustedPullRequestTarget) {
