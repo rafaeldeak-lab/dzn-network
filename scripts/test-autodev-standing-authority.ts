@@ -85,23 +85,25 @@ assert.equal(assessTaskAuthority({ ...authority, state: "revoked", revokedAt: no
 assert.equal(assessTaskAuthority({ ...authority, maxExtraMonthlySpendUsd: 1 }, task()).code, "resource_limit_exceeded");
 assert.equal(assessTaskAuthority(authority, task({ attempts: 3 })).code, "resource_limit_exceeded");
 
-const authorised = transitionTask(authority, task(), "authorised", now);
+const authorised = transitionTask(authority, task(), "authorised", now, "runner-a");
 assert.equal(authorised.ok, true);
 const leased = acquireTaskLease(authority, authorised.task!, [], "runner-a", new Date(now));
 assert.equal(leased.ok, true);
 assert.equal(leased.task?.lease?.runnerId, "runner-a");
-const implementing = transitionTask(authority, leased.task!, "implementing", now);
-const validating = transitionTask(authority, implementing.task!, "validating", now);
-const ready = transitionTask(authority, validating.task!, "ready-to-release", now);
+const implementing = transitionTask(authority, leased.task!, "implementing", now, "runner-a");
+assert.equal(transitionTask(authority, leased.task!, "implementing", now, "runner-b").code, "task_locked", "Only the runner that holds the lease can advance the task.");
+const validating = transitionTask(authority, implementing.task!, "validating", now, "runner-a");
+const ready = transitionTask(authority, validating.task!, "ready-to-release", now, "runner-a");
 assert.equal(ready.ok, true);
-assert.equal(transitionTask(authority, task(), "released", now).code, "invalid_transition");
-assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", now).code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", now).code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "authorised", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", now).code, "lease_inactive");
-assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", now).code, "action_denied");
-const retried = transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now);
+assert.equal(transitionTask(authority, task(), "released", now, "runner-a").code, "invalid_transition");
+assert.equal(transitionTask(authority, task({ state: "authorised", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", now, "runner-a").code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "implementing", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", now, "runner-a").code, "action_denied");
+assert.equal(transitionTask(authority, task({ state: "authorised", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", now, "runner-a").code, "lease_inactive");
+assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", now, "runner-a").code, "action_denied");
+const retried = transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now, "runner-a");
 assert.equal(retried.ok, true);
 assert.equal(retried.task?.attempts, 1, "Reauthorising a blocked task must consume a retry attempt.");
+assert.equal(transitionTask(authority, task({ state: "blocked", attempts: authority.maxAttemptsPerTask - 1, requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", now, "runner-a").code, "resource_limit_exceeded", "A retry must not enter an authorised state after exhausting its budget.");
 assert.equal(acquireTaskLease(authority, ready.task!, [leased.task!], "runner-b", new Date(now)).code, "task_locked");
 assert.equal(acquireTaskLease(authority, task({ id: "parallel-task", state: "authorised" }), [leased.task!], "runner-b", new Date(now)).code, "resource_limit_exceeded");
 
@@ -126,7 +128,8 @@ const candidateTask = task({
 const eligible = assessFixture(authority, candidateTask, fixture);
 assert.equal(eligible.pullRequestEligible, true);
 assert.equal(eligible.requiresSeparateHumanMerge, true, "Eligibility alone must never merge a PR.");
-assert.equal(transitionTask(authority, candidateTask, "released", now).code, "invalid_transition", "A trusted merged-pull-request receipt is required to record release.");
+assert.equal(assessFixture(authority, candidateTask, fixture, "runner-b").pullRequestEligible, false, "Only the runner that holds the lease can prepare the pull request.");
+assert.equal(transitionTask(authority, candidateTask, "released", now, "runner-a").code, "invalid_transition", "A trusted merged-pull-request receipt is required to record release.");
 assert.equal(recordTrustedMerge(authority, candidateTask, {
   repositoryRemote: authority.repositoryRemote,
   branch: authority.targetBranch,
@@ -206,6 +209,18 @@ const renamedProtected = assessFixture(authority, {
   },
 }, renamedProtectedFixture);
 assert.equal(renamedProtected.pullRequestEligible, false, "Renaming a protected path must prevent pull-request eligibility.");
+
+const typeChangedProtectedFixture = makeTypeChangedProtectedFixture();
+const typeChangedProtectedRange = inspectGitRange(typeChangedProtectedFixture.path, typeChangedProtectedFixture.baseSha, typeChangedProtectedFixture.headSha);
+assert.ok(typeChangedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Type changes to protected files must remain in the verified file set.");
+const typeChangedProtected = assessFixture(authority, {
+  ...candidateTask,
+  candidate: {
+    ...typeChangedProtectedRange,
+    evidence: candidateTask.candidate!.evidence.map((item) => ({ ...item, candidateHead: typeChangedProtectedFixture.headSha })),
+  },
+}, typeChangedProtectedFixture);
+assert.equal(typeChangedProtected.pullRequestEligible, false, "Changing a protected path into a symlink must prevent pull-request eligibility.");
 
 const targetBypassFixture = makeTargetBypassFixture();
 const targetBypassRange = inspectGitRange(targetBypassFixture.path, targetBypassFixture.untrustedBaseSha, targetBypassFixture.headSha);
@@ -306,6 +321,7 @@ rmSync(protectedFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });
 rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
 rmSync(renamedProtectedFixture.path, { force: true, recursive: true });
+rmSync(typeChangedProtectedFixture.path, { force: true, recursive: true });
 rmSync(targetBypassFixture.path, { force: true, recursive: true });
 rmSync(removedAuthGuardFixture.path, { force: true, recursive: true });
 
@@ -357,6 +373,20 @@ function makeRenamedProtectedFixture() {
   return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
 }
 
+function makeTypeChangedProtectedFixture() {
+  const path = makeFixtureRepository();
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
+  writeFileSync(join(path, "symlink-target"), "scripts/autodev/unsafe-target.ts\n");
+  const symlinkBlob = runGit(path, ["hash-object", "-w", "symlink-target"]);
+  runGit(path, ["update-index", "--add", "--cacheinfo", `120000,${symlinkBlob},scripts/autodev/release-control.ts`]);
+  runGit(path, ["commit", "--quiet", "-m", "type change protected control"]);
+  return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
 function makeTargetBypassFixture() {
   const path = makeFixtureRepository();
   writeFileSync(join(path, "components/games/games-hub.tsx"), "export const baseline = true;\n");
@@ -390,8 +420,8 @@ function makeAuthGuardRemovalFixture() {
   return { path, baseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
 }
 
-function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }) {
-  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), new Date(now));
+function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }, actingRunnerId = "runner-a") {
+  return assessLowRiskPullRequest(authorityArg, taskArg, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId, new Date(now));
 }
 
 function trustedTargetFor(headSha: string): TrustedPullRequestTarget {

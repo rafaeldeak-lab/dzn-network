@@ -215,14 +215,14 @@ export function assessTaskAuthority(authority: StandingAuthority, task: Authorit
   return allow("Task is within the active authority scope.");
 }
 
-export function transitionTask(authority: StandingAuthority, task: AuthorityTask, nextState: AuthorityTaskState, at: string): AuthorityDecision & { task?: AuthorityTask } {
+export function transitionTask(authority: StandingAuthority, task: AuthorityTask, nextState: AuthorityTaskState, at: string, actingRunnerId?: string): AuthorityDecision & { task?: AuthorityTask } {
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok && nextState !== "blocked") return authorityDecision;
   if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
     return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
   }
   if (requiresLiveLease(nextState)) {
-    const leaseDecision = assessTaskLease(task, new Date(at));
+    const leaseDecision = assessTaskLease(task, new Date(at), actingRunnerId);
     if (!leaseDecision.ok) return leaseDecision;
   }
   const requiredAction = task.state === "blocked" && nextState === "authorised"
@@ -231,12 +231,19 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   if (requiredAction && !task.requestedActions.includes(requiredAction)) {
     return deny("action_denied", "Task did not request the action required for this state transition.", { nextState, requiredAction });
   }
+  const nextAttempts = task.state === "blocked" && nextState === "authorised" ? task.attempts + 1 : task.attempts;
+  if (nextAttempts >= authority.maxAttemptsPerTask) {
+    return deny("resource_limit_exceeded", "Retry would exceed the approved attempt limit.", {
+      attempts: nextAttempts,
+      maxAttemptsPerTask: authority.maxAttemptsPerTask,
+    });
+  }
   return {
     ...allow(`Task transitioned from ${task.state} to ${nextState}.`),
     task: {
       ...task,
       state: nextState,
-      attempts: task.state === "blocked" && nextState === "authorised" ? task.attempts + 1 : task.attempts,
+      attempts: nextAttempts,
       updatedAt: at,
     },
   };
@@ -281,11 +288,11 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, at: Date = new Date()): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, task: AuthorityTask, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, at: Date = new Date()): PullRequestAssessment {
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
-  const leaseDecision = assessTaskLease(task, at);
+  const leaseDecision = assessTaskLease(task, at, actingRunnerId);
   if (!leaseDecision.ok) return pullRequestDeny(leaseDecision.message, leaseDecision.details);
   if (!task.requestedActions.includes("prepare-pr")) return pullRequestDeny("The task did not request pull-request preparation.");
   if (!task.implementerId.trim()) return pullRequestDeny("Pull-request preparation requires a named implementation actor.");
@@ -441,7 +448,7 @@ function runGitBuffer(repositoryPath: string, args: string[]) {
 }
 
 function listChangedPaths(repositoryPath: string, baseSha: string, headSha: string) {
-  const fields = runGitBuffer(repositoryPath, ["diff", "--name-status", "-z", "--find-renames=50%", "--diff-filter=ACMRD", baseSha, headSha])
+  const fields = runGitBuffer(repositoryPath, ["diff", "--name-status", "-z", "--find-renames=50%", baseSha, headSha])
     .toString("utf8")
     .split("\0");
   const paths: string[] = [];
@@ -501,9 +508,15 @@ function requiresLiveLease(nextState: AuthorityTaskState) {
   return nextState === "implementing" || nextState === "validating" || nextState === "ready-to-release";
 }
 
-function assessTaskLease(task: AuthorityTask, at: Date): AuthorityDecision {
+function assessTaskLease(task: AuthorityTask, at: Date, actingRunnerId?: string): AuthorityDecision {
   if (!task.lease) {
     return deny("lease_inactive", "Task must retain a live lease before it can continue lifecycle or pull-request work.", { taskId: task.id });
+  }
+  if (!actingRunnerId?.trim() || task.lease.runnerId !== actingRunnerId) {
+    return deny("task_locked", "Task lease belongs to a different runner.", {
+      taskId: task.id,
+      leaseRunnerId: task.lease.runnerId,
+    });
   }
   const expiresAt = new Date(task.lease.expiresAt).getTime();
   if (!Number.isFinite(expiresAt) || expiresAt <= at.getTime()) {
