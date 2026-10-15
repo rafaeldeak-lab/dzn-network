@@ -133,6 +133,11 @@ export type AuthorityControllerRecords = {
   /** Returns the current authority policy held by the trusted host. */
   getAuthorityRecord(authorityId: string): TrustedStandingAuthorityRecord | undefined;
   getTaskRecord(authorityId: string, taskId: string): TrustedAuthorityTaskRecord | undefined;
+  /**
+   * Resolves the current protected target through the host-owned pull-request
+   * provider adapter. Runners never supply a target SHA to the controller.
+   */
+  getPullRequestTarget(authorityId: string): TrustedPullRequestTarget | undefined;
   getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
   /**
    * Atomically reads the current controller-owned task, checks live authority
@@ -155,7 +160,7 @@ export type AuthorityControllerRecords = {
 export type AuthorityController = {
   acquireTaskLease(taskId: string, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
   transitionTask(taskId: string, nextState: AuthorityTaskState, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
-  assessLowRiskPullRequest(taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment;
+  assessLowRiskPullRequest(taskId: string, repositoryPath: string, actingRunnerId: string): PullRequestAssessment;
   recordTrustedMerge(taskId: string): AuthorityDecision & { task?: AuthorityTask };
 };
 
@@ -175,11 +180,11 @@ export function createAuthorityController(authorityId: string, records: Authorit
       const authority = resolveControllerAuthority(authorityId, records);
       return isAuthorityDecision(authority) ? authority : transitionTaskFromRecords(authority, taskId, nextState, runnerId, records);
     },
-    assessLowRiskPullRequest: (taskId, repositoryPath, trustedTarget, actingRunnerId) => {
+    assessLowRiskPullRequest: (taskId, repositoryPath, actingRunnerId) => {
       const authority = resolveControllerAuthority(authorityId, records);
       return isAuthorityDecision(authority)
         ? pullRequestDeny(authority.message, authority.details)
-        : assessLowRiskPullRequestFromRecords(authority, taskId, repositoryPath, trustedTarget, actingRunnerId, records);
+        : assessLowRiskPullRequestFromRecords(authority, taskId, repositoryPath, actingRunnerId, records);
     },
     recordTrustedMerge: (taskId) => {
       const authority = resolveControllerAuthority(authorityId, records);
@@ -362,7 +367,7 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
+function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskId: string, repositoryPath: string, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
   const now = new Date();
   let taskRecord: TrustedAuthorityTaskRecord | undefined;
   try {
@@ -394,8 +399,11 @@ function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskI
     });
   }
 
+  let trustedTarget: TrustedPullRequestTarget | undefined;
   let trustedBaseSha: string;
   try {
+    trustedTarget = controllerRecords.getPullRequestTarget(authority.id);
+    if (!trustedTarget) throw new Error("The controller-owned pull-request provider returned no target.");
     trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority, trustedTarget);
   } catch (error) {
     return pullRequestDeny("The approved pull-request target could not be verified in the repository.", {
