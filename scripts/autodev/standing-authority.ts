@@ -563,11 +563,16 @@ function isCommitSha(value: string) {
 }
 
 function runGit(repositoryPath: string, args: string[]) {
-  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", gitCommandArgs(repositoryPath, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
 function runGitBuffer(repositoryPath: string, args: string[]) {
-  return execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", gitCommandArgs(repositoryPath, args), { encoding: "buffer", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function gitCommandArgs(repositoryPath: string, args: string[]) {
+  // Candidate verification must inspect the real object graph, never a local replacement view.
+  return ["--no-replace-objects", "-C", repositoryPath, ...args];
 }
 
 function listChangedPaths(repositoryPath: string, baseSha: string, headSha: string) {
@@ -639,7 +644,7 @@ function normalizeRepositoryRemote(remote: string) {
 
 function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: string) {
   try {
-    execFileSync("git", ["-C", repositoryPath, "merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" });
+    execFileSync("git", gitCommandArgs(repositoryPath, ["merge-base", "--is-ancestor", ancestorSha, descendantSha]), { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -694,7 +699,7 @@ function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: s
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {
-  return execFileSync("git", ["-C", repositoryPath, "show", `${commitSha}:${file}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", gitCommandArgs(repositoryPath, ["show", `${commitSha}:${file}`]), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function resolveControllerAuthority(authorityId: string, controllerRecords: AuthorityControllerRecords): StandingAuthority | AuthorityDecision {
