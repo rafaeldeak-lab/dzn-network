@@ -252,6 +252,15 @@ const targetBypass = assessFixture(authority, {
 }, targetBypassFixture);
 assert.equal(targetBypass.pullRequestEligible, false, "The candidate base must match the trusted pull-request target tip.");
 
+const replacementObjectFixture = makeReplacementObjectFixture();
+const replacementObjectRange = inspectGitRange(replacementObjectFixture.path, replacementObjectFixture.baseSha, replacementObjectFixture.protectedHeadSha);
+assert.equal(replacementObjectRange.headSha, replacementObjectFixture.protectedHeadSha, "Verified candidate identity must remain the requested protected commit.");
+assert.ok(replacementObjectRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Git replacement objects must not hide protected changed paths.");
+assert.equal(assessFixture(authority, {
+  ...candidateTask,
+  candidate: replacementObjectRange,
+}, replacementObjectFixture).pullRequestEligible, false, "A local replacement object must not turn a protected candidate into a low-risk release.");
+
 const outOfScopeFixture = makeGitFixture("components/events/authority-note.tsx", "export const eventNote = 'scope';\n");
 const outOfScopeRange = inspectGitRange(outOfScopeFixture.path, outOfScopeFixture.baseSha, outOfScopeFixture.headSha);
 const outOfScope = assessFixture(authority, {
@@ -348,6 +357,7 @@ rmSync(renamedProtectedFixture.path, { force: true, recursive: true });
 rmSync(typeChangedProtectedFixture.path, { force: true, recursive: true });
 rmSync(typeChangedUiFixture.path, { force: true, recursive: true });
 rmSync(targetBypassFixture.path, { force: true, recursive: true });
+rmSync(replacementObjectFixture.path, { force: true, recursive: true });
 rmSync(removedAuthGuardFixture.path, { force: true, recursive: true });
 rmSync(unreadableBlobFixture.path, { force: true, recursive: true });
 
@@ -444,6 +454,30 @@ function makeTargetBypassFixture() {
   runGit(path, ["add", "."]);
   runGit(path, ["commit", "--quiet", "-m", "allowed-looking change"]);
   return { path, baseSha: trustedBaseSha, untrustedBaseSha, headSha: runGit(path, ["rev-parse", "HEAD"]) };
+}
+
+function makeReplacementObjectFixture() {
+  const path = makeFixtureRepository();
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const baseline = true;\n");
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = true;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "baseline"]);
+  const baseSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["update-ref", "refs/remotes/origin/main", baseSha]);
+
+  writeFileSync(join(path, "scripts/autodev/release-control.ts"), "export const release = false;\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "protected candidate"]);
+  const protectedHeadSha = runGit(path, ["rev-parse", "HEAD"]);
+
+  runGit(path, ["checkout", "--quiet", "--detach", baseSha]);
+  writeFileSync(join(path, "components/games/games-hub.tsx"), "export const status = 'ready';\n");
+  runGit(path, ["add", "."]);
+  runGit(path, ["commit", "--quiet", "-m", "benign replacement"]);
+  const benignHeadSha = runGit(path, ["rev-parse", "HEAD"]);
+  runGit(path, ["replace", protectedHeadSha, benignHeadSha]);
+
+  return { path, baseSha, protectedHeadSha };
 }
 
 function makeAuthGuardRemovalFixture() {
