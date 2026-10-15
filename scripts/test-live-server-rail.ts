@@ -28,6 +28,8 @@ assert.equal(source.includes("dedupeRailItems(items)"), true, "The client must d
 assert.equal(source.includes('item.playerCountStatus !== "fresh"'), true, "Stale player counts must not be presented as live values.");
 assert.equal(source.includes("SERVER_RAIL_REFRESH_MS = 30_000"), true, "The rail must refresh live server data without requiring a page reload.");
 assert.equal(source.includes("SERVER_RAIL_INITIAL_RETRY_DELAY_MS = 1_500"), true, "An initial transient public-rail failure should receive one prompt bounded retry.");
+assert.equal(source.includes("isStaleEmptyRailResponse(payload)"), true, "The retry must cover the public endpoint's stale-empty fallback response.");
+assert.equal(source.includes('cache: initialRetryUsesFreshRequestRef.current ? "no-store" : "default"'), true, "The recovery request must bypass a stale browser cache.");
 assert.equal(source.includes('document.visibilityState === "visible"'), true, "Background tabs must not keep polling the public rail.");
 assert.equal(source.includes('document.addEventListener("visibilitychange"'), true, "Returning to the page must refresh the rail.");
 assert.equal(source.includes("requestInFlight"), true, "Timed and visibility refreshes must not overlap requests.");

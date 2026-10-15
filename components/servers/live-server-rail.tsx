@@ -31,6 +31,10 @@ type RailResponse = {
   stale?: boolean;
 };
 
+function isStaleEmptyRailResponse(payload: RailResponse) {
+  return payload.stale === true && (payload.items?.length ?? 0) === 0;
+}
+
 type RailLoaderOptions = {
   fetchRail: (signal: AbortSignal) => Promise<Response>;
   onPayload: (payload: RailResponse) => void;
@@ -88,6 +92,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
   const hasConfirmedResponseRef = useRef(false);
   const initialFailureCountRef = useRef(0);
   const initialRetryTimerRef = useRef<number | null>(null);
+  const initialRetryUsesFreshRequestRef = useRef(false);
   const loaderRef = useRef<ReturnType<typeof createRailLoader> | null>(null);
 
   useEffect(() => {
@@ -98,6 +103,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 
     const scheduleInitialRetry = () => {
       clearInitialRetry();
+      initialRetryUsesFreshRequestRef.current = true;
       setReconnecting(true);
       initialRetryTimerRef.current = window.setTimeout(() => {
         initialRetryTimerRef.current = null;
@@ -107,12 +113,25 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 
     const loader = createRailLoader({
       fetchRail: (signal) => fetch("/api/public/server-rail", {
+          cache: initialRetryUsesFreshRequestRef.current ? "no-store" : "default",
           headers: { accept: "application/json" },
           signal,
         }),
       onPayload: (payload) => {
+        if (!hasConfirmedResponseRef.current && isStaleEmptyRailResponse(payload)) {
+          if (initialFailureCountRef.current === 0) {
+            initialFailureCountRef.current += 1;
+            scheduleInitialRetry();
+            return;
+          }
+          initialRetryUsesFreshRequestRef.current = false;
+          setReconnecting(false);
+          setResponseStale(true);
+          return;
+        }
         hasConfirmedResponseRef.current = true;
         initialFailureCountRef.current = 0;
+        initialRetryUsesFreshRequestRef.current = false;
         clearInitialRetry();
         setReconnecting(false);
         setItems((currentItems) => (
@@ -128,6 +147,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
           scheduleInitialRetry();
           return;
         }
+        initialRetryUsesFreshRequestRef.current = false;
         setReconnecting(false);
         setResponseStale(true);
       },
@@ -144,6 +164,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       clearInitialRetry();
+      initialRetryUsesFreshRequestRef.current = false;
       loaderRef.current = null;
       loader.dispose();
       window.clearInterval(refreshTimer);

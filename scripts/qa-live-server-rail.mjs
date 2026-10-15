@@ -17,6 +17,7 @@ const realServer = { id: "server-one", slug: "nuketown-deathmatch", name: "NukeT
 const secondServer = { ...realServer, id: "server-two", slug: "second-server", name: "Second Server" };
 let railMode = "normal";
 let refreshRequestCount = 0;
+const initialRetryCacheModes = [];
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, origin);
@@ -30,9 +31,12 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/api/public/server-rail") {
     refreshRequestCount += 1;
-    if (railMode === "initial-retry" && refreshRequestCount === 1) {
-      response.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, items: [], stale: true }));
-      return;
+    if (railMode === "initial-retry") {
+      initialRetryCacheModes.push(request.headers["cache-control"] ?? "");
+      if (refreshRequestCount === 1) {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [], stale: true }));
+        return;
+      }
     }
     const staleRefresh = railMode === "preserve" && refreshRequestCount > 1;
     const items = staleRefresh
@@ -145,6 +149,7 @@ try {
   await unavailableContext.close();
   railMode = "initial-retry";
   refreshRequestCount = 0;
+  initialRetryCacheModes.length = 0;
   const retryContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const retryPage = await retryContext.newPage();
   await retryPage.goto(origin, { waitUntil: "networkidle" });
@@ -153,6 +158,8 @@ try {
   await retryPage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Latest server data"));
   assert.equal(await retryPage.locator(".dzn-live-server-card").count(), 2, "A successful initial retry must restore the real deduplicated cards.");
   assert.equal((await retryPage.locator(".dzn-live-server-rail").innerText()).includes("temporarily unavailable"), false, "A recovered initial request must not present a false outage.");
+  assert.equal(initialRetryCacheModes.length >= 2, true, "The stale fallback must trigger a second live request.");
+  assert.equal(initialRetryCacheModes[1].includes("no-cache"), true, "The recovery request must bypass the stale browser cache.");
   await retryContext.close();
   console.log("Live server rail dedupe, motion, and unavailable-state QA passed.");
 } finally {
