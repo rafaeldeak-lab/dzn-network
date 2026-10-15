@@ -138,22 +138,24 @@ export type AuthorityControllerRecords = {
   tryRecordMergedPullRequest(authorityId: string, taskId: string): TrustedMergedAuthorityTaskRecord | AuthorityDecision;
 };
 
-const authorityControllerBrand = Symbol("dzn-standing-authority-controller");
-const controllerRecordCapabilities = new WeakMap<AuthorityController, AuthorityControllerRecords>();
-
 export type AuthorityController = {
-  readonly [authorityControllerBrand]: true;
+  acquireTaskLease(authority: StandingAuthority, taskId: string, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
+  assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment;
+  recordTrustedMerge(authority: StandingAuthority, taskId: string): AuthorityDecision & { task?: AuthorityTask };
 };
 
 /**
- * Mints the opaque controller capability used by the trusted runtime adapter.
- * Callers cannot substitute a structurally similar object at sensitive
- * lifecycle boundaries because the backing records are held in this module.
+ * Builds the trusted host's controller around its own record adapter. Treat
+ * this as host bootstrap: task callers receive the resulting controller and
+ * can supply only task identifiers and runner identifiers. Sensitive methods
+ * never accept a caller-supplied controller or record adapter.
  */
 export function createAuthorityController(records: AuthorityControllerRecords): AuthorityController {
-  const controller = Object.freeze({ [authorityControllerBrand]: true }) as AuthorityController;
-  controllerRecordCapabilities.set(controller, records);
-  return controller;
+  return Object.freeze({
+    acquireTaskLease: (authority, taskId, runnerId) => acquireTaskLeaseFromRecords(authority, taskId, runnerId, records),
+    assessLowRiskPullRequest: (authority, taskId, repositoryPath, trustedTarget, actingRunnerId) => assessLowRiskPullRequestFromRecords(authority, taskId, repositoryPath, trustedTarget, actingRunnerId, records),
+    recordTrustedMerge: (authority, taskId) => recordTrustedMergeFromRecords(authority, taskId, records),
+  });
 }
 
 export type AuthorityDecision = {
@@ -300,12 +302,8 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   };
 }
 
-export function acquireTaskLease(authority: StandingAuthority, taskId: string, runnerId: string, controller: AuthorityController): AuthorityDecision & { task?: AuthorityTask } {
+function acquireTaskLeaseFromRecords(authority: StandingAuthority, taskId: string, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
   const now = new Date();
-  const controllerRecords = resolveControllerRecords(controller);
-  if (!controllerRecords) {
-    return deny("lease_inactive", "Lease acquisition requires a controller-issued capability.", { taskId });
-  }
   let leaseRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
   try {
     leaseRecord = controllerRecords.tryClaimTaskLease(authority.id, taskId, runnerId);
@@ -351,12 +349,8 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controller: AuthorityController): PullRequestAssessment {
+function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
   const now = new Date();
-  const controllerRecords = resolveControllerRecords(controller);
-  if (!controllerRecords) {
-    return pullRequestDeny("Pull-request preparation requires a controller-issued capability.", { taskId });
-  }
   let taskRecord: TrustedAuthorityTaskRecord | undefined;
   try {
     taskRecord = controllerRecords.getTaskRecord(authority.id, taskId);
@@ -475,11 +469,7 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: s
   };
 }
 
-export function recordTrustedMerge(authority: StandingAuthority, taskId: string, controller: AuthorityController): AuthorityDecision & { task?: AuthorityTask } {
-  const controllerRecords = resolveControllerRecords(controller);
-  if (!controllerRecords) {
-    return deny("release_denied", "Release recording requires a controller-issued capability.", { taskId });
-  }
+function recordTrustedMergeFromRecords(authority: StandingAuthority, taskId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
   let mergeRecord: TrustedMergedAuthorityTaskRecord | AuthorityDecision;
   try {
     mergeRecord = controllerRecords.tryRecordMergedPullRequest(authority.id, taskId);
@@ -702,11 +692,6 @@ function isTrustedMergedTaskRecord(record: TrustedMergedAuthorityTaskRecord | un
 
 function isAuthorityDecision(value: TrustedAuthorityTaskRecord | TrustedMergedAuthorityTaskRecord | AuthorityDecision): value is AuthorityDecision {
   return "ok" in value && typeof value.ok === "boolean" && typeof value.code === "string";
-}
-
-function resolveControllerRecords(controller: AuthorityController | undefined): AuthorityControllerRecords | undefined {
-  if (!controller || controller[authorityControllerBrand] !== true) return undefined;
-  return controllerRecordCapabilities.get(controller);
 }
 
 function isTrustedEvidenceReceipt(receipt: TrustedEvidenceReceipt | undefined, authority: StandingAuthority, task: AuthorityTask, candidateHeadSha: string) {
