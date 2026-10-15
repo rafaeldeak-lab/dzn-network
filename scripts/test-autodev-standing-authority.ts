@@ -6,12 +6,12 @@ import { join } from "node:path";
 
 import {
   assessPostMergeHealth,
-  assessTaskAuthority,
   createAuthorityController,
   inspectGitRange,
   makeTaskDeduplicationKey,
-  transitionTask,
   type AuthorityTask,
+  type AuthorityTaskState,
+  type AuthorityDecision,
   type AuthorityControllerRecords,
   type StandingAuthority,
   type TrustedEvidenceReceipt,
@@ -77,51 +77,52 @@ const dedupeA = makeTaskDeduplicationKey(authority.id, "Tighten  public navigati
 const dedupeB = makeTaskDeduplicationKey(authority.id, "tighten public navigation spacing", "ui");
 assert.equal(dedupeA, dedupeB, "Equivalent tasks must deduplicate deterministically.");
 
-assert.equal(assessTaskAuthority(authority, task()).ok, true);
-assert.equal(assessTaskAuthority(authority, task({ system: "billing" })).code, "authority_scope_denied");
-assert.equal(assessTaskAuthority(authority, task({ title: "Replace every public screen" })).code, "authority_scope_denied");
-assert.equal(assessTaskAuthority(authority, task({ id: "unapproved-task" })).code, "authority_scope_denied");
-assert.equal(assessTaskAuthority({ ...authority, acceptanceCriteria: [{ id: "independent-review", description: "Try to weaken the mandatory review." }] }, task()).code, "authority_scope_denied");
-assert.equal(assessTaskAuthority({ ...authority, state: "revoked", revokedAt: now }, task()).code, "authority_inactive");
-assert.equal(assessTaskAuthority({ ...authority, maxExtraMonthlySpendUsd: 1 }, task()).code, "resource_limit_exceeded");
-assert.equal(assessTaskAuthority(authority, task({ attempts: 3 })).code, "resource_limit_exceeded");
+assert.equal(transitionFixture(authority, task()).ok, true);
+assert.equal(transitionFixture(authority, task({ system: "billing" })).code, "authority_scope_denied");
+assert.equal(transitionFixture(authority, task({ title: "Replace every public screen" })).code, "authority_scope_denied");
+assert.equal(transitionFixture(authority, task({ id: "unapproved-task" })).code, "authority_scope_denied");
+assert.equal(transitionFixture({ ...authority, acceptanceCriteria: [{ id: "independent-review", description: "Try to weaken the mandatory review." }] }, task()).code, "authority_scope_denied");
+assert.equal(transitionFixture({ ...authority, state: "revoked", revokedAt: now }, task()).code, "authority_inactive");
+assert.equal(transitionFixture({ ...authority, maxExtraMonthlySpendUsd: 1 }, task()).code, "resource_limit_exceeded");
+assert.equal(transitionFixture(authority, task({ attempts: 3 })).code, "resource_limit_exceeded");
 
-const authorised = transitionTask(authority, task(), "authorised", "runner-a");
+const initialTask = task();
+const leaseController = controller(authority, initialTask, []);
+const authorised = leaseController.transitionTask(initialTask.id, "authorised", "runner-a");
 assert.equal(authorised.ok, true);
-const leaseController = controller(authority, authorised.task!, []);
-assert.deepEqual(Object.keys(leaseController).sort(), ["acquireTaskLease", "assessLowRiskPullRequest", "recordTrustedMerge"], "The trusted host exposes lifecycle methods without its record adapter.");
-const leased = leaseController.acquireTaskLease(authority, authorised.task!.id, "runner-a");
+assert.deepEqual(Object.keys(leaseController).sort(), ["acquireTaskLease", "assessLowRiskPullRequest", "recordTrustedMerge", "transitionTask"], "The trusted host exposes lifecycle methods without its record adapter, authority policy, or task snapshots.");
+const leased = leaseController.acquireTaskLease(authorised.task!.id, "runner-a");
 assert.equal(leased.ok, true);
 assert.equal(leased.task?.lease?.runnerId, "runner-a");
 assert.equal(leased.task?.implementerId, "runner-a", "The implementation actor must be fixed when its runner acquires the lease.");
 assert.ok(leased.task?.lease?.runtimeDeadline, "A new lease must record its non-extendable runtime deadline.");
-const renewedLease = leaseController.acquireTaskLease(authority, leased.task!.id, "runner-a");
+const renewedLease = leaseController.acquireTaskLease(leased.task!.id, "runner-a");
 assert.equal(renewedLease.ok, true);
 assert.equal(renewedLease.task?.lease?.acquiredAt, leased.task?.lease?.acquiredAt, "Renewing a lease must preserve its original acquisition time.");
 assert.equal(renewedLease.task?.lease?.runtimeDeadline, leased.task?.lease?.runtimeDeadline, "Renewing a lease must preserve its original runtime deadline.");
 assert.equal(renewedLease.task?.lease?.expiresAt, leased.task?.lease?.expiresAt, "Renewing a lease must not extend the runtime deadline.");
-const implementing = transitionTask(authority, leased.task!, "implementing", "runner-a");
-assert.equal(transitionTask(authority, leased.task!, "implementing", "runner-b").code, "task_locked", "Only the runner that holds the lease can advance the task.");
-const validating = transitionTask(authority, implementing.task!, "validating", "runner-a");
-const ready = transitionTask(authority, validating.task!, "ready-to-release", "runner-a");
+const implementing = leaseController.transitionTask(leased.task!.id, "implementing", "runner-a");
+assert.equal(controller(authority, leased.task!, []).transitionTask(leased.task!.id, "implementing", "runner-b").code, "task_locked", "Only the runner that holds the lease can advance the task.");
+const validating = leaseController.transitionTask(implementing.task!.id, "validating", "runner-a");
+const ready = leaseController.transitionTask(validating.task!.id, "ready-to-release", "runner-a");
 assert.equal(ready.ok, true);
-assert.equal(transitionTask(authority, task(), "released", "runner-a").code, "invalid_transition");
-assert.equal(transitionTask(authority, task({ state: "authorised", implementerId: "runner-a", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing", "runner-a").code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "implementing", implementerId: "runner-a", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating", "runner-a").code, "action_denied");
-assert.equal(transitionTask(authority, task({ state: "authorised", implementerId: "runner-a", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing", "runner-a").code, "lease_inactive");
-assert.equal(transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] }), "authorised", "runner-a").code, "action_denied");
-const retried = transitionTask(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", "runner-a");
+assert.equal(transitionFixture(authority, task(), "released").code, "invalid_transition");
+assert.equal(transitionFixture(authority, task({ state: "authorised", implementerId: "runner-a", requestedActions: ["investigate", "validate", "prepare-pr"], lease: leased.task!.lease }), "implementing").code, "action_denied");
+assert.equal(transitionFixture(authority, task({ state: "implementing", implementerId: "runner-a", requestedActions: ["investigate", "implement-in-branch", "prepare-pr"], lease: leased.task!.lease }), "validating").code, "action_denied");
+assert.equal(transitionFixture(authority, task({ state: "authorised", implementerId: "runner-a", lease: { runnerId: "runner-a", acquiredAt: "2026-10-13T22:00:00.000Z", expiresAt: "2026-10-13T22:30:00.000Z" } }), "implementing").code, "lease_inactive");
+assert.equal(transitionFixture(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"] })).code, "action_denied");
+const retried = transitionFixture(authority, task({ state: "blocked", requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }));
 assert.equal(retried.ok, true);
 assert.equal(retried.task?.attempts, 1, "Reauthorising a blocked task must consume a retry attempt.");
-assert.equal(transitionTask(authority, task({ state: "blocked", attempts: authority.maxAttemptsPerTask - 1, requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] }), "authorised", "runner-a").code, "resource_limit_exceeded", "A retry must not enter an authorised state after exhausting its budget.");
-assert.equal(leaseController.acquireTaskLease(authority, ready.task!.id, "runner-b").code, "task_locked");
+assert.equal(transitionFixture(authority, task({ state: "blocked", attempts: authority.maxAttemptsPerTask - 1, requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr", "retry-branch-failure"] })).code, "resource_limit_exceeded", "A retry must not enter an authorised state after exhausting its budget.");
+assert.equal(leaseController.acquireTaskLease(ready.task!.id, "runner-b").code, "task_locked");
 
 const parallelController = controller(authority, [
   task({ id: "task-ui-nav-spacing", state: "authorised" }),
   task({ id: "parallel-task", state: "authorised" }),
 ], []);
-const firstParallelLease = parallelController.acquireTaskLease(authority, "task-ui-nav-spacing", "runner-a");
-const secondParallelLease = parallelController.acquireTaskLease(authority, "parallel-task", "runner-b");
+const firstParallelLease = parallelController.acquireTaskLease("task-ui-nav-spacing", "runner-a");
+const secondParallelLease = parallelController.acquireTaskLease("parallel-task", "runner-b");
 assert.equal(firstParallelLease.ok, true, "The first atomic lease claim may take the only authority slot.");
 assert.equal(secondParallelLease.code, "resource_limit_exceeded", "A second independent lease claim must observe the controller-owned capacity claim.");
 
@@ -133,15 +134,15 @@ const persistedBlockedTask = task({
   lease: leased.task!.lease,
 });
 const persistedLeaseController = controller(authority, persistedBlockedTask, []);
-const renewedPersistedLease = persistedLeaseController.acquireTaskLease(authority, persistedBlockedTask.id, "runner-a");
+const renewedPersistedLease = persistedLeaseController.acquireTaskLease(persistedBlockedTask.id, "runner-a");
 assert.equal(renewedPersistedLease.task?.state, "blocked", "Lease renewal must retain the persisted task state.");
 assert.equal(renewedPersistedLease.task?.attempts, authority.maxAttemptsPerTask - 1, "Lease renewal must retain persisted attempt usage.");
-assert.equal(createAuthorityController({
+assert.equal(createAuthorityController(authority.id, {
   ...controllerRecords(authority, persistedBlockedTask, []),
   tryClaimTaskLease: () => {
     throw new Error("controller write unavailable");
   },
-}).acquireTaskLease(authority, persistedBlockedTask.id, "runner-a").code, "lease_inactive", "Lease acquisition must fail closed when the atomic controller operation is unavailable.");
+}).acquireTaskLease(persistedBlockedTask.id, "runner-a").code, "lease_inactive", "Lease acquisition must fail closed when the atomic controller operation is unavailable.");
 
 const fixture = makeGitFixture("components/games/games-hub.tsx", "export const status = 'ready';\n");
 const verifiedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
@@ -156,7 +157,7 @@ const eligible = assessFixture(authority, candidateTask, fixture);
 assert.equal(eligible.pullRequestEligible, true);
 assert.equal(eligible.requiresSeparateHumanMerge, true, "Eligibility alone must never merge a PR.");
 assert.equal(assessFixture(authority, candidateTask, fixture, "runner-b").pullRequestEligible, false, "Only the runner that holds the lease can prepare the pull request.");
-assert.equal(transitionTask(authority, candidateTask, "released", "runner-a").code, "invalid_transition", "A trusted merged-pull-request receipt is required to record release.");
+assert.equal(transitionFixture(authority, candidateTask, "released").code, "invalid_transition", "A trusted merged-pull-request receipt is required to record release.");
 const invalidMergeReceipt = {
   repositoryRemote: authority.repositoryRemote,
   branch: authority.targetBranch,
@@ -166,7 +167,7 @@ const invalidMergeReceipt = {
   mergedAt: now,
   source: "untrusted-source" as "pull-request-provider",
 };
-assert.equal(controller(authority, candidateTask, [], { mergeReceipt: invalidMergeReceipt }).recordTrustedMerge(authority, candidateTask.id).code, "release_denied");
+assert.equal(controller(authority, candidateTask, [], { mergeReceipt: invalidMergeReceipt }).recordTrustedMerge(candidateTask.id).code, "release_denied");
 const validMergeReceipt = {
   repositoryRemote: authority.repositoryRemote,
   branch: authority.targetBranch,
@@ -177,10 +178,10 @@ const validMergeReceipt = {
   source: "pull-request-provider",
 } as const;
 const mergeController = controller(authority, candidateTask, [], { mergeReceipt: validMergeReceipt });
-const released = mergeController.recordTrustedMerge(authority, candidateTask.id);
+const released = mergeController.recordTrustedMerge(candidateTask.id);
 assert.equal(released.ok, true);
 assert.equal(released.task?.state, "released");
-assert.equal(mergeController.recordTrustedMerge(authority, candidateTask.id).code, "invalid_transition", "A controller-owned merge record may only release the current ready task once.");
+assert.equal(mergeController.recordTrustedMerge(candidateTask.id).code, "invalid_transition", "A controller-owned merge record may only release the current ready task once.");
 
 const expiredLeaseAssessment = assessFixture(authority, {
   ...candidateTask,
@@ -311,14 +312,18 @@ assert.equal(failedEvidence.pullRequestEligible, false, "A current-head failed v
 const untrustedEvidence = assessFixture(authority, candidateTask, fixture, "runner-a", trustedEvidenceFor(candidateTask, fixture.headSha).map((item) => ({ ...item, source: "untrusted-runner" as "authority-controller" })));
 assert.equal(untrustedEvidence.pullRequestEligible, false, "Self-reported evidence must not satisfy controller-owned release evidence requirements.");
 
-const unavailableControllerRecord = createAuthorityController({
+const unavailableControllerRecord = createAuthorityController(authority.id, {
+  getAuthorityRecord: (authorityId) => authorityId === authority.id
+    ? { source: "authority-controller", recordedAt: now, authority: copyAuthority(authority) }
+    : undefined,
   getTaskRecord: () => {
     throw new Error("controller record unavailable");
   },
   getEvidenceReceipts: () => [],
   tryClaimTaskLease: () => ({ ok: false, code: "lease_inactive", message: "unavailable" }),
+  tryTransitionTask: () => ({ ok: false, code: "invalid_transition", message: "unavailable" }),
   tryRecordMergedPullRequest: () => ({ ok: false, code: "release_denied", message: "unavailable" }),
-}).assessLowRiskPullRequest(authority, candidateTask.id, fixture.path, trustedTargetFor(fixture.baseSha), "runner-a");
+}).assessLowRiskPullRequest(candidateTask.id, fixture.path, trustedTargetFor(fixture.baseSha), "runner-a");
 assert.equal(unavailableControllerRecord.pullRequestEligible, false, "An unavailable controller record must fail closed.");
 
 const unreadableBlobFixture = makeGitFixture("components/games/large-controller-note.tsx", `export const note = \"${"a".repeat(1_100_000)}\";\n`);
@@ -451,7 +456,11 @@ function makeAuthGuardRemovalFixture() {
 }
 
 function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }, actingRunnerId = "runner-a", evidence = trustedEvidenceFor(taskArg, taskArg.candidate?.headSha ?? "")) {
-  return controller(authorityArg, taskArg, evidence).assessLowRiskPullRequest(authorityArg, taskArg.id, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId);
+  return controller(authorityArg, taskArg, evidence).assessLowRiskPullRequest(taskArg.id, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId);
+}
+
+function transitionFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, nextState: AuthorityTaskState = "authorised", runnerId = "runner-a") {
+  return controller(authorityArg, taskArg, []).transitionTask(taskArg.id, nextState, runnerId);
 }
 
 function controller(
@@ -460,7 +469,7 @@ function controller(
   evidence: TrustedEvidenceReceipt[],
   options: { mergeReceipt?: TrustedMergedPullRequestReceipt } = {},
 ) {
-  return createAuthorityController(controllerRecords(authorityArg, taskOrTasks, evidence, options));
+  return createAuthorityController(authorityArg.id, controllerRecords(authorityArg, taskOrTasks, evidence, options));
 }
 
 function controllerRecords(
@@ -472,6 +481,9 @@ function controllerRecords(
   const tasks = new Map((Array.isArray(taskOrTasks) ? taskOrTasks : [taskOrTasks]).map((item) => [item.id, copyTask(item)]));
 
   return {
+    getAuthorityRecord: (authorityId) => authorityId === authorityArg.id
+      ? { source: "authority-controller", recordedAt: now, authority: copyAuthority(authorityArg) }
+      : undefined,
     getTaskRecord: (authorityId, taskId) => authorityId === authorityArg.id && tasks.has(taskId)
       ? { source: "authority-controller", recordedAt: now, task: copyTask(tasks.get(taskId)!) }
       : undefined,
@@ -526,6 +538,16 @@ function controllerRecords(
       tasks.set(taskId, claimed);
       return { source: "authority-controller" as const, recordedAt: timestamp, task: copyTask(claimed) };
     },
+    tryTransitionTask: (authorityId, taskId, nextState, runnerId) => {
+      const current = tasks.get(taskId);
+      if (authorityId !== authorityArg.id || !current) {
+        return { ok: false, code: "invalid_transition", message: "No controller-owned task record is available for the transition." };
+      }
+      const result = transitionStoredTask(authorityArg, current, nextState, runnerId);
+      if (!result.ok || !result.task) return result;
+      tasks.set(taskId, copyTask(result.task));
+      return { source: "authority-controller" as const, recordedAt: result.task.updatedAt, task: copyTask(result.task) };
+    },
     tryRecordMergedPullRequest: (authorityId, taskId) => {
       const current = tasks.get(taskId);
       const receipt = options.mergeReceipt;
@@ -562,6 +584,60 @@ function controllerRecords(
   };
 }
 
+function transitionStoredTask(authorityArg: StandingAuthority, current: AuthorityTask, nextState: AuthorityTaskState, runnerId: string): AuthorityDecision & { task?: AuthorityTask } {
+  const allowedTransitions: Record<AuthorityTaskState, AuthorityTaskState[]> = {
+    proposed: ["authorised", "blocked"],
+    authorised: ["implementing", "blocked"],
+    implementing: ["validating", "blocked"],
+    validating: ["ready-to-release", "blocked"],
+    "ready-to-release": ["blocked"],
+    released: ["reverted"],
+    blocked: ["authorised"],
+    reverted: [],
+  };
+  if (!allowedTransitions[current.state].includes(nextState)) {
+    return { ok: false, code: "invalid_transition", message: "Task state transition is not allowed." };
+  }
+  const nowValue = new Date();
+  const requiresLease = nextState === "implementing" || nextState === "validating" || nextState === "ready-to-release";
+  if (requiresLease) {
+    const lease = current.lease;
+    const expiresAt = lease ? new Date(lease.expiresAt).getTime() : Number.NaN;
+    const deadline = lease ? new Date(lease.runtimeDeadline ?? lease.expiresAt).getTime() : Number.NaN;
+    if (!lease || !Number.isFinite(expiresAt) || !Number.isFinite(deadline) || expiresAt <= nowValue.getTime() || deadline <= nowValue.getTime()) {
+      return { ok: false, code: "lease_inactive", message: "Task must retain a live lease before it can continue." };
+    }
+    if (lease.runnerId !== runnerId) return { ok: false, code: "task_locked", message: "Only the current lease holder can advance the task." };
+  }
+  const requiredAction = current.state === "blocked" && nextState === "authorised"
+    ? "retry-branch-failure"
+    : nextState === "implementing"
+      ? "implement-in-branch"
+      : nextState === "validating"
+        ? "validate"
+        : nextState === "ready-to-release"
+          ? "prepare-pr"
+          : undefined;
+  if (requiredAction && !current.requestedActions.includes(requiredAction)) {
+    return { ok: false, code: "action_denied", message: "Task did not request the action required for this state transition." };
+  }
+  const attempts = current.state === "blocked" && nextState === "authorised" ? current.attempts + 1 : current.attempts;
+  if (attempts >= authorityArg.maxAttemptsPerTask) {
+    return { ok: false, code: "resource_limit_exceeded", message: "Retry would exceed the approved attempt limit." };
+  }
+  return {
+    ok: true,
+    code: "allowed",
+    message: `Task transitioned to ${nextState}.`,
+    task: {
+      ...copyTask(current),
+      state: nextState,
+      attempts,
+      updatedAt: nowValue.toISOString(),
+    },
+  };
+}
+
 function copyTask(taskArg: AuthorityTask): AuthorityTask {
   return {
     ...taskArg,
@@ -570,6 +646,17 @@ function copyTask(taskArg: AuthorityTask): AuthorityTask {
     candidate: taskArg.candidate
       ? { ...taskArg.candidate, changedFiles: [...taskArg.candidate.changedFiles] }
       : undefined,
+  };
+}
+
+function copyAuthority(authorityArg: StandingAuthority): StandingAuthority {
+  return {
+    ...authorityArg,
+    allowedSystems: [...authorityArg.allowedSystems],
+    excludedSystems: [...authorityArg.excludedSystems],
+    allowedActions: [...authorityArg.allowedActions],
+    approvedTasks: authorityArg.approvedTasks.map((binding) => ({ ...binding, allowedActions: [...binding.allowedActions] })),
+    acceptanceCriteria: authorityArg.acceptanceCriteria.map((criterion) => ({ ...criterion })),
   };
 }
 
