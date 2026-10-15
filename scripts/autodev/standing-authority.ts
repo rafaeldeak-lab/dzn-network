@@ -119,11 +119,19 @@ export type TrustedAuthorityTaskRecord = {
   task: AuthorityTask;
 };
 
+export type TrustedStandingAuthorityRecord = {
+  source: "authority-controller";
+  recordedAt: string;
+  authority: StandingAuthority;
+};
+
 export type TrustedMergedAuthorityTaskRecord = TrustedAuthorityTaskRecord & {
   receipt: TrustedMergedPullRequestReceipt;
 };
 
 export type AuthorityControllerRecords = {
+  /** Returns the current authority policy held by the trusted host. */
+  getAuthorityRecord(authorityId: string): TrustedStandingAuthorityRecord | undefined;
   getTaskRecord(authorityId: string, taskId: string): TrustedAuthorityTaskRecord | undefined;
   getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
   /**
@@ -132,6 +140,12 @@ export type AuthorityControllerRecords = {
    */
   tryClaimTaskLease(authorityId: string, taskId: string, runnerId: string): TrustedAuthorityTaskRecord | AuthorityDecision;
   /**
+   * Atomically reads the current controller-owned task, applies a permitted
+   * lifecycle transition, and persists the resulting task. It must not accept
+   * a runner-supplied task snapshot.
+   */
+  tryTransitionTask(authorityId: string, taskId: string, nextState: AuthorityTaskState, runnerId: string): TrustedAuthorityTaskRecord | AuthorityDecision;
+  /**
    * Atomically reads the current controller-owned ready task, verifies the
    * provider's completed merge, and persists the released task record.
    */
@@ -139,22 +153,38 @@ export type AuthorityControllerRecords = {
 };
 
 export type AuthorityController = {
-  acquireTaskLease(authority: StandingAuthority, taskId: string, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
-  assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment;
-  recordTrustedMerge(authority: StandingAuthority, taskId: string): AuthorityDecision & { task?: AuthorityTask };
+  acquireTaskLease(taskId: string, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
+  transitionTask(taskId: string, nextState: AuthorityTaskState, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
+  assessLowRiskPullRequest(taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string): PullRequestAssessment;
+  recordTrustedMerge(taskId: string): AuthorityDecision & { task?: AuthorityTask };
 };
 
 /**
  * Builds the trusted host's controller around its own record adapter. Treat
  * this as host bootstrap: task callers receive the resulting controller and
- * can supply only task identifiers and runner identifiers. Sensitive methods
- * never accept a caller-supplied controller or record adapter.
+ * can supply only task identifiers, requested states, and runner identifiers.
+ * Authority policy, task state, and all record adapters remain host-owned.
  */
-export function createAuthorityController(records: AuthorityControllerRecords): AuthorityController {
+export function createAuthorityController(authorityId: string, records: AuthorityControllerRecords): AuthorityController {
   return Object.freeze({
-    acquireTaskLease: (authority, taskId, runnerId) => acquireTaskLeaseFromRecords(authority, taskId, runnerId, records),
-    assessLowRiskPullRequest: (authority, taskId, repositoryPath, trustedTarget, actingRunnerId) => assessLowRiskPullRequestFromRecords(authority, taskId, repositoryPath, trustedTarget, actingRunnerId, records),
-    recordTrustedMerge: (authority, taskId) => recordTrustedMergeFromRecords(authority, taskId, records),
+    acquireTaskLease: (taskId, runnerId) => {
+      const authority = resolveControllerAuthority(authorityId, records);
+      return isAuthorityDecision(authority) ? authority : acquireTaskLeaseFromRecords(authority, taskId, runnerId, records);
+    },
+    transitionTask: (taskId, nextState, runnerId) => {
+      const authority = resolveControllerAuthority(authorityId, records);
+      return isAuthorityDecision(authority) ? authority : transitionTaskFromRecords(authority, taskId, nextState, runnerId, records);
+    },
+    assessLowRiskPullRequest: (taskId, repositoryPath, trustedTarget, actingRunnerId) => {
+      const authority = resolveControllerAuthority(authorityId, records);
+      return isAuthorityDecision(authority)
+        ? pullRequestDeny(authority.message, authority.details)
+        : assessLowRiskPullRequestFromRecords(authority, taskId, repositoryPath, trustedTarget, actingRunnerId, records);
+    },
+    recordTrustedMerge: (taskId) => {
+      const authority = resolveControllerAuthority(authorityId, records);
+      return isAuthorityDecision(authority) ? authority : recordTrustedMergeFromRecords(authority, taskId, records);
+    },
   });
 }
 
@@ -199,23 +229,6 @@ const PULL_REQUEST_PROTECTED_PATHS = [
   /^workers\//,
 ];
 
-const ALLOWED_TRANSITIONS: Record<AuthorityTaskState, AuthorityTaskState[]> = {
-  proposed: ["authorised", "blocked"],
-  authorised: ["implementing", "blocked"],
-  implementing: ["validating", "blocked"],
-  validating: ["ready-to-release", "blocked"],
-  "ready-to-release": ["blocked"],
-  released: ["reverted"],
-  blocked: ["authorised"],
-  reverted: [],
-};
-
-const REQUIRED_ACTION_FOR_STATE: Partial<Record<AuthorityTaskState, AuthorityAction>> = {
-  implementing: "implement-in-branch",
-  validating: "validate",
-  "ready-to-release": "prepare-pr",
-};
-
 const REQUIRED_RELEASE_CRITERIA: AuthorityAcceptanceCriterion[] = [
   { id: "scope", description: "Verified scope check passes." },
   { id: "tests", description: "Targeted tests pass." },
@@ -234,7 +247,7 @@ export function makeTaskDeduplicationKey(authorityId: string, title: string, sys
     .digest("hex");
 }
 
-export function assessTaskAuthority(authority: StandingAuthority, task: AuthorityTask): AuthorityDecision {
+function assessTaskAuthority(authority: StandingAuthority, task: AuthorityTask): AuthorityDecision {
   if (authority.state !== "active" || authority.revokedAt) {
     return deny("authority_inactive", "Standing authority is not active; this task cannot continue.", { state: authority.state, revokedAt: authority.revokedAt ?? null });
   }
@@ -267,38 +280,38 @@ export function assessTaskAuthority(authority: StandingAuthority, task: Authorit
   return allow("Task is within the active authority scope.");
 }
 
-export function transitionTask(authority: StandingAuthority, task: AuthorityTask, nextState: AuthorityTaskState, actingRunnerId?: string): AuthorityDecision & { task?: AuthorityTask } {
-  const now = new Date();
+function transitionTaskFromRecords(authority: StandingAuthority, taskId: string, nextState: AuthorityTaskState, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
+  let transitionRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
+  try {
+    transitionRecord = controllerRecords.tryTransitionTask(authority.id, taskId, nextState, runnerId);
+  } catch {
+    return deny("invalid_transition", "The controller-owned task transition could not be persisted.", { taskId, nextState });
+  }
+  if (isAuthorityDecision(transitionRecord)) {
+    return transitionRecord.ok
+      ? deny("invalid_transition", "The controller transition returned no trusted task record.", { taskId, nextState })
+      : transitionRecord;
+  }
+  if (!isTrustedTaskRecord(transitionRecord, authority, taskId)) {
+    return deny("invalid_transition", "Task transitions require a current controller-owned task record.", { taskId, nextState });
+  }
+  const task = transitionRecord.task;
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok && nextState !== "blocked") return authorityDecision;
-  if (!ALLOWED_TRANSITIONS[task.state].includes(nextState)) {
-    return deny("invalid_transition", "Task state transition is not allowed.", { from: task.state, to: nextState });
-  }
-  if (requiresLiveLease(nextState)) {
-    const leaseDecision = assessTaskLease(authority, task, now, actingRunnerId);
-    if (!leaseDecision.ok) return leaseDecision;
-  }
-  const requiredAction = task.state === "blocked" && nextState === "authorised"
-    ? "retry-branch-failure"
-    : REQUIRED_ACTION_FOR_STATE[nextState];
-  if (requiredAction && !task.requestedActions.includes(requiredAction)) {
-    return deny("action_denied", "Task did not request the action required for this state transition.", { nextState, requiredAction });
-  }
-  const nextAttempts = task.state === "blocked" && nextState === "authorised" ? task.attempts + 1 : task.attempts;
-  if (nextAttempts >= authority.maxAttemptsPerTask) {
-    return deny("resource_limit_exceeded", "Retry would exceed the approved attempt limit.", {
-      attempts: nextAttempts,
-      maxAttemptsPerTask: authority.maxAttemptsPerTask,
+  if (task.state !== nextState) {
+    return deny("invalid_transition", "The controller-owned transition did not reach the requested state.", {
+      taskId,
+      expectedState: nextState,
+      actualState: task.state,
     });
   }
+  if (requiresLiveLease(nextState)) {
+    const leaseDecision = assessTaskLease(authority, task, new Date(), runnerId);
+    if (!leaseDecision.ok) return leaseDecision;
+  }
   return {
-    ...allow(`Task transitioned from ${task.state} to ${nextState}.`),
-    task: {
-      ...task,
-      state: nextState,
-      attempts: nextAttempts,
-      updatedAt: now.toISOString(),
-    },
+    ...allow(`Task transitioned to ${nextState}.`),
+    task,
   };
 }
 
@@ -676,6 +689,25 @@ function readGitBlob(repositoryPath: string, commitSha: string, file: string) {
   return execFileSync("git", ["-C", repositoryPath, "show", `${commitSha}:${file}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function resolveControllerAuthority(authorityId: string, controllerRecords: AuthorityControllerRecords): StandingAuthority | AuthorityDecision {
+  let authorityRecord: TrustedStandingAuthorityRecord | undefined;
+  try {
+    authorityRecord = controllerRecords.getAuthorityRecord(authorityId);
+  } catch {
+    return deny("authority_inactive", "The controller-owned authority record could not be read.", { authorityId });
+  }
+  if (!isTrustedAuthorityRecord(authorityRecord, authorityId)) {
+    return deny("authority_inactive", "A current controller-owned authority record is required.", { authorityId });
+  }
+  return copyAuthority(authorityRecord.authority);
+}
+
+function isTrustedAuthorityRecord(record: TrustedStandingAuthorityRecord | undefined, authorityId: string): record is TrustedStandingAuthorityRecord {
+  return record?.source === "authority-controller"
+    && isValidTimestamp(record.recordedAt)
+    && record.authority.id === authorityId;
+}
+
 function isTrustedTaskRecord(record: TrustedAuthorityTaskRecord | undefined, authority: StandingAuthority, taskId: string): record is TrustedAuthorityTaskRecord {
   if (!record) return false;
   return record.source === "authority-controller"
@@ -684,14 +716,30 @@ function isTrustedTaskRecord(record: TrustedAuthorityTaskRecord | undefined, aut
     && record.task.authorityId === authority.id;
 }
 
+function copyAuthority(authority: StandingAuthority): StandingAuthority {
+  return {
+    ...authority,
+    allowedSystems: [...authority.allowedSystems],
+    excludedSystems: [...authority.excludedSystems],
+    allowedActions: [...authority.allowedActions],
+    approvedTasks: authority.approvedTasks.map((task) => ({ ...task, allowedActions: [...task.allowedActions] })),
+    acceptanceCriteria: authority.acceptanceCriteria.map((criterion) => ({ ...criterion })),
+  };
+}
+
 function isTrustedMergedTaskRecord(record: TrustedMergedAuthorityTaskRecord | undefined, authority: StandingAuthority, taskId: string): record is TrustedMergedAuthorityTaskRecord {
   return isTrustedTaskRecord(record, authority, taskId)
     && record.receipt.source === "pull-request-provider"
     && isValidTimestamp(record.receipt.mergedAt);
 }
 
-function isAuthorityDecision(value: TrustedAuthorityTaskRecord | TrustedMergedAuthorityTaskRecord | AuthorityDecision): value is AuthorityDecision {
-  return "ok" in value && typeof value.ok === "boolean" && typeof value.code === "string";
+function isAuthorityDecision(value: unknown): value is AuthorityDecision {
+  return typeof value === "object"
+    && value !== null
+    && "ok" in value
+    && "code" in value
+    && typeof value.ok === "boolean"
+    && typeof value.code === "string";
 }
 
 function isTrustedEvidenceReceipt(receipt: TrustedEvidenceReceipt | undefined, authority: StandingAuthority, task: AuthorityTask, candidateHeadSha: string) {
