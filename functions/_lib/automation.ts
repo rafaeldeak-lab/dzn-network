@@ -2672,7 +2672,6 @@ function durationBetween(startedAt: string, finishedAt: string) {
 
 async function ensureAutomationCronRunsColumns(db: D1Database) {
   const columns = await getTableColumns(db, "automation_cron_runs");
-  const addedColumns = new Set<string>();
   const requiredColumns: Record<string, string> = {
     endpoint: "ALTER TABLE automation_cron_runs ADD COLUMN endpoint TEXT",
     job_type: "ALTER TABLE automation_cron_runs ADD COLUMN job_type TEXT",
@@ -2688,27 +2687,11 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
   for (const [column, statement] of Object.entries(requiredColumns)) {
     if (!columns.has(column)) {
       await db.prepare(statement).run();
-      addedColumns.add(column);
     }
   }
 
-  // A current production table must not rescan every historical cron row on each request.
-  // Legacy repair remains available only on the invocation that adds the missing column.
-  if (addedColumns.has("job_type")) {
-    if (columns.has("endpoint")) {
-      await db.prepare("UPDATE automation_cron_runs SET job_type = endpoint WHERE job_type IS NULL AND endpoint IS NOT NULL").run();
-    }
-    await db.prepare("UPDATE automation_cron_runs SET job_type = 'metadata' WHERE job_type IS NULL").run();
-  }
-  if (addedColumns.has("started_at")) {
-    await db.prepare("UPDATE automation_cron_runs SET started_at = COALESCE(started_at, created_at) WHERE started_at IS NULL").run();
-  }
-  if (addedColumns.has("finished_at")) {
-    await db.prepare("UPDATE automation_cron_runs SET finished_at = COALESCE(finished_at, created_at) WHERE finished_at IS NULL").run();
-  }
-  if (addedColumns.size > 0) {
-    await db.prepare("UPDATE automation_cron_runs SET status = 'success' WHERE status IN ('completed', 'manual')").run();
-  }
+  // Historical repairs must run once through the ledger-backed 0103 migration.
+  // A routine schema check must never rescan or rewrite the full cron history.
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
 }
 

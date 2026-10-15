@@ -8,11 +8,8 @@ assert.notEqual(start, -1, "Automation cron schema guard should exist.");
 assert.notEqual(end, -1, "Automation cron schema guard should have a stable boundary.");
 
 const guard = source.slice(start, end);
-assert.match(guard, /const addedColumns = new Set<string>\(\);/);
-assert.match(guard, /addedColumns\.add\(column\)/);
-assert.match(guard, /if \(addedColumns\.has\("job_type"\)\) \{[\s\S]*?WHERE job_type IS NULL AND endpoint IS NOT NULL[\s\S]*?WHERE job_type IS NULL/);
-assert.match(guard, /if \(addedColumns\.has\("started_at"\)\) \{\s*await db\.prepare\("UPDATE automation_cron_runs SET started_at = COALESCE\(started_at, created_at\) WHERE started_at IS NULL"\)\.run\(\);/);
-assert.match(guard, /if \(addedColumns\.has\("finished_at"\)\) \{\s*await db\.prepare\("UPDATE automation_cron_runs SET finished_at = COALESCE\(finished_at, created_at\) WHERE finished_at IS NULL"\)\.run\(\);/);
-assert.match(guard, /if \(addedColumns\.size > 0\) \{\s*await db\.prepare\("UPDATE automation_cron_runs SET status = 'success' WHERE status IN \('completed', 'manual'\)"\)\.run\(\);/);
+assert.match(guard, /Historical repairs must run once through the ledger-backed 0103 migration/);
+assert.doesNotMatch(guard, /UPDATE automation_cron_runs/i, "Routine schema checks must not rescan cron history.");
+assert.match(guard, /CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type/);
 
-console.log("Automation cron schema upgrades avoid historical rewrites on current tables.");
+console.log("Automation cron schema upgrades remain additive and avoid historical rewrites.");
