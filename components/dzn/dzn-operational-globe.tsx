@@ -777,9 +777,10 @@ function createDznGlobeTextureCanvas() {
   maskCanvas.width = width;
   maskCanvas.height = height;
   const maskCtx = maskCanvas.getContext("2d");
+  const maskPath = maskCtx ? geoPath(projection, maskCtx) : null;
 
   drawTextureGrid(ctx, path);
-  if (maskCtx) drawLandMask(maskCtx, path, width, height);
+  if (maskCtx && maskPath) drawLandMask(maskCtx, maskPath, width, height);
   drawTextureLand(ctx, path);
   if (maskCtx) {
     drawTextureTerrain(ctx, maskCtx, width, height);
