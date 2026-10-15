@@ -129,6 +129,13 @@ export type TrustedMergedAuthorityTaskRecord = TrustedAuthorityTaskRecord & {
   receipt: TrustedMergedPullRequestReceipt;
 };
 
+/**
+ * The controller supplies this guard to its trusted record adapter. The adapter
+ * must invoke it inside the same atomic transaction that would persist a lease
+ * or lifecycle transition. Callers never receive this function or task data.
+ */
+export type ControllerTaskWriteGuard = (currentTask: AuthorityTask) => AuthorityDecision;
+
 export type AuthorityControllerRecords = {
   /** Returns the current authority policy held by the trusted host. */
   getAuthorityRecord(authorityId: string): TrustedStandingAuthorityRecord | undefined;
@@ -141,15 +148,17 @@ export type AuthorityControllerRecords = {
   getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
   /**
    * Atomically reads the current controller-owned task, checks live authority
-   * capacity, and persists the lease claim. It must not use runner snapshots.
+   * capacity, invokes the controller write guard, and persists the lease claim.
+   * It must not use runner snapshots or persist if the guard denies the task.
    */
-  tryClaimTaskLease(authorityId: string, taskId: string, runnerId: string): TrustedAuthorityTaskRecord | AuthorityDecision;
+  tryClaimTaskLease(authorityId: string, taskId: string, runnerId: string, guard: ControllerTaskWriteGuard): TrustedAuthorityTaskRecord | AuthorityDecision;
   /**
    * Atomically reads the current controller-owned task, applies a permitted
-   * lifecycle transition, and persists the resulting task. It must not accept
-   * a runner-supplied task snapshot.
+   * lifecycle transition, invokes the controller write guard before persistence,
+   * and persists the resulting task. It must not accept a runner-supplied task
+   * snapshot or persist if the guard denies the task.
    */
-  tryTransitionTask(authorityId: string, taskId: string, nextState: AuthorityTaskState, runnerId: string): TrustedAuthorityTaskRecord | AuthorityDecision;
+  tryTransitionTask(authorityId: string, taskId: string, nextState: AuthorityTaskState, runnerId: string, guard: ControllerTaskWriteGuard): TrustedAuthorityTaskRecord | AuthorityDecision;
   /**
    * Atomically reads the current controller-owned ready task, verifies the
    * provider's completed merge, and persists the released task record.
@@ -288,7 +297,7 @@ function assessTaskAuthority(authority: StandingAuthority, task: AuthorityTask):
 function transitionTaskFromRecords(authority: StandingAuthority, taskId: string, nextState: AuthorityTaskState, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
   let transitionRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
   try {
-    transitionRecord = controllerRecords.tryTransitionTask(authority.id, taskId, nextState, runnerId);
+    transitionRecord = controllerRecords.tryTransitionTask(authority.id, taskId, nextState, runnerId, (currentTask) => assessTaskAuthority(authority, currentTask));
   } catch {
     return deny("invalid_transition", "The controller-owned task transition could not be persisted.", { taskId, nextState });
   }
@@ -302,7 +311,7 @@ function transitionTaskFromRecords(authority: StandingAuthority, taskId: string,
   }
   const task = transitionRecord.task;
   const authorityDecision = assessTaskAuthority(authority, task);
-  if (!authorityDecision.ok && nextState !== "blocked") return authorityDecision;
+  if (!authorityDecision.ok) return authorityDecision;
   if (task.state !== nextState) {
     return deny("invalid_transition", "The controller-owned transition did not reach the requested state.", {
       taskId,
@@ -311,7 +320,7 @@ function transitionTaskFromRecords(authority: StandingAuthority, taskId: string,
     });
   }
   if (requiresLiveLease(nextState)) {
-    const leaseDecision = assessTaskLease(authority, task, new Date(), runnerId);
+    const leaseDecision = assessTaskLease(authority, task, runnerId);
     if (!leaseDecision.ok) return leaseDecision;
   }
   return {
@@ -321,10 +330,9 @@ function transitionTaskFromRecords(authority: StandingAuthority, taskId: string,
 }
 
 function acquireTaskLeaseFromRecords(authority: StandingAuthority, taskId: string, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
-  const now = new Date();
   let leaseRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
   try {
-    leaseRecord = controllerRecords.tryClaimTaskLease(authority.id, taskId, runnerId);
+    leaseRecord = controllerRecords.tryClaimTaskLease(authority.id, taskId, runnerId, (currentTask) => assessTaskLeaseClaim(authority, currentTask));
   } catch {
     return deny("lease_inactive", "The controller-owned lease record could not be claimed.", { taskId });
   }
@@ -339,7 +347,7 @@ function acquireTaskLeaseFromRecords(authority: StandingAuthority, taskId: strin
   const authoritativeTask = leaseRecord.task;
   const authorityDecision = assessTaskAuthority(authority, authoritativeTask);
   if (!authorityDecision.ok) return authorityDecision;
-  const leaseDecision = assessTaskLease(authority, authoritativeTask, now, runnerId);
+  const leaseDecision = assessTaskLease(authority, authoritativeTask, runnerId);
   if (!leaseDecision.ok) return leaseDecision;
   return {
     ...allow("Task lease acquired."),
@@ -368,7 +376,6 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
 }
 
 function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskId: string, repositoryPath: string, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
-  const now = new Date();
   let taskRecord: TrustedAuthorityTaskRecord | undefined;
   try {
     taskRecord = controllerRecords.getTaskRecord(authority.id, taskId);
@@ -382,7 +389,7 @@ function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskI
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return pullRequestDeny(authorityDecision.message, authorityDecision.details);
   if (task.state !== "ready-to-release") return pullRequestDeny("Only a ready-to-release task can be assessed for a pull request.", { state: task.state });
-  const leaseDecision = assessTaskLease(authority, task, now, actingRunnerId);
+  const leaseDecision = assessTaskLease(authority, task, actingRunnerId);
   if (!leaseDecision.ok) return pullRequestDeny(leaseDecision.message, leaseDecision.details);
   if (!task.requestedActions.includes("prepare-pr")) return pullRequestDeny("The task did not request pull-request preparation.");
   if (!task.implementerId.trim()) return pullRequestDeny("Pull-request preparation requires a named implementation actor.");
@@ -639,6 +646,8 @@ function normalizeRepositoryRemote(remote: string) {
   const parsed = new URL(remote);
   parsed.username = "";
   parsed.password = "";
+  parsed.search = "";
+  parsed.hash = "";
   return parsed.toString();
 }
 
@@ -655,7 +664,21 @@ function requiresLiveLease(nextState: AuthorityTaskState) {
   return nextState === "implementing" || nextState === "validating" || nextState === "ready-to-release";
 }
 
-function assessTaskLease(authority: StandingAuthority, task: AuthorityTask, at: Date, actingRunnerId?: string): AuthorityDecision {
+function isLeaseRunnableState(state: AuthorityTaskState) {
+  return state === "authorised" || requiresLiveLease(state);
+}
+
+function assessTaskLeaseClaim(authority: StandingAuthority, task: AuthorityTask): AuthorityDecision {
+  const authorityDecision = assessTaskAuthority(authority, task);
+  if (!authorityDecision.ok) return authorityDecision;
+  if (!isLeaseRunnableState(task.state)) {
+    return deny("invalid_transition", "Only an authorised or active task may claim a runner lease.", { taskId: task.id, state: task.state });
+  }
+  return allow("Task may claim a lease.");
+}
+
+function assessTaskLease(authority: StandingAuthority, task: AuthorityTask, actingRunnerId?: string): AuthorityDecision {
+  const at = controllerNow();
   if (!task.lease) {
     return deny("lease_inactive", "Task must retain a live lease before it can continue lifecycle or pull-request work.", { taskId: task.id });
   }
@@ -683,6 +706,14 @@ function assessTaskLease(authority: StandingAuthority, task: AuthorityTask, at: 
     });
   }
   return allow("Task lease is active.");
+}
+
+function controllerNow() {
+  const current = new Date();
+  if (!Number.isFinite(current.getTime())) {
+    throw new Error("The controller clock did not produce a valid timestamp.");
+  }
+  return current;
 }
 
 function isValidTimestamp(value: string) {

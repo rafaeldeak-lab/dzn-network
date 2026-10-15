@@ -135,8 +135,21 @@ const persistedBlockedTask = task({
 });
 const persistedLeaseController = controller(authority, persistedBlockedTask, []);
 const renewedPersistedLease = persistedLeaseController.acquireTaskLease(persistedBlockedTask.id, "runner-a");
-assert.equal(renewedPersistedLease.task?.state, "blocked", "Lease renewal must retain the persisted task state.");
-assert.equal(renewedPersistedLease.task?.attempts, authority.maxAttemptsPerTask - 1, "Lease renewal must retain persisted attempt usage.");
+assert.equal(renewedPersistedLease.code, "invalid_transition", "Blocked work must be reauthorised before a runner may hold a lease.");
+
+const invalidBindingTask = task({ title: "Replace every public screen" });
+const invalidBindingRecords = controllerRecords(authority, invalidBindingTask, []);
+const invalidBindingController = createAuthorityController(authority.id, invalidBindingRecords);
+assert.equal(invalidBindingController.transitionTask(invalidBindingTask.id, "authorised", "runner-a").code, "authority_scope_denied");
+assert.equal(invalidBindingRecords.getTaskRecord(authority.id, invalidBindingTask.id)?.task.state, "proposed", "The atomic transition adapter must not persist a task that fails its authority binding.");
+
+for (const state of ["proposed", "blocked", "released", "reverted"] as const) {
+  const nonRunnableTask = task({ state });
+  const nonRunnableRecords = controllerRecords(authority, nonRunnableTask, []);
+  const nonRunnableController = createAuthorityController(authority.id, nonRunnableRecords);
+  assert.equal(nonRunnableController.acquireTaskLease(nonRunnableTask.id, "runner-a").code, "invalid_transition", `A ${state} task must not consume a runner lease.`);
+  assert.equal(nonRunnableRecords.getTaskRecord(authority.id, nonRunnableTask.id)?.task.lease, undefined, `A ${state} task must remain unleased after a rejected claim.`);
+}
 assert.equal(createAuthorityController(authority.id, {
   ...controllerRecords(authority, persistedBlockedTask, []),
   tryClaimTaskLease: () => {
@@ -311,6 +324,12 @@ const credentialedRemoteMismatch = assessFixture(authority, {
 }, fixture);
 assert.equal(credentialedRemoteMismatch.pullRequestEligible, false);
 assert.equal(JSON.stringify(credentialedRemoteMismatch.details).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
+const queryCredentialRemote = "https://github.com/rafaeldeak-lab/dzn-network.git?access_token=do-not-expose-query-token#secret-fragment";
+runGit(fixture.path, ["remote", "set-url", "origin", queryCredentialRemote]);
+const querySanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
+assert.equal(querySanitizedRange.repositoryRemote, authority.repositoryRemote, "Query strings and fragments must be removed before remote metadata is retained.");
+assert.equal(JSON.stringify(querySanitizedRange).includes("do-not-expose-query-token"), false, "Candidate metadata must never retain remote query credentials.");
+assert.equal(JSON.stringify(querySanitizedRange).includes("secret-fragment"), false, "Candidate metadata must never retain remote fragments.");
 
 const failedEvidence = assessFixture(authority, candidateTask, fixture, "runner-a", [
   ...trustedEvidenceFor(candidateTask, fixture.headSha),
@@ -534,11 +553,14 @@ function controllerRecords(
     getEvidenceReceipts: (authorityId, taskId, candidateHeadSha) => authorityId === authorityArg.id && tasks.get(taskId)?.candidate?.headSha === candidateHeadSha
       ? evidence
       : [],
-    tryClaimTaskLease: (authorityId, taskId, runnerId) => {
+    tryClaimTaskLease: (authorityId, taskId, runnerId, guard) => {
       const current = tasks.get(taskId);
       if (authorityId !== authorityArg.id || !current) {
         return { ok: false, code: "lease_inactive", message: "No controller-owned task record is available for the lease claim." };
       }
+
+      const guardDecision = guard(copyTask(current));
+      if (!guardDecision.ok) return guardDecision;
 
       const timestamp = new Date().toISOString();
       const currentNow = new Date(timestamp).getTime();
@@ -582,11 +604,13 @@ function controllerRecords(
       tasks.set(taskId, claimed);
       return { source: "authority-controller" as const, recordedAt: timestamp, task: copyTask(claimed) };
     },
-    tryTransitionTask: (authorityId, taskId, nextState, runnerId) => {
+    tryTransitionTask: (authorityId, taskId, nextState, runnerId, guard) => {
       const current = tasks.get(taskId);
       if (authorityId !== authorityArg.id || !current) {
         return { ok: false, code: "invalid_transition", message: "No controller-owned task record is available for the transition." };
       }
+      const guardDecision = guard(copyTask(current));
+      if (!guardDecision.ok) return guardDecision;
       const result = transitionStoredTask(authorityArg, current, nextState, runnerId);
       if (!result.ok || !result.task) return result;
       tasks.set(taskId, copyTask(result.task));
