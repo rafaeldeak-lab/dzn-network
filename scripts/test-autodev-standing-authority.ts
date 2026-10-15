@@ -319,12 +319,17 @@ const unavailableControllerRecord = createAuthorityController(authority.id, {
   getTaskRecord: () => {
     throw new Error("controller record unavailable");
   },
+  getPullRequestTarget: () => trustedTargetFor(authority, fixture.baseSha),
   getEvidenceReceipts: () => [],
   tryClaimTaskLease: () => ({ ok: false, code: "lease_inactive", message: "unavailable" }),
   tryTransitionTask: () => ({ ok: false, code: "invalid_transition", message: "unavailable" }),
   tryRecordMergedPullRequest: () => ({ ok: false, code: "release_denied", message: "unavailable" }),
-}).assessLowRiskPullRequest(candidateTask.id, fixture.path, trustedTargetFor(fixture.baseSha), "runner-a");
+}).assessLowRiskPullRequest(candidateTask.id, fixture.path, "runner-a");
 assert.equal(unavailableControllerRecord.pullRequestEligible, false, "An unavailable controller record must fail closed.");
+
+const unavailableTargetProvider = controller(authority, candidateTask, trustedEvidenceFor(candidateTask, fixture.headSha))
+  .assessLowRiskPullRequest(candidateTask.id, fixture.path, "runner-a");
+assert.equal(unavailableTargetProvider.pullRequestEligible, false, "Pull-request eligibility must fail closed when the controller-owned target provider is unavailable.");
 
 const unreadableBlobFixture = makeGitFixture("components/games/large-controller-note.tsx", `export const note = \"${"a".repeat(1_100_000)}\";\n`);
 const unreadableBlobRange = inspectGitRange(unreadableBlobFixture.path, unreadableBlobFixture.baseSha, unreadableBlobFixture.headSha);
@@ -456,7 +461,9 @@ function makeAuthGuardRemovalFixture() {
 }
 
 function assessFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, fixtureArg: { path: string; baseSha: string }, actingRunnerId = "runner-a", evidence = trustedEvidenceFor(taskArg, taskArg.candidate?.headSha ?? "")) {
-  return controller(authorityArg, taskArg, evidence).assessLowRiskPullRequest(taskArg.id, fixtureArg.path, trustedTargetFor(fixtureArg.baseSha), actingRunnerId);
+  return controller(authorityArg, taskArg, evidence, {
+    pullRequestTarget: trustedTargetFor(authorityArg, fixtureArg.baseSha),
+  }).assessLowRiskPullRequest(taskArg.id, fixtureArg.path, actingRunnerId);
 }
 
 function transitionFixture(authorityArg: StandingAuthority, taskArg: AuthorityTask, nextState: AuthorityTaskState = "authorised", runnerId = "runner-a") {
@@ -467,7 +474,7 @@ function controller(
   authorityArg: StandingAuthority,
   taskOrTasks: AuthorityTask | AuthorityTask[],
   evidence: TrustedEvidenceReceipt[],
-  options: { mergeReceipt?: TrustedMergedPullRequestReceipt } = {},
+  options: { mergeReceipt?: TrustedMergedPullRequestReceipt; pullRequestTarget?: TrustedPullRequestTarget } = {},
 ) {
   return createAuthorityController(authorityArg.id, controllerRecords(authorityArg, taskOrTasks, evidence, options));
 }
@@ -476,7 +483,7 @@ function controllerRecords(
   authorityArg: StandingAuthority,
   taskOrTasks: AuthorityTask | AuthorityTask[],
   evidence: TrustedEvidenceReceipt[],
-  options: { mergeReceipt?: TrustedMergedPullRequestReceipt } = {},
+  options: { mergeReceipt?: TrustedMergedPullRequestReceipt; pullRequestTarget?: TrustedPullRequestTarget } = {},
 ): AuthorityControllerRecords {
   const tasks = new Map((Array.isArray(taskOrTasks) ? taskOrTasks : [taskOrTasks]).map((item) => [item.id, copyTask(item)]));
 
@@ -486,6 +493,9 @@ function controllerRecords(
       : undefined,
     getTaskRecord: (authorityId, taskId) => authorityId === authorityArg.id && tasks.has(taskId)
       ? { source: "authority-controller", recordedAt: now, task: copyTask(tasks.get(taskId)!) }
+      : undefined,
+    getPullRequestTarget: (authorityId) => authorityId === authorityArg.id && options.pullRequestTarget
+      ? { ...options.pullRequestTarget }
       : undefined,
     getEvidenceReceipts: (authorityId, taskId, candidateHeadSha) => authorityId === authorityArg.id && tasks.get(taskId)?.candidate?.headSha === candidateHeadSha
       ? evidence
@@ -681,10 +691,10 @@ function trustedEvidenceReceipt(taskArg: AuthorityTask, evidence: Omit<TrustedEv
   };
 }
 
-function trustedTargetFor(headSha: string): TrustedPullRequestTarget {
+function trustedTargetFor(authorityArg: StandingAuthority, headSha: string): TrustedPullRequestTarget {
   return {
-    repositoryRemote: authority.repositoryRemote,
-    branch: authority.targetBranch,
+    repositoryRemote: authorityArg.repositoryRemote,
+    branch: authorityArg.targetBranch,
     headSha,
     source: "pull-request-provider",
   };
