@@ -119,10 +119,42 @@ export type TrustedAuthorityTaskRecord = {
   task: AuthorityTask;
 };
 
+export type TrustedMergedAuthorityTaskRecord = TrustedAuthorityTaskRecord & {
+  receipt: TrustedMergedPullRequestReceipt;
+};
+
 export type AuthorityControllerRecords = {
   getTaskRecord(authorityId: string, taskId: string): TrustedAuthorityTaskRecord | undefined;
   getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
+  /**
+   * Atomically reads the current controller-owned task, checks live authority
+   * capacity, and persists the lease claim. It must not use runner snapshots.
+   */
+  tryClaimTaskLease(authorityId: string, taskId: string, runnerId: string): TrustedAuthorityTaskRecord | AuthorityDecision;
+  /**
+   * Atomically reads the current controller-owned ready task, verifies the
+   * provider's completed merge, and persists the released task record.
+   */
+  tryRecordMergedPullRequest(authorityId: string, taskId: string): TrustedMergedAuthorityTaskRecord | AuthorityDecision;
 };
+
+const authorityControllerBrand = Symbol("dzn-standing-authority-controller");
+const controllerRecordCapabilities = new WeakMap<AuthorityController, AuthorityControllerRecords>();
+
+export type AuthorityController = {
+  readonly [authorityControllerBrand]: true;
+};
+
+/**
+ * Mints the opaque controller capability used by the trusted runtime adapter.
+ * Callers cannot substitute a structurally similar object at sensitive
+ * lifecycle boundaries because the backing records are held in this module.
+ */
+export function createAuthorityController(records: AuthorityControllerRecords): AuthorityController {
+  const controller = Object.freeze({ [authorityControllerBrand]: true }) as AuthorityController;
+  controllerRecordCapabilities.set(controller, records);
+  return controller;
+}
 
 export type AuthorityDecision = {
   ok: boolean;
@@ -268,49 +300,34 @@ export function transitionTask(authority: StandingAuthority, task: AuthorityTask
   };
 }
 
-export function acquireTaskLease(authority: StandingAuthority, task: AuthorityTask, activeTasks: AuthorityTask[], runnerId: string): AuthorityDecision & { task?: AuthorityTask } {
+export function acquireTaskLease(authority: StandingAuthority, taskId: string, runnerId: string, controller: AuthorityController): AuthorityDecision & { task?: AuthorityTask } {
   const now = new Date();
-  const persistedTask = activeTasks.find((item) => item.id === task.id);
-  const authoritativeTask = persistedTask ?? task;
+  const controllerRecords = resolveControllerRecords(controller);
+  if (!controllerRecords) {
+    return deny("lease_inactive", "Lease acquisition requires a controller-issued capability.", { taskId });
+  }
+  let leaseRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
+  try {
+    leaseRecord = controllerRecords.tryClaimTaskLease(authority.id, taskId, runnerId);
+  } catch {
+    return deny("lease_inactive", "The controller-owned lease record could not be claimed.", { taskId });
+  }
+  if (isAuthorityDecision(leaseRecord)) {
+    return leaseRecord.ok
+      ? deny("lease_inactive", "The controller lease operation returned no trusted task record.", { taskId })
+      : leaseRecord;
+  }
+  if (!isTrustedTaskRecord(leaseRecord, authority, taskId)) {
+    return deny("lease_inactive", "Lease acquisition requires a current controller-owned task record.", { taskId });
+  }
+  const authoritativeTask = leaseRecord.task;
   const authorityDecision = assessTaskAuthority(authority, authoritativeTask);
   if (!authorityDecision.ok) return authorityDecision;
-  const activeLease = authoritativeTask.lease;
-  if (authoritativeTask.implementerId && authoritativeTask.implementerId !== runnerId) {
-    return deny("task_locked", "Task implementation is already bound to another runner.", { taskId: authoritativeTask.id, implementerId: authoritativeTask.implementerId });
-  }
-  if (activeLease) {
-    const runtimeDeadline = resolveLeaseRuntimeDeadline(authority, activeLease);
-    const expiresAt = new Date(activeLease.expiresAt).getTime();
-    if (!runtimeDeadline || !Number.isFinite(expiresAt) || expiresAt <= now.getTime() || runtimeDeadline.getTime() <= now.getTime()) {
-      return deny("lease_inactive", "Task lease has expired or cannot be renewed beyond its original runtime deadline.", {
-        taskId: authoritativeTask.id,
-        expiresAt: activeLease.expiresAt,
-        runtimeDeadline: activeLease.runtimeDeadline ?? null,
-      });
-    }
-    if (activeLease.runnerId !== runnerId) {
-      return deny("task_locked", "Task is already leased by another runner.", { runnerId: activeLease.runnerId, expiresAt: activeLease.expiresAt });
-    }
-  }
-  const activeLeases = activeTasks.filter((item) => item.authorityId === authority.id && item.id !== task.id && item.lease && leaseOccupiesCapacity(authority, item.lease, now));
-  if (activeLeases.length >= authority.maxConcurrentTasks) {
-    return deny("resource_limit_exceeded", "Authority concurrency limit has been reached.", { maxConcurrentTasks: authority.maxConcurrentTasks, activeLeases: activeLeases.length });
-  }
-  const acquiredAt = activeLease?.acquiredAt ?? now.toISOString();
-  const runtimeDeadline = activeLease
-    ? resolveLeaseRuntimeDeadline(authority, activeLease)
-    : new Date(now.getTime() + authority.maxRuntimeMinutes * 60_000);
-  if (!runtimeDeadline) {
-    return deny("lease_inactive", "Task lease has no valid runtime deadline.", { taskId: authoritativeTask.id });
-  }
+  const leaseDecision = assessTaskLease(authority, authoritativeTask, now, runnerId);
+  if (!leaseDecision.ok) return leaseDecision;
   return {
     ...allow("Task lease acquired."),
-    task: {
-      ...authoritativeTask,
-      implementerId: authoritativeTask.implementerId || runnerId,
-      lease: { runnerId, acquiredAt, expiresAt: runtimeDeadline.toISOString(), runtimeDeadline: runtimeDeadline.toISOString() },
-      updatedAt: now.toISOString(),
-    },
+    task: authoritativeTask,
   };
 }
 
@@ -334,8 +351,12 @@ export function inspectGitRange(repositoryPath: string, baseSha: string, headSha
   };
 }
 
-export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controllerRecords: AuthorityControllerRecords): PullRequestAssessment {
+export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: string, repositoryPath: string, trustedTarget: TrustedPullRequestTarget, actingRunnerId: string, controller: AuthorityController): PullRequestAssessment {
   const now = new Date();
+  const controllerRecords = resolveControllerRecords(controller);
+  if (!controllerRecords) {
+    return pullRequestDeny("Pull-request preparation requires a controller-issued capability.", { taskId });
+  }
   let taskRecord: TrustedAuthorityTaskRecord | undefined;
   try {
     taskRecord = controllerRecords.getTaskRecord(authority.id, taskId);
@@ -454,14 +475,33 @@ export function assessLowRiskPullRequest(authority: StandingAuthority, taskId: s
   };
 }
 
-export function recordTrustedMerge(authority: StandingAuthority, task: AuthorityTask, receipt: TrustedMergedPullRequestReceipt): AuthorityDecision & { task?: AuthorityTask } {
+export function recordTrustedMerge(authority: StandingAuthority, taskId: string, controller: AuthorityController): AuthorityDecision & { task?: AuthorityTask } {
+  const controllerRecords = resolveControllerRecords(controller);
+  if (!controllerRecords) {
+    return deny("release_denied", "Release recording requires a controller-issued capability.", { taskId });
+  }
+  let mergeRecord: TrustedMergedAuthorityTaskRecord | AuthorityDecision;
+  try {
+    mergeRecord = controllerRecords.tryRecordMergedPullRequest(authority.id, taskId);
+  } catch {
+    return deny("release_denied", "The controller-owned merged-pull-request record could not be read.", { taskId });
+  }
+  if (isAuthorityDecision(mergeRecord)) {
+    return mergeRecord.ok
+      ? deny("release_denied", "The merge controller returned no trusted merged task record.", { taskId })
+      : mergeRecord;
+  }
+  if (!isTrustedMergedTaskRecord(mergeRecord, authority, taskId)) {
+    return deny("release_denied", "Release requires a current controller-owned merged-pull-request record.", { taskId });
+  }
+  const { task, receipt } = mergeRecord;
   const authorityDecision = assessTaskAuthority(authority, task);
   if (!authorityDecision.ok) return authorityDecision;
-  if (task.state !== "ready-to-release") {
-    return deny("invalid_transition", "Only a ready-to-release task can be marked released by a trusted merge receipt.", { state: task.state });
+  if (task.state !== "released" || task.lease) {
+    return deny("release_denied", "The controller-owned merge record did not persist a released task.", { state: task.state, taskId });
   }
   if (!task.candidate || !isCommitSha(task.candidate.headSha)) {
-    return deny("release_denied", "A ready-to-release task must retain an immutable candidate before release can be recorded.");
+    return deny("release_denied", "A released task must retain its immutable candidate and provider merge receipt.");
   }
   if (receipt.source !== "pull-request-provider"
     || normalizeRepositoryRemote(receipt.repositoryRemote) !== authority.repositoryRemote
@@ -470,7 +510,8 @@ export function recordTrustedMerge(authority: StandingAuthority, task: Authority
     || !isCommitSha(receipt.mergeCommitSha)
     || !Number.isSafeInteger(receipt.pullRequestNumber)
     || receipt.pullRequestNumber < 1
-    || !isValidTimestamp(receipt.mergedAt)) {
+    || !isValidTimestamp(receipt.mergedAt)
+    || task.updatedAt !== receipt.mergedAt) {
     return deny("release_denied", "Release requires a valid provider-sourced merged-pull-request receipt.", {
       targetBranch: authority.targetBranch,
       pullRequestNumber: receipt.pullRequestNumber,
@@ -478,7 +519,7 @@ export function recordTrustedMerge(authority: StandingAuthority, task: Authority
   }
   return {
     ...allow("Trusted provider merge receipt recorded."),
-    task: { ...task, state: "released", lease: undefined, updatedAt: receipt.mergedAt },
+    task,
   };
 }
 
@@ -653,6 +694,21 @@ function isTrustedTaskRecord(record: TrustedAuthorityTaskRecord | undefined, aut
     && record.task.authorityId === authority.id;
 }
 
+function isTrustedMergedTaskRecord(record: TrustedMergedAuthorityTaskRecord | undefined, authority: StandingAuthority, taskId: string): record is TrustedMergedAuthorityTaskRecord {
+  return isTrustedTaskRecord(record, authority, taskId)
+    && record.receipt.source === "pull-request-provider"
+    && isValidTimestamp(record.receipt.mergedAt);
+}
+
+function isAuthorityDecision(value: TrustedAuthorityTaskRecord | TrustedMergedAuthorityTaskRecord | AuthorityDecision): value is AuthorityDecision {
+  return "ok" in value && typeof value.ok === "boolean" && typeof value.code === "string";
+}
+
+function resolveControllerRecords(controller: AuthorityController | undefined): AuthorityControllerRecords | undefined {
+  if (!controller || controller[authorityControllerBrand] !== true) return undefined;
+  return controllerRecordCapabilities.get(controller);
+}
+
 function isTrustedEvidenceReceipt(receipt: TrustedEvidenceReceipt | undefined, authority: StandingAuthority, task: AuthorityTask, candidateHeadSha: string) {
   if (!receipt) return false;
   return receipt.source === "authority-controller"
@@ -672,12 +728,6 @@ function resolveLeaseRuntimeDeadline(authority: StandingAuthority, lease: NonNul
   return new Date(acquiredAt.getTime() + authority.maxRuntimeMinutes * 60_000);
 }
 
-function leaseOccupiesCapacity(authority: StandingAuthority, lease: NonNullable<AuthorityTask["lease"]>, now: Date) {
-  const expiresAt = new Date(lease.expiresAt).getTime();
-  const runtimeDeadline = resolveLeaseRuntimeDeadline(authority, lease);
-  if (!Number.isFinite(expiresAt) || !runtimeDeadline) return true;
-  return expiresAt > now.getTime() && runtimeDeadline.getTime() > now.getTime();
-}
 
 function sameFiles(left: string[], right: string[]) {
   if (left.length !== right.length) return false;
