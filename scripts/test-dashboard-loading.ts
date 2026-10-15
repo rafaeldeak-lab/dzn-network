@@ -633,5 +633,8 @@ assert.ok(mobileLeaderboards.includes("data-label={headers[cellIndex]}"), "Respo
 assert.ok(mobileLeaderboards.includes('aria-label="Personal best kills"'), "Records retain an accessible table name.");
 assert.equal(mobileLeaderboards.includes("useState(() => !loadLastGoodLeaderboard())"), false, "Cached results must wait until after hydration.");
 assert.ok(mobileLeaderboards.includes('if (cached && payloadMode.current !== "all")'), "The all-mode last-good fallback is still restored after mount.");
+assert.equal(landing.includes("useState<HomeStats>(() => loadLastGoodHomeStats()"), false, "Homepage cache must not be read during the first hydration render.");
+assert.equal(landing.includes('useState<HomeStatsLoadState>(() => loadLastGoodHomeStats()'), false, "Homepage loading state must remain stable through hydration.");
+assert.ok(landing.includes('if (cached && !visibleHomeStatsRef.current)'), "Homepage cache must be restored immediately after hydration.");
 
 console.log("Dashboard/public loading last-good and mobile presentation regression checks passed.");

@@ -480,14 +480,12 @@ const previewConversionSteps = [
 }>;
 
 function useHomeStats() {
-  const [data, setData] = useState<HomeStats>(() => loadLastGoodHomeStats() ?? emptyHomeStats);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(() => {
-    const cached = loadLastGoodHomeStats();
-    return cached?.generated_at ? new Date(cached.generated_at) : null;
-  });
+  // Browser cache must wait until after hydration so it cannot disagree with the server shell.
+  const [data, setData] = useState<HomeStats>(emptyHomeStats);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
-  const [loadState, setLoadState] = useState<HomeStatsLoadState>(() => loadLastGoodHomeStats() ? "loaded" : "loading_initial");
-  const visibleHomeStatsRef = useRef(hasMeaningfulHomeStats(data));
+  const [loadState, setLoadState] = useState<HomeStatsLoadState>("loading_initial");
+  const visibleHomeStatsRef = useRef(false);
   const latestRequestId = useRef(0);
   const inFlight = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -508,6 +506,11 @@ function useHomeStats() {
       const controller = new AbortController();
       abortRef.current = controller;
       const cached = loadLastGoodHomeStats();
+      if (cached && !visibleHomeStatsRef.current) {
+        setData(cached);
+        setLastUpdated(cached.generated_at ? new Date(cached.generated_at) : null);
+        visibleHomeStatsRef.current = true;
+      }
       const hasVisibleData = Boolean(cached) || visibleHomeStatsRef.current;
       setLoadState(hasVisibleData ? "refreshing" : "loading_initial");
       try {
@@ -1312,9 +1315,6 @@ function DznOperationalGlobePlaceholder() {
       aria-live="polite"
       aria-label="Loading live DZN operational globe"
     >
-      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-one" aria-hidden="true" />
-      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-two" aria-hidden="true" />
-      <span className="dzn-operational-globe-floor-glow" aria-hidden="true" />
       <span className="dzn-operational-globe-placeholder-sphere" aria-hidden="true" />
       <span className="dzn-operational-globe-fallback">Loading live globe...</span>
     </div>
@@ -2051,6 +2051,11 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
             sync_status: typeof rawNode.sync_status === "string" ? rawNode.sync_status : "pending",
             region: typeof rawNode.region === "string" && rawNode.region.trim() ? rawNode.region : "Location awaiting metadata",
             country: typeof rawNode.country === "string" ? rawNode.country : null,
+            location_label: typeof rawNode.location_label === "string" && rawNode.location_label.trim()
+              ? rawNode.location_label
+              : typeof rawNode.region === "string" && rawNode.region.trim()
+                ? rawNode.region
+                : "Location awaiting metadata",
             x: clamp(numberOrZero(rawNode.x), 5, 95),
             y: clamp(numberOrZero(rawNode.y), 8, 90),
             active: Boolean(rawNode.active) || rawNode.sync_status === "active" || rawNode.status === "active",
