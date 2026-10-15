@@ -480,14 +480,12 @@ const previewConversionSteps = [
 }>;
 
 function useHomeStats() {
-  const [data, setData] = useState<HomeStats>(() => loadLastGoodHomeStats() ?? emptyHomeStats);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(() => {
-    const cached = loadLastGoodHomeStats();
-    return cached?.generated_at ? new Date(cached.generated_at) : null;
-  });
+  // Browser cache must wait until after hydration so it cannot disagree with the server shell.
+  const [data, setData] = useState<HomeStats>(emptyHomeStats);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
-  const [loadState, setLoadState] = useState<HomeStatsLoadState>(() => loadLastGoodHomeStats() ? "loaded" : "loading_initial");
-  const visibleHomeStatsRef = useRef(hasMeaningfulHomeStats(data));
+  const [loadState, setLoadState] = useState<HomeStatsLoadState>("loading_initial");
+  const visibleHomeStatsRef = useRef(false);
   const latestRequestId = useRef(0);
   const inFlight = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -508,6 +506,11 @@ function useHomeStats() {
       const controller = new AbortController();
       abortRef.current = controller;
       const cached = loadLastGoodHomeStats();
+      if (cached && !visibleHomeStatsRef.current) {
+        setData(cached);
+        setLastUpdated(cached.generated_at ? new Date(cached.generated_at) : null);
+        visibleHomeStatsRef.current = true;
+      }
       const hasVisibleData = Boolean(cached) || visibleHomeStatsRef.current;
       setLoadState(hasVisibleData ? "refreshing" : "loading_initial");
       try {
