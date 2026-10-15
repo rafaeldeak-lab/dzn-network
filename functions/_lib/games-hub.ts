@@ -21,7 +21,8 @@ async function availableGameSchemas(db: D1Database) {
       'dzn_hide_seek_sessions', 'dzn_hide_seek_reward_ledger', 'dzn_relay_rush_sessions', 'dzn_relay_rush_reward_ledger',
       'dzn_cipher_grid_sessions', 'dzn_cipher_grid_reward_ledger', 'dzn_echo_array_sessions', 'dzn_echo_array_reward_ledger',
       'dzn_outpost_run_sessions', 'dzn_outpost_run_reward_ledger', 'dzn_signal_shift_sessions', 'dzn_signal_shift_reward_ledger',
-      'dzn_circuit_forge_sessions', 'dzn_circuit_forge_reward_ledger', 'dzn_ranger_range_sessions', 'dzn_ranger_range_reward_ledger')`).all<{ name: string }>();
+      'dzn_circuit_forge_sessions', 'dzn_circuit_forge_reward_ledger', 'dzn_ranger_range_sessions', 'dzn_ranger_range_reward_ledger',
+      'dzn_night_run_sessions', 'dzn_night_run_reward_ledger')`).all<{ name: string }>();
   const names = new Set((rows.results ?? []).map(row => row.name));
   const complete = (...tables: string[]) => tables.every(table => names.has(table));
   return { trivia: complete("dzn_trivia_sessions", "dzn_trivia_reward_ledger"), wordChain: complete("dzn_word_chain_rounds", "dzn_word_chain_entries", "dzn_word_chain_reward_ledger"),
@@ -29,10 +30,11 @@ async function availableGameSchemas(db: D1Database) {
     cipherGrid: complete("dzn_cipher_grid_sessions", "dzn_cipher_grid_reward_ledger"), echoArray: complete("dzn_echo_array_sessions", "dzn_echo_array_reward_ledger"),
     outpostRun: complete("dzn_outpost_run_sessions", "dzn_outpost_run_reward_ledger"), signalShift: complete("dzn_signal_shift_sessions", "dzn_signal_shift_reward_ledger"),
     circuitForge: complete("dzn_circuit_forge_sessions", "dzn_circuit_forge_reward_ledger"),
-    rangerRange: complete("dzn_ranger_range_sessions", "dzn_ranger_range_reward_ledger") };
+    rangerRange: complete("dzn_ranger_range_sessions", "dzn_ranger_range_reward_ledger"),
+    nightRun: complete("dzn_night_run_sessions", "dzn_night_run_reward_ledger") };
 }
 
-type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean; relayRush: boolean; cipherGrid: boolean; echoArray: boolean; outpostRun: boolean; signalShift: boolean; circuitForge: boolean; rangerRange: boolean };
+type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean; relayRush: boolean; cipherGrid: boolean; echoArray: boolean; outpostRun: boolean; signalShift: boolean; circuitForge: boolean; rangerRange: boolean; nightRun: boolean };
 
 function enabledGames(env: Env, schemas: ExtraLedgers): HubGameAvailability {
   const hubEnabled = env.DZN_GAMES_HUB_ENABLED === "true";
@@ -48,11 +50,12 @@ function enabledGames(env: Env, schemas: ExtraLedgers): HubGameAvailability {
     "signal-shift": hubEnabled && schemas.signalShift && env.DZN_GAMES_SIGNAL_SHIFT_ENABLED === "true",
     "circuit-forge": hubEnabled && schemas.circuitForge && env.DZN_GAMES_CIRCUIT_FORGE_ENABLED === "true",
     "ranger-range": hubEnabled && schemas.rangerRange && env.DZN_GAMES_RANGER_RANGE_ENABLED === "true",
+    "night-run": hubEnabled && schemas.nightRun && env.DZN_GAMES_NIGHT_RUN_ENABLED === "true",
   };
 }
 
 export async function readHub(db: D1Database, user: SessionUser, now: number,
-  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false, rangerRange: false },
+  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false, rangerRange: false, nightRun: false },
   availableGames: HubGameAvailability = DEFAULT_HUB_GAME_AVAILABILITY): Promise<HubPayload> {
   const dayStart = Math.floor(now / DAY) * DAY;
   const rollingWeekStart = now - 7 * DAY;
@@ -255,6 +258,24 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
       FROM dzn_ranger_range_reward_ledger WHERE user_id = ? AND created_at <= ?`).bind(DAY, user.id, now).all<{ day: number }>();
     for (const row of days.results ?? []) rewardDays.add(row.day);
   }
+  if (extraLedgers.nightRun) {
+    const nightRun = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
+      COALESCE(SUM(CASE WHEN created_at > ? AND created_at <= ? THEN xp ELSE 0 END), 0) AS weekly_xp,
+      MIN(CASE WHEN created_at > ? AND created_at <= ? THEN created_at END) AS weekly_oldest
+      FROM dzn_night_run_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number; weekly_oldest: number | null }>();
+    extraTotals.xp += nightRun?.xp ?? 0; extraTotals.parts += nightRun?.parts ?? 0;
+    challengeTotals.dailyRewards += nightRun?.daily_rewards ?? 0; challengeTotals.weeklyXp += nightRun?.weekly_xp ?? 0;
+    weeklyOldest.push(nightRun?.weekly_oldest ?? null);
+    const entries = await db.prepare(`SELECT 'night-run' AS kind, xp, parts, created_at
+      FROM dzn_night_run_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
+      .bind(user.id).all<HubPayload["summary"]["history"][number]>();
+    extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_night_run_reward_ledger WHERE user_id = ? AND created_at <= ?`).bind(DAY, user.id, now).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
+  }
   const combinedHistory = [...(history.results ?? []), ...extraHistory]
     .sort((left, right) => right.created_at - left.created_at).slice(0, 12);
   const latestRewardDay = rewardDays.size ? Math.max(...rewardDays) : -1;
@@ -345,6 +366,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         extraLedgers.signalShift ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_signal_shift_reward_ledger WHERE user_id = ?)` : null,
         extraLedgers.circuitForge ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_circuit_forge_reward_ledger WHERE user_id = ?)` : null,
         extraLedgers.rangerRange ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_ranger_range_reward_ledger WHERE user_id = ?)` : null,
+        extraLedgers.nightRun ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_night_run_reward_ledger WHERE user_id = ?)` : null,
       ].filter((value): value is string => Boolean(value));
       const availableParts = [`(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`, ...extraPartQueries].join(" + ");
       const statement = db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
@@ -356,7 +378,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         ...(extraLedgers.hideSeek ? [user.id] : []), ...(extraLedgers.relayRush ? [user.id] : []),
         ...(extraLedgers.cipherGrid ? [user.id] : []), ...(extraLedgers.echoArray ? [user.id] : []),
         ...(extraLedgers.outpostRun ? [user.id] : []), ...(extraLedgers.signalShift ? [user.id] : []),
-        ...(extraLedgers.circuitForge ? [user.id] : []), ...(extraLedgers.rangerRange ? [user.id] : []), WORKSHOP_PART_COST];
+        ...(extraLedgers.circuitForge ? [user.id] : []), ...(extraLedgers.rangerRange ? [user.id] : []),
+        ...(extraLedgers.nightRun ? [user.id] : []), WORKSHOP_PART_COST];
       const result = await statement.bind(...bindings).run();
       if (!result.meta.changes) {
         const alreadyDone = await db.prepare("SELECT id FROM dzn_game_reward_ledger WHERE user_id = ? AND reward_key = ?")

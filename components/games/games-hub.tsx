@@ -19,12 +19,14 @@ import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_R
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_TARGETS, type RangerRangePayload, type RangerRangeTarget } from "@/lib/games-ranger-range";
+import { NIGHT_RUN_LANES, NIGHT_RUN_MIN_ACTION_INTERVAL_MS, NIGHT_RUN_REWARD, type NightRunLane, type NightRunPayload } from "@/lib/games-night-run";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
 type PlayGame = HubGameId;
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
+const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.NightRun3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -40,6 +42,7 @@ const ECHO_ARRAY_COOLDOWN_MS = ECHO_ARRAY_MIN_INPUT_INTERVAL_MS + 40;
 const SIGNAL_SHIFT_COOLDOWN_MS = SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS + 40;
 const CIRCUIT_FORGE_COOLDOWN_MS = CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS + 40;
 const RANGER_RANGE_COOLDOWN_MS = RANGER_RANGE_MIN_ACTION_INTERVAL_MS + 50;
+const NIGHT_RUN_COOLDOWN_MS = NIGHT_RUN_MIN_ACTION_INTERVAL_MS + 50;
 const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
@@ -60,6 +63,7 @@ const ARCADE_CATALOGUE = [
   { name: "Relay Rush", detail: "Server-timed reactions", icon: Zap },
   { name: "Outpost Run", detail: "Fog-grid extraction", icon: Map },
   { name: "Ranger Range", detail: "Bow target drill", icon: Crosshair },
+  { name: "Night Run", detail: "3D convoy escape", icon: Radio },
   { name: "Cipher Grid", detail: "Field-code puzzle", icon: KeyRound },
   { name: "Circuit Forge", detail: "Power-grid rebuild", icon: Settings2 },
 ] as const;
@@ -249,6 +253,7 @@ export function GamesHub() {
             {availableGames["signal-shift"] && <button aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
             {availableGames["circuit-forge"] && <button aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
             {availableGames["ranger-range"] && <button aria-pressed={selectedPlayGame === "ranger-range"} onClick={() => setPlayGame("ranger-range")}><Crosshair size={17} /><span><strong>Ranger Range</strong><small>Bow target drill</small></span></button>}
+            {availableGames["night-run"] && <button aria-pressed={selectedPlayGame === "night-run"} onClick={() => setPlayGame("night-run")}><Radio size={17} /><span><strong>Night Run</strong><small>3D convoy escape</small></span></button>}
           </div>}
           {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -281,6 +286,7 @@ export function GamesHub() {
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -301,7 +307,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; const circuitForge = entry.kind === "circuit-forge"; const rangerRange = entry.kind === "ranger-range"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : circuitForge ? <Settings2 size={20} /> : rangerRange ? <Crosshair size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : circuitForge ? "Circuit Forge restored" : rangerRange ? "Ranger Range cleared" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            <ActivityHistory history={summary?.history ?? []} />
           </section>}
         </div>
 
@@ -1204,6 +1210,163 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
               : <><Radio size={20} /><div><strong>{targetOpen ? "Plate live" : "Bow nocked"}</strong><span>{targetOpen ? "Release on the highlighted plate before it clears the range." : "The DZN range is preparing the next server-verified target."}</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.rangerRangeReady}><Crosshair size={34} /><h3>Set the bow range.</h3><p>Track eight moving DZN range plates and release only when the live target appears. The server verifies every arrow before it can award progression.</p><div className={styles.rewardPills}><span>8 plates</span><span>+{RANGER_RANGE_REWARD.xp} XP</span><span>+{RANGER_RANGE_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function ActivityHistory({ history }: { history: HubPayload["summary"]["history"] }) {
+  if (!history.length) return <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>;
+  return <ul className={styles.history}>{history.map((entry, index) => {
+    const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null;
+    return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{activityIcon(entry.kind, triviaDifficulty)}</span><div><strong>{activityLabel(entry.kind, triviaDifficulty)}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>;
+  })}</ul>;
+}
+
+function activityLabel(kind: string, triviaDifficulty: TriviaDifficulty | null) {
+  if (kind === "workshop") return "Workshop assembly";
+  if (triviaDifficulty) return `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed`;
+  const labels: Record<string, string> = {
+    "word-chain": "Word Chain relay", "hide-seek": "Signal Hunt cleared", "relay-rush": "Relay Rush completed",
+    "cipher-grid": "Cipher Grid decoded", "echo-array": "Echo Array synchronised", "outpost-run": "Outpost Run extracted",
+    "signal-shift": "Signal Shift routed", "circuit-forge": "Circuit Forge restored", "ranger-range": "Ranger Range cleared", "night-run": "Night Run escaped",
+  };
+  return labels[kind] ?? (GAME_MODES[kind as GameMode]?.label ? `${GAME_MODES[kind as GameMode].label} secured` : "Verified field reward");
+}
+
+function activityIcon(kind: string, triviaDifficulty: TriviaDifficulty | null) {
+  if (kind === "workshop") return <Hammer size={20} />;
+  if (triviaDifficulty) return <BookOpen size={20} />;
+  if (kind === "word-chain" || kind === "relay-rush" || kind === "night-run") return <Radio size={20} />;
+  if (kind === "hide-seek") return <Search size={20} />;
+  if (kind === "cipher-grid") return <KeyRound size={20} />;
+  if (kind === "echo-array") return <Microchip size={20} />;
+  if (kind === "outpost-run") return <Map size={20} />;
+  if (kind === "signal-shift") return <Target size={20} />;
+  if (kind === "circuit-forge") return <Settings2 size={20} />;
+  if (kind === "ranger-range") return <Crosshair size={20} />;
+  return <ShieldCheck size={20} />;
+}
+
+function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
+  const [payload, setPayload] = useState<NightRunPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [runNow, setRunNow] = useState(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(NIGHT_RUN_COOLDOWN_MS);
+
+  const receivePayload = useCallback((result: NightRunPayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setRunNow(result.serverTime);
+    setPayload(result);
+  }, []);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/night-run", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as NightRunPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Night Run is unavailable.");
+      if (sequence === generation.current) { receivePayload(result); clearCooldown(); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Night Run is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [clearCooldown, receivePayload]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/night-run", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as NightRunPayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Choose one lane at a time."); return; }
+        setError(result.error || "That steering decision could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      receivePayload(result); clearCooldown(); onProgress();
+    } catch { if (sequence === generation.current) setError("That steering decision could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, clearCooldown, cooldown, load, onProgress, receivePayload, startCooldown]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setRunNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, runNow, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow && game.gateEndsAt > clockNow);
+  const gateOpen = Boolean(active && game?.safeLane && clockNow >= game.gateStartsAt && clockNow < game.gateEndsAt);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const drive = useCallback((lane: NightRunLane) => {
+    if (!game || !active || !gateOpen || busy || cooldown) return;
+    void mutate({ action: "drive", gameId: game.id, version: game.version, lane });
+  }, [active, busy, cooldown, game, gateOpen, mutate]);
+
+  useEffect(() => {
+    if (!game || game.status !== "playing") return;
+    const nextRefreshAt = game.safeLane ? game.gateEndsAt + 45 : game.gateStartsAt + 45;
+    const clock = serverClock.current;
+    const serverNow = clock.time + performance.now() - clock.measuredAt;
+    const timer = window.setTimeout(() => void load(), Math.max(45, nextRefreshAt - serverNow));
+    return () => window.clearTimeout(timer);
+  }, [game, load]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const source = event.target;
+      if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const lane = event.key === "ArrowLeft" || event.key.toLowerCase() === "a" ? "left"
+        : event.key === "ArrowDown" || event.key.toLowerCase() === "s" ? "centre"
+          : event.key === "ArrowRight" || event.key.toLowerCase() === "d" ? "right" : null;
+      if (!lane || !gateOpen || busy || cooldown) return;
+      event.preventDefault(); drive(lane);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, cooldown, drive, gateOpen]);
+
+  return <section aria-labelledby="night-run-title" className={styles.nightRunPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>12 / CONVOY ESCAPE</span><h2 id="night-run-title">DZN Night Run</h2></div><Radio size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Night Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.nightRunTools}>
+      <div><strong>{game ? `${game.gatesCleared} / ${game.totalGates} gates cleared` : "Nine city-gate escapes"}</strong><span>{game ? `${game.maxCollisions - game.collisions} collisions remaining` : "Read the lit gate and steer the convoy through before it closes."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New convoy run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Convoy in progress" : game ? "New night run" : "Start night run"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.nightRunMeta}><span><Radio size={14} />{game.gatesCleared} / {game.totalGates}</span><span><Target size={14} />{game.collisions} collisions</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen}>
+        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? "GATE / LIVE" : "CONVOY / MOVING" : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
+        <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown} motionRunning={motionRunning} onDrive={drive} />
+        <div className={styles.nightRunLanes} role="group" aria-label="Night Run convoy lanes">
+          {NIGHT_RUN_LANES.map((lane, index) => {
+            const live = gateOpen && game.safeLane === lane;
+            return <button key={lane} type="button" data-lane={lane} data-live={live} disabled={!gateOpen || busy || cooldown}
+              aria-label={`${lane} lane (${["A", "S", "D"][index]})${live ? ", safe lane" : ""}`} onClick={() => drive(lane)}>
+              <span>{String(index + 1).padStart(2, "0")}</span><strong>{lane}</strong><small>{live ? "Drive now" : "Perimeter route"}</small><kbd>{["A", "S", "D"][index]}</kbd>
+            </button>;
+          })}
+        </div>
+        <p className={styles.nightRunHint}>Keyboard: A, S, D or the arrow keys. Each gate, safe lane, collision, timing window and daily reward is verified by the DZN server.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Convoy escaped</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${NIGHT_RUN_REWARD.xp} XP and +${NIGHT_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice escape complete. Today's reward was already recorded." : "Night Run complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Convoy intercepted</strong><span>Two collision decisions ended the run. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Night Run expired</strong><span>Start another convoy run when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>{gateOpen ? "Gate open" : "Convoy moving"}</strong><span>{gateOpen ? "Drive through the lit safe lane before the gate closes." : "The DZN server is preparing the next verified gate."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.nightRunReady}><Radio size={34} /><h3>Take the convoy through the blackout.</h3><p>Read nine perimeter gates in the rendered Night Run city and steer for the safe lane before each window closes. Rewards are verified by the DZN server.</p><div className={styles.rewardPills}><span>9 gates</span><span>+{NIGHT_RUN_REWARD.xp} XP</span><span>+{NIGHT_RUN_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

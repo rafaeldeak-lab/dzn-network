@@ -89,6 +89,7 @@ async function run() {
       DZN_GAMES_SIGNAL_SHIFT_ENABLED: "false",
       DZN_GAMES_CIRCUIT_FORGE_ENABLED: "false",
       DZN_GAMES_RANGER_RANGE_ENABLED: "false",
+      DZN_GAMES_NIGHT_RUN_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
@@ -113,7 +114,7 @@ async function run() {
     const initial = await payload(await call(f));
     assert.deepEqual(initial.availableGames, {
       minefield: true, trivia: false, "word-chain": false, "hide-seek": false, "relay-rush": false,
-      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false, "ranger-range": false,
+      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false, "ranger-range": false, "night-run": false,
     });
     f.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
     assert.equal((await payload(await call(f))).availableGames["relay-rush"], false);
