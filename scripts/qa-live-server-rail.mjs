@@ -30,6 +30,10 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/api/public/server-rail") {
     refreshRequestCount += 1;
+    if (railMode === "initial-retry" && refreshRequestCount === 1) {
+      response.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, items: [], stale: true }));
+      return;
+    }
     const staleRefresh = railMode === "preserve" && refreshRequestCount > 1;
     const items = staleRefresh
       ? []
@@ -124,6 +128,7 @@ try {
     body: JSON.stringify({ ok: false, items: [], stale: true }),
   }));
   await unavailablePage.goto(origin, { waitUntil: "networkidle" });
+  await unavailablePage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Latest data unavailable"));
   const unavailableMetrics = await unavailablePage.evaluate(() => ({
     overflow: document.documentElement.scrollWidth > innerWidth,
     railCards: document.querySelectorAll(".dzn-live-server-card").length,
@@ -138,6 +143,17 @@ try {
   await unavailablePage.screenshot({ path: path.join(output, "unavailable-390.png"), fullPage: true });
   await writeFile(path.join(output, "unavailable-390.json"), JSON.stringify(unavailableMetrics, null, 2));
   await unavailableContext.close();
+  railMode = "initial-retry";
+  refreshRequestCount = 0;
+  const retryContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const retryPage = await retryContext.newPage();
+  await retryPage.goto(origin, { waitUntil: "networkidle" });
+  await retryPage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Reconnecting listings"));
+  assert.equal((await retryPage.locator(".dzn-live-server-rail").innerText()).includes("Reconnecting live server listings"), true, "A first transient failure should be described as reconnecting.");
+  await retryPage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Latest server data"));
+  assert.equal(await retryPage.locator(".dzn-live-server-card").count(), 2, "A successful initial retry must restore the real deduplicated cards.");
+  assert.equal((await retryPage.locator(".dzn-live-server-rail").innerText()).includes("temporarily unavailable"), false, "A recovered initial request must not present a false outage.");
+  await retryContext.close();
   console.log("Live server rail dedupe, motion, and unavailable-state QA passed.");
 } finally {
   await browser.close();

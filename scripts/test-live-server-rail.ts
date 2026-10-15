@@ -27,9 +27,12 @@ assert.equal(source.includes("[...items, ...items]"), false, "The animated rail 
 assert.equal(source.includes("dedupeRailItems(items)"), true, "The client must defensively deduplicate server identities.");
 assert.equal(source.includes('item.playerCountStatus !== "fresh"'), true, "Stale player counts must not be presented as live values.");
 assert.equal(source.includes("SERVER_RAIL_REFRESH_MS = 30_000"), true, "The rail must refresh live server data without requiring a page reload.");
+assert.equal(source.includes("SERVER_RAIL_INITIAL_RETRY_DELAY_MS = 1_500"), true, "An initial transient public-rail failure should receive one prompt bounded retry.");
 assert.equal(source.includes('document.visibilityState === "visible"'), true, "Background tabs must not keep polling the public rail.");
 assert.equal(source.includes('document.addEventListener("visibilitychange"'), true, "Returning to the page must refresh the rail.");
 assert.equal(source.includes("requestInFlight"), true, "Timed and visibility refreshes must not overlap requests.");
+assert.equal(source.includes('!hasConfirmedResponseRef.current && initialFailureCountRef.current === 0'), true, "Only the first unresolved rail failure should retry before showing an outage state.");
+assert.equal(source.includes('"Reconnecting live server listings"'), true, "A transient first failure must be described as reconnecting rather than unavailable.");
 assert.match(source, /payload\.stale\s*===\s*true\s*&&\s*payload\.items\?\.length\s*===\s*0\s*&&\s*currentItems\.length\s*>\s*0/, "A stale empty refresh must preserve the last known-good server cards.");
 assert.equal(source.includes("SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000"), true, "A stalled rail request must be bounded so later refreshes can recover.");
 assert.match(source, /setTimeout\(\(\)\s*=>\s*requestController\.abort\(\),\s*timeoutMs\)/, "Each rail request must abort when its timeout expires.");
