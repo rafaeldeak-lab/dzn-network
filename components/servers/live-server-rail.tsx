@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
 const SERVER_RAIL_REFRESH_MS = 30_000;
 const SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000;
+const SERVER_RAIL_INITIAL_RETRY_DELAY_MS = 1_500;
 
 type RailItem = {
   id: string;
@@ -29,6 +30,10 @@ type RailResponse = {
   generated_at?: string;
   stale?: boolean;
 };
+
+function isStaleEmptyRailResponse(payload: RailResponse) {
+  return payload.stale === true && (payload.items?.length ?? 0) === 0;
+}
 
 type RailLoaderOptions = {
   fetchRail: (signal: AbortSignal) => Promise<Response>;
@@ -83,14 +88,52 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
   const [items, setItems] = useState<RailItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [responseStale, setResponseStale] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const hasConfirmedResponseRef = useRef(false);
+  const initialFailureCountRef = useRef(0);
+  const initialRetryTimerRef = useRef<number | null>(null);
+  const initialRetryUsesFreshRequestRef = useRef(false);
+  const loaderRef = useRef<ReturnType<typeof createRailLoader> | null>(null);
 
   useEffect(() => {
+    const clearInitialRetry = () => {
+      if (initialRetryTimerRef.current !== null) window.clearTimeout(initialRetryTimerRef.current);
+      initialRetryTimerRef.current = null;
+    };
+
+    const scheduleInitialRetry = () => {
+      clearInitialRetry();
+      initialRetryUsesFreshRequestRef.current = true;
+      setReconnecting(true);
+      initialRetryTimerRef.current = window.setTimeout(() => {
+        initialRetryTimerRef.current = null;
+        void loaderRef.current?.load();
+      }, SERVER_RAIL_INITIAL_RETRY_DELAY_MS);
+    };
+
     const loader = createRailLoader({
       fetchRail: (signal) => fetch("/api/public/server-rail", {
+          cache: initialRetryUsesFreshRequestRef.current ? "no-store" : "default",
           headers: { accept: "application/json" },
           signal,
         }),
       onPayload: (payload) => {
+        if (!hasConfirmedResponseRef.current && isStaleEmptyRailResponse(payload)) {
+          if (initialFailureCountRef.current === 0) {
+            initialFailureCountRef.current += 1;
+            scheduleInitialRetry();
+            return;
+          }
+          initialRetryUsesFreshRequestRef.current = false;
+          setReconnecting(false);
+          setResponseStale(true);
+          return;
+        }
+        hasConfirmedResponseRef.current = true;
+        initialFailureCountRef.current = 0;
+        initialRetryUsesFreshRequestRef.current = false;
+        clearInitialRetry();
+        setReconnecting(false);
         setItems((currentItems) => (
           payload.stale === true && payload.items?.length === 0 && currentItems.length > 0
             ? currentItems
@@ -98,9 +141,19 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         ));
         setResponseStale(payload.stale === true);
       },
-      onUnavailable: () => setResponseStale(true),
+      onUnavailable: () => {
+        if (!hasConfirmedResponseRef.current && initialFailureCountRef.current === 0) {
+          initialFailureCountRef.current += 1;
+          scheduleInitialRetry();
+          return;
+        }
+        initialRetryUsesFreshRequestRef.current = false;
+        setReconnecting(false);
+        setResponseStale(true);
+      },
       onSettled: () => setLoaded(true),
     });
+    loaderRef.current = loader;
 
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void loader.load();
@@ -110,6 +163,9 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
     const refreshTimer = window.setInterval(refreshWhenVisible, SERVER_RAIL_REFRESH_MS);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
+      clearInitialRetry();
+      initialRetryUsesFreshRequestRef.current = false;
+      loaderRef.current = null;
       loader.dispose();
       window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
@@ -128,7 +184,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         </div>
         <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-100">
           <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.9)]" aria-hidden="true" />
-          {!loaded ? "Loading listings" : responseStale ? "Latest data unavailable" : hasItems ? "Latest server data" : "No live listings"}
+          {!loaded ? "Loading listings" : reconnecting ? "Reconnecting listings" : responseStale ? "Latest data unavailable" : hasItems ? "Latest server data" : "No live listings"}
         </span>
       </div>
       {hasItems ? (
@@ -145,8 +201,8 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
             <RadioTower className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <strong>{!loaded ? "Loading connected server listings" : responseStale ? "Server listings are temporarily unavailable" : "No public server listings are available right now"}</strong>
-            <p>{!loaded ? "Real server records will appear here when the network response is ready." : responseStale ? "The latest server data could not be confirmed. Try again shortly or browse the server directory." : "Only verified public servers appear here. Check the server directory for the latest available listings."}</p>
+            <strong>{!loaded ? "Loading connected server listings" : reconnecting ? "Reconnecting live server listings" : responseStale ? "Server listings are temporarily unavailable" : "No public server listings are available right now"}</strong>
+            <p>{!loaded ? "Real server records will appear here when the network response is ready." : reconnecting ? "Rechecking the latest verified server records now." : responseStale ? "The latest server data could not be confirmed. Try again shortly or browse the server directory." : "Only verified public servers appear here. Check the server directory for the latest available listings."}</p>
           </div>
           {loaded ? (
             <Link href="/servers" className="dzn-live-server-rail__empty-link">
