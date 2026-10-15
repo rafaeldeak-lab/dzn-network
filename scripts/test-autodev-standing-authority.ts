@@ -330,6 +330,17 @@ const querySanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixtu
 assert.equal(querySanitizedRange.repositoryRemote, authority.repositoryRemote, "Query strings and fragments must be removed before remote metadata is retained.");
 assert.equal(JSON.stringify(querySanitizedRange).includes("do-not-expose-query-token"), false, "Candidate metadata must never retain remote query credentials.");
 assert.equal(JSON.stringify(querySanitizedRange).includes("secret-fragment"), false, "Candidate metadata must never retain remote fragments.");
+const sshCredentialRemote = "ssh://deploy-secret@github.com/rafaeldeak-lab/dzn-network.git?access_token=do-not-expose-ssh-token#ssh-fragment";
+runGit(fixture.path, ["remote", "set-url", "origin", sshCredentialRemote]);
+const sshSanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
+assert.equal(sshSanitizedRange.repositoryRemote, "ssh://github.com/rafaeldeak-lab/dzn-network.git", "SSH URL credentials, queries, and fragments must be removed before remote metadata is retained.");
+assert.equal(JSON.stringify(sshSanitizedRange).includes("deploy-secret"), false, "Candidate metadata must never retain SSH user credentials.");
+assert.equal(JSON.stringify(sshSanitizedRange).includes("do-not-expose-ssh-token"), false, "Candidate metadata must never retain SSH query credentials.");
+const scpCredentialRemote = "deploy-secret@github.com:rafaeldeak-lab/dzn-network.git";
+runGit(fixture.path, ["remote", "set-url", "origin", scpCredentialRemote]);
+const scpSanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
+assert.equal(scpSanitizedRange.repositoryRemote, "github.com:rafaeldeak-lab/dzn-network.git", "SCP-style remote user credentials must be removed before remote metadata is retained.");
+assert.equal(JSON.stringify(scpSanitizedRange).includes("deploy-secret"), false, "Candidate metadata must never retain SCP-style remote credentials.");
 
 const failedEvidence = assessFixture(authority, candidateTask, fixture, "runner-a", [
   ...trustedEvidenceFor(candidateTask, fixture.headSha),

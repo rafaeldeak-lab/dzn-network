@@ -642,13 +642,16 @@ function isBranchName(value: string) {
 }
 
 function normalizeRepositoryRemote(remote: string) {
-  if (!/^https?:\/\//i.test(remote)) return remote;
-  const parsed = new URL(remote);
-  parsed.username = "";
-  parsed.password = "";
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(remote)) {
+    const parsed = new URL(remote);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  }
+  const scpStyle = /^([^@/:]+)@([^:]+):(.+)$/.exec(remote);
+  return scpStyle ? `${scpStyle[2]}:${scpStyle[3]}` : remote;
 }
 
 function isAncestor(repositoryPath: string, ancestorSha: string, descendantSha: string) {
