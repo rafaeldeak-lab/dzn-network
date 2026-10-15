@@ -36,6 +36,33 @@ async function main() {
   assert.equal(providerLookup.longitude, -0.1278);
   assert.equal(providerLookup.source, "ipapi");
 
+  let geoProviderCalls = 0;
+  const fallbackProviderLookup = await geolocateServerIp("8.8.8.8", {
+    fetcher: async (input) => {
+      geoProviderCalls += 1;
+      const url = String(input);
+      if (url.includes("ipapi.co")) return new Response(null, { status: 503 });
+      return new Response(
+        JSON.stringify({
+          success: true,
+          latitude: 51.5074,
+          longitude: -0.1278,
+          country: "United Kingdom",
+          region: "England",
+          city: "London",
+          timezone: { id: "Europe/London" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  assert.equal(geoProviderCalls, 2);
+  assert.equal(fallbackProviderLookup.latitude, 51.5074);
+  assert.equal(fallbackProviderLookup.longitude, -0.1278);
+  assert.equal(fallbackProviderLookup.country, "United Kingdom");
+  assert.equal(fallbackProviderLookup.timezone, "Europe/London");
+  assert.equal(fallbackProviderLookup.source, "ipwhois");
+
   const baseRow: MapNodeRow = {
     id: "server-1",
     public_slug: "london-dayz",

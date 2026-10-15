@@ -1,5 +1,14 @@
 const GEO_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-const DEFAULT_GEOIP_ENDPOINT = "https://ipapi.co";
+type GeoIpProvider = {
+  endpoint: string;
+  source: string;
+  path: "ipapi" | "ipwhois";
+};
+
+const DEFAULT_GEOIP_PROVIDERS: readonly GeoIpProvider[] = [
+  { endpoint: "https://ipapi.co", source: "ipapi", path: "ipapi" },
+  { endpoint: "https://ipwho.is", source: "ipwhois", path: "ipwhois" },
+] as const;
 
 export type ServerGeoLocation = {
   latitude: number | null;
@@ -27,6 +36,7 @@ type GeoLookupOptions = {
 
 type GeoIpPayload = {
   error?: boolean;
+  success?: boolean;
   reason?: string;
   latitude?: number | string | null;
   longitude?: number | string | null;
@@ -35,7 +45,7 @@ type GeoIpPayload = {
   region?: string | null;
   region_name?: string | null;
   city?: string | null;
-  timezone?: string | null;
+  timezone?: string | { id?: string | null; name?: string | null } | null;
 };
 
 export async function geolocateServerIp(ip: string | null | undefined, options: GeoLookupOptions = {}): Promise<ServerGeoLocation> {
@@ -43,23 +53,43 @@ export async function geolocateServerIp(ip: string | null | undefined, options: 
   if (!normalizedIp) return fallbackLocation(options.regionHint, "invalid");
   if (!isPublicIpv4(normalizedIp)) return fallbackLocation(options.regionHint, "private");
 
-  const endpoint = (options.endpoint ?? DEFAULT_GEOIP_ENDPOINT).replace(/\/+$/, "");
   const fetcher = options.fetcher ?? fetch;
+  const providers: readonly GeoIpProvider[] = options.endpoint
+    ? [{ endpoint: options.endpoint.replace(/\/+$/, ""), source: "ipapi", path: "ipapi" }]
+    : DEFAULT_GEOIP_PROVIDERS;
+
+  for (const provider of providers) {
+    const location = await lookupGeoIpProvider(normalizedIp, provider, fetcher);
+    if (location) return location;
+  }
+
+  return fallbackLocation(options.regionHint, "geoip-unavailable");
+}
+
+async function lookupGeoIpProvider(
+  ip: string,
+  provider: GeoIpProvider,
+  fetcher: typeof fetch,
+): Promise<ServerGeoLocation | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
+  const requestUrl = provider.path === "ipapi"
+    ? `${provider.endpoint}/${encodeURIComponent(ip)}/json/`
+    : `${provider.endpoint}/${encodeURIComponent(ip)}`;
 
   try {
-    const response = await fetcher(`${endpoint}/${encodeURIComponent(normalizedIp)}/json/`, {
+    const response = await fetcher(requestUrl, {
       headers: { accept: "application/json" },
       signal: controller.signal,
     });
-    if (!response.ok) return fallbackLocation(options.regionHint, "geoip-unavailable");
+    if (!response.ok) return null;
+
     const payload = (await response.json().catch(() => null)) as GeoIpPayload | null;
-    if (!payload || payload.error) return fallbackLocation(options.regionHint, "geoip-unavailable");
+    if (!payload || payload.error || payload.success === false) return null;
 
     const latitude = finiteNumber(payload.latitude);
     const longitude = finiteNumber(payload.longitude);
-    if (latitude === null || longitude === null) return fallbackLocation(options.regionHint, "geoip-unavailable");
+    if (latitude === null || longitude === null) return null;
 
     return {
       latitude: clamp(latitude, -90, 90),
@@ -67,12 +97,12 @@ export async function geolocateServerIp(ip: string | null | undefined, options: 
       country: cleanText(payload.country_name ?? payload.country),
       region: cleanText(payload.region ?? payload.region_name),
       city: cleanText(payload.city),
-      timezone: cleanText(payload.timezone),
-      source: "ipapi",
+      timezone: cleanTimezone(payload.timezone),
+      source: provider.source,
       approximate: false,
     };
   } catch {
-    return fallbackLocation(options.regionHint, "geoip-unavailable");
+    return null;
   } finally {
     clearTimeout(timeout);
   }
@@ -175,6 +205,11 @@ function approximateRegionCoordinates(value: string | null) {
 
 function cleanText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : null;
+}
+
+function cleanTimezone(value: GeoIpPayload["timezone"]) {
+  if (typeof value === "object" && value) return cleanText(value.id ?? value.name);
+  return cleanText(value);
 }
 
 function finiteNumber(value: unknown) {

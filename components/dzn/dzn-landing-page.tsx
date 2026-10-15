@@ -1312,9 +1312,6 @@ function DznOperationalGlobePlaceholder() {
       aria-live="polite"
       aria-label="Loading live DZN operational globe"
     >
-      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-one" aria-hidden="true" />
-      <span className="dzn-operational-globe-orbit dzn-operational-globe-orbit-two" aria-hidden="true" />
-      <span className="dzn-operational-globe-floor-glow" aria-hidden="true" />
       <span className="dzn-operational-globe-placeholder-sphere" aria-hidden="true" />
       <span className="dzn-operational-globe-fallback">Loading live globe...</span>
     </div>
@@ -2051,6 +2048,11 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
             sync_status: typeof rawNode.sync_status === "string" ? rawNode.sync_status : "pending",
             region: typeof rawNode.region === "string" && rawNode.region.trim() ? rawNode.region : "Location awaiting metadata",
             country: typeof rawNode.country === "string" ? rawNode.country : null,
+            location_label: typeof rawNode.location_label === "string" && rawNode.location_label.trim()
+              ? rawNode.location_label
+              : typeof rawNode.region === "string" && rawNode.region.trim()
+                ? rawNode.region
+                : "Location awaiting metadata",
             x: clamp(numberOrZero(rawNode.x), 5, 95),
             y: clamp(numberOrZero(rawNode.y), 8, 90),
             active: Boolean(rawNode.active) || rawNode.sync_status === "active" || rawNode.status === "active",
