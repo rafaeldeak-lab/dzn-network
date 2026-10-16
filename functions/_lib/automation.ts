@@ -855,12 +855,25 @@ export async function markStatusCheckStarted(env: Env, guildId: string, options:
         END,
         updated_at = ?
        WHERE guild_id = ?
-         AND (
+          -- A second scheduler may have selected this row just before the
+          -- first scheduler recorded its outcome. Recheck the live schedule
+          -- here so a completed attempt or retry backoff wins the race.
+          AND COALESCE(next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+          AND COALESCE(next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
+          AND (
            COALESCE(currently_checking_status, 0) = 0
            OR COALESCE(status_sync_started_at, updated_at, '1970-01-01T00:00:00.000Z') <= ?
          )`,
     )
-    .bind(now, `Reclaimed stale status sync lock after ${Math.round(leaseMs / 60000)} minutes.`, now, guildId, staleCutoff)
+    .bind(
+      now,
+      `Reclaimed stale status sync lock after ${Math.round(leaseMs / 60000)} minutes.`,
+      now,
+      guildId,
+      now,
+      now,
+      staleCutoff,
+    )
     .run();
   const changes = Number(result.meta?.changes ?? 0);
   return {
