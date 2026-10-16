@@ -1,19 +1,18 @@
-# DZN Signal Shift release boundary
+# DZN Signal Shift activation release
 
-Signal Shift is a source-only Games Hub release. It adds a private, server-verified 4x4 tactical slide puzzle with a 72-shift cap, five-minute session expiry, daily reward cap, and atomic XP/parts award.
+Signal Shift is a private, server-verified 4x4 tactical slide puzzle with a 72-shift cap, five-minute session expiry, daily reward cap, and atomic XP/parts award.
 
-## Not live through this source release
+## Activation boundary
 
-- `0100_games_hub_signal_shift.sql` has not been applied to production.
-- `DZN_GAMES_SIGNAL_SHIFT_ENABLED` remains `false` in production configuration.
-- No D1 rows, feature flags, Discord memberships, roles, invitations, messages, payment settings, or customer records are changed by this source work.
+`0100_games_hub_signal_shift.sql` was previously applied and independently verified in production. This release enables only `DZN_GAMES_SIGNAL_SHIFT_ENABLED=true` in the Pages production configuration.
 
-## Controlled production sequence
+No D1 migration, Discord membership, role, invitation, message, payment setting, customer record, or player progress is changed by this release outside normal authenticated game play.
 
-1. Record a private recovery point for the intended D1 database.
-2. Apply only `0100_games_hub_signal_shift.sql`.
-3. Verify its migration ledger entry, tables, index, constraints, foreign keys, and zero-row baseline.
-4. Run authenticated production-safe read and one intentionally controlled game session.
-5. Enable only `DZN_GAMES_SIGNAL_SHIFT_ENABLED` after the preceding proof passes.
+## Completed production preflight
 
-The mode must remain disabled if any verification fails. Signal Shift does not alter DayZ statistics, competitive eligibility, entitlements, billing, or Discord access.
+1. `0100_games_hub_signal_shift.sql` appears exactly once in the production migration ledger.
+2. Its session and reward-ledger tables, reward-history index, constraints, and cascading foreign keys match the approved migration.
+3. Both Signal Shift tables have a zero-row baseline and `PRAGMA foreign_key_check` passed.
+4. A read-only authenticated production panel load is required after deployment. It must not start a session or expose the private board layout.
+
+Signal Shift does not alter DayZ statistics, competitive eligibility, entitlements, billing, or Discord access.
