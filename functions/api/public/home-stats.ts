@@ -1539,13 +1539,22 @@ function mapPlacementFor(row: MapNodeRow) {
   const hasCoordinates = row.geo_latitude != null && row.geo_longitude != null;
   const latitude = hasCoordinates ? Number(row.geo_latitude) : Number.NaN;
   const longitude = hasCoordinates ? Number(row.geo_longitude) : Number.NaN;
-  if (publicCountry && hasCoordinates && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+  if (
+    hasCoordinates &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  ) {
+    const aggregateLabel = publicCountry ?? publicGeoRegion ?? publicRegion ?? "Approximate server region";
     return {
       latitude: clamp(Math.round(latitude / 15) * 15, -75, 75),
       longitude: clamp(Math.round(longitude / 15) * 15, -180, 180),
       country: publicCountry,
-      region: publicGeoRegion ?? publicRegion ?? publicCountry,
-      locationLabel: publicCountry,
+      region: aggregateLabel,
+      locationLabel: aggregateLabel,
     };
   }
 

@@ -62,6 +62,8 @@ for (const [lat, lng] of [
 
 assert.equal(source.includes("addGlobeGrid(THREE, globeGroup);"), false,
   "The redundant 3D grid must not be layered over the textured globe.");
+assert.equal(source.includes("geoGraticule10"), false,
+  "The globe texture must not reintroduce latitude/longitude grid lines that visually cross the rendered sphere.");
 assert.match(source, /new THREE\.TorusGeometry\(point\.active \? 0\.046 : 0\.03/,
   "The active server marker should remain visible above the terrain texture.");
 assert.match(source, /initialGlobeRotationForPoints\(globePoints\)/,
