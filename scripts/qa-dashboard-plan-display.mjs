@@ -182,8 +182,8 @@ try {
     assert.equal(typeof releaseHeldBillingStatus, "function");
     releaseHeldBillingStatus();
     await page.getByRole("button", { name: /Billing & Boosts/ }).click();
-    await page.getByText("Billing Date", { exact: true }).waitFor();
-    await page.getByText("Needs review (18 Jul 2026)", { exact: true }).waitFor();
+    await page.getByText("Billing Record", { exact: true }).waitFor();
+    await page.getByText("Stored period ended 18 Jul 2026; review required", { exact: true }).waitFor();
     assert.equal(await page.getByText("Renews", { exact: true }).count(), 0);
     const promoMetric = page.getByText("Promo Credits", { exact: true }).locator("..");
     assert.match(await promoMetric.innerText(), /\b2\b/);

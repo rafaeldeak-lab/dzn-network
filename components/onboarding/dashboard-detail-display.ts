@@ -15,9 +15,10 @@ export function dashboardBillingPeriod(billing: BillingPeriod, now = Date.now())
   const date = new Date(end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const plan = dashboardBillingPlan(billing);
   const active = plan === "pro" || plan === "starter";
-  if (end <= now) return active
-    ? { label: "Billing Date", value: `Needs review (${date})` }
+  if (end < now) return active
+    ? { label: "Billing Record", value: `Stored period ended ${date}; review required` }
     : { label: "Last Period Ended", value: date };
+  if (end === now) return { label: "Billing Date", value: date };
   return { label: active ? billing.cancel_at_period_end ? "Cancels On" : "Renews" : "Billing Period End", value: date };
 }
 
