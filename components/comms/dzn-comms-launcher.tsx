@@ -10,6 +10,7 @@ const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_AC
 export function DznCommsLauncher() {
   const pathname = usePathname() ?? "/";
   const compactOnGames = pathname.startsWith("/games");
+  const hideOnHomeMobile = pathname === "/";
   const disclosureRef = useRef<HTMLDetailsElement | null>(null);
   const didMountRef = useRef(false);
 
@@ -39,16 +40,16 @@ export function DznCommsLauncher() {
           closeDisclosure();
         }
       }}
-      className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start"
+      className={`group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start ${hideOnHomeMobile ? "max-md:hidden" : ""}`}
     >
       <summary
         aria-label="Chat and Help"
         title="Chat and Help"
-        className={`group flex list-none items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 [&::-webkit-details-marker]:hidden ${compactOnGames ? "h-11 w-11 px-0" : "h-12 min-w-[8.5rem] px-3"}`}
+        className={`group flex h-11 w-11 list-none items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-0 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 [&::-webkit-details-marker]:hidden ${compactOnGames ? "" : "md:h-12 md:min-w-[8.5rem] md:px-3"}`}
       >
         <MessagesSquare className="h-5 w-5 group-open:hidden" aria-hidden="true" />
         <X className="hidden h-5 w-5 group-open:block" aria-hidden="true" />
-        <span className="text-left leading-none" hidden={compactOnGames} aria-hidden={compactOnGames}>
+        <span className={`text-left leading-none ${compactOnGames ? "hidden" : "hidden md:block"}`} aria-hidden={compactOnGames}>
           <span className="block text-[0.7rem] font-black uppercase text-white">Chat &amp; Help</span>
           <span className="mt-1 block text-[0.62rem] font-bold uppercase text-cyan-200">Chat &amp; help</span>
         </span>
