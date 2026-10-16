@@ -114,6 +114,22 @@ const LIVE_BILLING_MUTATION_PATTERNS: Array<[RegExp, string]> = [
   [/\bDZN_LIVE_CHECKOUT_ENABLED\b\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)["'`]?\b/i, "live checkout enablement flag assignment detected"],
   [/\b(?:enable|activate|turn\s+on|go\s+live)\b[\s\S]{0,100}\blive\s+billing\b[\s\S]{0,140}\b(?:script|workflow|automation|autodev|unattended)\b/i, "unattended live billing activation path detected"],
 ];
+const EXECUTABLE_TEST_OPERATION_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:exec|execSync|execaCommand)\s*\(\s*["'`][^"'`]{0,420}\bwrangler\s+(?:pages\s+)?deploy\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\b(?:execFile|execFileSync|spawn|spawnSync|execa|Bun\.spawn|Deno\.Command)\s*\(\s*["'`](?:npx|wrangler)["'`]\s*,\s*\[[\s\S]{0,320}\b(?:wrangler|pages|deploy)\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\b(?:exec|execSync|execaCommand)\s*\(\s*["'`][^"'`]{0,420}\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\b(?:execFile|execFileSync|spawn|spawnSync|execa|Bun\.spawn|Deno\.Command)\s*\(\s*["'`]stripe["'`]\s*,\s*\[[\s\S]{0,320}\b(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\b[\s\S]{0,160}\b(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/api\.stripe\.com\/v1\//i, "executable test calls the Stripe API"],
+  [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.ai|openrouter\.ai|api\.groq\.com|api\.replicate\.com)\b/i, "executable test calls a metered AI provider"],
+];
+const EXECUTABLE_TEST_EXECUTION_PATTERN = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|execa|execaCommand|Bun\.spawn|Deno\.Command|fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(/;
+const EXECUTABLE_TEST_NETWORK_PATTERN = /\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(/;
+const EXECUTABLE_TEST_INDIRECT_OPERATION_PATTERNS: Array<[RegExp, string]> = [
+  [/\bwrangler\s+(?:pages\s+)?deploy\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\bapi\.stripe\.com\/v1\//i, "executable test calls the Stripe API"],
+  [/\b(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.ai|openrouter\.ai|api\.groq\.com|api\.replicate\.com)\b|\b(?:OPENAI_API_KEY|AZURE_OPENAI_API_KEY|ANTHROPIC_API_KEY|CLAUDE_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GEMINI_API_KEY|MISTRAL_API_KEY|COHERE_API_KEY|OPENROUTER_API_KEY|GROQ_API_KEY|REPLICATE_API_TOKEN)\b/i, "executable test calls a metered AI provider"],
+];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
@@ -131,7 +147,7 @@ const ADM_PATHS = [
   /^\.github\/workflows\/dzn-(?:adm|nitrado|post-deploy|autodev)/,
 ];
 const AUTH_UI_PATHS = [
-  /^app\/(?:login|logout|auth|signin|sign-in|session|sessions)(?:\/|$)/,
+  /^app\/(?:login|logout|auth|signin|sign-in|signup|sign-up|register|registration|session|sessions)(?:\/|$)/,
   /^components\/(?:auth|login|logout|oauth|session|sessions|discord-auth)(?:\/|$)/,
 ];
 const ONBOARDING_UI_PATHS = [
@@ -181,6 +197,27 @@ export function detectDestructiveMigration(content: string, file = "") {
   if (/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats\b/i.test(text)) findings.push("player_stats table creation detected");
   if (/UPDATE\s+player_profiles[\s\S]{0,260}\b(kills|deaths|joins|disconnects|score|longest_kill_distance|highest_killstreak)\s*=\s*0\b/i.test(text)) findings.push("destructive player_profiles stat reset logic detected");
   return findings;
+}
+
+/**
+ * Test fixtures are permitted to mention protected commands, but a changed
+ * executable test must never run a deployment, mutate live billing, or call a
+ * metered provider under standing authority. This detector is intentionally
+ * invoked only by the Git-range controller, not ordinary source classification.
+ */
+export function detectUnsafeExecutableTestOperations(content: string) {
+  const findings = EXECUTABLE_TEST_OPERATION_PATTERNS
+    .filter(([pattern]) => pattern.test(content))
+    .map(([, message]) => message);
+  if (EXECUTABLE_TEST_EXECUTION_PATTERN.test(content)) {
+    findings.push(...EXECUTABLE_TEST_INDIRECT_OPERATION_PATTERNS
+      .filter(([pattern]) => pattern.test(content))
+      .map(([, message]) => message));
+  }
+  if (EXECUTABLE_TEST_NETWORK_PATTERN.test(content)) {
+    findings.push("executable test makes an outbound network request");
+  }
+  return Array.from(new Set(findings));
 }
 
 function isVerifiedCommsPrivacyCopyAndSwap(content: string, text: string, file: string) {
@@ -395,7 +432,7 @@ function inferProtectedUiSystem(file: string, content: string): SystemCategory |
   if (hasNitradoProtectedUiMarker(file, content)) return "nitrado";
   if (ONBOARDING_UI_PATHS.some((pattern) => pattern.test(file))) return "onboarding";
   if (BILLING_UI_PATHS.some((pattern) => pattern.test(file))) return "billing";
-  if (/\b(?:useAuth|useSession|requireSession|createSession|deleteSession|setSessionCookie|clearSessionCookie|signIn|signOut|oauthCallback|discordOAuth)\b|discord\s+oauth|session\s+cookie/i.test(content)) return "auth";
+  if (/\b(?:useAuth|useSession|requireSession|createSession|deleteSession|setSessionCookie|clearSessionCookie|signIn|signOut|oauthCallback|discordOAuth|authStartHref|authenticated)\b|\/api\/auth\/me\b|discord\s+oauth|session\s+cookie/i.test(content)) return "auth";
   if (/\b(?:reserveAllowance|releaseAllowance|nitradoServiceId|linkedServer|serverLifecycle|claimServer|onboardingStep)\b|allowance reservation|server lifecycle|service association/i.test(content)) return "onboarding";
   if (/\b(?:createCheckoutSession|billingPortal|manageSubscription|subscriptionStatus|planEntitlement|stripeCheckout)\b|checkout session|billing portal|manage subscription|plan entitlement/i.test(content)) return "billing";
   return null;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { classifyPath, detectDestructiveMigration, classifyRecoverableProductionStatus } from "./autodev/risk-classifier";
+import { classifyPath, detectDestructiveMigration, detectUnsafeExecutableTestOperations, classifyRecoverableProductionStatus } from "./autodev/risk-classifier";
 import { isSafePlatformIssue } from "./autodev/pick-safe-issue";
 
 function read(path: string) {
@@ -47,6 +47,10 @@ assert.equal(config.riskGates.blockAutomaticCreditsOrAutoTopUpAssumptions, true)
 assert.equal(classifyPath("docs/README.md", "Fix docs").risk, "low");
 assert.equal(classifyPath("components/home/Hero.tsx", "export function Hero() { return <div />; }").risk, "low");
 assert.equal(classifyPath("app/events/page.tsx", "export default function Page() { return <main />; }").risk, "low");
+assert.equal(classifyPath("app/signup/page.tsx", "export default function Page() { return <main />; }").risk, "high");
+assert.equal(classifyPath("components/home/AuthLink.tsx", "export const authStartHref = '/api/auth/discord';").risk, "high");
+assert.equal(classifyPath("components/home/SessionProbe.tsx", "fetch('/api/auth/me');").risk, "high");
+assert.equal(classifyPath("components/home/Viewer.tsx", "export const authenticated = true;").risk, "high");
 assert.equal(classifyPath("functions/api/events/matchmaking.ts", "createCategorySafeMatchmaking").risk, "medium");
 assert.equal(classifyPath("functions/api/auth/me.ts").risk, "high");
 assert.equal(classifyPath("functions/api/billing/checkout.ts").risk, "high");
@@ -73,6 +77,19 @@ assert.equal(classifyPath(".github/workflows/stripe-secrets.yml", "run: npx wran
 assert.equal(classifyPath("wrangler.toml", "DZN_LIVE_CHECKOUT_ENABLED = \"true\"").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-live-checkout.yml", "env:\n  DZN_LIVE_CHECKOUT_ENABLED: yes").risk, "blocked");
 assert.equal(classifyPath("scripts/test-stripe-live-readiness.ts", "stripe products create --name test fixture").risk, "low");
+const deployTestCommand = ["npx", "wrangler", "pages", "deploy"].join(" ");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${deployTestCommand}');`), ["executable test invokes a Cloudflare deployment command"]);
+const stripeMutationCommand = ["stripe", "products", "create"].join(" ");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${stripeMutationCommand}');`), ["executable test invokes a live Stripe mutation command"]);
+const stripeApiUrl = ["https://api", "stripe.com/v1/products"].join(".");
+const fetchCall = ["fe", "tch"].join("");
+assert.equal(detectUnsafeExecutableTestOperations(`await ${fetchCall}('${stripeApiUrl}');`).includes("executable test calls the Stripe API"), true);
+const aiApiUrl = ["https://api", "openai.com/v1/responses"].join(".");
+assert.equal(detectUnsafeExecutableTestOperations(`await ${fetchCall}('${aiApiUrl}');`).includes("executable test calls a metered AI provider"), true);
+assert.equal(detectUnsafeExecutableTestOperations(`const endpoint = '${aiApiUrl}'; await ${fetchCall}(endpoint);`).includes("executable test calls a metered AI provider"), true);
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await ${fetchCall}('/local-test');`), ["executable test makes an outbound network request"]);
+assert.deepEqual(detectUnsafeExecutableTestOperations(`const command = '${deployTestCommand}'; await execaCommand(command);`), ["executable test invokes a Cloudflare deployment command"]);
+assert.deepEqual(detectUnsafeExecutableTestOperations("const fixture = 'stripe products create';"), []);
 assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");
 assert.equal(classifyPath("scripts/ai-runner.ts", "const key = process.env.GEMINI_API_KEY; runUnattendedAgent(key);").risk, "blocked");
