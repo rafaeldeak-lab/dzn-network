@@ -282,6 +282,38 @@ const outOfScope = assessFixture(authority, {
 }, outOfScopeFixture);
 assert.equal(outOfScope.pullRequestEligible, false, "Every verified file must be within the authority scope.");
 
+const eventsAuthority: StandingAuthority = {
+  ...authority,
+  allowedSystems: ["events"],
+  excludedSystems: [...authority.excludedSystems],
+  approvedTasks: [{
+    taskId: "task-events-page",
+    title: "Tighten event lobby spacing",
+    system: "events",
+    allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"],
+  }],
+};
+const browserFacingEventFixture = makeGitFixture("app/events/page.tsx", "export default function Page() { return <main>Events</main>; }\n");
+const browserFacingEventRange = inspectGitRange(browserFacingEventFixture.path, browserFacingEventFixture.baseSha, browserFacingEventFixture.headSha);
+const browserFacingEventTask = task({
+  id: "task-events-page",
+  title: "Tighten event lobby spacing",
+  system: "events",
+  requestedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"],
+  state: "ready-to-release",
+  implementerId: ready.task!.implementerId,
+  lease: ready.task!.lease,
+  candidate: browserFacingEventRange,
+});
+const missingBrowserQa = assessFixture(
+  eventsAuthority,
+  browserFacingEventTask,
+  browserFacingEventFixture,
+  "runner-a",
+  trustedEvidenceFor(browserFacingEventTask, browserFacingEventRange.headSha).filter((item) => item.kind !== "browser-qa"),
+);
+assert.equal(missingBrowserQa.pullRequestEligible, false, "Every browser-facing route must retain current-head browser QA evidence regardless of its system classification.");
+
 const removedAuthGuardFixture = makeAuthGuardRemovalFixture();
 const removedAuthGuardRange = inspectGitRange(removedAuthGuardFixture.path, removedAuthGuardFixture.baseSha, removedAuthGuardFixture.headSha);
 const removedAuthGuard = assessFixture(authority, {
@@ -382,6 +414,7 @@ assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health che
 rmSync(fixture.path, { force: true, recursive: true });
 rmSync(protectedFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });
+rmSync(browserFacingEventFixture.path, { force: true, recursive: true });
 rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
 rmSync(renamedProtectedFixture.path, { force: true, recursive: true });
 rmSync(typeChangedProtectedFixture.path, { force: true, recursive: true });

@@ -131,7 +131,7 @@ const ADM_PATHS = [
   /^\.github\/workflows\/dzn-(?:adm|nitrado|post-deploy|autodev)/,
 ];
 const AUTH_UI_PATHS = [
-  /^app\/(?:login|logout|auth|signin|sign-in|session|sessions)(?:\/|$)/,
+  /^app\/(?:login|logout|auth|signin|sign-in|signup|sign-up|register|registration|session|sessions)(?:\/|$)/,
   /^components\/(?:auth|login|logout|oauth|session|sessions|discord-auth)(?:\/|$)/,
 ];
 const ONBOARDING_UI_PATHS = [
@@ -395,7 +395,7 @@ function inferProtectedUiSystem(file: string, content: string): SystemCategory |
   if (hasNitradoProtectedUiMarker(file, content)) return "nitrado";
   if (ONBOARDING_UI_PATHS.some((pattern) => pattern.test(file))) return "onboarding";
   if (BILLING_UI_PATHS.some((pattern) => pattern.test(file))) return "billing";
-  if (/\b(?:useAuth|useSession|requireSession|createSession|deleteSession|setSessionCookie|clearSessionCookie|signIn|signOut|oauthCallback|discordOAuth)\b|discord\s+oauth|session\s+cookie/i.test(content)) return "auth";
+  if (/\b(?:useAuth|useSession|requireSession|createSession|deleteSession|setSessionCookie|clearSessionCookie|signIn|signOut|oauthCallback|discordOAuth|authStartHref|authenticated)\b|\/api\/auth\/me\b|discord\s+oauth|session\s+cookie/i.test(content)) return "auth";
   if (/\b(?:reserveAllowance|releaseAllowance|nitradoServiceId|linkedServer|serverLifecycle|claimServer|onboardingStep)\b|allowance reservation|server lifecycle|service association/i.test(content)) return "onboarding";
   if (/\b(?:createCheckoutSession|billingPortal|manageSubscription|subscriptionStatus|planEntitlement|stripeCheckout)\b|checkout session|billing portal|manage subscription|plan entitlement/i.test(content)) return "billing";
   return null;
