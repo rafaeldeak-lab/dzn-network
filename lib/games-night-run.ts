@@ -11,6 +11,22 @@ export const NIGHT_RUN_GATE_WINDOW_MS = 2_450;
 export const NIGHT_RUN_MIN_REACTION_MS = 120;
 export const NIGHT_RUN_MIN_ACTION_INTERVAL_MS = 145;
 
+export type NightRunIntensity = "recon" | "pursuit" | "lockdown";
+
+export function nightRunIntensity(gateIndex: number, totalGates = NIGHT_RUN_TOTAL_GATES): NightRunIntensity {
+  const progress = totalGates > 0 ? gateIndex / totalGates : 0;
+  return progress < 0.28 ? "recon" : progress < 0.64 ? "pursuit" : "lockdown";
+}
+
+/** The API sends the deadline derived by this difficulty curve. */
+export function nightRunGateWindowMs(gateIndex: number, totalGates = NIGHT_RUN_TOTAL_GATES) {
+  switch (nightRunIntensity(gateIndex, totalGates)) {
+    case "pursuit": return 1_900;
+    case "lockdown": return 1_450;
+    default: return NIGHT_RUN_GATE_WINDOW_MS;
+  }
+}
+
 export type NightRunStatus = "playing" | "won" | "failed" | "expired";
 
 export type NightRunGame = {
@@ -24,6 +40,7 @@ export type NightRunGame = {
   safeLane: NightRunLane | null;
   gateStartsAt: number;
   gateEndsAt: number;
+  intensity: NightRunIntensity;
   startedAt: number;
   expiresAt: number;
 };

@@ -7,7 +7,9 @@ import {
   NIGHT_RUN_MAX_COLLISIONS,
   NIGHT_RUN_MIN_REACTION_MS,
   NIGHT_RUN_REWARD,
+  NIGHT_RUN_TOTAL_GATES,
   NIGHT_RUN_TTL_MS,
+  nightRunGateWindowMs,
   type NightRunLane,
   type NightRunPayload,
 } from "../lib/games-night-run";
@@ -93,6 +95,7 @@ async function run() {
 
   await test("the server withholds the safe lane until its issued gate window", async fixture => {
     const started = await start(fixture);
+    assert.equal(started.game?.totalGates, NIGHT_RUN_TOTAL_GATES);
     assert.equal(started.game?.safeLane, null);
     assert.ok((started.game?.gateStartsAt ?? 0) > started.serverTime);
     assert.equal(JSON.stringify(started).includes("lane_sequence_json"), false);
@@ -101,6 +104,21 @@ async function run() {
     assert.ok(visible.game?.safeLane);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("convoy sessions tighten their server-issued gate window during later phases", async fixture => {
+    await start(fixture);
+    const now = Date.now();
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET gate_index = 4, gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now, now - 1_000);
+    const pursuit = await payload(await call(fixture));
+    assert.equal(pursuit.game?.intensity, "pursuit");
+    assert.equal((pursuit.game?.gateEndsAt ?? 0) - (pursuit.game?.gateStartsAt ?? 0), nightRunGateWindowMs(4, NIGHT_RUN_TOTAL_GATES));
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET gate_index = 6, gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now, now - 1_000);
+    const lockdown = await payload(await call(fixture));
+    assert.equal(lockdown.game?.intensity, "lockdown");
+    assert.equal((lockdown.game?.gateEndsAt ?? 0) - (lockdown.game?.gateStartsAt ?? 0), nightRunGateWindowMs(6, NIGHT_RUN_TOTAL_GATES));
   });
 
   await test("pre-emptive and rapid steering fail without ending a run", async fixture => {

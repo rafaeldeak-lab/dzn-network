@@ -8,10 +8,11 @@ import {
   RANGER_RANGE_REWARD,
   RANGER_RANGE_START_COOLDOWN_MS,
   RANGER_RANGE_TARGET_LEAD_MS,
-  RANGER_RANGE_TARGET_WINDOW_MS,
   RANGER_RANGE_TARGETS,
   RANGER_RANGE_TOTAL_SHOTS,
   RANGER_RANGE_TTL_MS,
+  rangerRangeIntensity,
+  rangerRangeTargetWindowMs,
   type RangerRangeGame,
   type RangerRangePayload,
   type RangerRangeTarget,
@@ -62,7 +63,7 @@ function parseTargetSequence(value: string): RangerRangeTarget[] {
 }
 
 function targetEndsAt(row: RangerRangeRow) {
-  return row.target_started_at + RANGER_RANGE_TARGET_WINDOW_MS;
+  return row.target_started_at + rangerRangeTargetWindowMs(row.shot_index);
 }
 
 function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
@@ -71,9 +72,10 @@ function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
     !Number.isInteger(row.misses) || row.misses < 0 || row.misses > RANGER_RANGE_MAX_MISSES) {
     throw new Error("Invalid stored Ranger Range progress");
   }
-  const status = row.status === "playing" && (now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEndsAt(row)) ? "expired" : row.status;
+  const targetEnds = targetEndsAt(row);
+  const status = row.status === "playing" && (now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEnds) ? "expired" : row.status;
   const active = status === "playing";
-  const targetOpen = active && now >= row.target_started_at && now < targetEndsAt(row);
+  const targetOpen = active && now >= row.target_started_at && now < targetEnds;
   return {
     id: row.id,
     version: row.version,
@@ -84,7 +86,8 @@ function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
     maxMisses: RANGER_RANGE_MAX_MISSES,
     target: targetOpen ? sequence[row.shot_index] ?? null : null,
     targetStartsAt: row.target_started_at,
-    targetEndsAt: targetEndsAt(row),
+    targetEndsAt: targetEnds,
+    intensity: rangerRangeIntensity(row.shot_index),
     startedAt: row.started_at,
     expiresAt: row.started_at + RANGER_RANGE_TTL_MS,
   };
@@ -141,7 +144,7 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       const row = await db.prepare("SELECT * FROM dzn_ranger_range_sessions WHERE user_id = ?").bind(user.id).first<RangerRangeRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This range run is not available." }, 404);
       const sequence = parseTargetSequence(row.target_sequence_json);
-      if (row.status !== "playing" || row.version !== body.version || row.shot_index >= RANGER_RANGE_TOTAL_SHOTS ||
+      if (row.status !== "playing" || row.version !== body.version || row.shot_index >= sequence.length ||
         now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEndsAt(row)) {
         return reply({ error: "This range run changed or ended. Refresh to continue." }, 409);
       }

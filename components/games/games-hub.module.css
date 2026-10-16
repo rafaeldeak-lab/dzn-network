@@ -66,8 +66,14 @@
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 38px; align-items: start; }
 .mainColumn, .sidebar { min-width: 0; }
 .gamePicker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
-.gamePicker button { min-width: 0; min-height: 64px; display: flex; align-items: center; gap: 12px; padding: 11px 14px; color: #b9c4c6; background: #151a1c; border: 1px solid #364144; border-radius: 6px; text-align: left; }
-.gamePicker button[aria-pressed=true] { color: var(--cyan); background: #17302e; border-color: #4ccabb; }
+.gamePicker button { position: relative; isolation: isolate; min-width: 0; min-height: 68px; display: flex; align-items: center; gap: 12px; overflow: hidden; padding: 11px 14px; color: #b9c4c6; background: #151a1c; border: 1px solid #364144; border-radius: 6px; text-align: left; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.gamePicker button::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .55; background: radial-gradient(circle at 82% 18%, #43e5ff3b, transparent 42%), linear-gradient(135deg, #12282f80, transparent 63%); }
+.gamePicker button:hover, .gamePicker button:focus-visible { border-color: #86fff0; background: #182527; box-shadow: 0 10px 24px #0008, inset 0 0 0 1px #81fff022; transform: translateY(-1px); outline: none; }
+.gamePicker button[aria-pressed=true] { color: var(--cyan); background: #17302e; border-color: #4ccabb; box-shadow: inset 3px 0 #72ffe6, 0 10px 24px #0008; }
+.gamePicker button[data-game="night-run"]::before { background: radial-gradient(circle at 88% 14%, #e361ff63, transparent 34%), linear-gradient(135deg, #1a1240, #100d24 70%); }
+.gamePicker button[data-game="ranger-range"]::before { background: radial-gradient(circle at 84% 18%, #ffcf5c4d, transparent 34%), linear-gradient(135deg, #20321f, #101a12 70%); }
+.gamePicker button[data-game="minefield"]::before { background: radial-gradient(circle at 86% 16%, #57eaff5c, transparent 36%), linear-gradient(135deg, #102d36, #0c171c 70%); }
+.gamePicker button[data-game="relay-rush"], .gamePicker button[data-game="echo-array"], .gamePicker button[data-game="circuit-forge"] { border-color: #4c6177; }
 .gamePicker button > span { display: grid; gap: 3px; }
 .gamePicker strong { color: #f0f3f3; font-size: 13px; }
 .gamePicker small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
@@ -520,9 +526,14 @@
 .rangerRangeMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .rangerRangeMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .rangerRangeMeta span:last-child { margin-left: auto; }
+.rangerRangeMeta span[data-intensity], .nightRunMeta span[data-intensity] { color: #bdeed1; text-transform: uppercase; }
+.rangerRangeMeta span[data-intensity="pressure"], .nightRunMeta span[data-intensity="pursuit"] { color: #ffd67a; }
+.rangerRangeMeta span[data-intensity="blackout"], .nightRunMeta span[data-intensity="lockdown"] { color: #ff9cad; }
 .rangerRangeStage { position: relative; isolation: isolate; display: grid; gap: 16px; overflow: hidden; min-height: 370px; padding: 22px; border: 1px solid #415c54; border-radius: 6px; background: linear-gradient(140deg, #0e1914 0%, #0b1611 52%, #162017 100%); }
 .rangerRangeStage::before { content: ""; position: absolute; inset: auto 0 0; z-index: -1; height: 47%; border-top: 1px solid #4b6658; background: repeating-linear-gradient(90deg, #17291e 0 11%, #1b3023 11% 12%, #17291e 12% 23%); }
 .rangerRangeStage::after { content: ""; position: absolute; top: 41%; right: 0; left: 0; z-index: -1; height: 3px; background: #8ab49c; opacity: .28; box-shadow: 0 0 20px #7ce5a840; }
+.rangerRangeStage[data-intensity="pressure"] { border-color: #90703f; box-shadow: inset 0 0 70px #573c1073; }
+.rangerRangeStage[data-intensity="blackout"] { border-color: #8b4b5a; background: linear-gradient(140deg, #1d1117, #120b11 55%, #241218); box-shadow: inset 0 0 80px #580e2266; }
 .rangerRangeReadout { display: grid; gap: 5px; text-align: center; }
 .rangerRangeReadout > span { color: #9ac9ae; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .1em; }
 .rangerRangeReadout > strong { color: #eefbf2; font-size: clamp(18px, 3vw, 26px); }
@@ -572,6 +583,8 @@
 .nightRunMeta span:last-child { margin-left: auto; }
 .nightRunStage { position: relative; isolation: isolate; display: grid; gap: 14px; overflow: hidden; min-height: 490px; padding: 20px; border: 1px solid #47436a; border-radius: 6px; background: #070914; box-shadow: inset 0 0 80px #170d3c80; }
 .nightRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5; background: radial-gradient(circle at 50% 8%, #6633c44d, transparent 38%), linear-gradient(135deg, #090b1d, #050710 70%); }
+.nightRunStage[data-intensity="pursuit"] { border-color: #6b5a9e; box-shadow: inset 0 0 92px #30135c80; }
+.nightRunStage[data-intensity="lockdown"] { border-color: #9b4e73; background: #130713; box-shadow: inset 0 0 110px #650d438a, 0 0 30px #5b1c5a32; }
 .nightRunReadout { display: grid; gap: 5px; text-align: center; }
 .nightRunReadout > span { color: #bba8ff; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .12em; }
 .nightRunReadout > strong { color: #f1efff; font-size: clamp(18px, 3vw, 26px); text-transform: capitalize; }

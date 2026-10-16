@@ -69,9 +69,27 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     scene.add(environment);
     const disposables: { dispose: () => void }[] = [];
     const materials: { dispose: () => void }[] = [];
+    const textures: { dispose: () => void }[] = [];
+
+    // Original district art keeps the distant skyline legible while the live, clickable
+    // road, gates, rain, lights, and hazards remain rendered in Three.js in front of it.
+    const districtTexture = new THREE.TextureLoader().load("/images/games/night-run-district-v2.png");
+    districtTexture.colorSpace = THREE.SRGBColorSpace;
+    textures.push(districtTexture);
+    const districtBackdropGeometry = new THREE.PlaneGeometry(48, 22);
+    const districtBackdropMaterial = new THREE.MeshBasicMaterial({ map: districtTexture, transparent: true, opacity: 0.48, depthWrite: false });
+    disposables.push(districtBackdropGeometry); materials.push(districtBackdropMaterial);
+    const districtBackdrop = new THREE.Mesh(districtBackdropGeometry, districtBackdropMaterial);
+    districtBackdrop.position.set(0, 8.9, -27);
+    scene.add(districtBackdrop);
 
     const roadGeometry = new THREE.PlaneGeometry(12.8, 26, 1, 1);
-    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x1a2346, emissive: 0x06112c, emissiveIntensity: 0.8, metalness: 0.72, roughness: 0.48 });
+    const roadTexture = createRoadTexture();
+    textures.push(roadTexture);
+    roadTexture.wrapS = THREE.RepeatWrapping;
+    roadTexture.wrapT = THREE.RepeatWrapping;
+    roadTexture.repeat.set(1.25, 3.6);
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x26355b, emissive: 0x07122f, emissiveIntensity: 0.9, metalness: 0.86, roughness: 0.25, map: roadTexture });
     disposables.push(roadGeometry); materials.push(roadMaterial);
     const road = new THREE.Mesh(roadGeometry, roadMaterial);
     road.rotation.x = -Math.PI / 2;
@@ -97,6 +115,20 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     }
     environment.add(laneLines);
 
+    const speedMarkers = new THREE.Group();
+    const markerGeometry = new THREE.BoxGeometry(0.34, 0.025, 1.15);
+    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0x94eaff, transparent: true, opacity: 0.54 });
+    disposables.push(markerGeometry); materials.push(markerMaterial);
+    const roadMarkers: any[] = [];
+    for (let index = 0; index < 18; index++) {
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+      marker.position.set([-2.55, 0, 2.55][index % 3], 0.035, 8 - Math.floor(index / 3) * 3.4);
+      marker.userData.seed = index;
+      speedMarkers.add(marker);
+      roadMarkers.push(marker);
+    }
+    environment.add(speedMarkers);
+
     const buildingGeometry = new THREE.BoxGeometry(1, 1, 1);
     const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x293663, emissive: 0x080d32, emissiveIntensity: 1.1, metalness: 0.68, roughness: 0.5 });
     disposables.push(buildingGeometry); materials.push(buildingMaterial);
@@ -115,6 +147,22 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       window.position.set(building.position.x - side * (building.scale.x / 2 + 0.01), building.position.y + 0.2, building.position.z);
       window.rotation.y = side * Math.PI / 2;
       environment.add(window);
+    }
+
+    const signGeometry = new THREE.PlaneGeometry(1.7, 0.66);
+    disposables.push(signGeometry);
+    const signLabels = ["DZN//", "RELAY", "NIGHT", "PULSE", "ECHO", "RUN"];
+    for (let index = 0; index < signLabels.length; index++) {
+      const signTexture = createNeonSignTexture(signLabels[index], index % 2 ? "#67d7ff" : "#e377ff");
+      textures.push(signTexture);
+      const signMaterial = new THREE.MeshBasicMaterial({ map: signTexture, transparent: true, opacity: 0.94, depthWrite: false });
+      materials.push(signMaterial);
+      const sign = new THREE.Mesh(signGeometry, signMaterial);
+      const side = index % 2 ? -1 : 1;
+      sign.position.set(side * (6.35 + (index % 3) * 1.08), 2.3 + (index % 2) * 1.16, 3.6 - Math.floor(index / 2) * 4.2);
+      sign.rotation.y = side * Math.PI / 2;
+      sign.userData.seed = index;
+      environment.add(sign);
     }
 
     const vehicleGeometry = new THREE.BoxGeometry(1.16, 0.34, 1.8);
@@ -167,6 +215,20 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       gateLights.set(lane.id, light);
     }
     environment.add(gateGroup);
+
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(480 * 3);
+    for (let index = 0; index < rainPositions.length; index += 3) {
+      const sample = index / 3;
+      rainPositions[index] = ((sample * 37) % 41) - 20;
+      rainPositions[index + 1] = ((sample * 19) % 24) * 0.34 + 0.5;
+      rainPositions[index + 2] = ((sample * 23) % 42) - 22;
+    }
+    rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+    const rainMaterial = new THREE.PointsMaterial({ color: 0x8dc9ff, size: 0.035, transparent: true, opacity: 0.48, depthWrite: false });
+    const rain = new THREE.Points(rainGeometry, rainMaterial);
+    disposables.push(rainGeometry); materials.push(rainMaterial);
+    scene.add(rain);
 
     const starGeometry = new THREE.BufferGeometry();
     const stars = new Float32Array(270);
@@ -230,6 +292,11 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
         vehicle.rotation.z = -vehicle.position.x * 0.05;
         vehicle.position.y = Math.sin(elapsed * 3.2) * 0.018;
         gateGroup.position.z = Math.sin(elapsed * 1.7) * 0.05;
+        roadTexture.offset.y = -(elapsed * 0.36 % 1);
+        roadMarkers.forEach((marker, index) => {
+          marker.position.z = 7.8 - ((elapsed * 8.6 + index * 3.4) % 20.4);
+          marker.material.opacity = 0.28 + (Math.sin(elapsed * 4 + index) + 1) * 0.13;
+        });
         alert.intensity = 14 + Math.sin(elapsed * 2.5) * 3;
         for (const lane of LANES) {
           const live = lane.id === safeLane && active;
@@ -237,6 +304,16 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
           material.emissiveIntensity = (live ? 1.25 : 0.7) + Math.sin(elapsed * 3.4 + lane.x) * (live ? 0.24 : 0.08);
           gateLights.get(lane.id)!.intensity = (live ? 4.6 : 1.8) + Math.sin(elapsed * 2.8 + lane.x) * 0.45;
         }
+        const rainPosition = rainGeometry.attributes.position;
+        for (let index = 1; index < rainPosition.array.length; index += 3) {
+          rainPosition.array[index] -= 0.16 + ((index / 3) % 7) * 0.011;
+          rainPosition.array[index + 1] += 0.07;
+          if (rainPosition.array[index] < 0.15) {
+            rainPosition.array[index] = 8.4;
+            rainPosition.array[index + 1] -= 8;
+          }
+        }
+        rainPosition.needsUpdate = true;
         starField.rotation.y = elapsed * 0.014;
       }
       renderer.render(scene, camera);
@@ -253,10 +330,63 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       disposables.forEach(geometry => geometry.dispose());
       materials.forEach(material => material.dispose());
+      textures.forEach(texture => texture.dispose());
       renderer.dispose();
       renderer.domElement.remove();
     };
   }, [active, motionRunning, safeLane]);
 
   return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
+}
+
+function createRoadTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = "#17254a";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const sheen = context.createLinearGradient(0, 0, canvas.width, 0);
+    sheen.addColorStop(0, "#081127");
+    sheen.addColorStop(0.48, "#263a66");
+    sheen.addColorStop(1, "#081127");
+    context.fillStyle = sheen;
+    context.globalAlpha = 0.65;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.globalAlpha = 0.24;
+    for (let y = 0; y < canvas.height; y += 22) {
+      context.fillStyle = y % 44 ? "#95d5ff" : "#7b56ff";
+      context.fillRect(18 + (y % 32), y, canvas.width - 36, 1);
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createNeonSignTexture(label: string, colour: string) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = 120;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = "#071025";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = colour;
+    context.globalAlpha = 0.8;
+    context.lineWidth = 5;
+    context.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+    context.globalAlpha = 1;
+    context.shadowColor = colour;
+    context.shadowBlur = 18;
+    context.fillStyle = colour;
+    context.font = "900 47px Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, canvas.width / 2, canvas.height / 2 + 3);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }

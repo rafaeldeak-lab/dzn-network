@@ -6,6 +6,7 @@ Generated specifically for the DZN Network Games Hub with the built-in image-gen
 
 - `public/images/games/dzn-outpost.webp`: 1536 x 1024 forest communications workshop backdrop, 357580 bytes. Original generation: `exec-e8bcae8f-766c-46ab-8598-7d119f9553b9.png`.
 - `public/images/games/dzn-field-scanner.webp`: 960 x 640 scanner, survey flags and DZN equipment bag, 112150 bytes. Final edited generation: `exec-c345dead-691b-4946-8159-76943a72eba1.png`.
+- `public/images/games/night-run-district-v2.png`: 1536 x 864 original rain-soaked evacuation district backdrop for the Night Run Three.js scene, 2302421 bytes. Original generation: `exec-89b1c70d-0db6-4c30-afcf-75cd83de29dd.png` on 16 October 2026.
 - Source PNGs remain in the local Codex generated-images directory. WebP derivatives use Sharp, width-only resize without enlargement, quality 85; no visual retouching outside the generation tool.
 
 ## Motion and Accessibility
@@ -29,3 +30,7 @@ Use case: product-mockup / stylized-concept. Original bespoke DZN Network Minesw
 ## Scanner Lettering Edit
 
 Edit only lettering. Keep the entire scene, scanner, flags, satchel, lighting, framing, objects and DZN marks exactly. Remove all decorative sentences and word marks from wall posters, mug, crate, map and notebook. Retain only DZN scanner and satchel lettering and numeric scanner clues.
+
+## Night Run District Prompt
+
+Use case: stylized-concept. Asset type: original 16:9 background artwork for an in-browser cyber-survival game called Night Run. Primary request: a dramatic but readable original near-future rain-soaked evacuation district at night, viewed from a low flight path down an empty elevated road, with luminous checkpoint gates, distant industrial towers, storm clouds, wet reflective asphalt, and subtle teal, violet, and amber lighting. No copyrighted characters or existing game locations. Style/medium: premium real-time 3D game key art, detailed, cinematic, grounded. Composition/framing: wide landscape composition with a clearer darker left and lower area for interface overlays, visual action weighted toward the distant center-right. Lighting/mood: tense, high-energy, cinematic survival challenge. Constraints: no people, no brand logos, no readable words, no letters, no UI, no watermark.
