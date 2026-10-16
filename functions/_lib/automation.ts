@@ -2690,13 +2690,8 @@ async function ensureAutomationCronRunsColumns(db: D1Database) {
     }
   }
 
-  if (!columns.has("job_type") && columns.has("endpoint")) {
-    await db.prepare("UPDATE automation_cron_runs SET job_type = COALESCE(job_type, endpoint)").run();
-  }
-  await db.prepare("UPDATE automation_cron_runs SET job_type = COALESCE(job_type, 'metadata') WHERE job_type IS NULL").run();
-  await db.prepare("UPDATE automation_cron_runs SET started_at = COALESCE(started_at, created_at) WHERE started_at IS NULL").run();
-  await db.prepare("UPDATE automation_cron_runs SET finished_at = COALESCE(finished_at, created_at) WHERE finished_at IS NULL").run();
-  await db.prepare("UPDATE automation_cron_runs SET status = 'success' WHERE status IN ('completed', 'manual')").run();
+  // Historical repairs must run once through the ledger-backed 0103 migration.
+  // A routine schema check must never rescan or rewrite the full cron history.
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_automation_cron_runs_job_type ON automation_cron_runs(job_type)").run();
 }
 
