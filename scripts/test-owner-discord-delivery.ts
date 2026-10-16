@@ -59,6 +59,7 @@ const leaseRaceOwner: SessionUser = { id: "lease_race_owner", discord_id: "90000
 const botPermissions = (BigInt(1) << BigInt(28)).toString();
 const privateInviteChannelPermissions = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 const viewChannel = BigInt(1) << BigInt(10);
+const sendMessages = BigInt(1) << BigInt(11);
 const administrator = BigInt(1) << BigInt(3);
 const manageChannels = BigInt(1) << BigInt(4);
 
@@ -265,7 +266,7 @@ async function run() {
     let pendingInvitePreflight: { started: () => void; wait: Promise<void> } | null = null;
     let failBotIdentityPreflight = false;
     let activeBotPermissions = botPermissions;
-    let activeEveryonePermissions = "0";
+    let activeEveryonePermissions = sendMessages.toString();
     let activeVerifiedOwnerRolePermissions = "0";
     let channelScopedPermissionsGranted = true;
     let channelRoleOverwritePermissions = privateInviteChannelPermissions;
@@ -428,7 +429,7 @@ async function run() {
       const inheritedExtraPermissionDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(inheritedExtraPermissionDiagnostic.ok, false, "Inherited @everyone management permissions must block owner delivery.");
       assert.equal(inheritedExtraPermissionDiagnostic.checks.botHasUnexpectedGuildPermissions, true, "The diagnostic must expose inherited forbidden permissions.");
-      activeEveryonePermissions = "0";
+      activeEveryonePermissions = sendMessages.toString();
 
       const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);
       assert.equal(everyoneRoleDiagnostic.ok, false, "The central guild's @everyone role must never be accepted as the owner role.");

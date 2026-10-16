@@ -103,12 +103,49 @@ const ACCOUNT_DELETION_LEASE_MS = 5 * 60 * 1000;
 const LINKED_SERVER_DELETION_LEASE_MS = 5 * 60 * 1000;
 const DISCORD_PERMISSION_ONE = BigInt(1);
 const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
+const DISCORD_KICK_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(1);
+const DISCORD_BAN_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(2);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
+const DISCORD_MANAGE_CHANNELS = DISCORD_PERMISSION_ONE << BigInt(4);
+const DISCORD_MANAGE_GUILD = DISCORD_PERMISSION_ONE << BigInt(5);
+const DISCORD_VIEW_AUDIT_LOG = DISCORD_PERMISSION_ONE << BigInt(7);
 const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
+const DISCORD_MANAGE_MESSAGES = DISCORD_PERMISSION_ONE << BigInt(13);
+const DISCORD_MENTION_EVERYONE = DISCORD_PERMISSION_ONE << BigInt(17);
+const DISCORD_MUTE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(22);
+const DISCORD_DEAFEN_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(23);
+const DISCORD_MOVE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(24);
+const DISCORD_MANAGE_NICKNAMES = DISCORD_PERMISSION_ONE << BigInt(27);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
+const DISCORD_MANAGE_WEBHOOKS = DISCORD_PERMISSION_ONE << BigInt(29);
+const DISCORD_MANAGE_GUILD_EXPRESSIONS = DISCORD_PERMISSION_ONE << BigInt(30);
+const DISCORD_MANAGE_EVENTS = DISCORD_PERMISSION_ONE << BigInt(33);
+const DISCORD_MANAGE_THREADS = DISCORD_PERMISSION_ONE << BigInt(34);
+const DISCORD_MODERATE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(40);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
-const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
+// A normal community server may give @everyone harmless baseline permissions
+// such as Send Messages. The bot's assigned roles remain restricted to Manage
+// Roles, while inherited moderation and governance permissions remain blockers.
+const DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK =
+  DISCORD_KICK_MEMBERS |
+  DISCORD_BAN_MEMBERS |
+  DISCORD_ADMINISTRATOR |
+  DISCORD_MANAGE_CHANNELS |
+  DISCORD_MANAGE_GUILD |
+  DISCORD_VIEW_AUDIT_LOG |
+  DISCORD_MANAGE_MESSAGES |
+  DISCORD_MENTION_EVERYONE |
+  DISCORD_MUTE_MEMBERS |
+  DISCORD_DEAFEN_MEMBERS |
+  DISCORD_MOVE_MEMBERS |
+  DISCORD_MANAGE_NICKNAMES |
+  DISCORD_MANAGE_ROLES |
+  DISCORD_MANAGE_WEBHOOKS |
+  DISCORD_MANAGE_GUILD_EXPRESSIONS |
+  DISCORD_MANAGE_EVENTS |
+  DISCORD_MANAGE_THREADS |
+  DISCORD_MODERATE_MEMBERS;
 
 export function isOwnerDiscordDeliveryEnabled(env: Env) {
   return deliveryFlagsEnabled(env) && Boolean(readInviteDeliveryConfiguration(env));
@@ -723,6 +760,7 @@ type RoleDeliveryPreflight =
     botId: string;
     botRoleIds: Set<string>;
     basePermissions: bigint;
+    everyoneBasePermissions: bigint;
   }
   | {
     ok: false;
@@ -766,6 +804,7 @@ async function checkDiscordRoleConfiguration(
     const targetRolePosition = Number(targetRole?.position ?? -1);
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, configuration.guildId);
     const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, configuration.guildId);
+    const everyoneBasePermissions = parseBits(roleById.get(configuration.guildId)?.permissions);
     const hasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
     const hasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, basePermissions);
     const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
@@ -816,7 +855,7 @@ async function checkDiscordRoleConfiguration(
       };
     }
     if (!canManageRoles && !(purpose === "cleanup" && hasAdministrator)) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
-    return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
+    return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions, everyoneBasePermissions };
   } catch {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
   }
@@ -842,10 +881,15 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     }
     const channelPermissions = evaluateChannelPermissions(rolePreflight.basePermissions, channel, configuration.guildId, rolePreflight.botRoleIds, rolePreflight.botId);
     const channelScopedPermissions = getBotChannelOverwritePermissions(channel, rolePreflight.botRoleIds, rolePreflight.botId);
+    const everyoneChannelPermissions = getEveryoneChannelOverwritePermissions(channel, configuration.guildId);
+    const privateToEveryone = everyoneIsDeniedView(rolePreflight.everyoneBasePermissions, channel, configuration.guildId);
     const canViewInviteChannel = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
     const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
-    const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelPermissions);
+    const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions | everyoneChannelPermissions);
     const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite, botHasUnexpectedInviteChannelPermissions: hasUnexpectedInviteChannelPermissions };
+    if (!privateToEveryone) {
+      return { ok: false as const, status: "permission_missing" as const, message: "The configured owner invite channel must deny View Channel to @everyone.", httpStatus: null, checks };
+    }
     if (hasUnexpectedInviteChannelPermissions) {
       return { ok: false as const, status: "permission_missing" as const, message: "The configured private invite channel grants DZN Bot permissions outside the owner-delivery allowlist. Keep only View Channel, Create Invite, and the required Manage Roles permission before owner delivery can run.", httpStatus: null, checks };
     }
@@ -887,9 +931,10 @@ function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<st
 }
 
 function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, effectivePermissions: bigint) {
+  const inheritedPermissions = effectivePermissions & ~assignedPermissions;
   return (
     (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
-    (effectivePermissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0)
+    (inheritedPermissions & DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK) !== BigInt(0)
   );
 }
 
@@ -922,6 +967,17 @@ function getBotChannelOverwritePermissions(channel: DiscordChannel, botRoleIds: 
   // Discord combines all bot-role overwrites before its member-specific overwrite;
   // a role allow wins over a role deny, so only explicit role allows grant access.
   return applyOverwrite(roleAllow, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
+}
+
+function getEveryoneChannelOverwritePermissions(channel: DiscordChannel, guildId: string) {
+  const overwrite = (channel.permission_overwrites ?? []).find((candidate) => String(candidate.type) === "0" && String(candidate.id) === guildId);
+  return parseBits(overwrite?.allow);
+}
+
+function everyoneIsDeniedView(basePermissions: bigint, channel: DiscordChannel, guildId: string) {
+  if (hasPermission(basePermissions, DISCORD_ADMINISTRATOR)) return false;
+  const overwrite = (channel.permission_overwrites ?? []).find((candidate) => String(candidate.type) === "0" && String(candidate.id) === guildId);
+  return !hasPermission(applyOverwrite(basePermissions, overwrite), DISCORD_VIEW_CHANNEL);
 }
 
 function applyOverwrite(permissions: bigint, overwrite: DiscordPermissionOverwrite | undefined) {

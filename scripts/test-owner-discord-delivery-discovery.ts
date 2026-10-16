@@ -26,6 +26,7 @@ const viewChannel = (BigInt(1) << BigInt(10)).toString();
 const administrator = (BigInt(1) << BigInt(3)).toString();
 const manageRoles = (BigInt(1) << BigInt(28)).toString();
 const manageChannels = (BigInt(1) << BigInt(4)).toString();
+const sendMessages = (BigInt(1) << BigInt(11)).toString();
 
 async function run() {
   const helper = readFileSync("functions/_lib/owner-discord-delivery-discovery.ts", "utf8");
@@ -68,7 +69,7 @@ async function run() {
     if (url.pathname === `/api/v10/guilds/${guildId}/members/${botId}`) return Response.json({ roles: [botRoleId] });
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
       return Response.json([
-        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: guildId, name: "@everyone", position: 0, permissions: (BigInt(viewChannel) | BigInt(sendMessages)).toString() },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: 0, managed: false },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
         { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 7, permissions: manageRoles, managed: false },
