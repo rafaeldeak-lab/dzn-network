@@ -628,21 +628,21 @@ function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>05 / SIGNAL ENDURANCE</span><h2 id="relay-rush-title">DZN Relay Rush</h2></div><Zap size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Relay Rush" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.relayRushTools}>
-      <div><strong>{game ? `${game.pulsesCleared} / ${game.totalPulses} pulses` : "Twelve signal pulses"}</strong><span>{game ? `${game.maxMisses - game.misses} signal errors remaining` : "Read the live lane, then answer on time."}</span></div>
+      <div><strong>{game ? `${game.pulsesCleared} / ${game.totalPulses} pulses` : "Twelve signal pulses"}</strong><span>{game ? `${game.intensity} phase - ${game.maxMisses - game.misses} signal errors remaining` : "The relay accelerates from link-up to overload and storm."}</span></div>
       <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New run available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
     </div>
     {game ? <>
-      <div className={styles.relayRushMeta}><span><Zap size={14} />{game.pulsesCleared} / {game.totalPulses}</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.relayRushStage} data-ready={targetOpen} data-status={game.status} aria-live="polite">
-        <div className={styles.relayRushReadout}><span>{active ? targetOpen ? "INCOMING PULSE" : "SYNCING RELAY" : game.status === "won" ? "RUN COMPLETE" : "RUN CLOSED"}</span><strong>{active ? targetOpen ? "Choose the lit lane" : "Stand by for the next signal" : game.status === "won" ? "Signal restored" : game.status === "failed" ? "Signal lost" : "Window expired"}</strong></div>
+      <div className={styles.relayRushMeta}><span><Zap size={14} />{game.pulsesCleared} / {game.totalPulses}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.relayRushStage} data-ready={targetOpen} data-status={game.status} data-intensity={game.intensity} aria-live="polite">
+        <div className={styles.relayRushReadout}><span>{active ? targetOpen ? `${game.intensity} / PULSE LIVE` : `${game.intensity} / SYNCING RELAY` : game.status === "won" ? "RUN COMPLETE" : "RUN CLOSED"}</span><strong>{active ? targetOpen ? "Choose the lit lane" : "Stand by for the next signal" : game.status === "won" ? "Signal restored" : game.status === "failed" ? "Signal lost" : "Window expired"}</strong></div>
         <div className={styles.relayRushLanes} role="group" aria-label="Relay Rush signal lanes">
           {RELAY_RUSH_LANES.map(lane => { const meta = RELAY_RUSH_LANE_META[lane]; const lit = targetOpen && game.nextLane === lane; return <button type="button" key={lane} className={styles.relayRushLane}
             data-lane={lane} data-target={lit} disabled={busy || !active || !targetOpen} onClick={() => submitPulse(lane)}
             aria-label={`${meta.label} signal lane (${meta.key})${lit ? ", live" : ""}`}><span>{meta.key}</span><strong>{meta.label}</strong><small>{lit ? "Pulse live" : active ? "Await signal" : "Stand down"}</small></button>; })}
         </div>
-        <p className={styles.relayRushHint}>Keyboard: A / S / D or arrow keys. The server verifies pulse order and timing.</p>
+        <p className={styles.relayRushHint}>Keyboard: A / S / D or arrow keys. The server verifies pulse order and progressively tighter timing windows.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RELAY_RUSH_REWARD.xp} XP and +${RELAY_RUSH_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Run complete."}</span></div></>
@@ -650,7 +650,7 @@ function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
             : !active ? <><Clock3 size={22} /><div><strong>Run expired</strong><span>Start a new signal run when ready.</span></div></>
               : <><Radio size={20} /><div><strong>{targetOpen ? "Pulse live" : "Relay synchronising"}</strong><span>{targetOpen ? "Choose the highlighted lane before the next pulse." : "The next lane appears when the DZN relay opens it."}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.relayRushReady}><Radio size={34} /><h3>Keep the relay alive.</h3><p>Read twelve DZN-controlled signal pulses. The route, timing and reward are verified server-side.</p><div className={styles.rewardPills}><span>12 pulses</span><span>+{RELAY_RUSH_REWARD.xp} XP</span><span>+{RELAY_RUSH_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.relayRushReady}><Radio size={34} /><h3>Keep the relay alive.</h3><p>Read twelve DZN-controlled signal pulses as the connection destabilises through link-up, overload and storm. The route, timing and reward are verified server-side.</p><div className={styles.rewardPills}><span>12 pulses</span><span>+{RELAY_RUSH_REWARD.xp} XP</span><span>+{RELAY_RUSH_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
