@@ -470,7 +470,7 @@ function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskI
   if (outOfScope.length) {
     return pullRequestDeny("Every verified changed file must be within the standing-authority system scope.", { outOfScope });
   }
-  const requiredCriteria = getRequiredAcceptanceCriteria(authority, independentlyClassified.some((item) => item.system === "ui"));
+  const requiredCriteria = getRequiredAcceptanceCriteria(authority, independentlyClassified.some((item) => isBrowserFacingPath(item.file)));
   const requiredCriterionIds = new Set(requiredCriteria.map((criterion) => criterion.id));
   let trustedEvidence: TrustedEvidenceReceipt[];
   try {
@@ -831,4 +831,8 @@ function getRequiredAcceptanceCriteria(authority: StandingAuthority, includesUi:
   const criteria = [...authority.acceptanceCriteria, ...REQUIRED_RELEASE_CRITERIA];
   if (includesUi) criteria.push(BROWSER_QA_CRITERION);
   return Array.from(new Map(criteria.map((criterion) => [criterion.id, criterion])).values());
+}
+
+function isBrowserFacingPath(file: string) {
+  return /^(?:app|components)\//.test(file);
 }

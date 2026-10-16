@@ -47,6 +47,10 @@ assert.equal(config.riskGates.blockAutomaticCreditsOrAutoTopUpAssumptions, true)
 assert.equal(classifyPath("docs/README.md", "Fix docs").risk, "low");
 assert.equal(classifyPath("components/home/Hero.tsx", "export function Hero() { return <div />; }").risk, "low");
 assert.equal(classifyPath("app/events/page.tsx", "export default function Page() { return <main />; }").risk, "low");
+assert.equal(classifyPath("app/signup/page.tsx", "export default function Page() { return <main />; }").risk, "high");
+assert.equal(classifyPath("components/home/AuthLink.tsx", "export const authStartHref = '/api/auth/discord';").risk, "high");
+assert.equal(classifyPath("components/home/SessionProbe.tsx", "fetch('/api/auth/me');").risk, "high");
+assert.equal(classifyPath("components/home/Viewer.tsx", "export const authenticated = true;").risk, "high");
 assert.equal(classifyPath("functions/api/events/matchmaking.ts", "createCategorySafeMatchmaking").risk, "medium");
 assert.equal(classifyPath("functions/api/auth/me.ts").risk, "high");
 assert.equal(classifyPath("functions/api/billing/checkout.ts").risk, "high");
