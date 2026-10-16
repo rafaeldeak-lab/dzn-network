@@ -562,3 +562,37 @@
 @keyframes ranger-range-draw { from { transform: translateY(-50%) translateX(-5px) scaleX(.94); } to { transform: translateY(-50%) translateX(0) scaleX(1); } }
 @media (max-width: 560px) { .rangerRangeTools { align-items: stretch; flex-direction: column; } .rangerRangeMeta { gap: 10px; } .rangerRangeStage { min-height: 0; padding: 16px 10px; } .rangerRangeField { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(104px, 1fr)); min-height: 340px; padding: 10px; } .rangerRangeField::before { display: none; } .rangerRangeBow { display: none; } .rangerRangeTarget { min-height: 104px; } }
 @media (prefers-reduced-motion: reduce) { .rangerRangeTarget[data-live=true], .rangerRangeBow[data-live=true] .rangerRangeArrow { animation: none; } }
+
+.nightRunTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
+.nightRunTools > div { display: grid; gap: 4px; }
+.nightRunTools strong { font-size: 13px; }
+.nightRunTools span { color: var(--muted); font-size: 11px; }
+.nightRunMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
+.nightRunMeta span { display: inline-flex; align-items: center; gap: 5px; }
+.nightRunMeta span:last-child { margin-left: auto; }
+.nightRunStage { position: relative; isolation: isolate; display: grid; gap: 14px; overflow: hidden; min-height: 490px; padding: 20px; border: 1px solid #47436a; border-radius: 6px; background: #070914; box-shadow: inset 0 0 80px #170d3c80; }
+.nightRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5; background: radial-gradient(circle at 50% 8%, #6633c44d, transparent 38%), linear-gradient(135deg, #090b1d, #050710 70%); }
+.nightRunReadout { display: grid; gap: 5px; text-align: center; }
+.nightRunReadout > span { color: #bba8ff; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .12em; }
+.nightRunReadout > strong { color: #f1efff; font-size: clamp(18px, 3vw, 26px); text-transform: capitalize; }
+.hub :global(.dzn-night-run-3d) { width: min(100%, 820px); min-height: 292px; aspect-ratio: 2.15 / 1; overflow: hidden; margin: 0 auto; border: 1px solid #49446c; border-radius: 5px; background: #040610; box-shadow: 0 18px 32px #0000006e; }
+.hub :global(.dzn-night-run-3d canvas) { display: block; width: 100%; height: 100%; touch-action: manipulation; }
+.nightRunLanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: min(100%, 820px); margin: 0 auto; }
+.nightRunLanes button { position: relative; display: grid; justify-items: center; gap: 3px; min-width: 0; min-height: 86px; padding: 10px 28px 10px 10px; overflow: hidden; border: 1px solid #474461; border-radius: 4px; color: #c8c4dd; background: #111124; font-family: var(--font-geist-mono), monospace; text-align: center; transition: background-color 130ms ease, border-color 130ms ease, box-shadow 130ms ease, transform 130ms ease; }
+.nightRunLanes button > span { color: #7e779f; font-size: 10px; font-weight: 900; }
+.nightRunLanes button strong { color: #ebeaff; font-size: clamp(11px, 2vw, 14px); text-transform: uppercase; }
+.nightRunLanes button small { color: #8e88aa; font-size: 9px; font-weight: 800; }
+.nightRunLanes button kbd { position: absolute; top: 8px; right: 8px; min-width: 19px; padding: 2px 4px; border: 1px solid #5c557d; border-radius: 2px; color: #c8c1f2; background: #0c0c1a; font: 800 9px var(--font-geist-mono), monospace; }
+.nightRunLanes button[data-live=true] { border-color: #61f0bf; color: #eafff4; background: #10372f; box-shadow: inset 0 0 0 1px #79ffd34d, 0 0 20px #43efa451; cursor: pointer; animation: night-run-safe-lane 520ms ease-in-out infinite alternate; }
+.nightRunLanes button[data-live=true] > span, .nightRunLanes button[data-live=true] small { color: #98ffd9; }
+.nightRunLanes button[data-live=true] kbd { border-color: #69d9b0; color: #c5ffe5; background: #0b2722; }
+.nightRunLanes button[data-live=true]:hover, .nightRunLanes button[data-live=true]:focus-visible { border-color: #edfff7; background: #164c40; outline: 2px solid #ffffff; outline-offset: 2px; }
+.nightRunLanes button:disabled { cursor: not-allowed; }
+.nightRunHint { margin: 0; color: var(--muted); font-size: 11px !important; line-height: 1.6; text-align: center; }
+.nightRunReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
+.nightRunReady svg { color: #b786ff; }
+.nightRunReady p { max-width: 510px; }
+.hub[data-motion=paused] .nightRunLanes button[data-live=true] { animation-play-state: paused; }
+@keyframes night-run-safe-lane { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+@media (max-width: 560px) { .nightRunTools { align-items: stretch; flex-direction: column; } .nightRunMeta { gap: 10px; } .nightRunStage { min-height: 0; padding: 16px 10px; } .hub :global(.dzn-night-run-3d) { min-height: 260px; aspect-ratio: 4 / 3; } .nightRunLanes { gap: 7px; } .nightRunLanes button { min-height: 92px; padding-inline: 7px 24px; } }
+@media (prefers-reduced-motion: reduce) { .nightRunLanes button[data-live=true] { animation: none; } }

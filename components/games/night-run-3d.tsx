@@ -1,0 +1,262 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import * as ThreeModule from "three";
+import type { NightRunLane } from "@/lib/games-night-run";
+
+// Three's recursive declaration graph can exceed the TypeScript checker stack in this large client bundle.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const THREE: any = ThreeModule;
+
+type NightRun3DProps = {
+  safeLane: NightRunLane | null;
+  active: boolean;
+  disabled: boolean;
+  motionRunning: boolean;
+  onDrive: (lane: NightRunLane) => void;
+};
+
+const LANES: { id: NightRunLane; x: number; label: string }[] = [
+  { id: "left", x: -3.15, label: "Left" },
+  { id: "centre", x: 0, label: "Centre" },
+  { id: "right", x: 3.15, label: "Right" },
+];
+
+export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive }: NightRun3DProps) {
+  const mountRef = useRef<HTMLDivElement>(null);
+  const driveRef = useRef(onDrive);
+  const disabledRef = useRef(disabled);
+
+  useEffect(() => { driveRef.current = onDrive; }, [onDrive]);
+  useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount || typeof WebGLRenderingContext === "undefined") return;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x070a1a);
+    scene.fog = new THREE.FogExp2(0x070a1a, 0.038);
+    const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 110);
+    camera.position.set(9.5, 7.6, 13.5);
+    camera.lookAt(0, 0.25, -2.8);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.18;
+    renderer.domElement.dataset.dznNightRunCanvas = "true";
+    renderer.domElement.setAttribute("aria-hidden", "true");
+    mount.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0x98b8ff, 0x0a0817, 2.6));
+    const moon = new THREE.DirectionalLight(0x899bff, 3.6);
+    moon.position.set(-7, 13, 8);
+    scene.add(moon);
+    const alert = new THREE.PointLight(0xc035ff, 16, 20, 1.6);
+    alert.position.set(0, 3.6, -4.2);
+    scene.add(alert);
+    const cityGlow = new THREE.PointLight(0x318fff, 8, 28, 1.7);
+    cityGlow.position.set(-6, 4.5, -7);
+    scene.add(cityGlow);
+    const districtGlow = new THREE.PointLight(0xff568f, 6, 22, 1.8);
+    districtGlow.position.set(7, 3.3, -9);
+    scene.add(districtGlow);
+
+    const environment = new THREE.Group();
+    environment.rotation.y = -0.04;
+    scene.add(environment);
+    const disposables: { dispose: () => void }[] = [];
+    const materials: { dispose: () => void }[] = [];
+
+    const roadGeometry = new THREE.PlaneGeometry(12.8, 26, 1, 1);
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x1a2346, emissive: 0x06112c, emissiveIntensity: 0.8, metalness: 0.72, roughness: 0.48 });
+    disposables.push(roadGeometry); materials.push(roadMaterial);
+    const road = new THREE.Mesh(roadGeometry, roadMaterial);
+    road.rotation.x = -Math.PI / 2;
+    road.position.z = -4.2;
+    environment.add(road);
+
+    const shoulderGeometry = new THREE.PlaneGeometry(23, 27);
+    const shoulderMaterial = new THREE.MeshStandardMaterial({ color: 0x070a13, metalness: 0.22, roughness: 0.94 });
+    disposables.push(shoulderGeometry); materials.push(shoulderMaterial);
+    const shoulder = new THREE.Mesh(shoulderGeometry, shoulderMaterial);
+    shoulder.rotation.x = -Math.PI / 2;
+    shoulder.position.set(0, -0.035, -4.4);
+    environment.add(shoulder);
+
+    const laneLines = new THREE.Group();
+    for (const x of [-1.58, 1.58]) {
+      const geometry = new THREE.BoxGeometry(0.055, 0.02, 25);
+      const material = new THREE.MeshBasicMaterial({ color: 0x42cbff, transparent: true, opacity: 0.52 });
+      disposables.push(geometry); materials.push(material);
+      const line = new THREE.Mesh(geometry, material);
+      line.position.set(x, 0.025, -4.25);
+      laneLines.add(line);
+    }
+    environment.add(laneLines);
+
+    const buildingGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x293663, emissive: 0x080d32, emissiveIntensity: 1.1, metalness: 0.68, roughness: 0.5 });
+    disposables.push(buildingGeometry); materials.push(buildingMaterial);
+    const windowGeometry = new THREE.PlaneGeometry(0.42, 0.26);
+    const windowMaterials = [0x6b3dff, 0x31caff, 0xd23dff].map(color => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.88 }));
+    disposables.push(windowGeometry); materials.push(...windowMaterials);
+    for (let index = 0; index < 18; index++) {
+      const side = index % 2 ? -1 : 1;
+      const row = Math.floor(index / 2);
+      const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+      const height = 1.2 + ((index * 7) % 4) * 0.65;
+      building.scale.set(1.2 + (index % 3) * 0.25, height, 1.2 + (index % 2) * 0.45);
+      building.position.set(side * (7 + (index % 3) * 1.25), height / 2, 5.6 - row * 2.6);
+      environment.add(building);
+      const window = new THREE.Mesh(windowGeometry, windowMaterials[index % windowMaterials.length]);
+      window.position.set(building.position.x - side * (building.scale.x / 2 + 0.01), building.position.y + 0.2, building.position.z);
+      window.rotation.y = side * Math.PI / 2;
+      environment.add(window);
+    }
+
+    const vehicleGeometry = new THREE.BoxGeometry(1.16, 0.34, 1.8);
+    const vehicleMaterial = new THREE.MeshStandardMaterial({ color: 0x4ebfff, emissive: 0x073a82, emissiveIntensity: 1.1, metalness: 0.86, roughness: 0.23 });
+    const cabinGeometry = new THREE.BoxGeometry(0.72, 0.28, 0.78);
+    const cabinMaterial = new THREE.MeshStandardMaterial({ color: 0x09152f, emissive: 0x0a3f88, emissiveIntensity: 0.9, metalness: 0.72, roughness: 0.18 });
+    disposables.push(vehicleGeometry, cabinGeometry); materials.push(vehicleMaterial, cabinMaterial);
+    const vehicle = new THREE.Group();
+    const vehicleBody = new THREE.Mesh(vehicleGeometry, vehicleMaterial);
+    vehicleBody.position.y = 0.3;
+    vehicle.add(vehicleBody);
+    const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
+    cabin.position.set(0, 0.6, -0.08);
+    vehicle.add(cabin);
+    vehicle.position.set(0, 0, 5.6);
+    environment.add(vehicle);
+
+    const gateGroup = new THREE.Group();
+    const gateHitboxes: any[] = [];
+    const gateMaterials = new Map<NightRunLane, any>();
+    const gateLights = new Map<NightRunLane, any>();
+    const gatePostGeometry = new THREE.BoxGeometry(2.32, 2.9, 0.2);
+    const gateBeamGeometry = new THREE.BoxGeometry(2.48, 0.18, 0.28);
+    const hitboxGeometry = new THREE.BoxGeometry(2.4, 2.65, 0.58);
+    disposables.push(gatePostGeometry, gateBeamGeometry, hitboxGeometry);
+    for (const lane of LANES) {
+      const material = new THREE.MeshStandardMaterial({ color: lane.id === safeLane && active ? 0x37e6af : 0x5b1b89, emissive: lane.id === safeLane && active ? 0x075e44 : 0x260a50, emissiveIntensity: lane.id === safeLane && active ? 1.38 : 0.86, metalness: 0.76, roughness: 0.28 });
+      const hitboxMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+      const beamMaterial = new THREE.MeshBasicMaterial({ color: lane.id === safeLane && active ? 0x9fffe2 : 0xc37aff, transparent: true, opacity: lane.id === safeLane && active ? 0.98 : 0.62 });
+      materials.push(material, hitboxMaterial, beamMaterial);
+      gateMaterials.set(lane.id, material);
+      const leftPost = new THREE.Mesh(gatePostGeometry, material);
+      leftPost.scale.x = 0.12;
+      leftPost.position.set(lane.x - 1.12, 1.32, -4.1);
+      gateGroup.add(leftPost);
+      const rightPost = leftPost.clone();
+      rightPost.position.x = lane.x + 1.12;
+      gateGroup.add(rightPost);
+      const beam = new THREE.Mesh(gateBeamGeometry, beamMaterial);
+      beam.position.set(lane.x, 2.55, -4.1);
+      gateGroup.add(beam);
+      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+      hitbox.position.set(lane.x, 1.28, -4.16);
+      hitbox.userData = { lane: lane.id };
+      gateGroup.add(hitbox);
+      gateHitboxes.push(hitbox);
+      const light = new THREE.PointLight(lane.id === safeLane && active ? 0x46ffc1 : 0xba67ff, lane.id === safeLane && active ? 4.8 : 2.2, 6.4, 2);
+      light.position.set(lane.x, 1.9, -3.85);
+      gateGroup.add(light);
+      gateLights.set(lane.id, light);
+    }
+    environment.add(gateGroup);
+
+    const starGeometry = new THREE.BufferGeometry();
+    const stars = new Float32Array(270);
+    for (let index = 0; index < stars.length; index += 3) {
+      const sample = index / 3;
+      stars[index] = ((sample * 29) % 31) - 15;
+      stars[index + 1] = 2 + ((sample * 17) % 19) * 0.44;
+      stars[index + 2] = -22 + ((sample * 13) % 32);
+    }
+    starGeometry.setAttribute("position", new THREE.BufferAttribute(stars, 3));
+    const starMaterial = new THREE.PointsMaterial({ color: 0x95baff, size: 0.055, transparent: true, opacity: 0.92 });
+    disposables.push(starGeometry); materials.push(starMaterial);
+    const starField = new THREE.Points(starGeometry, starMaterial);
+    scene.add(starField);
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let frame = 0;
+    let pointerX = 0;
+    let pointerY = 0;
+
+    function hitLane(event: PointerEvent) {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+      pointerX = pointer.x; pointerY = pointer.y;
+      raycaster.setFromCamera(pointer, camera);
+      return raycaster.intersectObjects(gateHitboxes, false)[0]?.object.userData.lane as NightRunLane | undefined;
+    }
+    function onPointerMove(event: PointerEvent) {
+      const lane = hitLane(event);
+      renderer.domElement.style.cursor = lane && active && !disabledRef.current ? "pointer" : "default";
+    }
+    function onPointerLeave() { renderer.domElement.style.cursor = "default"; }
+    function onPointerUp(event: PointerEvent) {
+      if (event.button !== 0 || disabledRef.current || !active) return;
+      const lane = hitLane(event);
+      if (lane) driveRef.current(lane);
+    }
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+    renderer.domElement.addEventListener("pointerup", onPointerUp);
+
+    const resize = new ResizeObserver(entries => {
+      const width = Math.max(1, entries[0]?.contentRect.width ?? mount.clientWidth);
+      const height = Math.max(1, entries[0]?.contentRect.height ?? mount.clientHeight);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+    });
+    resize.observe(mount);
+
+    const started = performance.now();
+    function render(time: number) {
+      const elapsed = (time - started) / 1_000;
+      if (motionRunning) {
+        environment.rotation.y += ((-0.04 + pointerX * 0.055) - environment.rotation.y) * 0.03;
+        environment.rotation.x += ((pointerY * -0.025) - environment.rotation.x) * 0.025;
+        vehicle.position.x += ((safeLane === "left" ? -0.45 : safeLane === "right" ? 0.45 : 0) - vehicle.position.x) * 0.018;
+        vehicle.rotation.z = -vehicle.position.x * 0.05;
+        vehicle.position.y = Math.sin(elapsed * 3.2) * 0.018;
+        gateGroup.position.z = Math.sin(elapsed * 1.7) * 0.05;
+        alert.intensity = 14 + Math.sin(elapsed * 2.5) * 3;
+        for (const lane of LANES) {
+          const live = lane.id === safeLane && active;
+          const material = gateMaterials.get(lane.id)!;
+          material.emissiveIntensity = (live ? 1.25 : 0.7) + Math.sin(elapsed * 3.4 + lane.x) * (live ? 0.24 : 0.08);
+          gateLights.get(lane.id)!.intensity = (live ? 4.6 : 1.8) + Math.sin(elapsed * 2.8 + lane.x) * 0.45;
+        }
+        starField.rotation.y = elapsed * 0.014;
+      }
+      renderer.render(scene, camera);
+      renderer.domElement.dataset.renderFrames = String(Number(renderer.domElement.dataset.renderFrames ?? 0) + 1);
+      if (motionRunning) frame = requestAnimationFrame(render);
+    }
+    render(performance.now());
+
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+      renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      disposables.forEach(geometry => geometry.dispose());
+      materials.forEach(material => material.dispose());
+      renderer.dispose();
+      renderer.domElement.remove();
+    };
+  }, [active, motionRunning, safeLane]);
+
+  return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
+}
