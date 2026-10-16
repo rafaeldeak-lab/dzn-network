@@ -425,8 +425,8 @@
 .circuitForgeMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .circuitForgeMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .circuitForgeMeta span:last-child { margin-left: auto; }
-.circuitForgeStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #5e5840; border-radius: 6px; background: #15140f; }
-.circuitForgeStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .46; background-image: linear-gradient(90deg, transparent 49%, #ab93401c 50%, transparent 51%), linear-gradient(0deg, transparent 49%, #ab934015 50%, transparent 51%); background-size: 32px 32px; }
+.circuitForgeStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #5e5840; border-radius: 6px; background-color: #15140f; background-image: linear-gradient(180deg, #090c0ee0 0%, #10110ddd 42%, #12120feb 100%), url("/images/games/circuit-forge-workshop-v2.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 86px #030403d9; }
+.circuitForgeStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .6; background-image: linear-gradient(90deg, transparent 49%, #ab934022 50%, transparent 51%), linear-gradient(0deg, transparent 49%, #ab93401c 50%, transparent 51%); background-size: 32px 32px; }
 .circuitForgeReadout { display: grid; gap: 5px; text-align: center; }
 .circuitForgeReadout > span { color: #bcae7a; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .circuitForgeReadout > strong { color: #fff7dc; font-size: clamp(18px, 3vw, 26px); }
