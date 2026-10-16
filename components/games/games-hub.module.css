@@ -401,7 +401,12 @@
 .signalShiftMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .signalShiftMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .signalShiftMeta span:last-child { margin-left: auto; }
+.signalShiftMeta span[data-intensity] { color: #b7d8e8; text-transform: uppercase; }
+.signalShiftMeta span[data-intensity="pressure"] { color: #ffd67a; }
+.signalShiftMeta span[data-intensity="blackout"] { color: #ff9bac; }
 .signalShiftStage { display: grid; gap: 18px; padding: 22px; border: 1px solid #4a4f65; border-radius: 6px; background: #10121a; }
+.signalShiftStage[data-intensity="pressure"] { border-color: #786f4b; box-shadow: inset 0 0 72px #3a311457; }
+.signalShiftStage[data-intensity="blackout"] { border-color: #875169; background-color: #1a0f1d; box-shadow: inset 0 0 86px #4b173b82, 0 0 22px #3b173a36; }
 .signalShiftReadout { display: grid; gap: 5px; text-align: center; }
 .signalShiftReadout > span { color: #9ca6c9; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .signalShiftReadout > strong { color: #eef1ff; font-size: clamp(18px, 3vw, 26px); }
@@ -412,6 +417,8 @@
 .signalShiftTile > span { color: #9ceee5; font-size: clamp(8px, 1.6vw, 11px); font-weight: 800; letter-spacing: .08em; }
 .signalShiftTile[data-blank=true] { border-style: dashed; border-color: #4f7890; color: #8ed9d0; background: #0e1c24; }
 .signalShiftTile[data-adjacent=true] { border-color: #75ded3; color: #edfffc; background: #173935; cursor: pointer; }
+.signalShiftStage[data-intensity="pressure"] .signalShiftTile[data-adjacent=true] { border-color: #dfbd68; background: #3f321d; }
+.signalShiftStage[data-intensity="blackout"] .signalShiftTile[data-adjacent=true] { border-color: #eb88ba; background: #47203c; }
 .signalShiftTile[data-adjacent=true]:hover, .signalShiftTile[data-adjacent=true]:focus-visible { border-color: #eefffb; background: #24504b; outline: 2px solid #ffffff; outline-offset: 2px; transform: translateY(-1px); }
 .signalShiftTile:disabled { cursor: not-allowed; }
 .signalShiftHint { margin: 0; color: var(--muted); font-size: 11px !important; line-height: 1.6; text-align: center; }
