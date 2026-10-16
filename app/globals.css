@@ -7494,6 +7494,10 @@ button.dzn-header-action {
   font-size: 0.82rem;
 }
 
+.dzn-operational-globe-shell {
+  position: relative;
+}
+
 .dzn-operational-globe-stage {
   position: relative;
   height: clamp(228px, 20vw, 278px);
@@ -7585,6 +7589,70 @@ button.dzn-header-action {
   top: auto;
   bottom: 0.75rem;
   color: rgba(196, 181, 253, 0.72);
+}
+
+.dzn-operational-globe-node-status {
+  position: absolute;
+  left: 0.7rem;
+  top: 0.7rem;
+  z-index: 8;
+  display: grid;
+  gap: 0.08rem;
+  max-width: min(56%, 180px);
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 9, 20, 0.72);
+  padding: 0.45rem 0.55rem;
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.14);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+.dzn-operational-globe-node-status span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: #a5f3fc;
+  font-size: 0.54rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dzn-operational-globe-node-status i {
+  width: 0.38rem;
+  height: 0.38rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.9);
+}
+
+.dzn-operational-globe-node-status strong,
+.dzn-operational-globe-node-status em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dzn-operational-globe-node-status strong {
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.dzn-operational-globe-node-status em {
+  color: rgba(191, 219, 254, 0.78);
+  font-size: 0.61rem;
+  font-style: normal;
+}
+
+@media (max-width: 480px) {
+  .dzn-operational-globe-node-status {
+    top: 3.55rem;
+    max-width: min(72%, 180px);
+  }
 }
 
 .dzn-operational-globe-tooltip {

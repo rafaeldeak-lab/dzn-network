@@ -102,6 +102,10 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
   const [failed, setFailed] = useState(false);
 
   const globePoints = useMemo(() => buildGlobePoints(nodes), [nodes]);
+  const featuredNode = useMemo(
+    () => globePoints.find((point) => point.active) ?? globePoints[0] ?? null,
+    [globePoints],
+  );
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -179,69 +183,81 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
   }, [globePoints, router]);
 
   return (
-    <div
-      ref={stageRef}
-      className="dzn-operational-globe-stage"
-      role="img"
-      aria-label="Slow rotating DZN operational globe with linked public server nodes"
-    >
-      {!ready && !failed ? (
-        <span className="dzn-operational-globe-fallback">Loading globe telemetry</span>
-      ) : null}
-      {failed ? (
-        <span className="dzn-operational-globe-fallback">Globe telemetry unavailable</span>
-      ) : null}
-      {ready && globePoints.length === 0 ? (
-        <span className="dzn-operational-globe-empty">Server locations update after ADM sync</span>
-      ) : null}
-      {tooltip ? (
-        <span
-          className="dzn-operational-globe-tooltip"
-          style={{ left: tooltip.x, top: tooltip.y }}
-        >
-          <strong>{tooltip.name}</strong>
-          <span>{tooltip.region}</span>
-          <em className={`dzn-operational-globe-tooltip-status dzn-operational-globe-tooltip-status--${tooltip.tone}`}>
-            {tooltip.status}
-          </em>
-        </span>
-      ) : null}
+    <div className="dzn-operational-globe-shell">
       <div
-        className="dzn-operational-globe-controls"
-        aria-label="Globe view controls"
-        onPointerDown={(event) => event.stopPropagation()}
+        ref={stageRef}
+        className="dzn-operational-globe-stage"
+        role="img"
+        aria-label="Slow rotating DZN operational globe with linked public server nodes"
       >
-        <button
-          type="button"
-          aria-label="Zoom globe in"
-          onClick={() => {
-            hasUserAdjustedViewRef.current = true;
-            globeControlsRef.current?.zoomBy(GLOBE_ZOOM_STEP);
-          }}
+        {!ready && !failed ? (
+          <span className="dzn-operational-globe-fallback">Loading globe telemetry</span>
+        ) : null}
+        {failed ? (
+          <span className="dzn-operational-globe-fallback">Globe telemetry unavailable</span>
+        ) : null}
+        {ready && globePoints.length === 0 ? (
+          <span className="dzn-operational-globe-empty">Server locations update after ADM sync</span>
+        ) : null}
+        {tooltip ? (
+          <span
+            className="dzn-operational-globe-tooltip"
+            style={{ left: tooltip.x, top: tooltip.y }}
+          >
+            <strong>{tooltip.name}</strong>
+            <span>{tooltip.region}</span>
+            <em className={`dzn-operational-globe-tooltip-status dzn-operational-globe-tooltip-status--${tooltip.tone}`}>
+              {tooltip.status}
+            </em>
+          </span>
+        ) : null}
+        <div
+          className="dzn-operational-globe-controls"
+          aria-label="Globe view controls"
+          onPointerDown={(event) => event.stopPropagation()}
         >
-          +
-        </button>
-        <button
-          type="button"
-          aria-label="Zoom globe out"
-          onClick={() => {
-            hasUserAdjustedViewRef.current = true;
-            globeControlsRef.current?.zoomBy(-GLOBE_ZOOM_STEP);
-          }}
-        >
-          -
-        </button>
-        <button
-          type="button"
-          aria-label="Reset globe zoom"
-          onClick={() => {
-            hasUserAdjustedViewRef.current = true;
-            globeControlsRef.current?.resetZoom();
-          }}
-        >
-          Reset
-        </button>
+          <button
+            type="button"
+            aria-label="Zoom globe in"
+            onClick={() => {
+              hasUserAdjustedViewRef.current = true;
+              globeControlsRef.current?.zoomBy(GLOBE_ZOOM_STEP);
+            }}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom globe out"
+            onClick={() => {
+              hasUserAdjustedViewRef.current = true;
+              globeControlsRef.current?.zoomBy(-GLOBE_ZOOM_STEP);
+            }}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            aria-label="Reset globe zoom"
+            onClick={() => {
+              hasUserAdjustedViewRef.current = true;
+              globeControlsRef.current?.resetZoom();
+            }}
+          >
+            Reset
+          </button>
+        </div>
       </div>
+      {ready && featuredNode ? (
+        <div className="dzn-operational-globe-node-status" aria-live="polite">
+          <span>
+            <i aria-hidden="true" />
+            {featuredNode.active ? "Live node" : "Public node"}
+          </span>
+          <strong>{featuredNode.node.display_name || featuredNode.node.name}</strong>
+          <em>{featuredNode.region}</em>
+        </div>
+      ) : null}
     </div>
   );
 }
