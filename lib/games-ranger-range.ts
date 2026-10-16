@@ -11,6 +11,22 @@ export const RANGER_RANGE_TARGET_WINDOW_MS = 2_300;
 export const RANGER_RANGE_MIN_REACTION_MS = 110;
 export const RANGER_RANGE_MIN_ACTION_INTERVAL_MS = 140;
 
+export type RangerRangeIntensity = "calibration" | "pressure" | "blackout";
+
+export function rangerRangeIntensity(shotIndex: number, totalShots = RANGER_RANGE_TOTAL_SHOTS): RangerRangeIntensity {
+  const progress = totalShots > 0 ? shotIndex / totalShots : 0;
+  return progress < 0.3 ? "calibration" : progress < 0.7 ? "pressure" : "blackout";
+}
+
+/** The API, rather than the browser, owns the escalating target deadline. */
+export function rangerRangeTargetWindowMs(shotIndex: number, totalShots = RANGER_RANGE_TOTAL_SHOTS) {
+  switch (rangerRangeIntensity(shotIndex, totalShots)) {
+    case "pressure": return 1_850;
+    case "blackout": return 1_450;
+    default: return RANGER_RANGE_TARGET_WINDOW_MS;
+  }
+}
+
 export type RangerRangeStatus = "playing" | "won" | "failed" | "expired";
 
 export type RangerRangeGame = {
@@ -24,6 +40,7 @@ export type RangerRangeGame = {
   target: RangerRangeTarget | null;
   targetStartsAt: number;
   targetEndsAt: number;
+  intensity: RangerRangeIntensity;
   startedAt: number;
   expiresAt: number;
 };

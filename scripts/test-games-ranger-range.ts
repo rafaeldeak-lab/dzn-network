@@ -7,7 +7,9 @@ import {
   RANGER_RANGE_MAX_MISSES,
   RANGER_RANGE_MIN_REACTION_MS,
   RANGER_RANGE_REWARD,
+  RANGER_RANGE_TOTAL_SHOTS,
   RANGER_RANGE_TTL_MS,
+  rangerRangeTargetWindowMs,
   type RangerRangePayload,
   type RangerRangeTarget,
 } from "../lib/games-ranger-range";
@@ -99,6 +101,7 @@ async function run() {
 
   await test("the target remains hidden until its server-issued window opens", async fixture => {
     const started = await start(fixture);
+    assert.equal(started.game?.totalShots, RANGER_RANGE_TOTAL_SHOTS);
     assert.equal(started.game?.target, null);
     assert.ok((started.game?.targetStartsAt ?? 0) > started.serverTime);
     assert.equal(JSON.stringify(started).includes("target_sequence_json"), false);
@@ -107,6 +110,21 @@ async function run() {
     assert.ok(visible.game?.target);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("range sessions tighten their server-issued target window during later phases", async fixture => {
+    await start(fixture);
+    const now = Date.now();
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET shot_index = 4, target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now, now - 1_000);
+    const pressure = await payload(await call(fixture));
+    assert.equal(pressure.game?.intensity, "pressure");
+    assert.equal((pressure.game?.targetEndsAt ?? 0) - (pressure.game?.targetStartsAt ?? 0), rangerRangeTargetWindowMs(4, RANGER_RANGE_TOTAL_SHOTS));
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET shot_index = 6, target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now, now - 1_000);
+    const blackout = await payload(await call(fixture));
+    assert.equal(blackout.game?.intensity, "blackout");
+    assert.equal((blackout.game?.targetEndsAt ?? 0) - (blackout.game?.targetStartsAt ?? 0), rangerRangeTargetWindowMs(6, RANGER_RANGE_TOTAL_SHOTS));
   });
 
   await test("the server rejects pre-emptive shots and rapid repeat actions without ending a live run", async fixture => {

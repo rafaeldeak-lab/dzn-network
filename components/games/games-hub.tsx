@@ -242,18 +242,18 @@ export function GamesHub() {
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
           {view === "play" && <div className={styles.gamePicker} role="group" aria-label="Choose a game">
-            {availableGames.minefield && <button aria-pressed={selectedPlayGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>}
-            {availableGames.trivia && <button aria-pressed={selectedPlayGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>}
-            {availableGames["word-chain"] && <button aria-pressed={selectedPlayGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
-            {availableGames["hide-seek"] && <button aria-pressed={selectedPlayGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>}
-            {availableGames["relay-rush"] && <button aria-pressed={selectedPlayGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>}
-            {availableGames["cipher-grid"] && <button aria-pressed={selectedPlayGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>}
-            {availableGames["echo-array"] && <button aria-pressed={selectedPlayGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
-            {availableGames["outpost-run"] && <button aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
-            {availableGames["signal-shift"] && <button aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
-            {availableGames["circuit-forge"] && <button aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
-            {availableGames["ranger-range"] && <button aria-pressed={selectedPlayGame === "ranger-range"} onClick={() => setPlayGame("ranger-range")}><Crosshair size={17} /><span><strong>Ranger Range</strong><small>Bow target drill</small></span></button>}
-            {availableGames["night-run"] && <button aria-pressed={selectedPlayGame === "night-run"} onClick={() => setPlayGame("night-run")}><Radio size={17} /><span><strong>Night Run</strong><small>3D convoy escape</small></span></button>}
+            {availableGames.minefield && <button data-game="minefield" aria-pressed={selectedPlayGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical breach</small></span></button>}
+            {availableGames.trivia && <button data-game="trivia" aria-pressed={selectedPlayGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival intel</small></span></button>}
+            {availableGames["word-chain"] && <button data-game="word-chain" aria-pressed={selectedPlayGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
+            {availableGames["hide-seek"] && <button data-game="hide-seek" aria-pressed={selectedPlayGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Concealed beacon sweep</small></span></button>}
+            {availableGames["relay-rush"] && <button data-game="relay-rush" aria-pressed={selectedPlayGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Server-timed reaction run</small></span></button>}
+            {availableGames["cipher-grid"] && <button data-game="cipher-grid" aria-pressed={selectedPlayGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code breach</small></span></button>}
+            {availableGames["echo-array"] && <button data-game="echo-array" aria-pressed={selectedPlayGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
+            {availableGames["outpost-run"] && <button data-game="outpost-run" aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
+            {availableGames["signal-shift"] && <button data-game="signal-shift" aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
+            {availableGames["circuit-forge"] && <button data-game="circuit-forge" aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
+            {availableGames["ranger-range"] && <button data-game="ranger-range" aria-pressed={selectedPlayGame === "ranger-range"} onClick={() => setPlayGame("ranger-range")}><Crosshair size={17} /><span><strong>Ranger Range</strong><small>Escalating bow drill</small></span></button>}
+            {availableGames["night-run"] && <button data-game="night-run" aria-pressed={selectedPlayGame === "night-run"} onClick={() => setPlayGame("night-run")}><Radio size={17} /><span><strong>Night Run</strong><small>3D blackout escape</small></span></button>}
           </div>}
           {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -1175,15 +1175,15 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>11 / RANGER DRILL</span><h2 id="ranger-range-title">DZN Ranger Range</h2></div><Crosshair size={24} /></div>
     {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Ranger Range" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.rangerRangeTools}>
-      <div><strong>{game ? `${game.shotsCleared} / ${game.totalShots} plates cleared` : "Eight moving range plates"}</strong><span>{game ? `${game.maxMisses - game.misses} misses remaining` : "Use the bow range to read and release onto the live target."}</span></div>
+      <div><strong>{game ? `${game.shotsCleared} / ${game.totalShots} plates cleared` : "Eight escalating range plates"}</strong><span>{game ? `${game.intensity} phase - ${game.maxMisses - game.misses} misses remaining` : "The target window shortens as the range enters pressure and blackout phases."}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New range run available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Range in progress" : game ? "New range" : "Start range"}</button>
     </div>
     {game ? <>
-      <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen}>
-        <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? "TARGET / LIVE" : "BOW / NOCKED" : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
+      <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen} data-intensity={game.intensity}>
+        <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? `${game.intensity} / TARGET LIVE` : `${game.intensity} / BOW NOCKED` : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
         <div className={styles.rangerRangeField} role="group" aria-label="Ranger Range targets">
           <div className={styles.rangerRangeBow} data-live={targetOpen} aria-hidden="true">
             <span className={styles.rangerRangeBowString} />
@@ -1201,7 +1201,7 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
             </button>;
           })}
         </div>
-        <p className={styles.rangerRangeHint}>Keyboard: 1 through 6. Each target, timing window, verified hit, miss, and daily reward is set by the DZN server.</p>
+        <p className={styles.rangerRangeHint}>Keyboard: 1 through 6. The timing window tightens across calibration, pressure and blackout. Each target, verified hit, miss and daily reward is set by the DZN server.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Range cleared</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RANGER_RANGE_REWARD.xp} XP and +${RANGER_RANGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice range complete. Today's reward was already recorded." : "Ranger Range complete."}</span></div></>
@@ -1209,7 +1209,7 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
             : !active ? <><Clock3 size={22} /><div><strong>Range expired</strong><span>Start another range run when you are ready.</span></div></>
               : <><Radio size={20} /><div><strong>{targetOpen ? "Plate live" : "Bow nocked"}</strong><span>{targetOpen ? "Release on the highlighted plate before it clears the range." : "The DZN range is preparing the next server-verified target."}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.rangerRangeReady}><Crosshair size={34} /><h3>Set the bow range.</h3><p>Track eight moving DZN range plates and release only when the live target appears. The server verifies every arrow before it can award progression.</p><div className={styles.rewardPills}><span>8 plates</span><span>+{RANGER_RANGE_REWARD.xp} XP</span><span>+{RANGER_RANGE_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.rangerRangeReady}><Crosshair size={34} /><h3>Set the bow range.</h3><p>Track eight DZN range plates as the window narrows through calibration, pressure and blackout. The server verifies every arrow before it can award progression.</p><div className={styles.rewardPills}><span>8 plates</span><span>+{RANGER_RANGE_REWARD.xp} XP</span><span>+{RANGER_RANGE_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
@@ -1339,15 +1339,15 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>12 / CONVOY ESCAPE</span><h2 id="night-run-title">DZN Night Run</h2></div><Radio size={24} /></div>
     {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Night Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.nightRunTools}>
-      <div><strong>{game ? `${game.gatesCleared} / ${game.totalGates} gates cleared` : "Nine city-gate escapes"}</strong><span>{game ? `${game.maxCollisions - game.collisions} collisions remaining` : "Read the lit gate and steer the convoy through before it closes."}</span></div>
+      <div><strong>{game ? `${game.gatesCleared} / ${game.totalGates} gates cleared` : "Nine city-gate escapes"}</strong><span>{game ? `${game.intensity} phase - ${game.maxCollisions - game.collisions} collisions remaining` : "The city enters pursuit and lockdown as each server-issued gate closes faster."}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New convoy run available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Convoy in progress" : game ? "New night run" : "Start night run"}</button>
     </div>
     {game ? <>
-      <div className={styles.nightRunMeta}><span><Radio size={14} />{game.gatesCleared} / {game.totalGates}</span><span><Target size={14} />{game.collisions} collisions</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen}>
-        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? "GATE / LIVE" : "CONVOY / MOVING" : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
+      <div className={styles.nightRunMeta}><span><Radio size={14} />{game.gatesCleared} / {game.totalGates}</span><span><Target size={14} />{game.collisions} collisions</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen} data-intensity={game.intensity}>
+        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? `${game.intensity} / GATE LIVE` : `${game.intensity} / CONVOY MOVING` : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
         <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown} motionRunning={motionRunning} onDrive={drive} />
         <div className={styles.nightRunLanes} role="group" aria-label="Night Run convoy lanes">
           {NIGHT_RUN_LANES.map((lane, index) => {
@@ -1358,7 +1358,7 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
             </button>;
           })}
         </div>
-        <p className={styles.nightRunHint}>Keyboard: A, S, D or the arrow keys. Each gate, safe lane, collision, timing window and daily reward is verified by the DZN server.</p>
+        <p className={styles.nightRunHint}>Keyboard: A, S, D or the arrow keys. Gate windows tighten from recon to pursuit and lockdown; the DZN server verifies every lane, collision and reward.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Convoy escaped</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${NIGHT_RUN_REWARD.xp} XP and +${NIGHT_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice escape complete. Today's reward was already recorded." : "Night Run complete."}</span></div></>
@@ -1366,7 +1366,7 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
             : !active ? <><Clock3 size={22} /><div><strong>Night Run expired</strong><span>Start another convoy run when you are ready.</span></div></>
               : <><Radio size={20} /><div><strong>{gateOpen ? "Gate open" : "Convoy moving"}</strong><span>{gateOpen ? "Drive through the lit safe lane before the gate closes." : "The DZN server is preparing the next verified gate."}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.nightRunReady}><Radio size={34} /><h3>Take the convoy through the blackout.</h3><p>Read nine perimeter gates in the rendered Night Run city and steer for the safe lane before each window closes. Rewards are verified by the DZN server.</p><div className={styles.rewardPills}><span>9 gates</span><span>+{NIGHT_RUN_REWARD.xp} XP</span><span>+{NIGHT_RUN_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.nightRunReady}><Radio size={34} /><h3>Take the convoy through the blackout.</h3><p>Read nine perimeter gates in the rendered Night Run city. The escape accelerates through recon, pursuit and lockdown while the server validates every safe lane.</p><div className={styles.rewardPills}><span>9 gates</span><span>+{NIGHT_RUN_REWARD.xp} XP</span><span>+{NIGHT_RUN_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

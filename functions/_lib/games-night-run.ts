@@ -3,7 +3,6 @@ import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
   NIGHT_RUN_GATE_LEAD_MS,
-  NIGHT_RUN_GATE_WINDOW_MS,
   NIGHT_RUN_LANES,
   NIGHT_RUN_MAX_COLLISIONS,
   NIGHT_RUN_MIN_ACTION_INTERVAL_MS,
@@ -12,6 +11,8 @@ import {
   NIGHT_RUN_START_COOLDOWN_MS,
   NIGHT_RUN_TOTAL_GATES,
   NIGHT_RUN_TTL_MS,
+  nightRunGateWindowMs,
+  nightRunIntensity,
   type NightRunGame,
   type NightRunLane,
   type NightRunPayload,
@@ -61,7 +62,9 @@ function parseLaneSequence(value: string): NightRunLane[] {
   return parsed as NightRunLane[];
 }
 
-function gateEndsAt(row: NightRunRow) { return row.gate_started_at + NIGHT_RUN_GATE_WINDOW_MS; }
+function gateEndsAt(row: NightRunRow) {
+  return row.gate_started_at + nightRunGateWindowMs(row.gate_index);
+}
 
 function gameView(row: NightRunRow, now: number): NightRunGame {
   const sequence = parseLaneSequence(row.lane_sequence_json);
@@ -69,8 +72,9 @@ function gameView(row: NightRunRow, now: number): NightRunGame {
     !Number.isInteger(row.collisions) || row.collisions < 0 || row.collisions > NIGHT_RUN_MAX_COLLISIONS) {
     throw new Error("Invalid stored Night Run progress");
   }
-  const status = row.status === "playing" && (now >= row.started_at + NIGHT_RUN_TTL_MS || now >= gateEndsAt(row)) ? "expired" : row.status;
-  const gateOpen = status === "playing" && now >= row.gate_started_at && now < gateEndsAt(row);
+  const gateEnds = gateEndsAt(row);
+  const status = row.status === "playing" && (now >= row.started_at + NIGHT_RUN_TTL_MS || now >= gateEnds) ? "expired" : row.status;
+  const gateOpen = status === "playing" && now >= row.gate_started_at && now < gateEnds;
   return {
     id: row.id,
     version: row.version,
@@ -81,7 +85,8 @@ function gameView(row: NightRunRow, now: number): NightRunGame {
     maxCollisions: NIGHT_RUN_MAX_COLLISIONS,
     safeLane: gateOpen ? sequence[row.gate_index] ?? null : null,
     gateStartsAt: row.gate_started_at,
-    gateEndsAt: gateEndsAt(row),
+    gateEndsAt: gateEnds,
+    intensity: nightRunIntensity(row.gate_index),
     startedAt: row.started_at,
     expiresAt: row.started_at + NIGHT_RUN_TTL_MS,
   };
@@ -138,7 +143,7 @@ export async function handleGamesNightRun(request: Request, env: Env): Promise<R
       const row = await db.prepare("SELECT * FROM dzn_night_run_sessions WHERE user_id = ?").bind(user.id).first<NightRunRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This convoy run is not available." }, 404);
       const sequence = parseLaneSequence(row.lane_sequence_json);
-      if (row.status !== "playing" || row.version !== body.version || row.gate_index >= NIGHT_RUN_TOTAL_GATES ||
+      if (row.status !== "playing" || row.version !== body.version || row.gate_index >= sequence.length ||
         now >= row.started_at + NIGHT_RUN_TTL_MS || now >= gateEndsAt(row)) {
         return reply({ error: "This convoy run changed or ended. Refresh to continue." }, 409);
       }
