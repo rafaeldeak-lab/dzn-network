@@ -392,7 +392,7 @@ function parseBits(value: unknown) {
 
 function normalizeRoleName(value: unknown) {
   return typeof value === "string"
-    ? value.trim().replace(/^[\p{P}\p{S}\s]+/u, "").replace(/\s+/g, " ").toLowerCase()
+    ? value.trim().replace(/^(?:[\p{P}\p{S}]+[\u200d\ufe0e\ufe0f]*\s*)+/u, "").replace(/\s+/g, " ").toLowerCase()
     : "";
 }
 
