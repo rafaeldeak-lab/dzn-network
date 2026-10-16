@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesSignalShift } from "../functions/_lib/games-signal-shift";
 import type { Env } from "../functions/_lib/types";
-import { SIGNAL_SHIFT_MAX_MOVES, SIGNAL_SHIFT_REWARD, SIGNAL_SHIFT_TTL_MS, signalShiftIntensity, type SignalShiftPayload } from "../lib/games-signal-shift";
+import { SIGNAL_SHIFT_LEGACY_MAX_MOVES, SIGNAL_SHIFT_MAX_MOVES, SIGNAL_SHIFT_REWARD, SIGNAL_SHIFT_TTL_MS, signalShiftIntensity, type SignalShiftPayload } from "../lib/games-signal-shift";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof signalShiftFixture>>;
@@ -139,6 +139,22 @@ async function run() {
     assert.equal(signalShiftIntensity(43), "pressure");
     assert.equal(signalShiftIntensity(44), "blackout");
     assert.equal(signalShiftIntensity(SIGNAL_SHIFT_MAX_MOVES), "blackout");
+  });
+
+  await test("over-cap legacy sessions stay visible as restartable failed routes", async fixture => {
+    await start(fixture);
+    setBoard(fixture, nearSolvedBoard(), SIGNAL_SHIFT_MAX_MOVES + 1);
+    const legacy = await payload(await call(fixture));
+    assert.equal(legacy.game?.moves, SIGNAL_SHIFT_MAX_MOVES + 1);
+    assert.equal(legacy.game?.maxMoves, SIGNAL_SHIFT_LEGACY_MAX_MOVES);
+    assert.equal(legacy.game?.status, "failed");
+    assert.equal(legacy.game?.intensity, "blackout");
+    assert.equal((await call(fixture, command(legacy))).status, 409);
+    fixture.db.sqlite.exec("UPDATE dzn_signal_shift_sessions SET started_at = started_at - 6000");
+    const restarted = await start(fixture);
+    assert.equal(restarted.game?.status, "playing");
+    assert.equal(restarted.game?.moves, 0);
+    assert.equal(restarted.game?.maxMoves, SIGNAL_SHIFT_MAX_MOVES);
   });
 
   await test("legal server-validated shifts, win state and daily reward cap apply exactly", async fixture => {

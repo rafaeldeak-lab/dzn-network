@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
   SIGNAL_SHIFT_GRID_SIZE,
+  SIGNAL_SHIFT_LEGACY_MAX_MOVES,
   SIGNAL_SHIFT_MAX_MOVES,
   SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS,
   SIGNAL_SHIFT_REWARD,
@@ -88,10 +89,11 @@ function createPuzzle() {
 
 function gameView(row: SignalShiftRow, now: number): SignalShiftGame {
   const tiles = parseTiles(row.tiles_json);
-  if (!Number.isInteger(row.moves) || row.moves < 0 || row.moves > SIGNAL_SHIFT_MAX_MOVES || !Number.isInteger(row.version) || row.version < 0 || row.version > 96) {
+  if (!Number.isInteger(row.moves) || row.moves < 0 || row.moves > SIGNAL_SHIFT_LEGACY_MAX_MOVES || !Number.isInteger(row.version) || row.version < 0 || row.version > 96) {
     throw new Error("Invalid stored Signal Shift state");
   }
-  const status = row.status === "playing" && now >= row.started_at + SIGNAL_SHIFT_TTL_MS ? "expired" : row.status;
+  const legacyOverCap = row.status === "playing" && row.moves > SIGNAL_SHIFT_MAX_MOVES;
+  const status = legacyOverCap ? "failed" : row.status === "playing" && now >= row.started_at + SIGNAL_SHIFT_TTL_MS ? "expired" : row.status;
   return {
     id: row.id,
     version: row.version,
@@ -99,8 +101,8 @@ function gameView(row: SignalShiftRow, now: number): SignalShiftGame {
     gridSize: SIGNAL_SHIFT_GRID_SIZE,
     tiles,
     moves: row.moves,
-    maxMoves: SIGNAL_SHIFT_MAX_MOVES,
-    intensity: signalShiftIntensity(row.moves),
+    maxMoves: row.moves > SIGNAL_SHIFT_MAX_MOVES ? SIGNAL_SHIFT_LEGACY_MAX_MOVES : SIGNAL_SHIFT_MAX_MOVES,
+    intensity: signalShiftIntensity(Math.min(row.moves, SIGNAL_SHIFT_MAX_MOVES)),
     startedAt: row.started_at,
     expiresAt: row.started_at + SIGNAL_SHIFT_TTL_MS,
   };
