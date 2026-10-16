@@ -61,7 +61,7 @@ const staticPayload: CommsHistoryPayload = {
     slug: "global-chat",
     kind: "public",
     name: "Global Chat",
-    description: "Static read-only preview while the real message history route stays disabled by default.",
+    description: "Public messages appear here when DZN Comms is available.",
     visibility: "public",
   },
   access: {
@@ -77,44 +77,7 @@ const staticPayload: CommsHistoryPayload = {
     visibility: "public",
     current_user_member_role: null,
   }],
-  messages: [
-    {
-      id: "static-1",
-      author_display_name: "Rafael DZN",
-      author_role_label: "Owner",
-      body: "Welcome to DZN Comms. This preview is read-only until the real chat runtime and moderation gates are approved.",
-      visibility_state: "visible",
-      created_at: "2026-09-01T10:12:00.000Z",
-      edited_at: null,
-      public_safe: true,
-      read_only: true,
-      can_delete: false,
-    },
-    {
-      id: "static-2",
-      author_display_name: "NovaRift",
-      author_role_label: "Mod",
-      body: "Global chat, private groups, support help, reactions and timeouts will each be approved as separate slices.",
-      visibility_state: "visible",
-      created_at: "2026-09-01T10:18:00.000Z",
-      edited_at: null,
-      public_safe: true,
-      read_only: true,
-      can_delete: false,
-    },
-    {
-      id: "static-3",
-      author_display_name: "DZN Safety",
-      author_role_label: "System",
-      body: "Message hidden by DZN Safety.",
-      visibility_state: "hidden",
-      created_at: "2026-09-01T10:24:00.000Z",
-      edited_at: null,
-      public_safe: true,
-      read_only: true,
-      can_delete: false,
-    },
-  ],
+  messages: [],
   page: { next_cursor: null, has_more: false, limit: 30 },
   feature_flags: {
     route_enabled: false,
@@ -153,7 +116,7 @@ export function DznCommsShell() {
     payload: staticPayload,
     message: historyProbeEnabled
       ? "Checking whether DZN Global Chat is available."
-      : "Static fallback is active. Message history is disabled by default.",
+      : "Message history is not active here. No messages are shown.",
   }));
   const liveHistoryRuntimeEnabled = history.status === "ready" && history.payload.feature_flags.sending_enabled;
 
@@ -201,7 +164,7 @@ export function DznCommsShell() {
           : {
               status: "fallback",
               payload: staticPayload,
-              message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
+              message: "Message history is temporarily unavailable. No old or fabricated messages are shown.",
             });
         if (poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT) {
           capabilityProbeRetries += 1;
@@ -494,7 +457,7 @@ export function DznCommsShell() {
                   <h2 className="mt-1 text-xl font-black uppercase text-white">{payload.channel.name}</h2>
                 </div>
                 <span className="w-fit rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-zinc-300">
-                  {visibleMessages.length} visible rows
+                  {visibleMessages.length === 1 ? "1 message" : `${visibleMessages.length} messages`}
                 </span>
               </div>
 
@@ -508,7 +471,7 @@ export function DznCommsShell() {
                 aria-relevant="additions text"
                 className="mt-3 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
               >
-                {visibleMessages.map((message) => (
+                {visibleMessages.length > 0 ? visibleMessages.map((message) => (
                   <MessageRow
                     key={message.id}
                     message={message}
@@ -520,7 +483,20 @@ export function DznCommsShell() {
                     onReactionChange={handleReaction}
                     onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
                   />
-                ))}
+                )) : (
+                  <div className="grid min-h-28 place-items-center px-4 py-7 text-center">
+                    <div>
+                      <p className="text-sm font-black text-zinc-100">No public messages yet</p>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">
+                        {history.status === "ready"
+                          ? "Start the conversation when sending is available."
+                          : history.status === "static"
+                            ? "No placeholder conversation is displayed."
+                            : "DZN will reconnect automatically when message history returns."}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <form onSubmit={handleSend} className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
@@ -775,8 +751,7 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
 function statusCopy(status: CommsHistoryState["status"], sendingEnabled: boolean) {
   if (status === "ready") return sendingEnabled ? "Live" : "History";
   if (status === "loading") return "Checking";
-  if (status === "fallback") return "Fallback";
-  return "Static";
+  return "Unavailable";
 }
 
 function initials(value: string) {
