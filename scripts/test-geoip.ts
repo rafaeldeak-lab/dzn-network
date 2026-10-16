@@ -63,6 +63,22 @@ async function main() {
   assert.equal(fallbackProviderLookup.timezone, "Europe/London");
   assert.equal(fallbackProviderLookup.source, "ipwhois");
 
+  const invalidProviderLookup = await geolocateServerIp("8.8.8.8", {
+    endpoint: "https://example.invalid",
+    fetcher: async () =>
+      new Response(
+        JSON.stringify({
+          latitude: 123.4,
+          longitude: -1.2,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  });
+  assert.equal(invalidProviderLookup.latitude, null, "Out-of-range provider coordinates must be discarded rather than clamped.");
+  assert.equal(invalidProviderLookup.longitude, null);
+  assert.equal(invalidProviderLookup.source, "geoip-unavailable");
+  assert.equal(invalidProviderLookup.approximate, true);
+
   const baseRow: MapNodeRow = {
     id: "server-1",
     public_slug: "london-dayz",
