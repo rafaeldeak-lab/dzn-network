@@ -7494,6 +7494,10 @@ button.dzn-header-action {
   font-size: 0.82rem;
 }
 
+.dzn-operational-globe-shell {
+  position: relative;
+}
+
 .dzn-operational-globe-stage {
   position: relative;
   height: clamp(228px, 20vw, 278px);
@@ -7642,6 +7646,13 @@ button.dzn-header-action {
   color: rgba(191, 219, 254, 0.78);
   font-size: 0.61rem;
   font-style: normal;
+}
+
+@media (max-width: 480px) {
+  .dzn-operational-globe-node-status {
+    top: 3.55rem;
+    max-width: min(72%, 180px);
+  }
 }
 
 .dzn-operational-globe-tooltip {

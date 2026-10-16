@@ -8,6 +8,7 @@ import {
 } from "../components/dzn/dzn-operational-globe";
 
 const source = readFileSync("components/dzn/dzn-operational-globe.tsx", "utf8");
+const styles = readFileSync("app/globals.css", "utf8");
 
 assert.deepEqual(initialGlobeRotationForPoints([]), { x: -0.1, y: -0.42 });
 
@@ -73,5 +74,11 @@ assert.match(source, /dzn-operational-globe-node-status/,
   "An active public node should have a persistent, non-hover visual label.");
 assert.match(source, /featuredNode\.region/,
   "The persistent label must use the aggregate public location label rather than precise coordinates.");
+assert.match(source, /dzn-operational-globe-shell/,
+  "The persistent node label must sit outside the globe image role so assistive technology can announce it.");
+assert.ok(
+  styles.indexOf("@media (max-width: 480px)") < styles.lastIndexOf(".dzn-operational-globe-node-status"),
+  "Narrow layouts must move the node label clear of the globe controls.",
+);
 
 console.log("Operational globe visual and focus contracts passed.");
