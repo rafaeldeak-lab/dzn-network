@@ -7,6 +7,10 @@ const globalStylesSource = readFileSync("app/globals.css", "utf8");
 const headerSource = readFileSync("components/site-header.tsx", "utf8");
 const launcherSource = readFileSync("components/comms/dzn-comms-launcher.tsx", "utf8");
 const commsSource = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
+const staticPayloadSource = commsSource.slice(
+  commsSource.indexOf("const staticPayload"),
+  commsSource.indexOf("export function DznCommsShell"),
+);
 const assistSource = readFileSync("components/comms/dzn-assist.tsx", "utf8");
 const delayedAssistScrollSource = assistSource.slice(
   assistSource.indexOf("const scrollToAssist"),
@@ -54,6 +58,11 @@ assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat m
 assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
 assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
+assert.equal(staticPayloadSource.includes("messages: []"), true, "An unavailable history route must not invent preview messages.");
+assert.equal(staticPayloadSource.includes("static-1"), false, "The fallback must not render fabricated chat rows.");
+assert.equal(commsSource.includes("No old or fabricated messages are shown."), true, "The fallback must explain that stale chat is never substituted for live history.");
+assert.equal(commsSource.includes("No public messages yet"), true, "An empty history must receive a compact, honest visual state.");
+assert.equal(commsSource.includes("visible rows"), false, "The public chat count must use normal message language.");
 assert.equal(commsSource.includes("<DznAssist />"), true, "The Comms page must render the working DZN Assist experience.");
 assert.equal(commsSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "Comms must use the explicit public owner-access flag before exposing an owner Discord entry point.");
 assert.equal(commsSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "Comms must send anonymous server owners through sign-in before opening the feature-gated request route.");

@@ -168,7 +168,6 @@ async function main() {
 
 function testMessageTimestamps() {
   const previousTimezone = process.env.TZ;
-  const expectedShellTimes = ["10:12 UTC", "10:18 UTC", "10:24 UTC"];
   const fixtures = [
     ["2026-09-01T10:12:00.000Z", "2026-09-01T10:12:00.000Z", "10:12"],
     ["2026-09-01 10:12:00", "2026-09-01T10:12:00.000Z", "10:12"],
@@ -196,8 +195,10 @@ function testMessageTimestamps() {
         assert.equal(renderToString(createElement(CommsMessageTime, { value })), "", "Missing/invalid times must not invent a date.");
       }
       const html = renderToString(createElement(DznCommsShell));
-      assert.deepEqual([...html.matchAll(/<time[^>]*>(.*?)<\/time>/g)].map((match) => match[1]), expectedShellTimes);
-      assert.match(html, /Static fallback is active/);
+      assert.deepEqual([...html.matchAll(/<time[^>]*>(.*?)<\/time>/g)].map((match) => match[1]), []);
+      assert.match(html, /No public messages yet/);
+      assert.match(html, /No placeholder conversation is displayed/);
+      assert.doesNotMatch(html, /static-1|Message hidden by DZN Safety/);
       assert.match(html, /aria-label="Send is unavailable"/);
       assert.doesNotMatch(html, /suppressHydrationWarning/);
     }
