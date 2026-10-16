@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesEchoArray } from "../functions/_lib/games-echo-array";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
-import { ECHO_ARRAY_REWARD, ECHO_ARRAY_TTL_MS, type EchoArrayNode, type EchoArrayPayload } from "../lib/games-echo-array";
+import { ECHO_ARRAY_REWARD, ECHO_ARRAY_TTL_MS, echoArrayCueIntervalMs, type EchoArrayNode, type EchoArrayPayload } from "../lib/games-echo-array";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof echoArrayFixture>>;
@@ -108,6 +108,18 @@ async function run() {
     assert.equal(JSON.stringify(hidden).includes("sequence_json"), false);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+  await test("later echo stages reveal on tighter server-owned tempos", async fixture => {
+    await start(fixture);
+    const now = Date.now();
+    fixture.db.sqlite.prepare("UPDATE dzn_echo_array_sessions SET stage = 2, cue_started_at = ?, updated_at = ? WHERE user_id = 'local-player'").run(now, now - 1_000);
+    const echo = await payload(await call(fixture));
+    assert.equal(echo.game?.intensity, "echo");
+    assert.equal(echo.game?.cueIntervalMs, echoArrayCueIntervalMs(2));
+    fixture.db.sqlite.prepare("UPDATE dzn_echo_array_sessions SET stage = 3, cue_started_at = ?, updated_at = ? WHERE user_id = 'local-player'").run(now, now - 1_000);
+    const blackout = await payload(await call(fixture));
+    assert.equal(blackout.game?.intensity, "blackout");
+    assert.equal(blackout.game?.cueIntervalMs, echoArrayCueIntervalMs(3));
   });
 
   await test("strict request validation rejects forged shapes, reward fields and early inputs", async fixture => {

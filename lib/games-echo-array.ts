@@ -11,6 +11,22 @@ export const ECHO_ARRAY_CUE_INTERVAL_MS = 540;
 export const ECHO_ARRAY_CUE_TAIL_MS = 700;
 export const ECHO_ARRAY_MIN_INPUT_INTERVAL_MS = 180;
 
+export type EchoArrayIntensity = "scan" | "echo" | "blackout";
+
+export function echoArrayIntensity(stage: number): EchoArrayIntensity {
+  if (stage >= ECHO_ARRAY_STAGE_LENGTHS.length) return "blackout";
+  return stage === 2 ? "echo" : "scan";
+}
+
+/** The API controls each stage's reveal tempo; the browser only renders it. */
+export function echoArrayCueIntervalMs(stage: number) {
+  switch (echoArrayIntensity(stage)) {
+    case "echo": return 430;
+    case "blackout": return 330;
+    default: return ECHO_ARRAY_CUE_INTERVAL_MS;
+  }
+}
+
 export type EchoArrayStatus = "playing" | "won" | "failed" | "expired";
 export type EchoArrayPhase = "revealing" | "input";
 
@@ -22,6 +38,8 @@ export type EchoArrayGame = {
   stage: number;
   totalStages: number;
   sequenceLength: number;
+  intensity: EchoArrayIntensity;
+  cueIntervalMs: number;
   inputIndex: number;
   errors: number;
   maxErrors: number;
