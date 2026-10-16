@@ -10,6 +10,7 @@ const guildId = "900000000000000001";
 const botId = "900000000000000002";
 const botRoleId = "900000000000000003";
 const verifiedOwnerRoleId = "900000000000000004";
+const decoratedVerifiedOwnerRoleId = "900000000000000015";
 const administratorVerifiedOwnerRoleId = "900000000000000009";
 const manageRolesVerifiedOwnerRoleId = "900000000000000011";
 const viewChannelVerifiedOwnerRoleId = "900000000000000012";
@@ -72,6 +73,7 @@ async function run() {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: (BigInt(viewChannel) | BigInt(sendMessages)).toString() },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: 0, managed: false },
+        { id: decoratedVerifiedOwnerRoleId, name: "\u{1f3c6} Verified Server Owner", position: 4, permissions: 0, managed: false },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
         { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 7, permissions: manageRoles, managed: false },
         { id: viewChannelVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: viewChannel, managed: false },
@@ -106,8 +108,11 @@ async function run() {
   assert.equal(result.checks.botHasAdministrator, false);
   assert.equal(result.checks.botHasUnexpectedGuildPermissions, false);
   assert.equal(result.checks.canManageRoles, true);
-  assert.deepEqual(result.verifiedOwnerRoleCandidates, [{ id: verifiedOwnerRoleId, name: "Verified Server Owner", assignable: true }]);
-  assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
+  assert.deepEqual(result.verifiedOwnerRoleCandidates, [
+    { id: verifiedOwnerRoleId, name: "Verified Server Owner", assignable: true },
+    { id: decoratedVerifiedOwnerRoleId, name: "\u{1f3c6} Verified Server Owner", assignable: true },
+  ]);
+  assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId || role.id === decoratedVerifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
   assert.deepEqual(result.rejectedVerifiedOwnerRoles, [
     { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
     { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },

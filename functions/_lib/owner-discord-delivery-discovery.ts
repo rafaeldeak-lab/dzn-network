@@ -391,7 +391,9 @@ function parseBits(value: unknown) {
 }
 
 function normalizeRoleName(value: unknown) {
-  return typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
+  return typeof value === "string"
+    ? value.trim().replace(/^[^a-z0-9]+/i, "").replace(/\s+/g, " ").toLowerCase()
+    : "";
 }
 
 function humanList(values: string[]) {
