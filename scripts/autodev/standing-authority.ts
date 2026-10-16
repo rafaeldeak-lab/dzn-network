@@ -478,79 +478,10 @@ function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskI
   if (!candidate || !candidate.headSha || !candidate.baseSha) return pullRequestDeny("Pull-request candidate must include immutable base and head commits.");
   if (candidate.baseSha === candidate.headSha) return pullRequestDeny("Pull-request candidate base and head commits must differ.");
 
-  let verifiedRange: VerifiedGitRange;
-  try {
-    verifiedRange = inspectGitRange(repositoryPath, candidate.baseSha, candidate.headSha);
-  } catch (error) {
-    return pullRequestDeny("The candidate commit range could not be verified in the repository.", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  let trustedTarget: TrustedPullRequestTarget | undefined;
-  let trustedBaseSha: string;
-  try {
-    trustedTarget = controllerRecords.getPullRequestTarget(authority.id);
-    if (!trustedTarget) throw new Error("The controller-owned pull-request provider returned no target.");
-    trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority, trustedTarget);
-  } catch (error) {
-    return pullRequestDeny("The approved pull-request target could not be verified in the repository.", {
-      targetBranch: authority.targetBranch,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  if (verifiedRange.baseSha !== trustedBaseSha) {
-    return pullRequestDeny("Candidate base commit does not match the verified pull-request target.", {
-      candidateBaseSha: verifiedRange.baseSha,
-      trustedBaseSha,
-      targetBranch: authority.targetBranch,
-    });
-  }
-  if (!isAncestor(repositoryPath, trustedBaseSha, verifiedRange.headSha)) {
-    return pullRequestDeny("Candidate head is not a descendant of the verified pull-request target.", {
-      trustedBaseSha,
-      candidateHeadSha: verifiedRange.headSha,
-    });
-  }
-
-  const baseMatches = candidate.baseSha === verifiedRange.baseSha;
-  const headMatches = candidate.headSha === verifiedRange.headSha;
-  const candidateRemoteMatches = candidate.repositoryRemote === verifiedRange.repositoryRemote;
-  const authorityRemoteMatches = verifiedRange.repositoryRemote === authority.repositoryRemote;
-  const diffMatches = candidate.diffSha256 === verifiedRange.diffSha256;
-  const filesMatch = sameFiles(candidate.changedFiles, verifiedRange.changedFiles);
-  if (!baseMatches || !headMatches || !candidateRemoteMatches || !authorityRemoteMatches || !diffMatches || !filesMatch) {
-    return pullRequestDeny("Candidate metadata does not match the verified Git commit range.", {
-      baseMatches,
-      headMatches,
-      repositoryRemoteMatches: candidateRemoteMatches && authorityRemoteMatches,
-      diffMatches,
-      filesMatch,
-    });
-  }
-  if (verifiedRange.changedFiles.length === 0) return pullRequestDeny("Verified candidate range has no changed files.");
-  if (verifiedRange.changedFiles.length > authority.maxChangedFiles) {
-    return pullRequestDeny("Verified candidate exceeds the approved changed-file limit.", { changedFiles: verifiedRange.changedFiles.length, maxChangedFiles: authority.maxChangedFiles });
-  }
-  const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
-  if (protectedFiles.length) return pullRequestDeny("Verified candidate changes a protected release-control or production-sensitive path.", { protectedFiles });
-  const nonRegularFiles = verifiedRange.changedFiles.filter((file) => hasNonRegularGitEntry(repositoryPath, verifiedRange.baseSha, file)
-    || hasNonRegularGitEntry(repositoryPath, verifiedRange.headSha, file));
-  if (nonRegularFiles.length) return pullRequestDeny("Verified candidate includes a non-regular Git entry.", { nonRegularFiles });
-  let independentlyClassified: RiskClassification[];
-  try {
-    independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
-  } catch {
-    return pullRequestDeny("Every verified changed file must be readable and classifiable before pull-request preparation.");
-  }
-  if (independentlyClassified.some((item) => item.risk !== "low" || item.system === "unknown")) {
-    return pullRequestDeny("Every verified changed file must classify as low risk.", { classifications: independentlyClassified });
-  }
-  const outOfScope = independentlyClassified.filter((item) => !authority.allowedSystems.includes(item.system) || authority.excludedSystems.includes(item.system));
-  if (outOfScope.length) {
-    return pullRequestDeny("Every verified changed file must be within the standing-authority system scope.", { outOfScope });
-  }
+  const candidateCheck = verifyCandidateForControlledExecution(authority, candidate, repositoryPath, controllerRecords);
+  if (!candidateCheck.ok || !candidateCheck.candidate) return pullRequestDeny(candidateCheck.message, candidateCheck.details);
+  const verifiedRange = candidateCheck.candidate;
+  const independentlyClassified = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
   const requiredCriteria = getRequiredAcceptanceCriteria(authority, independentlyClassified.some((item) => isBrowserFacingPath(item.file)));
   const requiredCriterionIds = new Set(requiredCriteria.map((criterion) => criterion.id));
   let trustedEvidence: TrustedEvidenceReceipt[];
@@ -636,6 +567,10 @@ function verifyCandidateForControlledExecution(
       changedFiles: verifiedRange.changedFiles.length,
       maxChangedFiles: authority.maxChangedFiles,
     });
+  }
+  const executableTestFiles = verifiedRange.changedFiles.filter((file) => isExecutableTestPath(file));
+  if (executableTestFiles.length) {
+    return deny("release_denied", "Controller-owned validation does not execute candidates that change executable test files.", { executableTestFiles });
   }
   const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
   if (protectedFiles.length) {

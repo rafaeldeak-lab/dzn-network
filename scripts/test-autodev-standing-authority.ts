@@ -428,7 +428,7 @@ const credentialedRemoteMismatch = assessFixture(authority, {
   },
 }, fixture);
 assert.equal(credentialedRemoteMismatch.pullRequestEligible, false);
-assert.equal(JSON.stringify(credentialedRemoteMismatch.details).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
+assert.equal(JSON.stringify(credentialedRemoteMismatch.details ?? {}).includes("do-not-expose-this-token"), false, "Denial details must not reflect credential-bearing remote URLs.");
 const queryCredentialRemote = "https://github.com/rafaeldeak-lab/dzn-network.git?access_token=do-not-expose-query-token#secret-fragment";
 runGit(fixture.path, ["remote", "set-url", "origin", queryCredentialRemote]);
 const querySanitizedRange = inspectGitRange(fixture.path, fixture.baseSha, fixture.headSha);
