@@ -102,6 +102,10 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
   const [failed, setFailed] = useState(false);
 
   const globePoints = useMemo(() => buildGlobePoints(nodes), [nodes]);
+  const featuredNode = useMemo(
+    () => globePoints.find((point) => point.active) ?? globePoints[0] ?? null,
+    [globePoints],
+  );
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -193,6 +197,16 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
       ) : null}
       {ready && globePoints.length === 0 ? (
         <span className="dzn-operational-globe-empty">Server locations update after ADM sync</span>
+      ) : null}
+      {ready && featuredNode ? (
+        <div className="dzn-operational-globe-node-status" aria-live="polite">
+          <span>
+            <i aria-hidden="true" />
+            {featuredNode.active ? "Live node" : "Public node"}
+          </span>
+          <strong>{featuredNode.node.display_name || featuredNode.node.name}</strong>
+          <em>{featuredNode.region}</em>
+        </div>
       ) : null}
       {tooltip ? (
         <span

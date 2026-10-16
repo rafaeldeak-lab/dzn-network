@@ -69,5 +69,9 @@ assert.match(source, /shouldRefreshInitialGlobeFocus\(initialFocusKeyRef\.curren
   "The live renderer must permit fresh server data to replace a cached initial focus.");
 assert.match(source, /movementFromOrigin > 2/,
   "Slow pointer movement must accumulate from the drag origin before a refresh can replace the view.");
+assert.match(source, /dzn-operational-globe-node-status/,
+  "An active public node should have a persistent, non-hover visual label.");
+assert.match(source, /featuredNode\.region/,
+  "The persistent label must use the aggregate public location label rather than precise coordinates.");
 
 console.log("Operational globe visual and focus contracts passed.");
