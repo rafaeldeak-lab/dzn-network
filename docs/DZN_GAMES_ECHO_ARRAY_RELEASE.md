@@ -1,4 +1,4 @@
-# DZN Echo Array source release
+# DZN Echo Array activation release
 
 ## Scope
 
@@ -16,19 +16,18 @@ The game adds no paid advantage, server-stat effect, competitive-ranking effect,
 - The migration uses foreign keys, constraints, a daily unique reward key, a unique game ID, and account-deletion cascades.
 - Hub reward history, XP, challenges, streaks, and Workshop parts retain previously earned Echo Array rewards even when its play switch is disabled later.
 
-## Production boundary
+## Activation boundary
 
-`migrations/0098_games_hub_echo_array.sql` is additive and intentionally unapplied. `DZN_GAMES_ECHO_ARRAY_ENABLED` is explicitly `false` in the production configuration. The local preview enables the switch only against an in-memory synthetic database.
+`migrations/0098_games_hub_echo_array.sql` was previously applied and independently verified in production. This release enables only `DZN_GAMES_ECHO_ARRAY_ENABLED=true` in the Pages production configuration.
 
-Future production activation must remain a separate controlled operation:
+The release does not apply a D1 migration, alter Discord access, change payment settings, or create player progress outside normal authenticated game play.
 
-1. Capture the approved recovery point.
-2. Apply only `0098_games_hub_echo_array.sql`.
-3. Verify the migration ledger, both tables, reward-history index, constraints, foreign keys, and zero-row baseline.
-4. Enable only `DZN_GAMES_ECHO_ARRAY_ENABLED` after that verification.
-5. Run authenticated production smoke checks for private ownership, cue timing, retries, one daily reward, reward retention with the play switch off, deletion cascade, and mobile rendering.
+## Completed production preflight
 
-No Discord invite, role, channel, permission, payment, customer, deployment, or production D1 change is part of this source release.
+1. `0098_games_hub_echo_array.sql` appears exactly once in the production migration ledger.
+2. The session and reward-ledger tables, reward-history index, constraints, and cascading foreign keys match the approved migration.
+3. Both Echo Array tables have a zero-row baseline and `PRAGMA foreign_key_check` passed.
+4. A read-only authenticated production panel load is required after deployment. It must not begin a session or reveal a private sequence.
 
 ## Local verification
 
