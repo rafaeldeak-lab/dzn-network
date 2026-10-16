@@ -243,6 +243,12 @@ assert.equal(setupWizardSource.includes("discordChannelsAvailable"), true);
 assert.equal(setupWizardSource.includes("DZN Bot is not installed in this Discord server yet"), true);
 assert.equal(setupWizardSource.includes("mergeChecksWithBotStatus"), true);
 assert.equal(setupWizardSource.includes("status.guild_id !== selectedGuildId"), true);
+assert.equal(setupWizardSource.includes('href={DZN_PUBLIC_DISCORD_INVITE_URL}'), true,
+  "Onboarding help must send owners to the DZN Discord invite, not Discord's generic homepage.");
+assert.equal(setupWizardSource.includes("DZN_SUPPORT_EMAIL_HREF"), true,
+  "Onboarding help must use the published support address.");
+assert.equal(setupWizardSource.includes("support@dayz-network.com"), false,
+  "Onboarding help must not diverge from the published support address.");
 assert.equal(setupWizardSource.includes("Bot token readable"), true);
 assert.equal(setupWizardSource.includes("VERIFICATION_STAGES"), true);
 assert.equal(setupWizardSource.includes("verificationProgress"), true);

@@ -50,6 +50,8 @@ import type { AdmApiDebug, DiscordBotStatusResponse, DiscordGuild, LinkedServer,
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerCategoryOption, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
 import { DZN_BOT_INSTALL_PERMISSIONS } from "@/lib/discord-bot-permissions";
+import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
+import { DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 
 const steps = [
   "Connect Discord Server",
@@ -1662,10 +1664,10 @@ function HelpPanel({ onOpenServiceGuide, onOpenPermissions }: { onOpenServiceGui
         <button type="button" onClick={onOpenServiceGuide} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-left text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
           View Setup Guide
         </button>
-        <a href="https://discord.com" rel="noreferrer" target="_blank" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+        <a href={DZN_PUBLIC_DISCORD_INVITE_URL} rel="noreferrer" target="_blank" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
           Join Discord
         </a>
-        <a href="mailto:support@dayz-network.com" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
+        <a href={DZN_SUPPORT_EMAIL_HREF} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
           Contact Support
         </a>
         <button type="button" onClick={onOpenServiceGuide} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3 text-left text-sm font-bold text-zinc-100 transition hover:border-violet-300/30">
@@ -2382,7 +2384,7 @@ function SetupFailureState({ reason, onRetryTest, onBack }: { reason: string; on
           <button type="button" onClick={onBack} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-5 text-xs font-black uppercase text-zinc-100 transition hover:border-violet-300/35 hover:text-white">
             Back to Review & Test
           </button>
-          <a href="mailto:support@dayz-network.com" className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-orange-300/20 bg-orange-400/10 px-5 text-xs font-black uppercase text-orange-50 transition hover:border-orange-300/40">
+          <a href={DZN_SUPPORT_EMAIL_HREF} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-orange-300/20 bg-orange-400/10 px-5 text-xs font-black uppercase text-orange-50 transition hover:border-orange-300/40">
             Contact Support
           </a>
         </div>
