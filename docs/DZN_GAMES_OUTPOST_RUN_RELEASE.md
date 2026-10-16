@@ -6,7 +6,7 @@ This source-only release adds DZN Outpost Run to the authenticated Games Hub. It
 
 The server owns the selected field layout, relay position, hazard positions, player coordinates, visibility, stamina, movement count, scan use, expiry, result, daily reward, Hub history, XP, Workshop parts, and challenge totals. The browser receives only previously entered cells and never the stored layout.
 
-The game adds no paid advantage, server-stat effect, competitive-ranking effect, Discord role change, Discord message, payment action, or production configuration change.
+The game adds no paid advantage, server-stat effect, competitive-ranking effect, Discord role change, Discord message, or payment action.
 
 ## Security and fairness
 
@@ -20,17 +20,13 @@ The game adds no paid advantage, server-stat effect, competitive-ranking effect,
 
 ## Production boundary
 
-`migrations/0099_games_hub_outpost_run.sql` is additive and intentionally unapplied. `DZN_GAMES_OUTPOST_RUN_ENABLED` is explicitly `false` in production configuration. The local preview enables the switch only against an in-memory synthetic database.
+`migrations/0099_games_hub_outpost_run.sql` was applied as its own production operation before this source release. Its ledger entry, both tables, reward-history index, constraints, user cascades, and zero-row baseline were verified, including a database-wide foreign-key check.
 
-Future production activation remains a separate controlled operation:
+This release enables only `DZN_GAMES_OUTPOST_RUN_ENABLED` in the production Pages environment. Preview stays disabled. The release does not apply a database migration, create a player session, award XP or parts, or exercise the reward flow.
 
-1. Capture the approved recovery point.
-2. Apply only `0099_games_hub_outpost_run.sql`.
-3. Verify the migration ledger, both tables, reward-history index, constraints, foreign keys, and zero-row baseline.
-4. Enable only `DZN_GAMES_OUTPOST_RUN_ENABLED` after that verification.
-5. Run authenticated production smoke checks for private fog visibility, scanner use, route bounds, hazards, retry behavior, daily reward, reward retention with the play switch off, deletion cascade, and mobile rendering.
+Future operational checks remain separately controlled: authenticated private-fog visibility, scanner use, route bounds, hazards, retry behavior, daily-reward limits, reward retention with the play switch off, deletion cascades, and mobile rendering.
 
-No Discord invite, role, channel, permission, payment, customer, deployment, or production D1 change is part of this source release.
+No Discord invite, role, channel, permission, payment, customer, or production D1 write is part of this source release.
 
 ## Local verification
 
