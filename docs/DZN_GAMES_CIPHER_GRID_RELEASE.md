@@ -19,28 +19,25 @@ Cipher Grid is an original five-letter field-word deduction game in the DZN Game
 - The daily ledger has unique user/day and game-session constraints. The browser never supplies XP, parts, the answer, or a reward key.
 - This game is noncompetitive: it does not alter standings, ranking, eligibility, scoring formulas, server ownership, billing, or Discord membership.
 
-## Source release boundary
+## Activation boundary
 
-This source release deliberately leaves the production flag below disabled:
+The Cipher Grid D1 schema was previously applied and independently verified in production. This release enables only the following existing Pages production flag:
 
 ```text
-DZN_GAMES_CIPHER_GRID_ENABLED=false
+DZN_GAMES_CIPHER_GRID_ENABLED=true
 ```
 
-It also does not apply a D1 migration, alter any Discord role or invite, change payments, or start a deployment.
+It does not apply a D1 migration, alter any Discord role or invite, change payments, or modify player progress outside normal authenticated game play.
 
-## Controlled production operation
+## Completed production preflight
 
-Run this independently of unrelated releases, and only after any approved `0096` Relay Rush rollout is complete:
+The production database was checked before this activation:
 
-1. Capture a private recovery bookmark for the target D1 database.
-2. Apply only `0097_games_hub_cipher_grid.sql`.
-3. Verify the migration ledger contains exactly `0097_games_hub_cipher_grid.sql` as the applied Cipher Grid migration.
-4. Verify both new tables, the reward-history index, `CHECK` constraints, foreign keys, and zero-row baseline.
-5. Leave `DZN_GAMES_CIPHER_GRID_ENABLED=false` if any verification fails.
-6. Enable only `DZN_GAMES_CIPHER_GRID_ENABLED=true` after the schema passes. The existing Games Hub flag must already be enabled.
-7. Run one authenticated, disposable manual puzzle through start, incorrect guess, correct completion, Hub reward history, and Workshop accounting.
-8. Confirm no answer appears in browser network payloads, page source, logs, or error responses.
+1. `0097_games_hub_cipher_grid.sql` appears exactly once in the migration ledger.
+2. The session and reward-ledger tables, reward-history index, `CHECK` constraints, and cascading foreign keys match the migration.
+3. Both Cipher Grid tables have a zero-row baseline and `PRAGMA foreign_key_check` passed.
+4. The Games Hub feature flag was enabled only after the schema preflight passed.
+5. A read-only production load check must complete before an authenticated player starts a puzzle. The answer must not appear in browser payloads, page source, logs, or error responses.
 
 ## Local verification
 
