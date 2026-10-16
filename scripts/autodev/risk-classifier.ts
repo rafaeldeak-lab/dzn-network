@@ -114,6 +114,14 @@ const LIVE_BILLING_MUTATION_PATTERNS: Array<[RegExp, string]> = [
   [/\bDZN_LIVE_CHECKOUT_ENABLED\b\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)["'`]?\b/i, "live checkout enablement flag assignment detected"],
   [/\b(?:enable|activate|turn\s+on|go\s+live)\b[\s\S]{0,100}\blive\s+billing\b[\s\S]{0,140}\b(?:script|workflow|automation|autodev|unattended)\b/i, "unattended live billing activation path detected"],
 ];
+const EXECUTABLE_TEST_OPERATION_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:exec|execSync|execaCommand)\s*\(\s*["'`][^"'`]{0,420}\bwrangler\s+(?:pages\s+)?deploy\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\b(?:execFile|execFileSync|spawn|spawnSync|execa|Bun\.spawn|Deno\.Command)\s*\(\s*["'`](?:npx|wrangler)["'`]\s*,\s*\[[\s\S]{0,320}\b(?:wrangler|pages|deploy)\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\b(?:exec|execSync|execaCommand)\s*\(\s*["'`][^"'`]{0,420}\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\b(?:execFile|execFileSync|spawn|spawnSync|execa|Bun\.spawn|Deno\.Command)\s*\(\s*["'`]stripe["'`]\s*,\s*\[[\s\S]{0,320}\b(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\b[\s\S]{0,160}\b(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/api\.stripe\.com\/v1\//i, "executable test calls the Stripe API"],
+  [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.ai|openrouter\.ai|api\.groq\.com|api\.replicate\.com)\b/i, "executable test calls a metered AI provider"],
+];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
@@ -181,6 +189,20 @@ export function detectDestructiveMigration(content: string, file = "") {
   if (/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats\b/i.test(text)) findings.push("player_stats table creation detected");
   if (/UPDATE\s+player_profiles[\s\S]{0,260}\b(kills|deaths|joins|disconnects|score|longest_kill_distance|highest_killstreak)\s*=\s*0\b/i.test(text)) findings.push("destructive player_profiles stat reset logic detected");
   return findings;
+}
+
+/**
+ * Test fixtures are permitted to mention protected commands, but a changed
+ * executable test must never run a deployment, mutate live billing, or call a
+ * metered provider under standing authority. This detector is intentionally
+ * invoked only by the Git-range controller, not ordinary source classification.
+ */
+export function detectUnsafeExecutableTestOperations(content: string) {
+  return Array.from(new Set(
+    EXECUTABLE_TEST_OPERATION_PATTERNS
+      .filter(([pattern]) => pattern.test(content))
+      .map(([, message]) => message),
+  ));
 }
 
 function isVerifiedCommsPrivacyCopyAndSwap(content: string, text: string, file: string) {

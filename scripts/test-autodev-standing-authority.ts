@@ -126,6 +126,23 @@ const secondParallelLease = parallelController.acquireTaskLease("parallel-task",
 assert.equal(firstParallelLease.ok, true, "The first atomic lease claim may take the only authority slot.");
 assert.equal(secondParallelLease.code, "resource_limit_exceeded", "A second independent lease claim must observe the controller-owned capacity claim.");
 
+let authorityRacePersisted = false;
+const authorityRevokedInsideClaim = { ...authority, state: "revoked" as const, revokedAt: now };
+const authorityRaceTask = task({ state: "authorised" });
+const authorityRaceController = createAuthorityController(authority.id, {
+  ...controllerRecords(authority, authorityRaceTask, []),
+  tryClaimTaskLease: (authorityId, taskId, _runnerId, guard) => {
+    assert.equal(authorityId, authority.id);
+    assert.equal(taskId, authorityRaceTask.id);
+    const decision = guard(copyAuthority(authorityRevokedInsideClaim), copyTask(authorityRaceTask));
+    if (!decision.ok) return decision;
+    authorityRacePersisted = true;
+    return { source: "authority-controller", recordedAt: now, task: copyTask(authorityRaceTask) };
+  },
+});
+assert.equal(authorityRaceController.acquireTaskLease(authorityRaceTask.id, "runner-a").code, "authority_inactive", "A lease claim must re-check authority state inside its atomic write boundary.");
+assert.equal(authorityRacePersisted, false, "A revoked authority must not persist a lease even when a stale controller read was active.");
+
 const persistedBlockedTask = task({
   state: "blocked",
   attempts: authority.maxAttemptsPerTask - 1,
@@ -221,6 +238,37 @@ const protectedPath = assessFixture(authority, {
   candidate: protectedRange,
 }, protectedFixture);
 assert.equal(protectedPath.pullRequestEligible, false, "Protected paths must be rejected from the verified Git range.");
+
+const executableTestAuthority: StandingAuthority = {
+  ...authority,
+  allowedSystems: ["tests"],
+  approvedTasks: [{
+    taskId: "task-test-runner-safety",
+    title: "Validate a safe test helper",
+    system: "tests",
+    allowedActions: ["investigate", "implement-in-branch", "validate", "prepare-pr"],
+  }],
+};
+const unsafeDeployCommand = ["npx", "wrangler", "pages", "deploy"].join(" ");
+const executableTestFixture = makeGitFixture(
+  "scripts/test-live-operation.ts",
+  `import { execaCommand } from "execa";\nawait execaCommand('${unsafeDeployCommand}');\n`,
+);
+const executableTestRange = inspectGitRange(executableTestFixture.path, executableTestFixture.baseSha, executableTestFixture.headSha);
+const executableTestTask = task({
+  id: "task-test-runner-safety",
+  title: "Validate a safe test helper",
+  system: "tests",
+  state: "ready-to-release",
+  implementerId: ready.task!.implementerId,
+  lease: ready.task!.lease,
+  candidate: executableTestRange,
+});
+assert.equal(
+  assessFixture(executableTestAuthority, executableTestTask, executableTestFixture).pullRequestEligible,
+  false,
+  "Executable tests that invoke production deployment commands must block autonomous release.",
+);
 
 const deletedProtectedFixture = makeDeletedProtectedFixture();
 const deletedProtectedRange = inspectGitRange(deletedProtectedFixture.path, deletedProtectedFixture.baseSha, deletedProtectedFixture.headSha);
@@ -413,6 +461,7 @@ assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health che
 
 rmSync(fixture.path, { force: true, recursive: true });
 rmSync(protectedFixture.path, { force: true, recursive: true });
+rmSync(executableTestFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });
 rmSync(browserFacingEventFixture.path, { force: true, recursive: true });
 rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
@@ -603,7 +652,7 @@ function controllerRecords(
         return { ok: false, code: "lease_inactive", message: "No controller-owned task record is available for the lease claim." };
       }
 
-      const guardDecision = guard(copyTask(current));
+      const guardDecision = guard(copyAuthority(authorityArg), copyTask(current));
       if (!guardDecision.ok) return guardDecision;
 
       const timestamp = new Date().toISOString();
@@ -653,7 +702,7 @@ function controllerRecords(
       if (authorityId !== authorityArg.id || !current) {
         return { ok: false, code: "invalid_transition", message: "No controller-owned task record is available for the transition." };
       }
-      const guardDecision = guard(copyTask(current));
+      const guardDecision = guard(copyAuthority(authorityArg), copyTask(current));
       if (!guardDecision.ok) return guardDecision;
       const result = transitionStoredTask(authorityArg, current, nextState, runnerId);
       if (!result.ok || !result.task) return result;

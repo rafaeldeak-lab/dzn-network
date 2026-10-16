@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-import { classifyPath, type RiskClassification, type SystemCategory } from "./risk-classifier";
+import { classifyPath, detectUnsafeExecutableTestOperations, type RiskClassification, type SystemCategory } from "./risk-classifier";
 
 export type AuthorityState = "active" | "paused" | "revoked";
 export type AuthorityTaskState = "proposed" | "authorised" | "implementing" | "validating" | "ready-to-release" | "released" | "blocked" | "reverted";
@@ -132,9 +132,10 @@ export type TrustedMergedAuthorityTaskRecord = TrustedAuthorityTaskRecord & {
 /**
  * The controller supplies this guard to its trusted record adapter. The adapter
  * must invoke it inside the same atomic transaction that would persist a lease
- * or lifecycle transition. Callers never receive this function or task data.
+ * or lifecycle transition. The authority and task must come from that same
+ * transaction; callers never receive this function or either record.
  */
-export type ControllerTaskWriteGuard = (currentTask: AuthorityTask) => AuthorityDecision;
+export type ControllerTaskWriteGuard = (currentAuthority: StandingAuthority, currentTask: AuthorityTask) => AuthorityDecision;
 
 export type AuthorityControllerRecords = {
   /** Returns the current authority policy held by the trusted host. */
@@ -147,16 +148,17 @@ export type AuthorityControllerRecords = {
   getPullRequestTarget(authorityId: string): TrustedPullRequestTarget | undefined;
   getEvidenceReceipts(authorityId: string, taskId: string, candidateHeadSha: string): TrustedEvidenceReceipt[];
   /**
-   * Atomically reads the current controller-owned task, checks live authority
-   * capacity, invokes the controller write guard, and persists the lease claim.
+   * Atomically reads the current controller-owned authority and task, checks
+   * live authority capacity, invokes the controller write guard, and persists
+   * the lease claim.
    * It must not use runner snapshots or persist if the guard denies the task.
    */
   tryClaimTaskLease(authorityId: string, taskId: string, runnerId: string, guard: ControllerTaskWriteGuard): TrustedAuthorityTaskRecord | AuthorityDecision;
   /**
-   * Atomically reads the current controller-owned task, applies a permitted
-   * lifecycle transition, invokes the controller write guard before persistence,
-   * and persists the resulting task. It must not accept a runner-supplied task
-   * snapshot or persist if the guard denies the task.
+   * Atomically reads the current controller-owned authority and task, applies a
+   * permitted lifecycle transition, invokes the controller write guard before
+   * persistence, and persists the resulting task. It must not accept a
+   * runner-supplied task snapshot or persist if the guard denies the task.
    */
   tryTransitionTask(authorityId: string, taskId: string, nextState: AuthorityTaskState, runnerId: string, guard: ControllerTaskWriteGuard): TrustedAuthorityTaskRecord | AuthorityDecision;
   /**
@@ -182,12 +184,10 @@ export type AuthorityController = {
 export function createAuthorityController(authorityId: string, records: AuthorityControllerRecords): AuthorityController {
   return Object.freeze({
     acquireTaskLease: (taskId, runnerId) => {
-      const authority = resolveControllerAuthority(authorityId, records);
-      return isAuthorityDecision(authority) ? authority : acquireTaskLeaseFromRecords(authority, taskId, runnerId, records);
+      return acquireTaskLeaseFromRecords(authorityId, taskId, runnerId, records);
     },
     transitionTask: (taskId, nextState, runnerId) => {
-      const authority = resolveControllerAuthority(authorityId, records);
-      return isAuthorityDecision(authority) ? authority : transitionTaskFromRecords(authority, taskId, nextState, runnerId, records);
+      return transitionTaskFromRecords(authorityId, taskId, nextState, runnerId, records);
     },
     assessLowRiskPullRequest: (taskId, repositoryPath, actingRunnerId) => {
       const authority = resolveControllerAuthority(authorityId, records);
@@ -294,10 +294,10 @@ function assessTaskAuthority(authority: StandingAuthority, task: AuthorityTask):
   return allow("Task is within the active authority scope.");
 }
 
-function transitionTaskFromRecords(authority: StandingAuthority, taskId: string, nextState: AuthorityTaskState, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
+function transitionTaskFromRecords(authorityId: string, taskId: string, nextState: AuthorityTaskState, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
   let transitionRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
   try {
-    transitionRecord = controllerRecords.tryTransitionTask(authority.id, taskId, nextState, runnerId, (currentTask) => assessTaskAuthority(authority, currentTask));
+    transitionRecord = controllerRecords.tryTransitionTask(authorityId, taskId, nextState, runnerId, (currentAuthority, currentTask) => assessTaskAuthority(currentAuthority, currentTask));
   } catch {
     return deny("invalid_transition", "The controller-owned task transition could not be persisted.", { taskId, nextState });
   }
@@ -306,6 +306,8 @@ function transitionTaskFromRecords(authority: StandingAuthority, taskId: string,
       ? deny("invalid_transition", "The controller transition returned no trusted task record.", { taskId, nextState })
       : transitionRecord;
   }
+  const authority = resolveControllerAuthority(authorityId, controllerRecords);
+  if (isAuthorityDecision(authority)) return authority;
   if (!isTrustedTaskRecord(transitionRecord, authority, taskId)) {
     return deny("invalid_transition", "Task transitions require a current controller-owned task record.", { taskId, nextState });
   }
@@ -329,10 +331,10 @@ function transitionTaskFromRecords(authority: StandingAuthority, taskId: string,
   };
 }
 
-function acquireTaskLeaseFromRecords(authority: StandingAuthority, taskId: string, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
+function acquireTaskLeaseFromRecords(authorityId: string, taskId: string, runnerId: string, controllerRecords: AuthorityControllerRecords): AuthorityDecision & { task?: AuthorityTask } {
   let leaseRecord: TrustedAuthorityTaskRecord | AuthorityDecision;
   try {
-    leaseRecord = controllerRecords.tryClaimTaskLease(authority.id, taskId, runnerId, (currentTask) => assessTaskLeaseClaim(authority, currentTask));
+    leaseRecord = controllerRecords.tryClaimTaskLease(authorityId, taskId, runnerId, (currentAuthority, currentTask) => assessTaskLeaseClaim(currentAuthority, currentTask));
   } catch {
     return deny("lease_inactive", "The controller-owned lease record could not be claimed.", { taskId });
   }
@@ -341,6 +343,8 @@ function acquireTaskLeaseFromRecords(authority: StandingAuthority, taskId: strin
       ? deny("lease_inactive", "The controller lease operation returned no trusted task record.", { taskId })
       : leaseRecord;
   }
+  const authority = resolveControllerAuthority(authorityId, controllerRecords);
+  if (isAuthorityDecision(authority)) return authority;
   if (!isTrustedTaskRecord(leaseRecord, authority, taskId)) {
     return deny("lease_inactive", "Lease acquisition requires a current controller-owned task record.", { taskId });
   }
@@ -726,10 +730,19 @@ function isValidTimestamp(value: string) {
 function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: string, file: string): RiskClassification[] {
   const classifications = [baseSha, headSha].flatMap((commitSha) => {
     if (!readGitTreeEntry(repositoryPath, commitSha, file)) return [];
-    return [classifyPath(file, readGitBlob(repositoryPath, commitSha, file))];
+    const content = readGitBlob(repositoryPath, commitSha, file);
+    const classification = classifyPath(file, content);
+    const blockedOperations = isExecutableTestPath(file) ? detectUnsafeExecutableTestOperations(content) : [];
+    return [blockedOperations.length > 0
+      ? { ...classification, risk: "blocked" as const, reasons: [...classification.reasons, ...blockedOperations], blockedReason: blockedOperations.join("; ") }
+      : classification];
   });
   if (classifications.length === 0) throw new Error("Changed path was unavailable in both verified commits.");
   return classifications;
+}
+
+function isExecutableTestPath(file: string) {
+  return /^scripts\/test-[^/]+\.[cm]?[jt]sx?$/i.test(file);
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { classifyPath, detectDestructiveMigration, classifyRecoverableProductionStatus } from "./autodev/risk-classifier";
+import { classifyPath, detectDestructiveMigration, detectUnsafeExecutableTestOperations, classifyRecoverableProductionStatus } from "./autodev/risk-classifier";
 import { isSafePlatformIssue } from "./autodev/pick-safe-issue";
 
 function read(path: string) {
@@ -77,6 +77,15 @@ assert.equal(classifyPath(".github/workflows/stripe-secrets.yml", "run: npx wran
 assert.equal(classifyPath("wrangler.toml", "DZN_LIVE_CHECKOUT_ENABLED = \"true\"").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-live-checkout.yml", "env:\n  DZN_LIVE_CHECKOUT_ENABLED: yes").risk, "blocked");
 assert.equal(classifyPath("scripts/test-stripe-live-readiness.ts", "stripe products create --name test fixture").risk, "low");
+const deployTestCommand = ["npx", "wrangler", "pages", "deploy"].join(" ");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${deployTestCommand}');`), ["executable test invokes a Cloudflare deployment command"]);
+const stripeMutationCommand = ["stripe", "products", "create"].join(" ");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${stripeMutationCommand}');`), ["executable test invokes a live Stripe mutation command"]);
+const stripeApiUrl = ["https://api", "stripe.com/v1/products"].join(".");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await fetch('${stripeApiUrl}');`), ["executable test calls the Stripe API"]);
+const aiApiUrl = ["https://api", "openai.com/v1/responses"].join(".");
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await fetch('${aiApiUrl}');`), ["executable test calls a metered AI provider"]);
+assert.deepEqual(detectUnsafeExecutableTestOperations("const fixture = 'stripe products create';"), []);
 assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");
 assert.equal(classifyPath("scripts/ai-runner.ts", "const key = process.env.GEMINI_API_KEY; runUnattendedAgent(key);").risk, "blocked");
