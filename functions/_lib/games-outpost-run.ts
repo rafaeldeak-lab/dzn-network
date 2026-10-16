@@ -10,6 +10,7 @@ import {
   OUTPOST_RUN_REWARD,
   OUTPOST_RUN_START_COOLDOWN_MS,
   OUTPOST_RUN_TTL_MS,
+  outpostRunIntensity,
   type OutpostRunCell,
   type OutpostRunDirection,
   type OutpostRunGame,
@@ -24,6 +25,10 @@ const isDirection = (value: unknown): value is OutpostRunDirection => typeof val
 
 type Coordinate = { row: number; column: number };
 type OutpostLayout = { target: Coordinate; hazards: Coordinate[]; scanHint?: string };
+const start = { row: 2, column: 2 };
+const LEGACY_OUTPOST_RUN_MAX_ENERGY = 4;
+const LEGACY_OUTPOST_RUN_MAX_MOVES = 12;
+const GENERATED_HAZARD_COUNT = 5;
 type OutpostRunRow = {
   user_id: string;
   id: string;
@@ -40,12 +45,6 @@ type OutpostRunRow = {
   updated_at: number;
 };
 
-const layouts: readonly OutpostLayout[] = [
-  { target: { row: 0, column: 4 }, hazards: [{ row: 1, column: 2 }, { row: 0, column: 2 }, { row: 2, column: 4 }] },
-  { target: { row: 4, column: 0 }, hazards: [{ row: 3, column: 2 }, { row: 4, column: 2 }, { row: 2, column: 0 }] },
-  { target: { row: 0, column: 0 }, hazards: [{ row: 1, column: 1 }, { row: 0, column: 2 }, { row: 2, column: 1 }] },
-  { target: { row: 4, column: 4 }, hazards: [{ row: 3, column: 3 }, { row: 4, column: 2 }, { row: 2, column: 3 }] },
-];
 const scanHints = new Set(["north", "south", "east", "west", "north-east", "north-west", "south-east", "south-west", "relay acquired"]);
 
 function sameCoordinate(left: Coordinate, right: Coordinate) {
@@ -65,33 +64,70 @@ function isScanHint(value: unknown): value is string {
 function parseLayout(value: string): OutpostLayout {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || !isCoordinate((parsed as OutpostLayout).target) || !Array.isArray((parsed as OutpostLayout).hazards)
-    || (parsed as OutpostLayout).hazards.length !== 3 || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
+    || (parsed as OutpostLayout).hazards.length < 3 || (parsed as OutpostLayout).hazards.length > GENERATED_HAZARD_COUNT || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
     || ((parsed as OutpostLayout).scanHint !== undefined && !isScanHint((parsed as OutpostLayout).scanHint))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   const layout = parsed as OutpostLayout;
-  const start = { row: 2, column: 2 };
-  if (sameCoordinate(layout.target, start) || layout.hazards.some(hazard => sameCoordinate(hazard, start) || sameCoordinate(hazard, layout.target))) {
+  const uniqueHazards = new Set(layout.hazards.map(hazard => `${hazard.row}:${hazard.column}`));
+  if (uniqueHazards.size !== layout.hazards.length || sameCoordinate(layout.target, start) || layout.hazards.some(hazard => sameCoordinate(hazard, start) || sameCoordinate(hazard, layout.target))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   return layout;
 }
 
-function parseVisited(value: string): Coordinate[] {
+function maxMovesForLayout(layout: OutpostLayout) { return layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_MOVES : OUTPOST_RUN_MAX_MOVES; }
+function maxEnergyForLayout(layout: OutpostLayout) { return layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_ENERGY : OUTPOST_RUN_MAX_ENERGY; }
+
+function parseVisited(value: string, maxMoves: number): Coordinate[] {
   const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > OUTPOST_RUN_MAX_MOVES + 1 || parsed.some(cell => !isCoordinate(cell))) {
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > maxMoves + 1 || parsed.some(cell => !isCoordinate(cell))) {
     throw new Error("Invalid stored Outpost Run visibility");
   }
   const visited = parsed as Coordinate[];
-  if (!sameCoordinate(visited[0], { row: 2, column: 2 })) throw new Error("Invalid stored Outpost Run visibility");
+  if (!sameCoordinate(visited[0], start)) throw new Error("Invalid stored Outpost Run visibility");
   return visited;
 }
 
-function chooseLayout() {
+function randomIndex(length: number) {
   const bytes = new Uint32Array(1);
-  const limit = Math.floor(0x1_0000_0000 / layouts.length) * layouts.length;
+  const limit = Math.floor(0x1_0000_0000 / length) * length;
   do { crypto.getRandomValues(bytes); } while (bytes[0] >= limit);
-  return layouts[bytes[0] % layouts.length];
+  return bytes[0] % length;
+}
+
+function shuffled<T>(values: readonly T[]) {
+  const copy = [...values];
+  for (let index = copy.length - 1; index > 0; index--) {
+    const next = randomIndex(index + 1);
+    [copy[index], copy[next]] = [copy[next], copy[index]];
+  }
+  return copy;
+}
+
+const coordinates = Array.from({ length: OUTPOST_RUN_GRID_SIZE * OUTPOST_RUN_GRID_SIZE }, (_, index) => ({
+  row: Math.floor(index / OUTPOST_RUN_GRID_SIZE), column: index % OUTPOST_RUN_GRID_SIZE,
+}));
+const extractionTargets = coordinates.filter(cell => Math.abs(cell.row - start.row) + Math.abs(cell.column - start.column) >= 4);
+
+function protectedRoute(target: Coordinate) {
+  const vertical = Array.from({ length: Math.abs(target.row - start.row) }, () => target.row < start.row ? "north" : "south");
+  const horizontal = Array.from({ length: Math.abs(target.column - start.column) }, () => target.column < start.column ? "west" : "east");
+  const route = [start];
+  let position = start;
+  for (const direction of shuffled([...vertical, ...horizontal])) {
+    position = moveCoordinate(position, direction);
+    route.push(position);
+  }
+  return route;
+}
+
+function chooseLayout(): OutpostLayout {
+  const target = extractionTargets[randomIndex(extractionTargets.length)];
+  const route = protectedRoute(target);
+  const protectedCells = new Set(route.map(cell => `${cell.row}:${cell.column}`));
+  const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, GENERATED_HAZARD_COUNT);
+  return { target, hazards };
 }
 
 function moveCoordinate(position: Coordinate, direction: OutpostRunDirection): Coordinate {
@@ -121,10 +157,12 @@ function visibleCells(layout: OutpostLayout, visited: Coordinate[]): OutpostRunC
 
 function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
   const layout = parseLayout(row.layout_json);
-  const visited = parseVisited(row.visited_json);
+  const maxMoves = maxMovesForLayout(layout);
+  const maxEnergy = maxEnergyForLayout(layout);
+  const visited = parseVisited(row.visited_json, maxMoves);
   if (!Number.isInteger(row.position_row) || !Number.isInteger(row.position_column) || row.position_row < 0 || row.position_row >= OUTPOST_RUN_GRID_SIZE
-    || row.position_column < 0 || row.position_column >= OUTPOST_RUN_GRID_SIZE || !Number.isInteger(row.energy) || row.energy < 0 || row.energy > OUTPOST_RUN_MAX_ENERGY
-    || !Number.isInteger(row.moves) || row.moves < 0 || row.moves > OUTPOST_RUN_MAX_MOVES || !Number.isInteger(row.scanned) || ![0, 1].includes(row.scanned)) {
+    || row.position_column < 0 || row.position_column >= OUTPOST_RUN_GRID_SIZE || !Number.isInteger(row.energy) || row.energy < 0 || row.energy > maxEnergy
+    || !Number.isInteger(row.moves) || row.moves < 0 || row.moves > maxMoves || !Number.isInteger(row.scanned) || ![0, 1].includes(row.scanned)) {
     throw new Error("Invalid stored Outpost Run state");
   }
   const status = row.status === "playing" && now >= row.started_at + OUTPOST_RUN_TTL_MS ? "expired" : row.status;
@@ -137,9 +175,10 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
     row: position.row,
     column: position.column,
     energy: row.energy,
-    maxEnergy: OUTPOST_RUN_MAX_ENERGY,
+    maxEnergy,
     moves: row.moves,
-    maxMoves: OUTPOST_RUN_MAX_MOVES,
+    maxMoves,
+    intensity: outpostRunIntensity(row.moves),
     scanHint: row.scanned ? layout.scanHint ?? null : null,
     scanAvailable: status === "playing" && row.scanned === 0,
     visibleCells: visibleCells(layout, visited),
@@ -188,7 +227,7 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         position_row = 2, position_column = 2, energy = excluded.energy, moves = 0, scanned = 0, status = 'playing', version = 0,
         started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_outpost_run_sessions.started_at <= ?`)
-        .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([{ row: 2, column: 2 }]), OUTPOST_RUN_MAX_ENERGY, now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
+        .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([start]), OUTPOST_RUN_MAX_ENERGY, now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another outpost run." }, 429);
     } else if (body.action === "scan" || body.action === "move") {
       const expectedKeys = body.action === "scan" ? ["action", "gameId", "version"] : ["action", "gameId", "version", "direction"];
@@ -197,11 +236,13 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         || (body.action === "move" && !isDirection(body.direction))) return reply({ error: "Choose a valid Outpost Run command." }, 400);
       const row = await db.prepare("SELECT * FROM dzn_outpost_run_sessions WHERE user_id = ?").bind(user.id).first<OutpostRunRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This outpost run is not available." }, 404);
-      if (row.status !== "playing" || row.version !== body.version || row.moves >= OUTPOST_RUN_MAX_MOVES || now >= row.started_at + OUTPOST_RUN_TTL_MS) {
+      if (row.status !== "playing" || row.version !== body.version || now >= row.started_at + OUTPOST_RUN_TTL_MS) {
         return reply({ error: "This outpost run changed or ended. Refresh to continue." }, 409);
       }
       if (now < row.updated_at + OUTPOST_RUN_MIN_MOVE_INTERVAL_MS) return reply({ error: "Take a moment before the next field command." }, 429);
       const layout = parseLayout(row.layout_json);
+      const maxMoves = maxMovesForLayout(layout);
+      if (row.moves >= maxMoves) return reply({ error: "This outpost run changed or ended. Refresh to continue." }, 409);
       const position = { row: row.position_row, column: row.position_column };
       if (body.action === "scan") {
         if (row.scanned) return reply({ error: "The portable scanner has already been used on this run." }, 409);
@@ -214,12 +255,12 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         const direction = body.direction as OutpostRunDirection;
         const next = moveCoordinate(position, direction);
         if (!isCoordinate(next)) return reply({ error: "That route leaves the field grid." }, 400);
-        const visited = parseVisited(row.visited_json);
+        const visited = parseVisited(row.visited_json, maxMoves);
         const terrainHazard = layout.hazards.some(hazard => sameCoordinate(hazard, next));
         const energy = row.energy - (terrainHazard ? 1 : 0);
         const moves = row.moves + 1;
         const reachedRelay = sameCoordinate(layout.target, next);
-        const status: OutpostRunRow["status"] = reachedRelay ? "won" : energy <= 0 || moves >= OUTPOST_RUN_MAX_MOVES ? "failed" : "playing";
+        const status: OutpostRunRow["status"] = reachedRelay ? "won" : energy <= 0 || moves >= maxMoves ? "failed" : "playing";
         const update = db.prepare(`UPDATE dzn_outpost_run_sessions
           SET visited_json = ?, position_row = ?, position_column = ?, energy = ?, moves = ?, status = ?, version = version + 1, updated_at = ?
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
