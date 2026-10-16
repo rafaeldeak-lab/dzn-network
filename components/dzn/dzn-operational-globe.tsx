@@ -35,6 +35,8 @@ type GlobePoint = {
   active: boolean;
 };
 
+export type DznGlobeFocusPoint = Pick<GlobePoint, "lat" | "lng" | "active">;
+
 type TooltipState = {
   x: number;
   y: number;
@@ -52,6 +54,8 @@ type GlobeControls = {
 type PointerState = {
   x: number;
   y: number;
+  originX: number;
+  originY: number;
   hasDragged: boolean;
   pointerId: number | null;
 };
@@ -70,6 +74,7 @@ const BASE_CAMERA_Z = 2.7;
 const AUTO_ROTATE_SPEED = 0.00155;
 const DRAG_ROTATE_X_SPEED = 0.006;
 const DRAG_ROTATE_Y_SPEED = 0.0035;
+const MAX_INITIAL_GLOBE_TILT = 0.72;
 const BASE_MARKER_SCALE = 1;
 const MIN_MARKER_SCALE = 0.56;
 const MAX_MARKER_SCALE = 1.04;
@@ -81,10 +86,14 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
   const rotationXRef = useRef(DEFAULT_GLOBE_ROTATION_X);
   const rotationYRef = useRef(DEFAULT_GLOBE_ROTATION_Y);
   const zoomRef = useRef(DEFAULT_GLOBE_ZOOM);
+  const initialFocusKeyRef = useRef<string | null>(null);
+  const hasUserAdjustedViewRef = useRef(false);
   const isDraggingRef = useRef(false);
   const lastPointerRef = useRef<PointerState>({
     x: 0,
     y: 0,
+    originX: 0,
+    originY: 0,
     hasDragged: false,
     pointerId: null,
   });
@@ -124,6 +133,13 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
 
     async function loadGlobe() {
       try {
+        const focusKey = globeInitialFocusKey(globePoints);
+        if (shouldRefreshInitialGlobeFocus(initialFocusKeyRef.current, focusKey, hasUserAdjustedViewRef.current)) {
+          const initialRotation = initialGlobeRotationForPoints(globePoints);
+          rotationXRef.current = initialRotation.x;
+          rotationYRef.current = initialRotation.y;
+          initialFocusKeyRef.current = focusKey;
+        }
         const THREE = await import("three");
         if (disposed || !stageRef.current) return;
         cleanup = createThreeGlobe({
@@ -135,6 +151,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
           rotationYRef,
           zoomRef,
           isDraggingRef,
+          hasUserAdjustedViewRef,
           lastPointerRef,
           onTooltip: setTooltip,
           onNavigate: (slug) => router.push(`/servers/profile?slug=${encodeURIComponent(slug)}`),
@@ -197,21 +214,30 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
         <button
           type="button"
           aria-label="Zoom globe in"
-          onClick={() => globeControlsRef.current?.zoomBy(GLOBE_ZOOM_STEP)}
+          onClick={() => {
+            hasUserAdjustedViewRef.current = true;
+            globeControlsRef.current?.zoomBy(GLOBE_ZOOM_STEP);
+          }}
         >
           +
         </button>
         <button
           type="button"
           aria-label="Zoom globe out"
-          onClick={() => globeControlsRef.current?.zoomBy(-GLOBE_ZOOM_STEP)}
+          onClick={() => {
+            hasUserAdjustedViewRef.current = true;
+            globeControlsRef.current?.zoomBy(-GLOBE_ZOOM_STEP);
+          }}
         >
           -
         </button>
         <button
           type="button"
           aria-label="Reset globe zoom"
-          onClick={() => globeControlsRef.current?.resetZoom()}
+          onClick={() => {
+            hasUserAdjustedViewRef.current = true;
+            globeControlsRef.current?.resetZoom();
+          }}
         >
           Reset
         </button>
@@ -229,6 +255,7 @@ function createThreeGlobe({
   rotationYRef,
   zoomRef,
   isDraggingRef,
+  hasUserAdjustedViewRef,
   lastPointerRef,
   onTooltip,
   onNavigate,
@@ -242,6 +269,7 @@ function createThreeGlobe({
   rotationYRef: MutableRefObject<number>;
   zoomRef: MutableRefObject<number>;
   isDraggingRef: MutableRefObject<boolean>;
+  hasUserAdjustedViewRef: MutableRefObject<boolean>;
   lastPointerRef: MutableRefObject<PointerState>;
   onTooltip: (tooltip: TooltipState) => void;
   onNavigate: (slug: string) => void;
@@ -310,7 +338,6 @@ function createThreeGlobe({
   );
   globeGroup.add(atmosphere);
 
-  addGlobeGrid(THREE, globeGroup);
   addLandCoastlineOverlay(THREE, globeGroup);
 
   const { targetMeshes, pulseMeshes, markerGroups } = addServerNodes(THREE, globeGroup, points);
@@ -408,6 +435,8 @@ function createThreeGlobe({
     lastPointerRef.current = {
       x: event.clientX,
       y: event.clientY,
+      originX: event.clientX,
+      originY: event.clientY,
       hasDragged: false,
       pointerId: event.pointerId,
     };
@@ -419,7 +448,13 @@ function createThreeGlobe({
     if (isDraggingRef.current) {
       const dx = event.clientX - lastPointerRef.current.x;
       const dy = event.clientY - lastPointerRef.current.y;
-      if (Math.abs(dx) + Math.abs(dy) > 2) lastPointerRef.current.hasDragged = true;
+      const movementFromOrigin =
+        Math.abs(event.clientX - lastPointerRef.current.originX) +
+        Math.abs(event.clientY - lastPointerRef.current.originY);
+      if (movementFromOrigin > 2) {
+        lastPointerRef.current.hasDragged = true;
+        hasUserAdjustedViewRef.current = true;
+      }
       rotationYRef.current += dx * DRAG_ROTATE_X_SPEED;
       rotationXRef.current = clamp(
         rotationXRef.current + dy * DRAG_ROTATE_Y_SPEED,
@@ -465,6 +500,7 @@ function createThreeGlobe({
   function handleWheel(event: WheelEvent) {
     if (isGlobeControlEvent(event)) return;
     event.preventDefault();
+    hasUserAdjustedViewRef.current = true;
     const direction = event.deltaY < 0 ? 1 : -1;
     setZoom(zoomRef.current + direction * GLOBE_ZOOM_STEP);
   }
@@ -521,32 +557,6 @@ function createThreeGlobe({
   }
 }
 
-function addGlobeGrid(THREE: typeof import("three"), group: import("three").Group) {
-  const material = new THREE.LineBasicMaterial({
-    color: 0x67e8f9,
-    transparent: true,
-    opacity: 0.07,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-
-  for (const lat of [-60, -45, -30, -15, 0, 15, 30, 45, 60]) {
-    const points = [];
-    for (let lng = -180; lng <= 180; lng += 4) {
-      points.push(latLngToVector(THREE, lat, lng, 1.018));
-    }
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material.clone()));
-  }
-
-  for (let lng = -165; lng <= 180; lng += 15) {
-    const points = [];
-    for (let lat = -82; lat <= 82; lat += 4) {
-      points.push(latLngToVector(THREE, lat, lng, 1.018));
-    }
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material.clone()));
-  }
-}
-
 function addLandCoastlineOverlay(THREE: typeof import("three"), group: import("three").Group) {
   const positions = cachedCoastlinePositions ?? buildCoastlinePositions(THREE);
   cachedCoastlinePositions = positions;
@@ -560,7 +570,7 @@ function addLandCoastlineOverlay(THREE: typeof import("three"), group: import("t
     new THREE.LineBasicMaterial({
       color: 0xa855f7,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.18,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
@@ -572,7 +582,7 @@ function addLandCoastlineOverlay(THREE: typeof import("three"), group: import("t
     new THREE.LineBasicMaterial({
       color: 0x67e8f9,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.11,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
@@ -646,7 +656,7 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
       depthWrite: false,
     });
     const ringMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(point.active ? 0.034 : 0.024, point.active ? 0.0021 : 0.0015, 8, 42),
+      new THREE.TorusGeometry(point.active ? 0.046 : 0.03, point.active ? 0.0024 : 0.0017, 10, 48),
       ringMaterial,
     );
     ringMesh.position.set(0, 0, 0.004);
@@ -661,7 +671,7 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
     });
     const beamGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(0, 0, 0.006),
-      new THREE.Vector3(0, 0, point.active ? 0.14 : 0.092),
+      new THREE.Vector3(0, 0, point.active ? 0.18 : 0.11),
     ]);
     markerGroup.add(new THREE.Line(beamGeometry, beamMaterial));
 
@@ -673,7 +683,7 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
       depthWrite: false,
     });
     const outerGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.03 : 0.021, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.04 : 0.026, 18, 18),
       outerGlowMaterial,
     );
     outerGlow.position.set(0, 0, 0.04);
@@ -687,7 +697,7 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
       depthWrite: false,
     });
     const nodeMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(point.active ? 0.015 : 0.0105, 18, 18),
+      new THREE.SphereGeometry(point.active ? 0.021 : 0.013, 18, 18),
       nodeMaterial,
     );
     nodeMesh.position.set(0, 0, 0.052);
@@ -702,7 +712,7 @@ function addServerNodes(THREE: typeof import("three"), group: import("three").Gr
       depthWrite: false,
     });
     const pulseMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(point.active ? 0.045 : 0.03, point.active ? 0.0016 : 0.0011, 8, 42),
+      new THREE.TorusGeometry(point.active ? 0.06 : 0.038, point.active ? 0.0018 : 0.0013, 10, 48),
       pulseMaterial,
     );
     pulseMesh.position.set(0, 0, 0.008);
@@ -924,17 +934,58 @@ function drawTextureLandDots(
 }
 
 function latLngToVector(THREE: typeof import("three"), lat: number, lng: number, radius: number) {
-  const phi = THREE.MathUtils.degToRad(90 - lat);
-  const theta = THREE.MathUtils.degToRad(lng + 180);
-  return new THREE.Vector3(
-    -radius * Math.sin(phi) * Math.cos(theta),
-    radius * Math.cos(phi),
-    radius * Math.sin(phi) * Math.sin(theta),
-  );
+  const vector = globeVectorComponents(lat, lng, radius);
+  return new THREE.Vector3(vector.x, vector.y, vector.z);
+}
+
+function globeVectorComponents(lat: number, lng: number, radius: number) {
+  const phi = ((90 - lat) * Math.PI) / 180;
+  const theta = ((lng + 180) * Math.PI) / 180;
+  return {
+    x: -radius * Math.sin(phi) * Math.cos(theta),
+    y: radius * Math.cos(phi),
+    z: radius * Math.sin(phi) * Math.sin(theta),
+  };
 }
 
 function markerScaleForZoom(zoom: number) {
   return clamp(BASE_MARKER_SCALE / Math.pow(zoom, 0.85), MIN_MARKER_SCALE, MAX_MARKER_SCALE);
+}
+
+export function initialGlobeRotationForPoints(points: readonly DznGlobeFocusPoint[]) {
+  const focusPoint = points.find((point) => point.active) ?? points[0];
+  if (!focusPoint) return { x: DEFAULT_GLOBE_ROTATION_X, y: DEFAULT_GLOBE_ROTATION_Y };
+
+  const latitude = clamp(focusPoint.lat, -82, 82);
+  const longitude = clamp(focusPoint.lng, -180, 180);
+  const vector = globeVectorComponents(latitude, longitude, 1);
+  const horizontalDistance = Math.hypot(vector.x, vector.z);
+
+  // Match globeGroup's XYZ Euler order so the selected public node opens on the camera-facing hemisphere.
+  return {
+    x: clamp(Math.atan2(vector.y, horizontalDistance), -MAX_INITIAL_GLOBE_TILT, MAX_INITIAL_GLOBE_TILT),
+    y: wrapRadians(Math.atan2(-vector.x, vector.z)),
+  };
+}
+
+export function shouldRefreshInitialGlobeFocus(
+  previousFocusKey: string | null,
+  nextFocusKey: string | null,
+  hasUserAdjustedView: boolean,
+) {
+  return !hasUserAdjustedView && nextFocusKey !== null && nextFocusKey !== previousFocusKey;
+}
+
+function globeInitialFocusKey(points: readonly GlobePoint[]) {
+  const focusPoint = points.find((point) => point.active) ?? points[0];
+  if (!focusPoint) return null;
+  return [
+    focusPoint.node.id,
+    focusPoint.node.slug ?? "",
+    focusPoint.active ? "active" : "pending",
+    focusPoint.lat.toFixed(4),
+    focusPoint.lng.toFixed(4),
+  ].join(":");
 }
 
 function buildGlobePoints(nodes: DznOperationalGlobeNode[]) {
@@ -1002,6 +1053,11 @@ function duplicateOffset(index: number) {
     { lat: -1.5, lng: 3.4 },
   ];
   return offsets[index % offsets.length];
+}
+
+function wrapRadians(value: number) {
+  const circle = Math.PI * 2;
+  return ((value + Math.PI) % circle + circle) % circle - Math.PI;
 }
 
 function isMaskLand(mask: Uint8ClampedArray, width: number, x: number, y: number) {
