@@ -33,6 +33,8 @@ import {
   getDueAdmAutomationServers,
   getDueAdmDiscoveryAutomationServers,
   getDueStatusAutomationServers,
+  clearStatusCheckLock,
+  markStatusCheckStarted,
   queueDiscordPostUpdatesForGuild,
 } from "../functions/_lib/automation";
 import { getPublicCacheDebugForServer } from "../functions/_lib/public-cache";
@@ -604,6 +606,47 @@ async function run() {
     const due = await getDueMetadataRefreshServersFast(env, 10, 60_000);
     assert.deepEqual(due.filter((row) => row.guild_id === scope.guildId).map((row) => row.id).sort(),
       [scope.linkedServerId, "same-guild-other-server"].sort());
+  });
+  await test("paid fast player-count claims preserve cadence while blocking duplicate and retry races", async ({ db, env }) => {
+    await grant(env);
+    await getDueStatusAutomationServers(env, 10);
+    const now = Date.now();
+    const stalePlayerCountAt = new Date(now - 5 * 60 * 1000).toISOString();
+    const staleBefore = new Date(now - 60_000).toISOString();
+    const statusDueLater = new Date(now + 30 * 60 * 1000).toISOString();
+    const retryLater = new Date(now + 5 * 60 * 1000).toISOString();
+    const freshPlayerCountAt = new Date(now).toISOString();
+
+    db.sqlite.prepare(`UPDATE server_sync_state SET
+      currently_checking_status = 0,
+      status_sync_started_at = NULL,
+      next_status_check_due_at = ?,
+      next_retry_after = NULL
+      WHERE guild_id = ?`).run(statusDueLater, scope.guildId);
+    db.sqlite.prepare("UPDATE linked_servers SET player_count_last_checked_at = ? WHERE id = ?")
+      .run(stalePlayerCountAt, scope.linkedServerId);
+
+    const first = await markStatusCheckStarted(env, scope.guildId, {
+      stalePlayerCountRefresh: { linkedServerId: scope.linkedServerId, before: staleBefore },
+    });
+    assert.equal(first.acquired, true, "paid fast refresh should not wait for the slower status cadence");
+    await clearStatusCheckLock(env, scope.guildId, first.startedAt);
+
+    db.sqlite.prepare("UPDATE linked_servers SET player_count_last_checked_at = ? WHERE id = ?")
+      .run(freshPlayerCountAt, scope.linkedServerId);
+    const duplicate = await markStatusCheckStarted(env, scope.guildId, {
+      stalePlayerCountRefresh: { linkedServerId: scope.linkedServerId, before: staleBefore },
+    });
+    assert.equal(duplicate.acquired, false, "a refreshed player count must reject a duplicate fast claim");
+
+    db.sqlite.prepare("UPDATE linked_servers SET player_count_last_checked_at = ? WHERE id = ?")
+      .run(stalePlayerCountAt, scope.linkedServerId);
+    db.sqlite.prepare("UPDATE server_sync_state SET next_retry_after = ? WHERE guild_id = ?")
+      .run(retryLater, scope.guildId);
+    const backoff = await markStatusCheckStarted(env, scope.guildId, {
+      stalePlayerCountRefresh: { linkedServerId: scope.linkedServerId, before: staleBefore },
+    });
+    assert.equal(backoff.acquired, false, "retry backoff must reject a duplicate fast claim");
   });
   await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
     await getDueStatusAutomationServers(env, 10);

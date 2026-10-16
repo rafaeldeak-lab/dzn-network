@@ -18,6 +18,16 @@ assert.equal(serverMetadata.includes("markStatusCheckStarted(env, row.guild_id")
 assert.equal(serverMetadata.includes("phase: \"lock_active\""), true, "Fresh locks should be recorded as explicit skipped candidates.");
 assert.equal(serverMetadata.includes("metadata_lock_cleanup_after_incomplete_run"), true, "Incomplete attempts should clear their lock in finally.");
 
+assert.equal(
+  automation.includes("COALESCE(next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?"),
+  true,
+  "Status claims must recheck the slower status cadence before granting an ordinary claim.",
+);
+assert.equal(
+  automation.includes("COALESCE(next_retry_after, '1970-01-01T00:00:00.000Z') <= ?"),
+  true,
+  "Status claims must refuse a candidate when another worker recorded retry backoff first.",
+);
 assert.equal(serverMetadata.includes("unavailableRetryCutoff"), true, "Unavailable servers need bounded retry backoff.");
 assert.equal(serverMetadata.includes("lower(COALESCE(linked_servers.player_count_status, 'unknown')) != 'unavailable'"), true);
 assert.equal(serverMetadata.includes("CASE WHEN linked_servers.player_count_last_checked_at IS NULL THEN 0 ELSE 1 END ASC"), true, "Never-attempted servers should sort first.");
