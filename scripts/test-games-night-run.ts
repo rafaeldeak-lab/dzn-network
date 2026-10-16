@@ -18,7 +18,7 @@ let passed = 0;
 
 async function nightRunFixture(migrate = true) {
   const fixture = await gamesFixture();
-  if (migrate) fixture.db.sqlite.exec(readFileSync("migrations/0103_games_hub_night_run.sql", "utf8"));
+  if (migrate) fixture.db.sqlite.exec(readFileSync("migrations/0104_games_hub_night_run.sql", "utf8"));
   (fixture.env as Env).DZN_GAMES_NIGHT_RUN_ENABLED = "true";
   return fixture;
 }
