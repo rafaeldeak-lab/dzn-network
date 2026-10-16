@@ -842,7 +842,7 @@ function classifyChangedPath(repositoryPath: string, baseSha: string, headSha: s
 }
 
 function isExecutableTestPath(file: string) {
-  return /^scripts\/test-[^/]+\.[cm]?[jt]sx?$/i.test(file);
+  return /^scripts\/test-[^/]+(?:\/.*)?\.[cm]?[jt]sx?$/i.test(file);
 }
 
 function readGitBlob(repositoryPath: string, commitSha: string, file: string) {

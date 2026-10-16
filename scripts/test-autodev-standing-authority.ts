@@ -295,6 +295,33 @@ assert.equal(
   "Executable tests that invoke production deployment commands must block autonomous release.",
 );
 
+const nestedExecutableTestFixture = makeGitFixture(
+  "scripts/test-github-workflow-boundary/owner-console-preview.ts",
+  "export const preview = 'manual-only';\n",
+);
+const nestedExecutableTestRange = inspectGitRange(nestedExecutableTestFixture.path, nestedExecutableTestFixture.baseSha, nestedExecutableTestFixture.headSha);
+const nestedExecutableTestTask = {
+  ...executableTestTask,
+  candidate: nestedExecutableTestRange,
+};
+let nestedValidationInvoked = false;
+const nestedValidation = controller(executableTestAuthority, {
+  ...nestedExecutableTestTask,
+  state: "implementing",
+}, [], {
+  pullRequestTarget: trustedTargetFor(executableTestAuthority, nestedExecutableTestRange.baseSha),
+}).runCandidateValidation(nestedExecutableTestTask.id, nestedExecutableTestFixture.path, "runner-a", () => {
+  nestedValidationInvoked = true;
+  return "nested-unsafe";
+});
+assert.equal(nestedValidation.code, "release_denied", "Nested executable test helpers must be rejected before their validator runs.");
+assert.equal(nestedValidationInvoked, false, "The controller must not execute changed nested test helpers under standing authority.");
+assert.equal(
+  assessFixture(executableTestAuthority, nestedExecutableTestTask, nestedExecutableTestFixture).pullRequestEligible,
+  false,
+  "Nested executable test helpers must block autonomous release.",
+);
+
 const deletedProtectedFixture = makeDeletedProtectedFixture();
 const deletedProtectedRange = inspectGitRange(deletedProtectedFixture.path, deletedProtectedFixture.baseSha, deletedProtectedFixture.headSha);
 assert.ok(deletedProtectedRange.changedFiles.includes("scripts/autodev/release-control.ts"), "Deleted protected files must remain in the verified file set.");
@@ -488,6 +515,7 @@ rmSync(fixture.path, { force: true, recursive: true });
 rmSync(validationFixture.path, { force: true, recursive: true });
 rmSync(protectedFixture.path, { force: true, recursive: true });
 rmSync(executableTestFixture.path, { force: true, recursive: true });
+rmSync(nestedExecutableTestFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });
 rmSync(browserFacingEventFixture.path, { force: true, recursive: true });
 rmSync(deletedProtectedFixture.path, { force: true, recursive: true });
