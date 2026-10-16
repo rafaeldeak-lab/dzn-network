@@ -39,8 +39,18 @@ try {
     await page.close();
   }
 
+  const homePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await homePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await homePage.getByRole("link", { name: /Chat & Help/i }).waitFor({ state: "visible" });
+  await homePage.getByRole("link", { name: /Join DZN Discord/i }).waitFor({ state: "visible" });
+  if (await homePage.getByLabel("Chat and Help").isVisible()) {
+    throw new Error("phone homepage: the floating launcher must not cover the primary Discord action");
+  }
+  await homePage.screenshot({ path: path.join(outputDir, "phone-home-actions.png"), fullPage: false });
+  await homePage.close();
+
   const launcherPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await launcherPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await launcherPage.goto(`${baseUrl}/pricing`, { waitUntil: "domcontentloaded" });
   await launcherPage.getByLabel("Chat and Help").click();
   await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "visible" });
   await launcherPage.screenshot({ path: path.join(outputDir, "phone-launcher.png"), fullPage: false });
