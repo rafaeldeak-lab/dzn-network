@@ -16,6 +16,7 @@ import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
 import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
+import { normalizePlanKey } from "./plans";
 import {
   automationBillingEligibilitySql,
   isMissingShowcaseSchema,
@@ -958,8 +959,15 @@ export async function refreshLivePlayerCountsForActiveServers(
       continue;
     }
 
+    const stalePlayerCountRefresh = skipScheduledMaintenance && normalizePlanKey(row.plan_key) !== "free"
+      ? {
+        linkedServerId: row.id,
+        before: new Date(Date.now() - livePlayerCountStaleMs).toISOString(),
+      }
+      : null;
     const lock = await markStatusCheckStarted(env, row.guild_id, {
       leaseMs: Math.max(3 * 60 * 1000, Math.min(livePlayerCountStaleMs, 5 * 60 * 1000)),
+      stalePlayerCountRefresh,
     });
     if (!lock.acquired) {
       skipped += 1;

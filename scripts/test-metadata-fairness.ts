@@ -21,7 +21,7 @@ assert.equal(serverMetadata.includes("metadata_lock_cleanup_after_incomplete_run
 assert.equal(
   automation.includes("COALESCE(next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?"),
   true,
-  "Status claims must recheck that a concurrently selected server remains due.",
+  "Status claims must recheck the slower status cadence before granting an ordinary claim.",
 );
 assert.equal(
   automation.includes("COALESCE(next_retry_after, '1970-01-01T00:00:00.000Z') <= ?"),

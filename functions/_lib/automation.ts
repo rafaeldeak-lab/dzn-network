@@ -840,10 +840,21 @@ export function discordPublishingSingleServerScopeGuard(guildId: string, linkedS
   };
 }
 
-export async function markStatusCheckStarted(env: Env, guildId: string, options: { leaseMs?: number } = {}) {
+export async function markStatusCheckStarted(
+  env: Env,
+  guildId: string,
+  options: {
+    leaseMs?: number;
+    stalePlayerCountRefresh?: {
+      linkedServerId: string;
+      before: string;
+    } | null;
+  } = {},
+) {
   const now = new Date().toISOString();
   const leaseMs = Math.max(60_000, Math.min(Math.trunc(Number(options.leaseMs ?? 5 * 60 * 1000)) || 5 * 60 * 1000, 15 * 60 * 1000));
   const staleCutoff = new Date(Date.now() - leaseMs).toISOString();
+  const stalePlayerCountRefresh = options.stalePlayerCountRefresh ?? null;
   const result = await requireDb(env)
     .prepare(
       `UPDATE server_sync_state SET
@@ -857,8 +868,26 @@ export async function markStatusCheckStarted(env: Env, guildId: string, options:
        WHERE guild_id = ?
           -- A second scheduler may have selected this row just before the
           -- first scheduler recorded its outcome. Recheck the live schedule
-          -- here so a completed attempt or retry backoff wins the race.
-          AND COALESCE(next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+          -- here so a completed attempt or retry backoff wins the race. Paid
+          -- metadata ticks may also claim their selected server while its
+          -- player count remains stale, without waiting for the slower status
+          -- cadence to become due again.
+          AND (
+            COALESCE(next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
+            OR (
+              ? IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM linked_servers AS status_claim_candidate
+                WHERE status_claim_candidate.id = ?
+                  AND status_claim_candidate.guild_id = server_sync_state.guild_id
+                  AND (
+                    status_claim_candidate.player_count_last_checked_at IS NULL
+                    OR status_claim_candidate.player_count_last_checked_at <= ?
+                  )
+              )
+            )
+          )
           AND COALESCE(next_retry_after, '1970-01-01T00:00:00.000Z') <= ?
           AND (
            COALESCE(currently_checking_status, 0) = 0
@@ -871,6 +900,9 @@ export async function markStatusCheckStarted(env: Env, guildId: string, options:
       now,
       guildId,
       now,
+       stalePlayerCountRefresh?.before ?? null,
+       stalePlayerCountRefresh?.linkedServerId ?? null,
+       stalePlayerCountRefresh?.before ?? null,
       now,
       staleCutoff,
     )
