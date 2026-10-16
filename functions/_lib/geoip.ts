@@ -89,11 +89,18 @@ async function lookupGeoIpProvider(
 
     const latitude = finiteNumber(payload.latitude);
     const longitude = finiteNumber(payload.longitude);
-    if (latitude === null || longitude === null) return null;
+    if (
+      latitude === null ||
+      longitude === null ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) return null;
 
     return {
-      latitude: clamp(latitude, -90, 90),
-      longitude: clamp(longitude, -180, 180),
+      latitude,
+      longitude,
       country: cleanText(payload.country_name ?? payload.country),
       region: cleanText(payload.region ?? payload.region_name),
       city: cleanText(payload.city),
@@ -216,10 +223,6 @@ function finiteNumber(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : null;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }
 
 function dedupe(values: string[]) {

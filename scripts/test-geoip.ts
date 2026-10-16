@@ -63,6 +63,22 @@ async function main() {
   assert.equal(fallbackProviderLookup.timezone, "Europe/London");
   assert.equal(fallbackProviderLookup.source, "ipwhois");
 
+  const invalidProviderLookup = await geolocateServerIp("8.8.8.8", {
+    endpoint: "https://example.invalid",
+    fetcher: async () =>
+      new Response(
+        JSON.stringify({
+          latitude: 123.4,
+          longitude: -1.2,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  });
+  assert.equal(invalidProviderLookup.latitude, null, "Out-of-range provider coordinates must be discarded rather than clamped.");
+  assert.equal(invalidProviderLookup.longitude, null);
+  assert.equal(invalidProviderLookup.source, "geoip-unavailable");
+  assert.equal(invalidProviderLookup.approximate, true);
+
   const baseRow: MapNodeRow = {
     id: "server-1",
     public_slug: "london-dayz",
@@ -142,6 +158,36 @@ async function main() {
   });
   assert.equal(southAmericaNode.location_label, "South America");
   assert.equal(southAmericaNode.x, 33.8);
+
+  const coordinateOnlyNode = buildPublicMapNodeFromRow({
+    ...baseRow,
+    id: "nukeproof-coordinate-only",
+    public_slug: "nukeproof-coordinate-only",
+    server_name: "NukeProof",
+    region: null,
+    geo_country: null,
+    geo_region: null,
+    geo_city: null,
+    geo_latitude: 53.6,
+    geo_longitude: -1.2,
+  });
+  assert.equal(coordinateOnlyNode.location_label, "Approximate server region", "Valid server coordinates must still produce an aggregate public globe marker when country metadata is unavailable.");
+  assert.equal(coordinateOnlyNode.region, "Approximate server region");
+  assert.equal(coordinateOnlyNode.country, null);
+  assert.notEqual(`${coordinateOnlyNode.x}:${coordinateOnlyNode.y}`, "50:38.9", "A coordinate-only server must not fall back to the awaiting-metadata marker.");
+  assert.equal(JSON.stringify(coordinateOnlyNode).includes("53.6"), false, "Aggregate map nodes must not disclose raw latitude.");
+  assert.equal(JSON.stringify(coordinateOnlyNode).includes("-1.2"), false, "Aggregate map nodes must not disclose raw longitude.");
+
+  const invalidCoordinateNode = buildPublicMapNodeFromRow({
+    ...baseRow,
+    id: "invalid-coordinate",
+    public_slug: "invalid-coordinate",
+    geo_country: null,
+    geo_region: null,
+    geo_latitude: 123.4,
+    geo_longitude: -1.2,
+  });
+  assert.equal(invalidCoordinateNode.location_label, "Location awaiting metadata", "Out-of-range coordinates must not produce a public globe marker.");
 
   const americanSamoaNode = buildPublicMapNodeFromRow({
     ...baseRow,

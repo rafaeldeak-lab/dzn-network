@@ -1,6 +1,6 @@
 "use client";
 
-import { geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
+import { geoEquirectangular, geoPath } from "d3-geo";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MutableRefObject } from "react";
@@ -805,7 +805,6 @@ function createDznGlobeTextureCanvas() {
   const maskCtx = maskCanvas.getContext("2d");
   const maskPath = maskCtx ? geoPath(projection, maskCtx) : null;
 
-  drawTextureGrid(ctx, path);
   if (maskCtx && maskPath) drawLandMask(maskCtx, maskPath, width, height);
   drawTextureLand(ctx, path);
   if (maskCtx) {
@@ -821,16 +820,6 @@ function createDznGlobeTextureCanvas() {
   ctx.fillRect(0, 0, width, height);
 
   return canvas;
-}
-
-function drawTextureGrid(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>) {
-  ctx.save();
-  ctx.beginPath();
-  path(geoGraticule10());
-  ctx.strokeStyle = "rgba(96, 165, 250, 0.18)";
-  ctx.lineWidth = 1.15;
-  ctx.stroke();
-  ctx.restore();
 }
 
 function drawLandMask(ctx: CanvasRenderingContext2D, path: ReturnType<typeof geoPath>, width: number, height: number) {
