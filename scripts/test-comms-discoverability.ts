@@ -37,8 +37,12 @@ assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not co
 assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
 assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
 assert.equal(launcherSource.includes("Chat &amp; Help"), true, "The persistent launcher control must identify chat and help without relying on an icon or tooltip.");
-assert.equal(launcherSource.includes("Chat &amp; help"), true, "The persistent launcher must explain that it opens chat and help.");
-assert.equal(launcherSource.includes('className="text-left leading-none"'), true, "Phone and narrow-tablet screens must retain a visible chat and help label.");
+assert.equal(launcherSource.includes("Chat &amp; help"), true, "The desktop launcher must explain that it opens chat and help.");
+assert.equal(launcherSource.includes('aria-label="Chat and Help"'), true, "The compact mobile launcher must retain an accessible chat and help label.");
+assert.equal(launcherSource.includes('"hidden md:block"'), true, "Phone launchers must use an icon-only control so they do not cover page actions.");
+assert.equal(launcherSource.includes('h-11 w-11'), true, "The compact phone launcher must preserve a stable touch target.");
+assert.equal(launcherSource.includes('pathname === "/"'), true, "The phone homepage must identify the route with its large primary actions.");
+assert.equal(launcherSource.includes('"max-md:hidden"'), true, "The phone homepage must defer to the visible Chat and Help navigation while its Discord action is on screen.");
 assert.equal(launcherSource.includes("safe-area-inset-bottom"), true, "The launcher must clear mobile safe-area controls.");
 assert.equal(launcherSource.includes("safe-area-inset-left"), true, "The launcher must clear mobile safe-area controls in landscape.");
 assert.equal(launcherSource.includes("safe-area-inset-right"), true, "The compact phone launcher must clear the right safe-area control.");
