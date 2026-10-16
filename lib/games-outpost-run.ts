@@ -1,6 +1,6 @@
 export const OUTPOST_RUN_GRID_SIZE = 5;
-export const OUTPOST_RUN_MAX_ENERGY = 4;
-export const OUTPOST_RUN_MAX_MOVES = 12;
+export const OUTPOST_RUN_MAX_ENERGY = 3;
+export const OUTPOST_RUN_MAX_MOVES = 10;
 export const OUTPOST_RUN_REWARD = { xp: 125, parts: 6 } as const;
 export const OUTPOST_RUN_TTL_MS = 4 * 60 * 1_000;
 export const OUTPOST_RUN_START_COOLDOWN_MS = 5_000;
@@ -10,6 +10,13 @@ export const OUTPOST_RUN_DIRECTIONS = ["north", "east", "south", "west"] as cons
 export type OutpostRunDirection = (typeof OUTPOST_RUN_DIRECTIONS)[number];
 export type OutpostRunCellKind = "start" | "clear" | "hazard" | "relay";
 export type OutpostRunStatus = "playing" | "won" | "failed" | "expired";
+export type OutpostRunIntensity = "calibration" | "pressure" | "blackout";
+
+export function outpostRunIntensity(moves: number): OutpostRunIntensity {
+  if (moves >= 7) return "blackout";
+  if (moves >= 3) return "pressure";
+  return "calibration";
+}
 
 export type OutpostRunCell = {
   row: number;
@@ -28,6 +35,7 @@ export type OutpostRunGame = {
   maxEnergy: number;
   moves: number;
   maxMoves: number;
+  intensity: OutpostRunIntensity;
   scanHint: string | null;
   scanAvailable: boolean;
   visibleCells: OutpostRunCell[];

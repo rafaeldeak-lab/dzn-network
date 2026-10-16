@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesOutpostRun } from "../functions/_lib/games-outpost-run";
 import type { Env } from "../functions/_lib/types";
-import { OUTPOST_RUN_REWARD, OUTPOST_RUN_TTL_MS, type OutpostRunDirection, type OutpostRunPayload } from "../lib/games-outpost-run";
+import { OUTPOST_RUN_MAX_ENERGY, OUTPOST_RUN_MAX_MOVES, OUTPOST_RUN_REWARD, OUTPOST_RUN_TTL_MS, type OutpostRunDirection, type OutpostRunPayload } from "../lib/games-outpost-run";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof outpostFixture>>;
@@ -119,6 +119,24 @@ async function run() {
     assert.equal(state.game?.scanAvailable, false);
     assert.equal((await call(fixture)).headers.get("cache-control"), "private, no-store");
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("each fresh run generates a bounded private route with a safe extraction path", async fixture => {
+    const gameIds = new Set<string>();
+    for (let index = 0; index < 12; index++) {
+      const state = await start(fixture);
+      assert.ok(state.game);
+      const layout = layoutFor(fixture);
+      assert.equal(state.game.maxEnergy, OUTPOST_RUN_MAX_ENERGY);
+      assert.equal(state.game.maxMoves, OUTPOST_RUN_MAX_MOVES);
+      assert.equal(layout.hazards.length, 5);
+      assert.equal(new Set(layout.hazards.map(hazard => `${hazard.row}:${hazard.column}`)).size, layout.hazards.length);
+      assert.ok(Math.abs(layout.target.row - 2) + Math.abs(layout.target.column - 2) >= 4);
+      assert.ok(safePath({ row: 2, column: 2 }, layout.target, layout.hazards).length <= OUTPOST_RUN_MAX_MOVES);
+      gameIds.add(state.game.id);
+      fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
+    }
+    assert.equal(gameIds.size, 12);
   });
 
   await test("strict request validation rejects forged shapes, rewards, early movement and repeat scans", async fixture => {

@@ -857,16 +857,16 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>08 / FIELD EXTRACTION</span><h2 id="outpost-run-title">DZN Outpost Run</h2></div><Map size={24} /></div>
     {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.outpostRunTools}>
-      <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves}` : "Fog-grid field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Reach the emergency relay before your field pack runs dry."}</span></div>
+      <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves}` : "Procedural field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Every server-issued run hides a fresh route through the weather front."}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New outpost run available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
     </div>
     {game ? <>
-      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.outpostRunStage} data-status={game.status}>
-        <div className={styles.outpostRunReadout}><span>{active ? "FIELD SIGNAL / UNVERIFIED" : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? "Trace the emergency relay" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
-        <div className={styles.outpostRunMapShell} data-active={active}>
+      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.outpostRunStage} data-status={game.status} data-intensity={game.intensity}>
+        <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / FIELD SIGNAL` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? game.intensity === "calibration" ? "Trace the emergency relay" : game.intensity === "pressure" ? "Commit to the surviving route" : "Break through the blackout" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
+        <div className={styles.outpostRunMapShell} data-active={active} data-intensity={game.intensity}>
           <span className={styles.outpostRunCoordinate} aria-hidden="true">DZN / FIELD-05</span>
           <span className={styles.outpostRunSweep} aria-hidden="true" />
           <div className={styles.outpostRunGrid} role="grid" aria-label="Outpost Run fog grid">
@@ -891,15 +891,15 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
               className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}
           </div>
         </div>
-        <p className={styles.outpostRunHint}>Only ground you enter becomes visible. Hazards drain one stamina cell; the scanner gives one coarse relay direction.</p>
+        <p className={styles.outpostRunHint}>Every run has a fresh server-owned route. Only ground you enter becomes visible; hazards drain stamina and the scanner gives one coarse direction.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay secured</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${OUTPOST_RUN_REWARD.xp} XP and +${OUTPOST_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Outpost Run complete."}</span></div></>
           : game.status === "failed" ? <><Target size={22} /><div><strong>Field pack exhausted</strong><span>Hazards or a lost route ended the extraction. Existing Hub progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start a new field run when you are ready.</span></div></>
-              : <><Radio size={20} /><div><strong>Extraction active</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : "Use the scanner once, then move through the fog grid."}</span></div></>}
+              : <><Radio size={20} /><div><strong>{game.intensity === "blackout" ? "Blackout extraction" : "Extraction active"}</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : "Use the scanner once, then read the fresh fog route."}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Hold the route through the unknown.</h3><p>Move through a live five-by-five field grid, manage stamina around hazards, and extract the emergency relay before the signal closes.</p><div className={styles.rewardPills}><span>Fog grid</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Hold the route through the unknown.</h3><p>Take a fresh server-issued five-by-five extraction through the weather front. Read the fog, protect your three stamina cells, and secure the emergency relay before the signal closes.</p><div className={styles.rewardPills}><span>Fresh field route</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
