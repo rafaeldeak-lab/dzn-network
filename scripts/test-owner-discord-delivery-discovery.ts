@@ -11,6 +11,7 @@ const botId = "900000000000000002";
 const botRoleId = "900000000000000003";
 const verifiedOwnerRoleId = "900000000000000004";
 const decoratedVerifiedOwnerRoleId = "900000000000000015";
+const nonLatinPrefixedOwnerRoleId = "900000000000000016";
 const administratorVerifiedOwnerRoleId = "900000000000000009";
 const manageRolesVerifiedOwnerRoleId = "900000000000000011";
 const viewChannelVerifiedOwnerRoleId = "900000000000000012";
@@ -74,6 +75,7 @@ async function run() {
         { id: guildId, name: "@everyone", position: 0, permissions: (BigInt(viewChannel) | BigInt(sendMessages)).toString() },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: 0, managed: false },
         { id: decoratedVerifiedOwnerRoleId, name: "\u{1f3c6} Verified Server Owner", position: 4, permissions: 0, managed: false },
+        { id: nonLatinPrefixedOwnerRoleId, name: "\u{7ba1}\u{7406}\u{8005} Verified Server Owner", position: 3, permissions: 0, managed: false },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
         { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 7, permissions: manageRoles, managed: false },
         { id: viewChannelVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: viewChannel, managed: false },
@@ -113,6 +115,7 @@ async function run() {
     { id: decoratedVerifiedOwnerRoleId, name: "\u{1f3c6} Verified Server Owner", assignable: true },
   ]);
   assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId || role.id === decoratedVerifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
+  assert.equal(result.verifiedOwnerRoleCandidates.some((role) => role.id === nonLatinPrefixedOwnerRoleId), false, "A non-decorative role-name prefix must not be stripped into the owner-access role name.");
   assert.deepEqual(result.rejectedVerifiedOwnerRoles, [
     { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
     { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
