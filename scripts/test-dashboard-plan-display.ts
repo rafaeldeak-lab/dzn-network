@@ -8,7 +8,7 @@ import { onRequest as authMe } from "../functions/api/auth/me";
 const health = { server_id: "showcase", current_plan: "premium", source: "live", stale: false };
 const now = Date.parse("2026-09-12T12:00:00Z");
 const period = { plan_key: "pro", plan_status: "active", cancel_at_period_end: false, current_period_end: "2026-07-18T12:00:00Z" };
-assert.deepEqual(dashboardBillingPeriod(period, now), { label: "Billing Date", value: "Needs review (18 Jul 2026)" });
+assert.deepEqual(dashboardBillingPeriod(period, now), { label: "Billing Record", value: "Stored period ended 18 Jul 2026; review required" });
 assert.equal(dashboardBillingPeriod({ ...period, current_period_end: "2026-09-12T12:00:00Z" }, now).label, "Billing Date");
 assert.equal(dashboardBillingPeriod({ ...period, plan_status: "canceled" }, now).label, "Last Period Ended");
 assert.equal(dashboardBillingPeriod({ ...period, current_period_end: "2026-10-12T12:00:00Z" }, now).label, "Renews");
