@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesRelayRush } from "../functions/_lib/games-relay-rush";
 import type { Env } from "../functions/_lib/types";
-import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, RELAY_RUSH_START_DELAY_MS, type RelayRushPayload } from "../lib/games-relay-rush";
+import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, RELAY_RUSH_START_DELAY_MS, relayRushPulseWindowMs, type RelayRushPayload } from "../lib/games-relay-rush";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof relayRushFixture>>;
@@ -90,6 +90,20 @@ async function run() {
     assert.equal((await call(fixture, pulse(state))).status, 429);
     const row = fixture.db.sqlite.prepare("SELECT current_index, misses, version FROM dzn_relay_rush_sessions").get();
     assert.equal(row?.current_index, 0); assert.equal(row?.misses, 0); assert.equal(row?.version, 0);
+  });
+  await test("later relay phases have tighter server-issued deadlines", async fixture => {
+    await start(fixture);
+    const now = Date.now();
+    fixture.db.sqlite.prepare("UPDATE dzn_relay_rush_sessions SET current_index = 5, started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now - RELAY_RUSH_START_DELAY_MS - 5 * RELAY_RUSH_PULSE_INTERVAL_MS, now - RELAY_RUSH_PULSE_INTERVAL_MS);
+    const overload = await payload(await call(fixture));
+    assert.equal(overload.game?.intensity, "overload");
+    assert.equal((overload.game?.nextAt ?? 0) + relayRushPulseWindowMs(5) - now, relayRushPulseWindowMs(5));
+    fixture.db.sqlite.prepare("UPDATE dzn_relay_rush_sessions SET current_index = 9, started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(now - RELAY_RUSH_START_DELAY_MS - 9 * RELAY_RUSH_PULSE_INTERVAL_MS, now - RELAY_RUSH_PULSE_INTERVAL_MS);
+    const storm = await payload(await call(fixture));
+    assert.equal(storm.game?.intensity, "storm");
+    assert.equal((storm.game?.nextAt ?? 0) + relayRushPulseWindowMs(9) - now, relayRushPulseWindowMs(9));
   });
   await test("late input cannot compress the server-owned pulse cadence", async fixture => {
     let state = await start(fixture);

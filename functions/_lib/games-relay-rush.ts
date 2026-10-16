@@ -6,6 +6,8 @@ import {
   RELAY_RUSH_MAX_MISSES,
   RELAY_RUSH_MIN_ACTION_INTERVAL_MS,
   RELAY_RUSH_PULSE_INTERVAL_MS,
+  relayRushIntensity,
+  relayRushPulseWindowMs,
   RELAY_RUSH_REWARD,
   RELAY_RUSH_START_DELAY_MS,
   RELAY_RUSH_TOTAL_PULSES,
@@ -69,7 +71,7 @@ function nextPulseAt(row: RelayRushRow) {
 }
 
 function pulseDeadline(row: RelayRushRow) {
-  return nextPulseAt(row) + RELAY_RUSH_PULSE_INTERVAL_MS;
+  return nextPulseAt(row) + relayRushPulseWindowMs(row.current_index);
 }
 
 function gameView(row: RelayRushRow, now: number): RelayRushGame {
@@ -86,6 +88,7 @@ function gameView(row: RelayRushRow, now: number): RelayRushGame {
     maxMisses: RELAY_RUSH_MAX_MISSES,
     nextLane: active ? route[row.current_index] ?? null : null,
     nextAt: active ? nextPulseAt(row) : null,
+    intensity: relayRushIntensity(row.current_index),
     startedAt: row.started_at,
     expiresAt: row.started_at + RELAY_RUSH_TTL_MS,
   };

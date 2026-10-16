@@ -9,6 +9,22 @@ export const RELAY_RUSH_PULSE_INTERVAL_MS = 900;
 export const RELAY_RUSH_MIN_ACTION_INTERVAL_MS = 500;
 export const RELAY_RUSH_TTL_MS = 2 * 60 * 1_000;
 
+export type RelayRushIntensity = "link-up" | "overload" | "storm";
+
+export function relayRushIntensity(pulseIndex: number, totalPulses = RELAY_RUSH_TOTAL_PULSES): RelayRushIntensity {
+  const progress = totalPulses > 0 ? pulseIndex / totalPulses : 0;
+  return progress < 0.34 ? "link-up" : progress < 0.67 ? "overload" : "storm";
+}
+
+/** The relay deadline is derived by the server, not a browser-side animation. */
+export function relayRushPulseWindowMs(pulseIndex: number, totalPulses = RELAY_RUSH_TOTAL_PULSES) {
+  switch (relayRushIntensity(pulseIndex, totalPulses)) {
+    case "overload": return 720;
+    case "storm": return 560;
+    default: return RELAY_RUSH_PULSE_INTERVAL_MS;
+  }
+}
+
 export type RelayRushGame = {
   id: string;
   version: number;
@@ -19,6 +35,7 @@ export type RelayRushGame = {
   maxMisses: number;
   nextLane: RelayRushLane | null;
   nextAt: number | null;
+  intensity: RelayRushIntensity;
   startedAt: number;
   expiresAt: number;
 };
