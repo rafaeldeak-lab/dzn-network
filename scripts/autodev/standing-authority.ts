@@ -171,6 +171,7 @@ export type AuthorityControllerRecords = {
 export type AuthorityController = {
   acquireTaskLease(taskId: string, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
   transitionTask(taskId: string, nextState: AuthorityTaskState, runnerId: string): AuthorityDecision & { task?: AuthorityTask };
+  runCandidateValidation<T>(taskId: string, repositoryPath: string, runnerId: string, validate: (candidate: VerifiedGitRange) => T): CandidateValidationRun<T>;
   assessLowRiskPullRequest(taskId: string, repositoryPath: string, actingRunnerId: string): PullRequestAssessment;
   recordTrustedMerge(taskId: string): AuthorityDecision & { task?: AuthorityTask };
 };
@@ -187,8 +188,12 @@ export function createAuthorityController(authorityId: string, records: Authorit
       return acquireTaskLeaseFromRecords(authorityId, taskId, runnerId, records);
     },
     transitionTask: (taskId, nextState, runnerId) => {
+      if (nextState === "validating") {
+        return deny("action_denied", "Candidate validation must run through the controller-owned preflight gate.", { taskId });
+      }
       return transitionTaskFromRecords(authorityId, taskId, nextState, runnerId, records);
     },
+    runCandidateValidation: (taskId, repositoryPath, runnerId, validate) => runCandidateValidationFromRecords(authorityId, taskId, repositoryPath, runnerId, validate, records),
     assessLowRiskPullRequest: (taskId, repositoryPath, actingRunnerId) => {
       const authority = resolveControllerAuthority(authorityId, records);
       return isAuthorityDecision(authority)
@@ -222,6 +227,12 @@ export type PullRequestAssessment = AuthorityDecision & {
   pullRequestEligible: boolean;
   requiresSeparateHumanMerge: boolean;
   shouldPauseFurtherWork: boolean;
+};
+
+export type CandidateValidationRun<T> = AuthorityDecision & {
+  task?: AuthorityTask;
+  candidate?: VerifiedGitRange;
+  result?: T;
 };
 
 const NON_DELEGABLE_ACTIONS = new Set([
@@ -356,6 +367,72 @@ function acquireTaskLeaseFromRecords(authorityId: string, taskId: string, runner
   return {
     ...allow("Task lease acquired."),
     task: authoritativeTask,
+  };
+}
+
+function runCandidateValidationFromRecords<T>(
+  authorityId: string,
+  taskId: string,
+  repositoryPath: string,
+  runnerId: string,
+  validate: (candidate: VerifiedGitRange) => T,
+  controllerRecords: AuthorityControllerRecords,
+): CandidateValidationRun<T> {
+  const preflight = preflightCandidateValidation(authorityId, taskId, repositoryPath, runnerId, controllerRecords);
+  if (!preflight.ok || !preflight.candidate) return preflight;
+
+  const transition = transitionTaskFromRecords(authorityId, taskId, "validating", runnerId, controllerRecords);
+  if (!transition.ok || !transition.task) return transition;
+
+  try {
+    return {
+      ...allow("Candidate validation ran after controller-owned safety preflight."),
+      task: transition.task,
+      candidate: preflight.candidate,
+      result: validate(preflight.candidate),
+    };
+  } catch {
+    return {
+      ...deny("invalid_transition", "The candidate validation runner did not complete after preflight.", { taskId }),
+      task: transition.task,
+      candidate: preflight.candidate,
+    };
+  }
+}
+
+function preflightCandidateValidation(
+  authorityId: string,
+  taskId: string,
+  repositoryPath: string,
+  runnerId: string,
+  controllerRecords: AuthorityControllerRecords,
+): CandidateValidationRun<never> {
+  const authority = resolveControllerAuthority(authorityId, controllerRecords);
+  if (isAuthorityDecision(authority)) return authority;
+
+  let taskRecord: TrustedAuthorityTaskRecord | undefined;
+  try {
+    taskRecord = controllerRecords.getTaskRecord(authority.id, taskId);
+  } catch {
+    return deny("invalid_transition", "The controller-owned task record could not be read before validation.", { taskId });
+  }
+  if (!isTrustedTaskRecord(taskRecord, authority, taskId)) {
+    return deny("invalid_transition", "Candidate validation requires a current controller-owned task record.", { taskId });
+  }
+  const task = taskRecord.task;
+  const authorityDecision = assessTaskAuthority(authority, task);
+  if (!authorityDecision.ok) return authorityDecision;
+  if (task.state !== "implementing") {
+    return deny("invalid_transition", "Candidate validation may begin only from the implementing state.", { taskId, state: task.state });
+  }
+  const leaseDecision = assessTaskLease(authority, task, runnerId);
+  if (!leaseDecision.ok) return leaseDecision;
+
+  const candidateCheck = verifyCandidateForControlledExecution(authority, task.candidate, repositoryPath, controllerRecords);
+  if (!candidateCheck.ok || !candidateCheck.candidate) return candidateCheck;
+  return {
+    ...allow("Candidate passed the controller-owned validation preflight."),
+    candidate: candidateCheck.candidate,
   };
 }
 
@@ -498,6 +575,94 @@ function assessLowRiskPullRequestFromRecords(authority: StandingAuthority, taskI
     pullRequestEligible: true,
     requiresSeparateHumanMerge: true,
     shouldPauseFurtherWork: false,
+  };
+}
+
+function verifyCandidateForControlledExecution(
+  authority: StandingAuthority,
+  candidate: ReleaseCandidate | undefined,
+  repositoryPath: string,
+  controllerRecords: AuthorityControllerRecords,
+): AuthorityDecision & { candidate?: VerifiedGitRange } {
+  if (!candidate || !candidate.headSha || !candidate.baseSha) {
+    return deny("release_denied", "Candidate validation requires immutable base and head commits.");
+  }
+  if (candidate.baseSha === candidate.headSha) {
+    return deny("release_denied", "Candidate validation requires distinct base and head commits.");
+  }
+
+  let verifiedRange: VerifiedGitRange;
+  try {
+    verifiedRange = inspectGitRange(repositoryPath, candidate.baseSha, candidate.headSha);
+  } catch (error) {
+    return deny("release_denied", "The candidate commit range could not be verified before validation.", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  let trustedTarget: TrustedPullRequestTarget | undefined;
+  let trustedBaseSha: string;
+  try {
+    trustedTarget = controllerRecords.getPullRequestTarget(authority.id);
+    if (!trustedTarget) throw new Error("The controller-owned pull-request provider returned no target.");
+    trustedBaseSha = resolveTrustedTargetBase(repositoryPath, authority, trustedTarget);
+  } catch (error) {
+    return deny("release_denied", "The approved pull-request target could not be verified before validation.", {
+      targetBranch: authority.targetBranch,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (verifiedRange.baseSha !== trustedBaseSha || !isAncestor(repositoryPath, trustedBaseSha, verifiedRange.headSha)) {
+    return deny("release_denied", "Candidate must descend from the verified pull-request target before validation.", {
+      candidateBaseSha: verifiedRange.baseSha,
+      candidateHeadSha: verifiedRange.headSha,
+      trustedBaseSha,
+      targetBranch: authority.targetBranch,
+    });
+  }
+
+  const metadataMatches = candidate.baseSha === verifiedRange.baseSha
+    && candidate.headSha === verifiedRange.headSha
+    && candidate.repositoryRemote === verifiedRange.repositoryRemote
+    && verifiedRange.repositoryRemote === authority.repositoryRemote
+    && candidate.diffSha256 === verifiedRange.diffSha256
+    && sameFiles(candidate.changedFiles, verifiedRange.changedFiles);
+  if (!metadataMatches) {
+    return deny("release_denied", "Candidate metadata does not match the verified Git commit range before validation.");
+  }
+  if (verifiedRange.changedFiles.length === 0 || verifiedRange.changedFiles.length > authority.maxChangedFiles) {
+    return deny("release_denied", "Candidate changed-file count is outside the approved validation limit.", {
+      changedFiles: verifiedRange.changedFiles.length,
+      maxChangedFiles: authority.maxChangedFiles,
+    });
+  }
+  const protectedFiles = verifiedRange.changedFiles.filter((file) => PULL_REQUEST_PROTECTED_PATHS.some((pattern) => pattern.test(file)));
+  if (protectedFiles.length) {
+    return deny("release_denied", "Candidate validation cannot execute for protected release-control or production-sensitive paths.", { protectedFiles });
+  }
+  const nonRegularFiles = verifiedRange.changedFiles.filter((file) => hasNonRegularGitEntry(repositoryPath, verifiedRange.baseSha, file)
+    || hasNonRegularGitEntry(repositoryPath, verifiedRange.headSha, file));
+  if (nonRegularFiles.length) {
+    return deny("release_denied", "Candidate validation cannot execute for non-regular Git entries.", { nonRegularFiles });
+  }
+
+  let classifications: RiskClassification[];
+  try {
+    classifications = verifiedRange.changedFiles.flatMap((file) => classifyChangedPath(repositoryPath, verifiedRange.baseSha, verifiedRange.headSha, file));
+  } catch {
+    return deny("release_denied", "Every candidate file must be readable and classifiable before validation.");
+  }
+  if (classifications.some((item) => item.risk !== "low" || item.system === "unknown")) {
+    return deny("release_denied", "Candidate validation is limited to low-risk classified files.", { classifications });
+  }
+  const outOfScope = classifications.filter((item) => !authority.allowedSystems.includes(item.system) || authority.excludedSystems.includes(item.system));
+  if (outOfScope.length) {
+    return deny("release_denied", "Candidate validation includes files outside the standing-authority scope.", { outOfScope });
+  }
+  return {
+    ...allow("Candidate passed the controller-owned execution safety gate."),
+    candidate: verifiedRange,
   };
 }
 

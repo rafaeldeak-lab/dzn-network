@@ -82,9 +82,13 @@ assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${dep
 const stripeMutationCommand = ["stripe", "products", "create"].join(" ");
 assert.deepEqual(detectUnsafeExecutableTestOperations(`await execaCommand('${stripeMutationCommand}');`), ["executable test invokes a live Stripe mutation command"]);
 const stripeApiUrl = ["https://api", "stripe.com/v1/products"].join(".");
-assert.deepEqual(detectUnsafeExecutableTestOperations(`await fetch('${stripeApiUrl}');`), ["executable test calls the Stripe API"]);
+const fetchCall = ["fe", "tch"].join("");
+assert.equal(detectUnsafeExecutableTestOperations(`await ${fetchCall}('${stripeApiUrl}');`).includes("executable test calls the Stripe API"), true);
 const aiApiUrl = ["https://api", "openai.com/v1/responses"].join(".");
-assert.deepEqual(detectUnsafeExecutableTestOperations(`await fetch('${aiApiUrl}');`), ["executable test calls a metered AI provider"]);
+assert.equal(detectUnsafeExecutableTestOperations(`await ${fetchCall}('${aiApiUrl}');`).includes("executable test calls a metered AI provider"), true);
+assert.equal(detectUnsafeExecutableTestOperations(`const endpoint = '${aiApiUrl}'; await ${fetchCall}(endpoint);`).includes("executable test calls a metered AI provider"), true);
+assert.deepEqual(detectUnsafeExecutableTestOperations(`await ${fetchCall}('/local-test');`), ["executable test makes an outbound network request"]);
+assert.deepEqual(detectUnsafeExecutableTestOperations(`const command = '${deployTestCommand}'; await execaCommand(command);`), ["executable test invokes a Cloudflare deployment command"]);
 assert.deepEqual(detectUnsafeExecutableTestOperations("const fixture = 'stripe products create';"), []);
 assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");

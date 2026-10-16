@@ -86,11 +86,15 @@ assert.equal(transitionFixture({ ...authority, state: "revoked", revokedAt: now 
 assert.equal(transitionFixture({ ...authority, maxExtraMonthlySpendUsd: 1 }, task()).code, "resource_limit_exceeded");
 assert.equal(transitionFixture(authority, task({ attempts: 3 })).code, "resource_limit_exceeded");
 
-const initialTask = task();
-const leaseController = controller(authority, initialTask, []);
+const validationFixture = makeGitFixture("components/home/Hero.tsx", "export const hero = 'ready';\n");
+const validationRange = inspectGitRange(validationFixture.path, validationFixture.baseSha, validationFixture.headSha);
+const initialTask = task({ candidate: validationRange });
+const leaseController = controller(authority, initialTask, [], {
+  pullRequestTarget: trustedTargetFor(authority, validationRange.baseSha),
+});
 const authorised = leaseController.transitionTask(initialTask.id, "authorised", "runner-a");
 assert.equal(authorised.ok, true);
-assert.deepEqual(Object.keys(leaseController).sort(), ["acquireTaskLease", "assessLowRiskPullRequest", "recordTrustedMerge", "transitionTask"], "The trusted host exposes lifecycle methods without its record adapter, authority policy, or task snapshots.");
+assert.deepEqual(Object.keys(leaseController).sort(), ["acquireTaskLease", "assessLowRiskPullRequest", "recordTrustedMerge", "runCandidateValidation", "transitionTask"], "The trusted host exposes lifecycle methods without its record adapter, authority policy, or task snapshots.");
 const leased = leaseController.acquireTaskLease(authorised.task!.id, "runner-a");
 assert.equal(leased.ok, true);
 assert.equal(leased.task?.lease?.runnerId, "runner-a");
@@ -103,7 +107,16 @@ assert.equal(renewedLease.task?.lease?.runtimeDeadline, leased.task?.lease?.runt
 assert.equal(renewedLease.task?.lease?.expiresAt, leased.task?.lease?.expiresAt, "Renewing a lease must not extend the runtime deadline.");
 const implementing = leaseController.transitionTask(leased.task!.id, "implementing", "runner-a");
 assert.equal(controller(authority, leased.task!, []).transitionTask(leased.task!.id, "implementing", "runner-b").code, "task_locked", "Only the runner that holds the lease can advance the task.");
-const validating = leaseController.transitionTask(implementing.task!.id, "validating", "runner-a");
+assert.equal(leaseController.transitionTask(implementing.task!.id, "validating", "runner-a").code, "action_denied", "Validation state may not be entered without the controller-owned safety gate.");
+let validationInvoked = false;
+const validating = leaseController.runCandidateValidation(implementing.task!.id, validationFixture.path, "runner-a", (candidate) => {
+  validationInvoked = true;
+  assert.equal(candidate.headSha, validationRange.headSha);
+  return "validated";
+});
+assert.equal(validating.ok, true);
+assert.equal(validationInvoked, true, "The controlled validator runs only after its candidate preflight passes.");
+assert.equal(validating.result, "validated");
 const ready = leaseController.transitionTask(validating.task!.id, "ready-to-release", "runner-a");
 assert.equal(ready.ok, true);
 assert.equal(transitionFixture(authority, task(), "released").code, "invalid_transition");
@@ -264,6 +277,18 @@ const executableTestTask = task({
   lease: ready.task!.lease,
   candidate: executableTestRange,
 });
+let unsafeValidationInvoked = false;
+const unsafeValidation = controller(executableTestAuthority, {
+  ...executableTestTask,
+  state: "implementing",
+}, [], {
+  pullRequestTarget: trustedTargetFor(executableTestAuthority, executableTestRange.baseSha),
+}).runCandidateValidation(executableTestTask.id, executableTestFixture.path, "runner-a", () => {
+  unsafeValidationInvoked = true;
+  return "unsafe";
+});
+assert.equal(unsafeValidation.code, "release_denied", "Unsafe executable tests must be rejected before their validator runs.");
+assert.equal(unsafeValidationInvoked, false, "The controller must not invoke candidate validation after an unsafe-test preflight failure.");
 assert.equal(
   assessFixture(executableTestAuthority, executableTestTask, executableTestFixture).pullRequestEligible,
   false,
@@ -460,6 +485,7 @@ assert.equal(regression.shouldPauseFurtherWork, true);
 assert.equal(assessPostMergeHealth(authority, candidateTask, "pass", "Health check passed.").shouldPauseFurtherWork, false);
 
 rmSync(fixture.path, { force: true, recursive: true });
+rmSync(validationFixture.path, { force: true, recursive: true });
 rmSync(protectedFixture.path, { force: true, recursive: true });
 rmSync(executableTestFixture.path, { force: true, recursive: true });
 rmSync(outOfScopeFixture.path, { force: true, recursive: true });

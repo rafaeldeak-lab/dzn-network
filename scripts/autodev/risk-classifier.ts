@@ -122,6 +122,14 @@ const EXECUTABLE_TEST_OPERATION_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/api\.stripe\.com\/v1\//i, "executable test calls the Stripe API"],
   [/\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(\s*["'`](?:https?:)?\/\/(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.ai|openrouter\.ai|api\.groq\.com|api\.replicate\.com)\b/i, "executable test calls a metered AI provider"],
 ];
+const EXECUTABLE_TEST_EXECUTION_PATTERN = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|execa|execaCommand|Bun\.spawn|Deno\.Command|fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(/;
+const EXECUTABLE_TEST_NETWORK_PATTERN = /\b(?:fetch|https\.request|axios\.(?:request|post|put|patch|delete))\s*\(/;
+const EXECUTABLE_TEST_INDIRECT_OPERATION_PATTERNS: Array<[RegExp, string]> = [
+  [/\bwrangler\s+(?:pages\s+)?deploy\b/i, "executable test invokes a Cloudflare deployment command"],
+  [/\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "executable test invokes a live Stripe mutation command"],
+  [/\bapi\.stripe\.com\/v1\//i, "executable test calls the Stripe API"],
+  [/\b(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.ai|openrouter\.ai|api\.groq\.com|api\.replicate\.com)\b|\b(?:OPENAI_API_KEY|AZURE_OPENAI_API_KEY|ANTHROPIC_API_KEY|CLAUDE_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GEMINI_API_KEY|MISTRAL_API_KEY|COHERE_API_KEY|OPENROUTER_API_KEY|GROQ_API_KEY|REPLICATE_API_TOKEN)\b/i, "executable test calls a metered AI provider"],
+];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
@@ -198,11 +206,18 @@ export function detectDestructiveMigration(content: string, file = "") {
  * invoked only by the Git-range controller, not ordinary source classification.
  */
 export function detectUnsafeExecutableTestOperations(content: string) {
-  return Array.from(new Set(
-    EXECUTABLE_TEST_OPERATION_PATTERNS
+  const findings = EXECUTABLE_TEST_OPERATION_PATTERNS
+    .filter(([pattern]) => pattern.test(content))
+    .map(([, message]) => message);
+  if (EXECUTABLE_TEST_EXECUTION_PATTERN.test(content)) {
+    findings.push(...EXECUTABLE_TEST_INDIRECT_OPERATION_PATTERNS
       .filter(([pattern]) => pattern.test(content))
-      .map(([, message]) => message),
-  ));
+      .map(([, message]) => message));
+  }
+  if (EXECUTABLE_TEST_NETWORK_PATTERN.test(content)) {
+    findings.push("executable test makes an outbound network request");
+  }
+  return Array.from(new Set(findings));
 }
 
 function isVerifiedCommsPrivacyCopyAndSwap(content: string, text: string, file: string) {
