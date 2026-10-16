@@ -87,6 +87,12 @@ const DISCORD_MANAGE_GUILD_EXPRESSIONS = DISCORD_PERMISSION_ONE << BigInt(30);
 const DISCORD_MANAGE_EVENTS = DISCORD_PERMISSION_ONE << BigInt(33);
 const DISCORD_MANAGE_THREADS = DISCORD_PERMISSION_ONE << BigInt(34);
 const DISCORD_MODERATE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(40);
+const DISCORD_VIEW_CREATOR_MONETIZATION_ANALYTICS = DISCORD_PERMISSION_ONE << BigInt(41);
+const DISCORD_CREATE_GUILD_EXPRESSIONS = DISCORD_PERMISSION_ONE << BigInt(43);
+const DISCORD_CREATE_EVENTS = DISCORD_PERMISSION_ONE << BigInt(44);
+const DISCORD_SET_VOICE_CHANNEL_STATUS = DISCORD_PERMISSION_ONE << BigInt(48);
+const DISCORD_PIN_MESSAGES = DISCORD_PERMISSION_ONE << BigInt(51);
+const DISCORD_BYPASS_SLOWMODE = DISCORD_PERMISSION_ONE << BigInt(52);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK =
@@ -107,7 +113,13 @@ const DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK =
   DISCORD_MANAGE_GUILD_EXPRESSIONS |
   DISCORD_MANAGE_EVENTS |
   DISCORD_MANAGE_THREADS |
-  DISCORD_MODERATE_MEMBERS;
+  DISCORD_MODERATE_MEMBERS |
+  DISCORD_VIEW_CREATOR_MONETIZATION_ANALYTICS |
+  DISCORD_CREATE_GUILD_EXPRESSIONS |
+  DISCORD_CREATE_EVENTS |
+  DISCORD_SET_VOICE_CHANNEL_STATUS |
+  DISCORD_PIN_MESSAGES |
+  DISCORD_BYPASS_SLOWMODE;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -166,7 +178,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, guildId);
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
-    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, basePermissions);
+    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, everyoneBasePermissions);
     const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const namedVerifiedOwnerRoles = roles
       .filter((role) => normalizeRoleName(role.name) === "verified server owner");
@@ -314,11 +326,10 @@ function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<st
   }, BigInt(0));
 }
 
-function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, effectivePermissions: bigint) {
-  const inheritedPermissions = effectivePermissions & ~assignedPermissions;
+function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, everyonePermissions: bigint) {
   return (
     (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
-    (inheritedPermissions & DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK) !== BigInt(0)
+    (everyonePermissions & DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK) !== BigInt(0)
   );
 }
 
