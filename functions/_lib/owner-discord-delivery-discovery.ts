@@ -68,12 +68,58 @@ export type OwnerDiscordDeliveryDiscovery = {
 const DISCORD_API_ROOT = "https://discord.com/api/v10";
 const DISCORD_PERMISSION_ONE = BigInt(1);
 const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
+const DISCORD_KICK_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(1);
+const DISCORD_BAN_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(2);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
+const DISCORD_MANAGE_CHANNELS = DISCORD_PERMISSION_ONE << BigInt(4);
+const DISCORD_MANAGE_GUILD = DISCORD_PERMISSION_ONE << BigInt(5);
+const DISCORD_VIEW_AUDIT_LOG = DISCORD_PERMISSION_ONE << BigInt(7);
 const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
+const DISCORD_MANAGE_MESSAGES = DISCORD_PERMISSION_ONE << BigInt(13);
+const DISCORD_MENTION_EVERYONE = DISCORD_PERMISSION_ONE << BigInt(17);
+const DISCORD_MUTE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(22);
+const DISCORD_DEAFEN_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(23);
+const DISCORD_MOVE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(24);
+const DISCORD_MANAGE_NICKNAMES = DISCORD_PERMISSION_ONE << BigInt(27);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
+const DISCORD_MANAGE_WEBHOOKS = DISCORD_PERMISSION_ONE << BigInt(29);
+const DISCORD_MANAGE_GUILD_EXPRESSIONS = DISCORD_PERMISSION_ONE << BigInt(30);
+const DISCORD_MANAGE_EVENTS = DISCORD_PERMISSION_ONE << BigInt(33);
+const DISCORD_MANAGE_THREADS = DISCORD_PERMISSION_ONE << BigInt(34);
+const DISCORD_MODERATE_MEMBERS = DISCORD_PERMISSION_ONE << BigInt(40);
+const DISCORD_VIEW_CREATOR_MONETIZATION_ANALYTICS = DISCORD_PERMISSION_ONE << BigInt(41);
+const DISCORD_CREATE_GUILD_EXPRESSIONS = DISCORD_PERMISSION_ONE << BigInt(43);
+const DISCORD_CREATE_EVENTS = DISCORD_PERMISSION_ONE << BigInt(44);
+const DISCORD_SET_VOICE_CHANNEL_STATUS = DISCORD_PERMISSION_ONE << BigInt(48);
+const DISCORD_PIN_MESSAGES = DISCORD_PERMISSION_ONE << BigInt(51);
+const DISCORD_BYPASS_SLOWMODE = DISCORD_PERMISSION_ONE << BigInt(52);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
-const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK =
+  DISCORD_KICK_MEMBERS |
+  DISCORD_BAN_MEMBERS |
+  DISCORD_ADMINISTRATOR |
+  DISCORD_MANAGE_CHANNELS |
+  DISCORD_MANAGE_GUILD |
+  DISCORD_VIEW_AUDIT_LOG |
+  DISCORD_MANAGE_MESSAGES |
+  DISCORD_MENTION_EVERYONE |
+  DISCORD_MUTE_MEMBERS |
+  DISCORD_DEAFEN_MEMBERS |
+  DISCORD_MOVE_MEMBERS |
+  DISCORD_MANAGE_NICKNAMES |
+  DISCORD_MANAGE_ROLES |
+  DISCORD_MANAGE_WEBHOOKS |
+  DISCORD_MANAGE_GUILD_EXPRESSIONS |
+  DISCORD_MANAGE_EVENTS |
+  DISCORD_MANAGE_THREADS |
+  DISCORD_MODERATE_MEMBERS |
+  DISCORD_VIEW_CREATOR_MONETIZATION_ANALYTICS |
+  DISCORD_CREATE_GUILD_EXPRESSIONS |
+  DISCORD_CREATE_EVENTS |
+  DISCORD_SET_VOICE_CHANNEL_STATUS |
+  DISCORD_PIN_MESSAGES |
+  DISCORD_BYPASS_SLOWMODE;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -132,7 +178,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, guildId);
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
-    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, basePermissions);
+    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, everyoneBasePermissions);
     const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const namedVerifiedOwnerRoles = roles
       .filter((role) => normalizeRoleName(role.name) === "verified server owner");
@@ -173,7 +219,8 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         const channelScopedPermissions = getBotChannelOverwritePermissions(channel, botRoleIds, botId);
         const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
         const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
-        if (!privateToEveryone || !canView || !canCreateInvite || hasUnexpectedOwnerDeliveryChannelPermissions(channelPermissions)) return null;
+        const everyoneChannelPermissions = getEveryoneChannelOverwritePermissions(channel, guildId);
+        if (!privateToEveryone || !canView || !canCreateInvite || hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions | everyoneChannelPermissions)) return null;
         return {
           id: String(channel.id ?? ""),
           name: safeChannelName(channel.name),
@@ -279,10 +326,10 @@ function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<st
   }, BigInt(0));
 }
 
-function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, effectivePermissions: bigint) {
+function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, everyonePermissions: bigint) {
   return (
     (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
-    (effectivePermissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0)
+    (everyonePermissions & DISCORD_OWNER_DELIVERY_INHERITED_GUILD_RISK_MASK) !== BigInt(0)
   );
 }
 
@@ -315,6 +362,11 @@ function getBotChannelOverwritePermissions(channel: DiscordChannel, botRoleIds: 
   // Discord combines all bot-role overwrites before its member-specific overwrite;
   // a role allow wins over a role deny, so only explicit role allows grant access.
   return applyOverwrite(roleAllow, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
+}
+
+function getEveryoneChannelOverwritePermissions(channel: DiscordChannel, guildId: string) {
+  const overwrite = (channel.permission_overwrites ?? []).find((candidate) => String(candidate.type) === "0" && String(candidate.id) === guildId);
+  return parseBits(overwrite?.allow);
 }
 
 function everyoneIsDeniedView(basePermissions: bigint, channel: DiscordChannel, guildId: string) {

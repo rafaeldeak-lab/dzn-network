@@ -26,6 +26,8 @@ const viewChannel = (BigInt(1) << BigInt(10)).toString();
 const administrator = (BigInt(1) << BigInt(3)).toString();
 const manageRoles = (BigInt(1) << BigInt(28)).toString();
 const manageChannels = (BigInt(1) << BigInt(4)).toString();
+const sendMessages = (BigInt(1) << BigInt(11)).toString();
+const pinMessages = (BigInt(1) << BigInt(51)).toString();
 
 async function run() {
   const helper = readFileSync("functions/_lib/owner-discord-delivery-discovery.ts", "utf8");
@@ -68,7 +70,7 @@ async function run() {
     if (url.pathname === `/api/v10/guilds/${guildId}/members/${botId}`) return Response.json({ roles: [botRoleId] });
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
       return Response.json([
-        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: guildId, name: "@everyone", position: 0, permissions: (BigInt(viewChannel) | BigInt(sendMessages)).toString() },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: 0, managed: false },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
         { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 7, permissions: manageRoles, managed: false },
@@ -199,6 +201,34 @@ async function run() {
   });
   assert.equal(inheritedExtraPermissionBot.ok, false, "Inherited @everyone management permissions must block discovery.");
   assert.equal(inheritedExtraPermissionBot.checks.botHasUnexpectedGuildPermissions, true);
+
+  const inheritedPinMessagesBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: pinMessages },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(inheritedPinMessagesBot.ok, false, "Inherited @everyone Pin Messages must block discovery.");
+  assert.equal(inheritedPinMessagesBot.checks.botHasUnexpectedGuildPermissions, true);
+
+  const overlappingManageRolesBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: manageRoles },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(overlappingManageRolesBot.ok, false, "Inherited @everyone Manage Roles must block discovery even when the bot role also grants it.");
+  assert.equal(overlappingManageRolesBot.checks.botHasUnexpectedGuildPermissions, true);
 
   const administratorRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
