@@ -762,21 +762,21 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>07 / MEMORY RELAY</span><h2 id="echo-array-title">DZN Echo Array</h2></div><Microchip size={24} /></div>
     {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Echo Array" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.echoArrayTools}>
-      <div><strong>{game ? `Stage ${game.stage} / ${game.totalStages}` : "Three escalating signal echoes"}</strong><span>{game ? `${game.maxErrors - game.errors} calibration retries remaining` : "Watch the pattern, then replay it from memory."}</span></div>
+      <div><strong>{game ? `Stage ${game.stage} / ${game.totalStages}` : "Three escalating signal echoes"}</strong><span>{game ? `${game.intensity} phase - ${game.maxErrors - game.errors} calibration retries remaining` : "Cues accelerate from scan to echo and blackout."}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New echo available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Echo in progress" : game ? "New echo" : "Start echo"}</button>
     </div>
     {game ? <>
-      <div className={styles.echoArrayMeta}><span><Microchip size={14} />Stage {game.stage} / {game.totalStages}</span><span><Target size={14} />{game.inputIndex} / {game.sequenceLength} nodes</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.echoArrayStage} data-revealing={revealing} data-status={game.status} aria-live="polite">
-        <div className={styles.echoArrayReadout}><span>{active ? revealing ? "WATCH THE ARRAY" : "REPLAY THE ARRAY" : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
+      <div className={styles.echoArrayMeta}><span><Microchip size={14} />Stage {game.stage} / {game.totalStages}</span><span><Target size={14} />{game.inputIndex} / {game.sequenceLength} nodes</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.echoArrayStage} data-revealing={revealing} data-status={game.status} data-intensity={game.intensity} aria-live="polite">
+        <div className={styles.echoArrayReadout}><span>{active ? revealing ? `${game.intensity} / WATCH THE ARRAY` : `${game.intensity} / REPLAY THE ARRAY` : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
         <div className={styles.echoArrayNodes} role="group" aria-label="Echo Array signal nodes">
           {ECHO_ARRAY_NODE_ORDER.map(node => { const meta = ECHO_ARRAY_NODE_META[node]; const lit = revealing && litNode === node; return <button type="button" key={node} className={styles.echoArrayNode}
             data-node={node} data-lit={lit} disabled={busy || cooldown || !inputOpen} onClick={() => submitNode(node)}
             aria-label={`${meta.label} (${meta.key})${lit ? ", signal live" : ""}`}><span>{meta.key}</span><strong>{meta.label.replace(" array", "")}</strong><small>{lit ? "Pulse live" : revealing ? "Observe" : inputOpen ? "Select" : "Stand down"}</small></button>; })}
         </div>
-        <p className={styles.echoArrayHint}>Keyboard: 1 to 4 or the arrow keys. The server records every stage, retry and reward.</p>
+        <p className={styles.echoArrayHint}>Keyboard: 1 to 4 or the arrow keys. Each later stage reveals faster; the server records every cue, retry and reward.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Echo synchronised</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${ECHO_ARRAY_REWARD.xp} XP and +${ECHO_ARRAY_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice echo complete. Today's reward was already recorded." : "Echo complete."}</span></div></>
@@ -784,7 +784,7 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
             : !active ? <><Clock3 size={22} /><div><strong>Echo expired</strong><span>Start a new array when you are ready.</span></div></>
               : <><Radio size={20} /><div><strong>{revealing ? "Pattern live" : "Input open"}</strong><span>{revealing ? "Watch each illuminated node before the array unlocks." : "Replay the full pattern in its original order."}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.echoArrayReady}><Microchip size={34} /><h3>Hold the tactical pattern.</h3><p>Replay three escalating field-signal arrays from memory. Progression is recorded only when the DZN server verifies the complete run.</p><div className={styles.rewardPills}><span>3 stages</span><span>+{ECHO_ARRAY_REWARD.xp} XP</span><span>+{ECHO_ARRAY_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.echoArrayReady}><Microchip size={34} /><h3>Hold the tactical pattern.</h3><p>Replay three field-signal arrays from memory as the server shortens the cue tempo from scan to echo and blackout. Progression is recorded only when the complete run verifies.</p><div className={styles.rewardPills}><span>3 stages</span><span>+{ECHO_ARRAY_REWARD.xp} XP</span><span>+{ECHO_ARRAY_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

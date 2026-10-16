@@ -2,9 +2,10 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
-  ECHO_ARRAY_CUE_INTERVAL_MS,
   ECHO_ARRAY_CUE_LEAD_MS,
   ECHO_ARRAY_CUE_TAIL_MS,
+  echoArrayCueIntervalMs,
+  echoArrayIntensity,
   ECHO_ARRAY_MAX_ERRORS,
   ECHO_ARRAY_MIN_INPUT_INTERVAL_MS,
   ECHO_ARRAY_NODES,
@@ -44,7 +45,7 @@ function stageLength(stage: number) {
 }
 
 function cueDuration(stage: number) {
-  return ECHO_ARRAY_CUE_LEAD_MS + stageLength(stage) * ECHO_ARRAY_CUE_INTERVAL_MS + ECHO_ARRAY_CUE_TAIL_MS;
+  return ECHO_ARRAY_CUE_LEAD_MS + stageLength(stage) * echoArrayCueIntervalMs(stage) + ECHO_ARRAY_CUE_TAIL_MS;
 }
 
 function cueEndsAt(row: EchoArrayRow) {
@@ -96,6 +97,8 @@ function gameView(row: EchoArrayRow, now: number): EchoArrayGame {
     stage: row.stage,
     totalStages: ECHO_ARRAY_STAGE_LENGTHS.length,
     sequenceLength: length,
+    intensity: echoArrayIntensity(row.stage),
+    cueIntervalMs: echoArrayCueIntervalMs(row.stage),
     inputIndex: row.input_index,
     errors: row.errors,
     maxErrors: ECHO_ARRAY_MAX_ERRORS,
