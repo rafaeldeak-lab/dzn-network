@@ -63,6 +63,11 @@ try {
         const started = await startResponse.json();
         assert.equal(startResponse.status(), 200, JSON.stringify(started));
         const relayPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "DZN Relay Rush" }) });
+        const relayStage = relayPanel.locator('div[data-status][data-intensity]');
+        await relayStage.evaluate(element => element.setAttribute("data-intensity", "storm"));
+        assert.match(await relayStage.evaluate(element => getComputedStyle(element).backgroundImage), /relay-rush-chamber-v2/,
+          "Relay Rush storm phase must retain the chamber artwork.");
+        await relayStage.evaluate((element, intensity) => element.setAttribute("data-intensity", intensity), started.game.intensity);
         const liveLane = relayPanel.locator('button[data-target="true"]');
         await liveLane.waitFor();
         const observedOpenAt = await page.evaluate(() => Date.now());
