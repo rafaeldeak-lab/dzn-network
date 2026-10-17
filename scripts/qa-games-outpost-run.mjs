@@ -50,6 +50,15 @@ try {
       assert.equal(moveResponse.status(), 200, await moveResponse.text());
     }
     await page.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
+    const terrainCanvas = page.locator('[data-dzn-outpost-run-canvas="true"]');
+    await terrainCanvas.waitFor();
+    assert.equal(await terrainCanvas.count(), 1, "Outpost Run should render exactly one tactical terrain canvas.");
+    const terrainBounds = await terrainCanvas.evaluate(canvas => {
+      const bounds = canvas.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height, pixels: canvas.width * canvas.height };
+    });
+    assert.ok(terrainBounds.width >= 260 && terrainBounds.height >= 140, "The tactical terrain should retain a usable visual footprint.");
+    assert.ok(terrainBounds.pixels > 20_000, "The tactical terrain canvas should have a real render buffer.");
     if (index === 0) {
       assert.equal(await page.locator('[data-objective="beacon"]').first().textContent(), "beacon required");
       assert.match(await page.getByText("Secure the field beacon before extraction").textContent() ?? "", /field beacon/);

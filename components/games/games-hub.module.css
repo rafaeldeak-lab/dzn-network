@@ -402,6 +402,13 @@
 .outpostRunReadout { display: grid; gap: 5px; text-align: center; }
 .outpostRunReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .outpostRunReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
+.outpostRunTerrain { position: relative; width: min(100%, 620px); aspect-ratio: 16 / 8.7; margin: 0 auto; overflow: hidden; border: 1px solid #4e7778; border-radius: 6px; background: radial-gradient(circle at 50% 8%, #123339, #071116 66%); box-shadow: inset 0 0 0 1px #a7fff214, inset 0 -48px 70px #000b, 0 18px 42px #00000055; }
+.outpostRunTerrain::before, .outpostRunTerrain::after { content: ""; position: absolute; z-index: 2; pointer-events: none; }
+.outpostRunTerrain::before { inset: 9px; border: 1px solid #9cfff224; clip-path: polygon(0 0, 22px 0, 28px 5px, calc(100% - 28px) 5px, calc(100% - 22px) 0, 100% 0, 100% 22px, calc(100% - 5px) 28px, calc(100% - 5px) calc(100% - 28px), 100% calc(100% - 22px), 100% 100%, calc(100% - 22px) 100%, calc(100% - 28px) calc(100% - 5px), 28px calc(100% - 5px), 22px 100%, 0 100%, 0 calc(100% - 22px), 5px calc(100% - 28px), 5px 28px, 0 22px); }
+.outpostRunTerrain::after { inset: 0; background: linear-gradient(115deg, #a7fff208, transparent 18% 82%, #e9c7780d); }
+.hub :global(.dzn-outpost-run-3d) { width: 100%; height: 100%; min-height: 0; touch-action: manipulation; }
+.hub :global(.dzn-outpost-run-3d canvas) { display: block; width: 100%; height: 100%; }
+.outpostRunTerrainLabel { position: absolute; z-index: 3; right: 13px; bottom: 11px; left: 13px; color: #a7ded6; font: 800 8px var(--font-geist-mono), monospace; letter-spacing: .12em; text-align: right; pointer-events: none; text-shadow: 0 1px 2px #000; }
 .outpostRunMapShell { position: relative; isolation: isolate; width: min(100%, 456px); aspect-ratio: 1; margin: 0 auto; padding: 22px; border: 1px solid #537173; border-radius: 6px; overflow: hidden; background: linear-gradient(#061012b8, #0b141ad1), url("/images/games/outpost-run-expanse-v2.png") center / cover; box-shadow: inset 0 0 0 1px #8ce3d20f, inset 0 -42px 54px #0000005c, 0 18px 42px #00000045; }
 .outpostRunMapShell[data-intensity="pressure"] { border-color: #a18951; }
 .outpostRunMapShell[data-intensity="blackout"] { border-color: #a85d7b; box-shadow: inset 0 0 0 1px #ffb7d741, inset 0 -42px 54px #1708118f, 0 18px 42px #00000062; }
