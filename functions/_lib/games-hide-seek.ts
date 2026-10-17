@@ -27,7 +27,12 @@ function parseIds(value: string) {
   return parsed;
 }
 
-function gameView(row: HideSeekRow, now: number): HideSeekGame {
+function sessionBrief(sessionId: string, slot: number, clue: string) {
+  const callsign = sessionId.replaceAll("-", "").slice(0, 6).toUpperCase();
+  return `${clue} Recon tag ${callsign}-${slot.toString().padStart(2, "0")}.`;
+}
+
+function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastScan"] = null): HideSeekGame {
   const targetIds = parseIds(row.target_ids_json);
   const found = new Set(parseIds(row.found_ids_json));
   const targets = targetIds.map(id => {
@@ -38,16 +43,21 @@ function gameView(row: HideSeekRow, now: number): HideSeekGame {
   const scene = targets[0]?.scene;
   if (!scene || targets.some(target => target.scene !== scene)) throw new Error("Invalid stored target scene");
   const status = row.status === "playing" && now >= row.started_at + TTL ? "expired" : row.status;
+  // Keep canonical target identities server-held. The selected target's terrain clue
+  // remains useful for the current hunt, while the opaque session tag prevents the
+  // browser response from exposing canonical target identifiers.
+  const clues = targets.map((target, index) => ({ slot: index + 1, clue: sessionBrief(row.id, index + 1, target.clue), found: found.has(target.id) }));
+  const recoveredSignals = targets.flatMap((target, index) => found.has(target.id) ? [{ slot: index + 1, x: target.x, y: target.y }] : []);
   return { id: row.id, version: row.version, status, foundCount: found.size, misses: row.misses,
     maxMisses: HIDE_SEEK_MAX_MISSES, startedAt: row.started_at, expiresAt: row.started_at + TTL,
-    scene, targets: targets.map(target => ({ ...target, found: found.has(target.id) })) };
+    scene, targetCount: targets.length, clues, recoveredSignals, lastScan };
 }
 
-async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false): Promise<HideSeekPayload> {
+async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false, lastScan: HideSeekGame["lastScan"] = null): Promise<HideSeekPayload> {
   const row = await db.prepare("SELECT * FROM dzn_hide_seek_sessions WHERE user_id = ?").bind(user.id).first<HideSeekRow>();
   const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_hide_seek_reward_ledger WHERE user_id = ? AND reward_key = ?")
     .bind(user.id, dayKey(now)).first<{ rewarded: number }>();
-  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: row ? gameView(row, now) : null };
+  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: row ? gameView(row, now, lastScan) : null };
 }
 
 export async function handleGamesHideSeek(request: Request, env: Env): Promise<Response> {
@@ -66,6 +76,7 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
     if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.action !== "string") return reply({ error: "Invalid Signal Hunt request." }, 400);
 
     let rewardGranted = false;
+    let lastScan: HideSeekGame["lastScan"] = null;
     if (body.action === "start") {
       if (Object.keys(body).length !== 1) return reply({ error: "Invalid Signal Hunt request." }, 400);
       const result = await db.prepare(`INSERT INTO dzn_hide_seek_sessions
@@ -88,7 +99,10 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
       const found = new Set(parseIds(row.found_ids_json));
       const hit = targets.map(id => HIDE_SEEK_TARGET_BY_ID.get(id)).find(target => target && !found.has(target.id)
         && Math.hypot(target.x - Number(body.x), target.y - Number(body.y)) <= 45);
-      if (hit) found.add(hit.id);
+      if (hit) {
+        found.add(hit.id);
+        lastScan = "signal-acquired";
+      } else lastScan = "empty";
       const misses = row.misses + (hit ? 0 : 1);
       const status = found.size === targets.length ? "won" : misses >= HIDE_SEEK_MAX_MISSES ? "failed" : "playing";
       const update = db.prepare(`UPDATE dzn_hide_seek_sessions SET found_ids_json = ?, misses = ?, status = ?, version = version + 1, updated_at = ?
@@ -104,7 +118,7 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
       if (!result[0].meta.changes) return reply({ error: "Another scan reached this hunt first. Refresh to continue." }, 409);
       rewardGranted = status === "won" && Boolean(result[1]?.meta.changes);
     } else return reply({ error: "Unknown Signal Hunt action." }, 400);
-    return reply(await readState(db, user, now, rewardGranted));
+    return reply(await readState(db, user, now, rewardGranted, lastScan));
   } catch {
     return reply({ error: "DZN Signal Hunt is temporarily unavailable. Your Hub progress is unchanged." }, 503);
   }

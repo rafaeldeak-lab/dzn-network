@@ -479,6 +479,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   const [payload, setPayload] = useState<HideSeekPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [reticle, setReticle] = useState({ gameId: "", x: 500, y: 500 });
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -512,36 +513,66 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   const available = Boolean(payload) && !error;
   const active = available && game?.status === "playing" && game.expiresAt > now;
   const restartCoolingDown = Boolean(game && now < game.startedAt + 5000);
-  function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
+  // Derive a centered scanner until this hunt has an intentional pointer or key action.
+  // This avoids a synchronous effect update every time a fresh hunt arrives.
+  const reticlePoint = game && reticle.gameId !== game.id ? { x: 500, y: 500 } : reticle;
+  function scan(x: number, y: number) {
+    if (!game || !active || busy) return;
+    if (game.recoveredSignals.some((signal) => Math.hypot(signal.x - x, signal.y - y) <= 45)) return;
+    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y });
+  }
+  function scanAt(x: number, y: number) {
+    const point = { x: Math.max(0, Math.min(1000, Math.round(x))), y: Math.max(0, Math.min(1000, Math.round(y))) };
+    setReticle({ gameId: game?.id ?? "", ...point });
+    scan(point.x, point.y);
+  }
+  function handleSceneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!active || busy) return;
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); scan(reticlePoint.x, reticlePoint.y); return; }
+    const delta = event.key === "ArrowUp" ? { x: 0, y: -50 }
+      : event.key === "ArrowRight" ? { x: 50, y: 0 }
+        : event.key === "ArrowDown" ? { x: 0, y: 50 }
+          : event.key === "ArrowLeft" ? { x: -50, y: 0 }
+            : null;
+    if (!delta) return;
+    event.preventDefault();
+    setReticle({ gameId: game?.id ?? "", x: Math.max(0, Math.min(1000, reticlePoint.x + delta.x)), y: Math.max(0, Math.min(1000, reticlePoint.y + delta.y)) });
+  }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>04 / RECONNAISSANCE</span><h2 id="hide-seek-title">DZN Signal Hunt</h2></div><Search size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Signal Hunt" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.hideSeekTools}>
-      <div><strong>{game ? `${game.foundCount} / ${game.targets.length} signals` : "Four concealed signals"}</strong><span>{game ? `${game.maxMisses - game.misses} scan errors remaining` : "Five minutes. Six scan errors."}</span></div>
+      <div><strong>{game ? `${game.foundCount} / ${game.targetCount} signals` : "Four concealed signals"}</strong><span>{game ? `${game.maxMisses - game.misses} scan errors remaining` : "Five minutes. Six scan errors."}</span></div>
       <button className={styles.primary} disabled={busy || !available || Boolean(active) || restartCoolingDown}
         title={restartCoolingDown && !active ? "New hunt available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Hunt in progress" : game ? "New hunt" : "Start hunt"}</button>
     </div>
     {game ? <>
       <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
-      <div className={styles.hideSeekScene} data-scene={game.scene} role="group" aria-label="DZN signal hunt reconnaissance scene" aria-disabled={!active || busy}
-        onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scan(Math.round((event.clientX - bounds.left) / bounds.width * 1000), Math.round((event.clientY - bounds.top) / bounds.height * 1000)); }}>
+      <div className={styles.hideSeekScene} data-scene={game.scene} role="group" tabIndex={active ? 0 : -1}
+        aria-label="DZN signal hunt reconnaissance scene. Click to scan terrain. With keyboard focus, use arrow keys to move the scan reticle and Enter to scan. Recovered signals cannot consume another scan."
+        aria-disabled={!active || busy} onKeyDown={handleSceneKeyDown}
+        onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scanAt((event.clientX - bounds.left) / bounds.width * 1000, (event.clientY - bounds.top) / bounds.height * 1000); }}>
         <Image src={game.scene === "recon-v2" ? "/images/games/signal-hunt-recon-v2.png" : "/images/games/dzn-outpost.webp"}
           alt={game.scene === "recon-v2" ? "Storm reconnaissance station in the DZN mountain range" : "DZN mountain communications outpost"}
           fill sizes="(max-width: 760px) 100vw, 760px" />
         <div className={styles.hideSeekOverlay} aria-hidden="true"><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><i /></div>
-        {game.targets.map((target, index) => <button key={target.id} type="button" className={styles.hideSeekTarget} data-found={target.found}
-          style={{ left: `${target.x / 10}%`, top: `${target.y / 10}%` }} disabled={!active || busy || target.found}
-          aria-label={target.found ? `Signal ${index + 1} found` : `Search position ${index + 1}`}
-          onClick={event => { event.stopPropagation(); scan(target.x, target.y); }}>{target.found ? <Check size={15} /> : <Search size={14} />}</button>)}
+        {active ? <span className={styles.hideSeekReticle} style={{ left: `${reticlePoint.x / 10}%`, top: `${reticlePoint.y / 10}%` }} aria-hidden="true"><Crosshair size={24} /></span> : null}
+        {game.recoveredSignals.map((signal) => <span key={signal.slot} className={styles.hideSeekRecovered} style={{ left: `${signal.x / 10}%`, top: `${signal.y / 10}%` }} role="img" aria-label={`Recovered signal ${signal.slot}`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}><Check size={15} /></span>)}
       </div>
+      <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><span className={styles.hideSeekCoordinate}>X {reticlePoint.x.toString().padStart(4, "0")} / Y {reticlePoint.y.toString().padStart(4, "0")}</span></div>
+      <ol className={styles.hideSeekBrief} aria-label="Classified signal brief">
+        {game.clues.map((clue) => <li key={clue.slot} data-found={clue.found}><span>{clue.found ? <Check size={15} /> : clue.slot.toString().padStart(2, "0")}</span><p>{clue.clue}</p></li>)}
+      </ol>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>All signals recovered</strong><span>{payload.rewardGranted ? `Daily reward recorded: +${HIDE_SEEK_REWARD.xp} XP and +${HIDE_SEEK_REWARD.parts} parts.` : payload.rewardedToday ? "Practice hunt complete. Today's reward was already recorded." : "Hunt complete."}</span></div></>
           : game.status === "failed" ? <><Target size={22} /><div><strong>Search window closed</strong><span>Too many empty scans. Your existing progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Hunt expired</strong><span>Start a new reconnaissance run when ready.</span></div></>
-              : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Sweep terrain, infrastructure and shadow lines. Every find is checked by DZN.</span></div></>}
+              : game.lastScan === "signal-acquired" ? <><ShieldCheck size={20} /><div><strong>Signal acquired</strong><span>Marker verified. The remaining coordinates stay classified.</span></div></>
+                : game.lastScan === "empty" ? <><Target size={20} /><div><strong>Empty sweep</strong><span>No signal locked at that position. Read the classified brief before the next pass.</span></div></>
+                  : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Read the classified brief, sweep terrain and infrastructure, then commit each scan. Every find is verified by DZN.</span></div></>}
       </div>
-    </> : <div className={styles.triviaReady}><Search size={34} /><h3>Search the outpost.</h3><p>Find four concealed DZN signals. Mouse, touch and keyboard targets are supported.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
+    </> : <div className={styles.triviaReady}><Search size={34} /><h3>Run a classified sweep.</h3><p>Recover four signals from a live visual brief. The server keeps every unrecovered coordinate classified.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
