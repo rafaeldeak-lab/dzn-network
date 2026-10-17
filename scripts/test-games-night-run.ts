@@ -288,6 +288,7 @@ async function run() {
   assert.match(nightRunPanel, /action: "scan"/, "The accessible Night Run controls must dispatch the same authoritative scan action.");
   assert.match(nightRunPanel, /!game\.safeLane/, "The accessible lane deck must remain disabled while an encrypted route is masked.");
   assert.match(nightRunPanel, /nightRunTelemetry/, "The accessible Night Run panel must expose convoy state outside the WebGL scene.");
+  assert.match(nightRunPanel, /Math\.min\(game\.totalGates, game\.gatesCleared \+ 1\)/, "Completed runs must not display a gate beyond the server-issued total.");
   console.log(`Night Run tests passed: ${passed}`);
 }
 

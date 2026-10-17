@@ -1472,7 +1472,7 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
           <div><span>CONVOY</span><strong>N-07 // SABLE</strong></div>
           <div><span>HULL</span><strong>{Math.round(((game.maxCollisions - game.collisions) / game.maxCollisions) * 100)}%</strong></div>
           <div><span>THREAT</span><strong data-intensity={game.intensity}>{game.intensity}</strong></div>
-          <div><span>GATE</span><strong>{String(game.gatesCleared + 1).padStart(2, "0")} / {String(game.totalGates).padStart(2, "0")}</strong></div>
+          <div><span>GATE</span><strong>{String(Math.min(game.totalGates, game.gatesCleared + 1)).padStart(2, "0")} / {String(game.totalGates).padStart(2, "0")}</strong></div>
         </div>
         <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown || game.scannerAvailable} motionRunning={motionRunning} requiresRecon={game.requiresRecon} scannerAvailable={game.scannerAvailable} intensity={game.intensity} gatesCleared={game.gatesCleared} collisions={game.collisions} onDrive={drive} />
         {game.scannerAvailable && <div className={styles.nightRunRecon} role="status"><div><ScanSearch size={20} /><span><strong>Encrypted convoy gate</strong><small>The safe lane stays masked until this one server-recorded scan completes.</small></span></div><button type="button" className={styles.secondary} disabled={busy || cooldown} onClick={scan}><ScanSearch size={17} />Run gate scan</button></div>}
