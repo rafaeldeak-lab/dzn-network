@@ -38,6 +38,7 @@ try {
       await page.waitForTimeout(180);
     }
     await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: viewport.name === "desktop" ? "visible" : "attached" });
+    await page.locator('canvas[data-dzn-circuit-forge-canvas="true"]').waitFor({ state: "visible" });
     assert.equal(await page.locator('[role="gridcell"]').count(), 25);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
