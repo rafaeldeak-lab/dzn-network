@@ -384,6 +384,7 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
 
   const game = payload?.game;
   const active = game?.status === "playing" && game.expiresAt > now;
+  const passMark = TRIVIA_DIFFICULTIES[(game?.difficulty ?? difficulty)].passMark;
   return <section aria-labelledby="trivia-title" className={styles.triviaPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>02 / SURVIVAL INTELLIGENCE</span><h2 id="trivia-title">DZN Trivia</h2></div><BookOpen size={24} /></div>
     {error && <div className={styles.triviaUnavailable} role="status"><ShieldCheck size={20} /><div><strong>{payload ? "Round paused" : "Not open yet"}</strong><span>{error}</span></div>{payload && <button className={styles.iconButton} title="Retry trivia" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
@@ -397,13 +398,13 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
           <div><span>FIELD BRIEF / {TRIVIA_DIFFICULTIES[game.difficulty].label.toUpperCase()}</span><strong>Survival intelligence</strong></div>
           <div className={styles.triviaProgress}><span>Round progress</span><progress value={game.question.number} max={game.question.total} aria-label={`Question ${game.question.number} of ${game.question.total}`} /><strong>{game.question.number} / {game.question.total}</strong></div>
         </div>
-        <div className={styles.triviaMeta}><span>Question {game.question.number} / {game.question.total}</span><span>{game.correct} correct</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
+        <div className={styles.triviaMeta}><span>Question {game.question.number} / {game.question.total}</span><span>Clearance {game.correct} / {passMark}</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
         <h3>{game.question.prompt}</h3>
         <div className={styles.triviaChoices}>{game.question.choices.map((choice, index) => <button key={choice} disabled={busy} onClick={() => void mutate({ action: "answer", gameId: game.id, version: game.version, answer: index })}><span aria-hidden="true">{String.fromCharCode(65 + index)}</span><div><small>Transmit response</small><strong>{choice}</strong></div></button>)}</div>
       </div> : game && <div className={`${styles.result} ${game.status === "passed" ? styles.won : ""}`} role="status">
-        {game.status === "passed" ? <><ShieldCheck size={22} /><div><strong>Briefing passed</strong><span>{payload.rewardedToday.includes(game.difficulty) ? `${TRIVIA_DIFFICULTIES[game.difficulty].label} reward recorded for today.` : "Round complete."}</span></div></> : game.status === "failed" ? <><Target size={22} /><div><strong>Briefing incomplete</strong><span>{game.correct} of 5 correct. Four correct answers are required.</span></div></> : <><Clock3 size={22} /><div><strong>Briefing expired</strong><span>Start a new round when you are ready.</span></div></>}
+        {game.status === "passed" ? <><ShieldCheck size={22} /><div><strong>Briefing passed</strong><span>{payload.rewardedToday.includes(game.difficulty) ? `${TRIVIA_DIFFICULTIES[game.difficulty].label} reward recorded for today.` : "Round complete."}</span></div></> : game.status === "failed" ? <><Target size={22} /><div><strong>Briefing incomplete</strong><span>{game.correct} of 5 correct. {passMark} correct answers are required.</span></div></> : <><Clock3 size={22} /><div><strong>Briefing expired</strong><span>Start a new round when you are ready.</span></div></>}
       </div>}
-      {!game && <div className={styles.triviaReady}><BookOpen size={34} /><h3>Five questions. Four to pass.</h3><p>Answers are checked by DZN. Each difficulty can award website XP and parts once per UTC day.</p><div className={styles.rewardPills}><span>+{TRIVIA_DIFFICULTIES[difficulty].xp} XP</span><span>+{TRIVIA_DIFFICULTIES[difficulty].parts} parts</span></div></div>}
+      {!game && <div className={styles.triviaReady}><BookOpen size={34} /><h3>Five questions. {passMark} to clear.</h3><p>Answers are checked by DZN. Each difficulty can award website XP and parts once per UTC day.</p><div className={styles.rewardPills}><span>+{TRIVIA_DIFFICULTIES[difficulty].xp} XP</span><span>+{TRIVIA_DIFFICULTIES[difficulty].parts} parts</span></div></div>}
     </>}
   </section>;
 }

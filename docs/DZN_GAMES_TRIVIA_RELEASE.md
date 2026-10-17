@@ -2,7 +2,7 @@
 
 ## Scope
 
-This release adds DZN Trivia as the second playable title inside the existing Games Hub. It includes an original server-side question bank, three difficulties, five-question rounds, a four-answer pass threshold, saved round state, daily website XP and parts, shared Hub balances, activity history, and workshop spending.
+This release adds DZN Trivia as the second playable title inside the existing Games Hub. It includes an original server-side question bank, three difficulties, five-question rounds, explicit four-of-five Recruit and Operator clearances plus a five-of-five Specialist clearance, saved round state, daily website XP and parts, shared Hub balances, activity history, and workshop spending.
 
 Trivia remains unavailable unless both `DZN_GAMES_HUB_ENABLED` and `DZN_GAMES_TRIVIA_ENABLED` are exactly `true`. The new Trivia switch is not enabled by this release.
 
@@ -14,7 +14,7 @@ Trivia remains unavailable unless both `DZN_GAMES_HUB_ENABLED` and `DZN_GAMES_TR
 - Only the current prompt and shuffled choices are returned. Correct answers, future questions and stored question IDs are not returned.
 - Versioned updates reject stale or replayed answers. A user cannot read or answer another user's round.
 - A round expires after 15 minutes. Starting replacement rounds is rate-limited.
-- Passing requires at least four correct answers. Each difficulty rewards at most once per UTC day.
+- Recruit and Operator require at least four correct answers. Specialist requires five correct answers. Each difficulty rewards at most once per UTC day.
 - Rewards are website-only and have no cash value, paid-plan benefit, DayZ-stat effect or competitive-ranking effect.
 
 ## Migration And Activation

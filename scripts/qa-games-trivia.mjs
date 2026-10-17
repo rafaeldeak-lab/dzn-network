@@ -32,6 +32,8 @@ try {
       await start.click();
     }
     await answers.first().waitFor();
+    const briefing = page.locator('div[class*="triviaQuestion"]');
+    assert.match(await briefing.evaluate(element => getComputedStyle(element, "::before").backgroundImage), /trivia-intelligence-v2/);
     assert.equal(await answers.count(), 4);
     await page.reload({ waitUntil: "networkidle" });
     const [resumeResponse] = await Promise.all([
