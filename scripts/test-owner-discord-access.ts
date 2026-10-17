@@ -142,6 +142,9 @@ async function run() {
   assert.match(ownerQueuePage, /owner-access-delivery-candidates\?guild_id=\$\{DZN_CENTRAL_DISCORD_GUILD_ID\}/, "The owner console must expose the existing read-only candidate discovery route.");
   assert.match(ownerQueuePage, /Read-only discovery for the DZN community server/, "The owner console must make clear that candidate discovery cannot change Discord access.");
   assert.match(ownerQueuePage, /Find safe DZN candidates/, "The owner console must provide a platform-owner action to inspect only safe central Discord candidates.");
+  assert.match(ownerQueuePage, /Owner delivery readiness/, "The owner console must turn central Discord diagnostics into a clear owner-delivery readiness checklist.");
+  assert.match(ownerQueuePage, /Keep private delivery disabled until every item is ready/, "The readiness checklist must not imply that discovery or diagnostics have enabled Discord automation.");
+  assert.match(ownerQueuePage, /Run the read-only check before enabling owner delivery/, "The checklist must preserve the no-message, no-role-change boundary for central Discord inspection.");
   assert.match(ownerQueuePage, /must have no role-level permissions/, "The owner console must explain that a discovered owner role with global permissions cannot be used for delivery.");
   assert.match(ownerQueuePage, /hasPermissionedVerifiedOwnerRole && !hasAssignableVerifiedOwnerRole/, "A rejected legacy role must not make delivery look blocked when an assignable zero-permission candidate exists.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
