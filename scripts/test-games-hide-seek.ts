@@ -78,6 +78,13 @@ async function run() {
     assert.deepEqual(state.game?.clues.map(target => target.slot), [1, 2, 3, 4]);
     assert.ok(state.game?.clues.every(target => target.clue.length > 16 && !target.found));
     assert.doesNotMatch(JSON.stringify(state.game), /"x"\s*:|"y"\s*:|"id"\s*:\s*"(?:recon|signal)-/, "Unrecovered target coordinates and canonical IDs must never reach the browser.");
+    const firstBrief = state.game?.clues.map(target => target.clue);
+    const replacementId = state.game?.id.startsWith("f")
+      ? "00000000-0000-0000-0000-000000000000"
+      : "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    fixture.db.sqlite.prepare("UPDATE dzn_hide_seek_sessions SET id = ? WHERE user_id = 'local-player'").run(replacementId);
+    const rekeyed = await payload(await call(fixture));
+    assert.notDeepEqual(rekeyed.game?.clues.map(target => target.clue), firstBrief, "A hunt-specific briefing tag must prevent a previous mission brief becoming a reusable coordinate key.");
   });
   await test("legacy in-progress hunts retain their original classified brief", async fixture => {
     await start(fixture);
@@ -102,12 +109,13 @@ async function run() {
     state = await payload(await call(fixture, scan(state, recovered)));
     assert.equal(state.game?.lastScan, "signal-acquired");
     assert.equal(state.game?.recoveredSignals.length, 1);
-    assert.deepEqual(state.game?.recoveredSignals[0], { id: recovered.id, x: recovered.x, y: recovered.y, clue: recovered.clue });
+    assert.deepEqual(state.game?.recoveredSignals[0], { slot: 1, x: recovered.x, y: recovered.y });
     assert.equal(state.game?.clues[0]?.found, true);
     assert.equal(state.game?.clues[1]?.found, false);
-    assert.equal(state.game?.recoveredSignals.some(signal => signal.id === hidden.id), false);
+    assert.equal(state.game?.recoveredSignals.some(signal => signal.slot === 2), false);
     assert.doesNotMatch(JSON.stringify(state.game), new RegExp(`\\"x\\"\\s*:\\s*${hidden.x}`));
     assert.doesNotMatch(JSON.stringify(state.game), new RegExp(hidden.id), "An unrecovered canonical target ID must stay server-held.");
+    assert.doesNotMatch(JSON.stringify(state.game), new RegExp(recovered.id), "Recovered markers must not expose canonical target IDs either.");
     state = await payload(await call(fixture, scan(state, emptyPoint(fixture))));
     assert.equal(state.game?.lastScan, "empty");
   });

@@ -10,10 +10,9 @@ export type HideSeekSignalBrief = {
 };
 
 export type HideSeekRecoveredSignal = {
-  id: string;
+  slot: number;
   x: number;
   y: number;
-  clue: string;
 };
 
 export type HideSeekGame = {

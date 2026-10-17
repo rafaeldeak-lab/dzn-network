@@ -479,7 +479,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   const [payload, setPayload] = useState<HideSeekPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
-  const [reticle, setReticle] = useState({ x: 500, y: 500 });
+  const [reticle, setReticle] = useState({ gameId: "", x: 500, y: 500 });
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -513,16 +513,18 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   const available = Boolean(payload) && !error;
   const active = available && game?.status === "playing" && game.expiresAt > now;
   const restartCoolingDown = Boolean(game && now < game.startedAt + 5000);
-  useEffect(() => { setReticle({ x: 500, y: 500 }); }, [game?.id]);
+  // Derive a centered scanner until this hunt has an intentional pointer or key action.
+  // This avoids a synchronous effect update every time a fresh hunt arrives.
+  const reticlePoint = game && reticle.gameId !== game.id ? { x: 500, y: 500 } : reticle;
   function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
   function scanAt(x: number, y: number) {
     const point = { x: Math.max(0, Math.min(1000, Math.round(x))), y: Math.max(0, Math.min(1000, Math.round(y))) };
-    setReticle(point);
+    setReticle({ gameId: game?.id ?? "", ...point });
     scan(point.x, point.y);
   }
   function handleSceneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!active || busy) return;
-    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); scan(reticle.x, reticle.y); return; }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); scan(reticlePoint.x, reticlePoint.y); return; }
     const delta = event.key === "ArrowUp" ? { x: 0, y: -50 }
       : event.key === "ArrowRight" ? { x: 50, y: 0 }
         : event.key === "ArrowDown" ? { x: 0, y: 50 }
@@ -530,7 +532,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
             : null;
     if (!delta) return;
     event.preventDefault();
-    setReticle(current => ({ x: Math.max(0, Math.min(1000, current.x + delta.x)), y: Math.max(0, Math.min(1000, current.y + delta.y)) }));
+    setReticle({ gameId: game?.id ?? "", x: Math.max(0, Math.min(1000, reticlePoint.x + delta.x)), y: Math.max(0, Math.min(1000, reticlePoint.y + delta.y)) });
   }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>04 / RECONNAISSANCE</span><h2 id="hide-seek-title">DZN Signal Hunt</h2></div><Search size={24} /></div>
@@ -551,10 +553,10 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
           alt={game.scene === "recon-v2" ? "Storm reconnaissance station in the DZN mountain range" : "DZN mountain communications outpost"}
           fill sizes="(max-width: 760px) 100vw, 760px" />
         <div className={styles.hideSeekOverlay} aria-hidden="true"><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><i /></div>
-        {active ? <span className={styles.hideSeekReticle} style={{ left: `${reticle.x / 10}%`, top: `${reticle.y / 10}%` }} aria-hidden="true"><Crosshair size={24} /></span> : null}
-        {game.recoveredSignals.map((signal, index) => <span key={signal.id} className={styles.hideSeekRecovered} style={{ left: `${signal.x / 10}%`, top: `${signal.y / 10}%` }} aria-label={`Recovered signal ${index + 1}`}><Check size={15} /></span>)}
+        {active ? <span className={styles.hideSeekReticle} style={{ left: `${reticlePoint.x / 10}%`, top: `${reticlePoint.y / 10}%` }} aria-hidden="true"><Crosshair size={24} /></span> : null}
+        {game.recoveredSignals.map((signal) => <span key={signal.slot} className={styles.hideSeekRecovered} style={{ left: `${signal.x / 10}%`, top: `${signal.y / 10}%` }} role="img" aria-label={`Recovered signal ${signal.slot}`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}><Check size={15} /></span>)}
       </div>
-      <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><span className={styles.hideSeekCoordinate}>X {reticle.x.toString().padStart(4, "0")} / Y {reticle.y.toString().padStart(4, "0")}</span></div>
+      <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><span className={styles.hideSeekCoordinate}>X {reticlePoint.x.toString().padStart(4, "0")} / Y {reticlePoint.y.toString().padStart(4, "0")}</span></div>
       <ol className={styles.hideSeekBrief} aria-label="Classified signal brief">
         {game.clues.map((clue) => <li key={clue.slot} data-found={clue.found}><span>{clue.found ? <Check size={15} /> : clue.slot.toString().padStart(2, "0")}</span><p>{clue.clue}</p></li>)}
       </ol>

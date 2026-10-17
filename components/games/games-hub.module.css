@@ -288,7 +288,7 @@
 .hideSeekOverlay i { width: 36px; height: 36px; border: 1px solid #b8eee366; border-left-color: transparent; border-bottom-color: transparent; }
 .hideSeekReticle { position: absolute; z-index: 2; translate: -50% -50%; display: grid; place-items: center; width: 40px; height: 40px; color: #b7fff1; filter: drop-shadow(0 0 6px #37d9c2); pointer-events: none; }
 .hideSeekReticle::before { content: ""; position: absolute; inset: 4px; border: 1px solid #a5fff067; border-radius: 50%; }
-.hideSeekRecovered { position: absolute; z-index: 3; translate: -50% -50%; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #b4ffd6; border-radius: 50%; color: #06140e; background: #8cf0b7; box-shadow: 0 0 0 3px #143d3188, 0 0 18px #6ef0ae; pointer-events: none; }
+.hideSeekRecovered { position: absolute; z-index: 3; translate: -50% -50%; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #b4ffd6; border-radius: 50%; color: #06140e; background: #8cf0b7; box-shadow: 0 0 0 3px #143d3188, 0 0 18px #6ef0ae; cursor: default; }
 .hideSeekConsole { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; padding: 10px 12px; border: 1px solid #365e57; border-radius: 5px; background: #081719d9; }
 .hideSeekConsole > div { display: grid; gap: 3px; }
 .hideSeekConsole strong { color: #dcf7f1; font-size: 11px; text-transform: uppercase; }

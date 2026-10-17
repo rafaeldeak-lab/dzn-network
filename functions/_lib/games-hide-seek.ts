@@ -27,6 +27,24 @@ function parseIds(value: string) {
   return parsed;
 }
 
+const reconBriefs = [
+  "Trace the artificial warmth against the storm-dark terrain.",
+  "Search the infrastructure line where metal interrupts the ridge.",
+  "Follow the reflected light beyond the wet ground cover.",
+  "Sweep the silhouette where the weather breaks across the range.",
+  "Look for a hard-edged signal against the natural tree line.",
+  "Use the visible service routes to narrow the next scan.",
+  "Inspect the contrast between field equipment and shadow.",
+  "Hold the sweep over the point where power meets elevation.",
+] as const;
+
+function sessionBrief(sessionId: string, slot: number) {
+  let seed = slot * 17;
+  for (const character of sessionId) seed = (seed * 33 + character.charCodeAt(0)) >>> 0;
+  const callsign = sessionId.replaceAll("-", "").slice(0, 6).toUpperCase();
+  return `${reconBriefs[seed % reconBriefs.length]} Recon tag ${callsign}-${slot.toString().padStart(2, "0")}.`;
+}
+
 function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastScan"] = null): HideSeekGame {
   const targetIds = parseIds(row.target_ids_json);
   const found = new Set(parseIds(row.found_ids_json));
@@ -38,11 +56,11 @@ function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastSca
   const scene = targets[0]?.scene;
   if (!scene || targets.some(target => target.scene !== scene)) throw new Error("Invalid stored target scene");
   const status = row.status === "playing" && now >= row.started_at + TTL ? "expired" : row.status;
-  // Keep the canonical target identities server-held until each matching scan succeeds.
-  // Ordinal briefing slots give the player usable mission progress without allowing an
-  // old response to correlate a current unrecovered clue with a known coordinate.
-  const clues = targets.map((target, index) => ({ slot: index + 1, clue: target.clue, found: found.has(target.id) }));
-  const recoveredSignals = targets.filter(target => found.has(target.id)).map(target => ({ id: target.id, x: target.x, y: target.y, clue: target.clue }));
+  // Keep all canonical target identities server-held. The briefing changes with the
+  // hunt's own random ID, so a previously recovered point cannot become a reusable
+  // clue-to-coordinate lookup for a later session.
+  const clues = targets.map((target, index) => ({ slot: index + 1, clue: sessionBrief(row.id, index + 1), found: found.has(target.id) }));
+  const recoveredSignals = targets.flatMap((target, index) => found.has(target.id) ? [{ slot: index + 1, x: target.x, y: target.y }] : []);
   return { id: row.id, version: row.version, status, foundCount: found.size, misses: row.misses,
     maxMisses: HIDE_SEEK_MAX_MISSES, startedAt: row.started_at, expiresAt: row.started_at + TTL,
     scene, targetCount: targets.length, clues, recoveredSignals, lastScan };

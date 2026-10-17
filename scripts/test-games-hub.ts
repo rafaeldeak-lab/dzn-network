@@ -56,6 +56,7 @@ async function run() {
   assert.match(gamesHubSource, /game\.recoveredSignals\.map/, "Signal Hunt may render only server-confirmed recovered markers.");
   assert.doesNotMatch(gamesHubSource, /game\.targets\.map/, "Signal Hunt must not render unrecovered target coordinates into the browser DOM.");
   assert.match(gamesHubSource, /key=\{clue\.slot\}/, "Signal Hunt briefing rows must use opaque ordinal slots instead of canonical target IDs.");
+  assert.match(gamesHubSource, /onClick=\{event => event\.stopPropagation\(\)\}/, "Clicking a recovered Signal Hunt marker must not submit a wasted scan through the scene surface.");
   assert.match(gamesHubSource, /Arrow keys move the reticle; Enter commits it/, "Signal Hunt must provide an accessible keyboard scan control.");
   assert.match(gamesHubSource, /remaining coordinates stay classified/, "Signal Hunt must state its server-held coordinate boundary clearly.");
   assert.match(gamesHubSource, /const estimatedServerNow = result\.serverTime;/, "Relay Rush must begin each display clock estimate from the server timestamp instead of projecting the previous request duration.");
