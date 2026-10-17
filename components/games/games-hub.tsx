@@ -5,7 +5,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
-  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, ScanSearch, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, ScanSearch, Search, Settings2, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
@@ -19,7 +19,7 @@ import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPU
 import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
-import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_TARGETS, type RangerRangePayload, type RangerRangeTarget } from "@/lib/games-ranger-range";
+import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_SIGHTS, RANGER_RANGE_TARGETS, RANGER_RANGE_WIND_META, type RangerRangePayload, type RangerRangeSight, type RangerRangeTarget } from "@/lib/games-ranger-range";
 import { NIGHT_RUN_LANES, NIGHT_RUN_MIN_ACTION_INTERVAL_MS, NIGHT_RUN_REWARD, type NightRunLane, type NightRunPayload } from "@/lib/games-night-run";
 import styles from "./games-hub.module.css";
 
@@ -1196,6 +1196,7 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
   const generation = useRef(0);
   const serverClock = useRef({ time: 0, measuredAt: 0 });
   const [rangeNow, setRangeNow] = useState(0);
+  const [sightPick, setSightPick] = useState<{ value: RangerRangeSight; turn: string } | null>(null);
   const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(RANGER_RANGE_COOLDOWN_MS);
 
   const receivePayload = useCallback((result: RangerRangePayload) => {
@@ -1244,15 +1245,17 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
   }, [payload?.game, payload?.serverTime]);
 
   const game = payload?.game;
+  const sightTurn = game ? `${game.id}:${game.version}:${game.targetStartsAt}` : "";
+  const sight = sightPick?.turn === sightTurn ? sightPick.value : null;
   const clockNow = Math.max(now, rangeNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow && game.targetEndsAt > clockNow);
   const targetOpen = Boolean(active && game?.target && clockNow >= game.targetStartsAt && clockNow < game.targetEndsAt);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
   const fire = useCallback((target: RangerRangeTarget) => {
-    if (!game || !active || !targetOpen || busy || cooldown) return;
-    void mutate({ action: "fire", gameId: game.id, version: game.version, target });
-  }, [active, busy, cooldown, game, mutate, targetOpen]);
+    if (!game || !active || !targetOpen || !sight || busy || cooldown) return;
+    void mutate({ action: "fire", gameId: game.id, version: game.version, target, sight });
+  }, [active, busy, cooldown, game, mutate, sight, targetOpen]);
 
   useEffect(() => {
     if (!game || game.status !== "playing") return;
@@ -1270,6 +1273,8 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
       const source = event.target;
       if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const sightKey = event.key.toLowerCase() === "a" ? "left" : event.key.toLowerCase() === "s" ? "centre" : event.key.toLowerCase() === "d" ? "right" : null;
+      if (sightKey && targetOpen && !busy && !cooldown) { event.preventDefault(); setSightPick({ value: sightKey, turn: sightTurn }); return; }
       const index = Number.parseInt(event.key, 10) - 1;
       const target = Number.isInteger(index) ? RANGER_RANGE_TARGETS[index] : null;
       if (!target || !targetOpen || busy || cooldown) return;
@@ -1277,7 +1282,7 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, cooldown, fire, targetOpen]);
+  }, [busy, cooldown, fire, sightTurn, targetOpen]);
 
   return <section aria-labelledby="ranger-range-title" className={styles.rangerRangePanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>11 / RANGER DRILL</span><h2 id="ranger-range-title">DZN Ranger Range</h2></div><Crosshair size={24} /></div>
@@ -1291,20 +1296,27 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
     {game ? <>
       <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen} data-intensity={game.intensity}>
-        <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? `${game.intensity} / TARGET LIVE` : `${game.intensity} / BOW NOCKED` : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
-        <RangerRange3D safeTarget={targetOpen ? game.target : null} active={targetOpen} disabled={busy || cooldown || !active} motionRunning={motionRunning} onFire={fire} />
+        <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? `${game.intensity} / TARGET LIVE` : `${game.intensity} / BOW NOCKED` : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? sight ? "Release on the lit plate" : "Read the wind, then choose your hold" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
+        <div className={styles.rangerRangeWind} data-ranger-wind data-live={targetOpen}>
+          <div><Wind size={19} aria-hidden="true" /><span>{targetOpen && game.wind ? RANGER_RANGE_WIND_META[game.wind].label : "Range conditions pending"}</span><strong>{targetOpen && game.wind ? "Set the compensating hold before releasing." : "The next wind call arrives with the plate."}</strong></div>
+          <div className={styles.rangerRangeSightDeck} role="group" aria-label="Ranger Range sight hold">
+            {RANGER_RANGE_SIGHTS.map(option => <button type="button" key={option} aria-pressed={sight === option} disabled={!targetOpen || busy || cooldown}
+              onClick={() => setSightPick({ value: option, turn: sightTurn })}>{option === "left" ? "Hold left" : option === "centre" ? "Hold centre" : "Hold right"}<kbd>{option === "left" ? "A" : option === "centre" ? "S" : "D"}</kbd></button>)}
+          </div>
+        </div>
+        <RangerRange3D safeTarget={targetOpen ? game.target : null} wind={targetOpen ? game.wind : null} active={targetOpen} sightReady={Boolean(sight)} disabled={busy || cooldown || !active} motionRunning={motionRunning} onFire={fire} />
         <div className={styles.rangerRangeDeck} role="group" aria-label="Ranger Range targets">
           {RANGER_RANGE_TARGETS.map(target => {
             const meta = RANGER_RANGE_TARGET_META[target];
             const live = targetOpen && game.target === target;
             return <button type="button" key={target} className={styles.rangerRangeTarget}
-              data-target={target} data-live={live} disabled={!active || !targetOpen || busy || cooldown}
-              aria-label={`${meta.detail} (${meta.key})${live ? ", live target" : ""}`} onClick={() => fire(target)}>
-              <span className={styles.rangerRangeBullseye} aria-hidden="true"><i /><b /></span><strong>{meta.label}</strong><small>{live ? "Release arrow" : "Range marker"}</small><kbd>{meta.key}</kbd>
+              data-target={target} data-live={live} disabled={!active || !targetOpen || !sight || busy || cooldown}
+              aria-label={`${meta.detail} (${meta.key})${live ? sight ? ", live target" : ", set a wind hold first" : ""}`} onClick={() => fire(target)}>
+              <span className={styles.rangerRangeBullseye} aria-hidden="true"><i /><b /></span><strong>{meta.label}</strong><small>{live ? sight ? "Release arrow" : "Set hold first" : "Range marker"}</small><kbd>{meta.key}</kbd>
             </button>;
           })}
         </div>
-        <p className={styles.rangerRangeHint}>Keyboard: 1 through 6. The timing window tightens across calibration, pressure and blackout. Each target, verified hit, miss and daily reward is set by the DZN server.</p>
+        <p className={styles.rangerRangeHint}>Keyboard: A / S / D to set your hold, then 1 through 6 to release. The timing window tightens across calibration, pressure and blackout. Each target, wind call, verified hit, miss and daily reward is set by the DZN server.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Range cleared</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RANGER_RANGE_REWARD.xp} XP and +${RANGER_RANGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice range complete. Today's reward was already recorded." : "Ranger Range complete."}</span></div></>

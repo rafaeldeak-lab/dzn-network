@@ -10,12 +10,16 @@ import {
   RANGER_RANGE_TARGET_LEAD_MS,
   RANGER_RANGE_TARGETS,
   RANGER_RANGE_TOTAL_SHOTS,
+  RANGER_RANGE_WINDS,
+  rangerRangeSightForWind,
   RANGER_RANGE_TTL_MS,
   rangerRangeIntensity,
   rangerRangeTargetWindowMs,
   type RangerRangeGame,
   type RangerRangePayload,
+  type RangerRangeSight,
   type RangerRangeTarget,
+  type RangerRangeWind,
 } from "../../lib/games-ranger-range";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
@@ -23,6 +27,8 @@ const reply = (body: unknown, status = 200) => json(body, { status, headers });
 const dayKey = (now: number) => new Date(now).toISOString().slice(0, 10);
 const isId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
 const isTarget = (value: unknown): value is RangerRangeTarget => typeof value === "string" && (RANGER_RANGE_TARGETS as readonly string[]).includes(value);
+const isWind = (value: unknown): value is RangerRangeWind => typeof value === "string" && (RANGER_RANGE_WINDS as readonly string[]).includes(value);
+const isSight = (value: unknown): value is RangerRangeSight => typeof value === "string" && ["left", "centre", "right"].includes(value);
 
 type RangerRangeRow = {
   user_id: string;
@@ -44,22 +50,30 @@ function randomIndex(length: number) {
   return bytes[0] % length;
 }
 
-function createTargetSequence(): RangerRangeTarget[] {
-  const sequence: RangerRangeTarget[] = [];
+type RangerRangeShot = { target: RangerRangeTarget; wind: RangerRangeWind };
+
+function createTargetSequence(): Array<[RangerRangeTarget, RangerRangeWind]> {
+  const sequence: Array<[RangerRangeTarget, RangerRangeWind]> = [];
   while (sequence.length < RANGER_RANGE_TOTAL_SHOTS) {
-    const previous = sequence.at(-1);
+    const previous = sequence.at(-1)?.[0];
     const candidates = previous ? RANGER_RANGE_TARGETS.filter(target => target !== previous) : RANGER_RANGE_TARGETS;
-    sequence.push(candidates[randomIndex(candidates.length)]);
+    const wind = sequence.length < 2 ? "calm" : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)];
+    sequence.push([candidates[randomIndex(candidates.length)], wind]);
   }
   return sequence;
 }
 
-function parseTargetSequence(value: string): RangerRangeTarget[] {
+function parseTargetSequence(value: string): RangerRangeShot[] {
   const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed) || parsed.length !== RANGER_RANGE_TOTAL_SHOTS || parsed.some(target => !isTarget(target))) {
+  if (!Array.isArray(parsed) || parsed.length !== RANGER_RANGE_TOTAL_SHOTS) {
     throw new Error("Invalid stored Ranger Range target sequence");
   }
-  return parsed as RangerRangeTarget[];
+  return parsed.map((shot): RangerRangeShot => {
+    // Existing active runs stored only targets. Keep those rows playable with still-air shots.
+    if (isTarget(shot)) return { target: shot, wind: "calm" };
+    if (Array.isArray(shot) && shot.length === 2 && isTarget(shot[0]) && isWind(shot[1])) return { target: shot[0], wind: shot[1] };
+    throw new Error("Invalid stored Ranger Range target sequence");
+  });
 }
 
 function targetEndsAt(row: RangerRangeRow) {
@@ -76,6 +90,7 @@ function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
   const status = row.status === "playing" && (now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEnds) ? "expired" : row.status;
   const active = status === "playing";
   const targetOpen = active && now >= row.target_started_at && now < targetEnds;
+  const shot = sequence[row.shot_index];
   return {
     id: row.id,
     version: row.version,
@@ -84,7 +99,8 @@ function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
     totalShots: RANGER_RANGE_TOTAL_SHOTS,
     misses: row.misses,
     maxMisses: RANGER_RANGE_MAX_MISSES,
-    target: targetOpen ? sequence[row.shot_index] ?? null : null,
+    target: targetOpen ? shot?.target ?? null : null,
+    wind: targetOpen ? shot?.wind ?? null : null,
     targetStartsAt: row.target_started_at,
     targetEndsAt: targetEnds,
     intensity: rangerRangeIntensity(row.shot_index),
@@ -137,8 +153,8 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before beginning another range run." }, 429);
     } else if (body.action === "fire") {
       const keys = Object.keys(body);
-      if (keys.length !== 4 || keys.some(key => !["action", "gameId", "version", "target"].includes(key)) ||
-        !isId(body.gameId) || !Number.isInteger(body.version) || !isTarget(body.target)) {
+      if (keys.length !== 5 || keys.some(key => !["action", "gameId", "version", "target", "sight"].includes(key)) ||
+        !isId(body.gameId) || !Number.isInteger(body.version) || !isTarget(body.target) || !isSight(body.sight)) {
         return reply({ error: "Choose a valid range target." }, 400);
       }
       const row = await db.prepare("SELECT * FROM dzn_ranger_range_sessions WHERE user_id = ?").bind(user.id).first<RangerRangeRow>();
@@ -151,7 +167,8 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       if (now < row.target_started_at + RANGER_RANGE_MIN_REACTION_MS) return reply({ error: "Let the target settle before releasing an arrow." }, 429);
       if (now < row.updated_at + RANGER_RANGE_MIN_ACTION_INTERVAL_MS) return reply({ error: "Release one arrow at a time." }, 429);
 
-      const correct = sequence[row.shot_index] === body.target;
+      const shot = sequence[row.shot_index];
+      const correct = shot?.target === body.target && rangerRangeSightForWind(shot.wind) === body.sight;
       const nextShot = correct ? row.shot_index + 1 : row.shot_index;
       const misses = correct ? row.misses : row.misses + 1;
       const status: RangerRangeRow["status"] = nextShot === RANGER_RANGE_TOTAL_SHOTS ? "won" : misses >= RANGER_RANGE_MAX_MISSES ? "failed" : "playing";

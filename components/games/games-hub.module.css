@@ -690,7 +690,7 @@
 .rangerRangeMeta span[data-intensity="pressure"], .nightRunMeta span[data-intensity="pursuit"] { color: #ffd67a; }
 .rangerRangeMeta span[data-intensity="blackout"], .nightRunMeta span[data-intensity="lockdown"] { color: #ff9cad; }
 .rangerRangePanel { position: relative; isolation: isolate; overflow: hidden; padding: 18px; border: 1px solid #465c4c; border-radius: 6px; background: #0c1510; }
-.rangerRangePanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .92; background-image: linear-gradient(90deg, #071009e8 0%, #0a1710d8 48%, #09100de8 100%), url("/images/games/ranger-range-mountain-outpost-v2.png"); background-position: center; background-size: cover; }
+.rangerRangePanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .92; background-image: linear-gradient(90deg, #071009ef 0%, #0a1710df 47%, #09100dea 100%), url("/images/games/ranger-range-command-v2.webp"); background-position: center; background-size: cover; }
 .rangerRangePanel > * { position: relative; z-index: 1; }
 .rangerRangeStage { position: relative; isolation: isolate; display: grid; gap: 16px; overflow: hidden; min-height: 370px; padding: 22px; border: 1px solid #58725e; border-radius: 6px; background: #07110bd9; box-shadow: inset 0 0 0 1px #c5f5bf10, inset 0 -80px 105px #020805bd, 0 20px 48px #0000004a; }
 .rangerRangeStage > * { position: relative; z-index: 1; }
@@ -701,7 +701,20 @@
 .rangerRangeReadout { display: grid; gap: 5px; text-align: center; }
 .rangerRangeReadout > span { color: #9ac9ae; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .1em; }
 .rangerRangeReadout > strong { color: #eefbf2; font-size: clamp(18px, 3vw, 26px); }
-.hub :global(.dzn-ranger-range-3d) { width: min(100%, 820px); min-height: 318px; aspect-ratio: 2.25 / 1; overflow: hidden; margin: 0 auto; border: 1px solid #5e7d66; border-radius: 5px; background: #04100a url("/images/games/ranger-range-cinematic-v1.png") center / cover no-repeat; box-shadow: inset 0 0 0 1px #b8e9b51a, 0 18px 34px #00000078; }
+.rangerRangeWind { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; width: min(100%, 820px); margin: 0 auto; padding: 9px 11px; border: 1px solid #426353; background: #07120ddd; }
+.rangerRangeWind > div:first-child { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 3px 8px; color: #9eb8a7; }
+.rangerRangeWind svg { grid-row: 1 / 3; color: #7cae91; }
+.rangerRangeWind span { color: #d8eee0; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .07em; text-transform: uppercase; }
+.rangerRangeWind strong { color: #8ea899; font-size: 10px; font-weight: 600; }
+.rangerRangeWind[data-live=true] { border-color: #be9551; box-shadow: inset 0 0 0 1px #f8dc9140; }
+.rangerRangeWind[data-live=true] svg { color: #f0cf78; }
+.rangerRangeSightDeck { display: flex; gap: 5px; }
+.rangerRangeSightDeck button { display: inline-flex; align-items: center; gap: 6px; min-height: 31px; padding: 5px 7px; border: 1px solid #466153; border-radius: 3px; color: #b8cdc0; background: #0b1711; font: 800 9px var(--font-geist-mono), monospace; text-transform: uppercase; transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease; }
+.rangerRangeSightDeck button[aria-pressed=true] { border-color: #f4d678; color: #fff0b3; background: #423515; box-shadow: inset 0 0 0 1px #fff0a433; }
+.rangerRangeSightDeck button:not(:disabled):hover, .rangerRangeSightDeck button:not(:disabled):focus-visible { border-color: #d8f7e1; color: #effff4; outline: none; }
+.rangerRangeSightDeck button:disabled { cursor: not-allowed; opacity: .56; }
+.rangerRangeSightDeck kbd { min-width: 14px; padding: 1px 3px; border: 1px solid currentColor; color: inherit; font: inherit; text-align: center; }
+.hub :global(.dzn-ranger-range-3d) { width: min(100%, 820px); min-height: 318px; aspect-ratio: 2.25 / 1; overflow: hidden; margin: 0 auto; border: 1px solid #5e7d66; border-radius: 5px; background: linear-gradient(90deg, #020a08a6, #07100b26 48%, #0208059c), #04100a url("/images/games/ranger-range-command-v2.webp") center / cover no-repeat; box-shadow: inset 0 0 0 1px #b8e9b51a, 0 18px 34px #00000078; }
 .hub :global(.dzn-ranger-range-3d canvas) { display: block; width: 100%; height: 100%; touch-action: manipulation; }
 .hub :global(.dzn-ranger-range-3d[data-live=true]) { border-color: #e6c66a; box-shadow: inset 0 0 0 1px #fff0a66b, 0 0 24px #d8a94035, 0 18px 34px #00000078; }
 .rangerRangeDeck { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: min(100%, 820px); margin: 0 auto; }
@@ -743,7 +756,7 @@
 .hub[data-motion=paused] .rangerRangeTarget[data-live=true], .hub[data-motion=paused] .rangerRangeBow[data-live=true] .rangerRangeArrow { animation-play-state: paused; }
 @keyframes ranger-range-plate { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
 @keyframes ranger-range-draw { from { transform: translateY(-50%) translateX(-5px) scaleX(.94); } to { transform: translateY(-50%) translateX(0) scaleX(1); } }
-@media (max-width: 560px) { .rangerRangeTools { align-items: stretch; flex-direction: column; } .rangerRangeMeta { gap: 10px; } .rangerRangeStage { min-height: 0; padding: 16px 10px; } .hub :global(.dzn-ranger-range-3d) { min-height: 292px; aspect-ratio: 4 / 3; } .hub :global(.dzn-ranger-range-3d[data-webgl-fallback=true]) { min-height: 292px !important; } .rangerRangeDeck { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangerRangeTarget { min-height: 82px; } }
+@media (max-width: 560px) { .rangerRangeTools { align-items: stretch; flex-direction: column; } .rangerRangeMeta { gap: 10px; } .rangerRangeStage { min-height: 0; padding: 16px 10px; } .rangerRangeWind { grid-template-columns: 1fr; gap: 9px; } .rangerRangeSightDeck { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); } .rangerRangeSightDeck button { justify-content: center; min-height: 36px; padding-inline: 4px; font-size: 8px; } .hub :global(.dzn-ranger-range-3d) { min-height: 292px; aspect-ratio: 4 / 3; } .hub :global(.dzn-ranger-range-3d[data-webgl-fallback=true]) { min-height: 292px !important; } .rangerRangeDeck { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangerRangeTarget { min-height: 82px; } }
 @media (prefers-reduced-motion: reduce) { .rangerRangeTarget[data-live=true], .rangerRangeBow[data-live=true] .rangerRangeArrow { animation: none; } }
 
 @media (max-width: 560px) {

@@ -31,12 +31,12 @@ try {
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     const [loadResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /Ranger Range/ }).click(),
+      page.locator('[data-game="ranger-range"]').click(),
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Ranger Range" }).waitFor();
-    const mountainOutpost = await page.locator('[aria-labelledby="ranger-range-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
-    assert.match(mountainOutpost, /ranger-range-mountain-outpost-v2\.png/);
+    const rangeCommandArt = await page.locator('[aria-labelledby="ranger-range-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
+    assert.match(rangeCommandArt, /ranger-range-command-v2\.webp/);
     if (index === 0) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "POST"),
@@ -47,7 +47,7 @@ try {
     const rangeCanvas = page.locator('canvas[data-dzn-ranger-range-canvas="true"]');
     await rangeCanvas.waitFor({ state: "visible" });
     const rangeBackdrop = await page.locator(".dzn-ranger-range-3d").evaluate(element => getComputedStyle(element).backgroundImage);
-    assert.match(rangeBackdrop, /ranger-range-cinematic-v1\.png/);
+    assert.match(rangeBackdrop, /ranger-range-command-v2\.webp/);
     const rangeVisual = await rangeCanvas.evaluate(element => {
       const canvas = element;
       const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
@@ -83,6 +83,14 @@ try {
       const liveTarget = stage.locator('button[data-live="true"]');
       await liveTarget.waitFor();
       assert.equal(await stage.locator('button[data-live="true"]').count(), 1);
+      assert.equal(await liveTarget.isDisabled(), true, "The plate must stay locked until the player sets a wind hold.");
+      const windCall = await stage.locator("[data-ranger-wind] span").innerText();
+      const holdName = windCall.includes("from left") ? "Hold right" : windCall.includes("from right") ? "Hold left" : "Hold centre";
+      const sightDeck = page.getByRole("group", { name: "Ranger Range sight hold" });
+      assert.equal(await sightDeck.getByRole("button").count(), 3);
+      await sightDeck.getByRole("button", { name: new RegExp(`^${holdName}`) }).click();
+      assert.equal(await sightDeck.getByRole("button", { name: new RegExp(`^${holdName}`) }).getAttribute("aria-pressed"), "true");
+      assert.equal(await liveTarget.isDisabled(), false, "The plate must open only after a valid hold has been selected.");
       const key = await liveTarget.locator("kbd").innerText();
       const [arrowResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "POST"),
@@ -105,7 +113,7 @@ try {
     const fallbackErrors = [];
     fallbackPage.on("pageerror", error => fallbackErrors.push(error.message));
     await fallbackPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-    await fallbackPage.getByRole("button", { name: /Ranger Range/ }).click();
+    await fallbackPage.locator('[data-game="ranger-range"]').click();
     // The isolated preview intentionally shares one synthetic player fixture across
     // browser contexts. Reuse the range opened by the desktop pass rather than
     // attempting a competing second start, so this path tests only the WebGL fallback.
@@ -122,7 +130,7 @@ try {
     assert.equal(fallbackPresentation.display, "block", `WebGL fallback mount is not displayed: ${JSON.stringify(fallbackPresentation)}`);
     assert.notEqual(fallbackPresentation.visibility, "hidden", `WebGL fallback mount is hidden: ${JSON.stringify(fallbackPresentation)}`);
     assert.ok(fallbackPresentation.width > 300 && fallbackPresentation.height >= 300, `WebGL fallback mount has no visible area: ${JSON.stringify(fallbackPresentation)}`);
-    assert.match(fallbackPresentation.background, /ranger-range-cinematic-v1\.png/);
+    assert.match(fallbackPresentation.background, /ranger-range-command-v2\.webp/);
     assert.equal(await fallbackPage.locator('canvas[data-dzn-ranger-range-canvas="true"]').count(), 0);
     assert.equal(await fallbackPage.getByRole("group", { name: "Ranger Range targets" }).getByRole("button").count(), 6);
     assert.deepEqual(fallbackErrors, []);
