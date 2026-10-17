@@ -29,6 +29,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0101_games_hub_circuit_forge.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0102_games_hub_ranger_range.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0104_games_hub_night_run.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
@@ -40,6 +41,7 @@ async function main() {
   fixture.env.DZN_GAMES_CIRCUIT_FORGE_ENABLED = "true";
   fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "true";
+  fixture.env.DZN_GAMES_NIGHT_RUN_RECON_ENABLED = "true";
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",

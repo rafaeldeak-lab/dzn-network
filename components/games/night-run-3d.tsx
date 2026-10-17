@@ -13,6 +13,8 @@ type NightRun3DProps = {
   active: boolean;
   disabled: boolean;
   motionRunning: boolean;
+  requiresRecon: boolean;
+  scannerAvailable: boolean;
   onDrive: (lane: NightRunLane) => void;
 };
 
@@ -22,7 +24,7 @@ const LANES: { id: NightRunLane; x: number; label: string }[] = [
   { id: "right", x: 3.15, label: "Right" },
 ];
 
-export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive }: NightRun3DProps) {
+export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, onDrive }: NightRun3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const driveRef = useRef(onDrive);
   const disabledRef = useRef(disabled);
@@ -46,6 +48,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.18;
     renderer.domElement.dataset.dznNightRunCanvas = "true";
+    renderer.domElement.dataset.dznNightRunRecon = scannerAvailable ? "masked" : requiresRecon ? "cleared" : "none";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
     const backgroundScene = new THREE.Scene();
@@ -212,9 +215,10 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     const hitboxGeometry = new THREE.BoxGeometry(2.4, 2.65, 0.58);
     disposables.push(gatePostGeometry, gateBeamGeometry, hitboxGeometry);
     for (const lane of LANES) {
-      const material = new THREE.MeshStandardMaterial({ color: lane.id === safeLane && active ? 0x37e6af : 0x5b1b89, emissive: lane.id === safeLane && active ? 0x075e44 : 0x260a50, emissiveIntensity: lane.id === safeLane && active ? 1.38 : 0.86, metalness: 0.76, roughness: 0.28 });
+      const masked = scannerAvailable && active;
+      const material = new THREE.MeshStandardMaterial({ color: lane.id === safeLane && active ? 0x37e6af : masked ? 0xb55c23 : 0x5b1b89, emissive: lane.id === safeLane && active ? 0x075e44 : masked ? 0x4a1808 : 0x260a50, emissiveIntensity: lane.id === safeLane && active ? 1.38 : masked ? 1.2 : 0.86, metalness: 0.76, roughness: 0.28 });
       const hitboxMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
-      const beamMaterial = new THREE.MeshBasicMaterial({ color: lane.id === safeLane && active ? 0x9fffe2 : 0xc37aff, transparent: true, opacity: lane.id === safeLane && active ? 0.98 : 0.62 });
+      const beamMaterial = new THREE.MeshBasicMaterial({ color: lane.id === safeLane && active ? 0x9fffe2 : masked ? 0xffb45a : 0xc37aff, transparent: true, opacity: lane.id === safeLane && active ? 0.98 : masked ? 0.78 : 0.62 });
       materials.push(material, hitboxMaterial, beamMaterial);
       gateMaterials.set(lane.id, material);
       const leftPost = new THREE.Mesh(gatePostGeometry, material);
@@ -238,6 +242,15 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       gateLights.set(lane.id, light);
     }
     environment.add(gateGroup);
+
+    const scannerRingGeometry = new THREE.TorusGeometry(1.28, 0.028, 8, 48);
+    const scannerRingMaterial = new THREE.MeshBasicMaterial({ color: 0xffbd63, transparent: true, opacity: scannerAvailable ? 0.9 : 0.18, depthWrite: false });
+    disposables.push(scannerRingGeometry); materials.push(scannerRingMaterial);
+    const scannerRing = new THREE.Mesh(scannerRingGeometry, scannerRingMaterial);
+    scannerRing.rotation.x = Math.PI / 2;
+    scannerRing.position.set(0, 0.09, -3.95);
+    scannerRing.visible = requiresRecon || scannerAvailable;
+    gateGroup.add(scannerRing);
 
     const rainGeometry = new THREE.BufferGeometry();
     const rainPositions = new Float32Array(480 * 3);
@@ -322,11 +335,16 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
           marker.material.opacity = 0.28 + (Math.sin(elapsed * 4 + index) + 1) * 0.13;
         });
         alert.intensity = 14 + Math.sin(elapsed * 2.5) * 3;
+        const masked = scannerAvailable && active;
+        scannerRing.visible = requiresRecon || scannerAvailable;
+        scannerRing.material.opacity = masked ? 0.62 + Math.sin(elapsed * 4.2) * 0.22 : requiresRecon ? 0.22 : 0;
+        scannerRing.rotation.z = elapsed * (masked ? 1.8 : 0.28);
+        scannerRing.scale.setScalar(masked ? 1 + Math.sin(elapsed * 3.6) * 0.08 : 1);
         for (const lane of LANES) {
           const live = lane.id === safeLane && active;
           const material = gateMaterials.get(lane.id)!;
-          material.emissiveIntensity = (live ? 1.25 : 0.7) + Math.sin(elapsed * 3.4 + lane.x) * (live ? 0.24 : 0.08);
-          gateLights.get(lane.id)!.intensity = (live ? 4.6 : 1.8) + Math.sin(elapsed * 2.8 + lane.x) * 0.45;
+          material.emissiveIntensity = (live ? 1.25 : masked ? 1.1 : 0.7) + Math.sin(elapsed * 3.4 + lane.x) * (live ? 0.24 : masked ? 0.2 : 0.08);
+          gateLights.get(lane.id)!.intensity = (live ? 4.6 : masked ? 3.2 : 1.8) + Math.sin(elapsed * 2.8 + lane.x) * 0.45;
         }
         const rainPosition = rainGeometry.attributes.position;
         for (let index = 1; index < rainPosition.array.length; index += 3) {
@@ -358,7 +376,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [active, motionRunning, safeLane]);
+  }, [active, motionRunning, requiresRecon, safeLane, scannerAvailable]);
 
   return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
 }

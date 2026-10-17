@@ -53,8 +53,16 @@ try {
       const rect = button.getBoundingClientRect(); return rect.width >= 44 && rect.height >= 44;
     }));
     assert.equal(touchSafe, true, `${scenario.name} lane controls must stay touch-safe`);
-    const expectedBackdropFit = await canvas.evaluate(element => element.clientWidth / element.clientHeight >= 16 / 9 ? "crop-y" : "crop-x");
-    assert.equal(await canvas.getAttribute("data-dzn-night-run-backdrop-fit"), expectedBackdropFit, `${scenario.name} must crop the city art without stretching it`);
+    const cropState = await canvas.evaluate(element => ({
+      width: element.clientWidth,
+      height: element.clientHeight,
+      parentWidth: element.parentElement?.clientWidth ?? 0,
+      parentHeight: element.parentElement?.clientHeight ?? 0,
+      crop: element.getAttribute("data-dzn-night-run-backdrop-fit"),
+    }));
+    const expectedBackdropFit = cropState.width / cropState.height >= 16 / 9 ? "crop-y" : "crop-x";
+    await waitForAttribute(canvas, "data-dzn-night-run-backdrop-fit", expectedBackdropFit);
+    assert.equal(await canvas.getAttribute("data-dzn-night-run-backdrop-fit"), expectedBackdropFit, `${scenario.name} must crop the city art without stretching it: ${JSON.stringify(cropState)}`);
 
     // Let the server-issued gate arrive before comparing frame counters; the renderer remounts once to adopt its live lane.
     await page.waitForTimeout(900);
@@ -117,4 +125,11 @@ async function waitForEnabled(locator, label) {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.equal(await locator.isEnabled(), true, `${label} must become enabled`);
+}
+
+async function waitForAttribute(locator, name, expected) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (await locator.getAttribute(name) === expected) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
 }
