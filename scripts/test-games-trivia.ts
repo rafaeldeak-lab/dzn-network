@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { handleGamesTrivia, triviaPresentation } from "../functions/_lib/games-trivia";
 import { handleGamesHub } from "../functions/_lib/games-hub";
-import { questionById } from "../functions/_lib/games-trivia-questions";
+import { questionById, TRIVIA_QUESTIONS } from "../functions/_lib/games-trivia-questions";
 import type { Env } from "../functions/_lib/types";
 import type { TriviaPayload } from "../lib/games-trivia";
 import { gamesFixture } from "./lib/games-hub-local";
@@ -59,6 +59,14 @@ async function run() {
     assert.equal(response.status, 503);
     assert.doesNotMatch(await response.text(), /sqlite|select |table|dzn_trivia/i);
   }, false);
+  await test("each difficulty has a broad unique, internally valid question pool", async () => {
+    for (const difficulty of ["recruit", "operator", "specialist"] as const) {
+      const questions = TRIVIA_QUESTIONS.filter(question => question.difficulty === difficulty);
+      assert.ok(questions.length >= 12);
+      assert.equal(new Set(questions.map(question => question.id)).size, questions.length);
+      assert.ok(questions.every(question => question.choices.length === 4 && question.answer >= 0 && question.answer < question.choices.length));
+    }
+  });
   await test("round exposes one shuffled question without answers or future prompts", async fixture => {
     const state = await payload(await call(fixture, { action: "start", difficulty: "operator" }));
     assert.equal(state.game?.question?.number, 1);
