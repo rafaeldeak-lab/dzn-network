@@ -33,7 +33,16 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || typeof WebGLRenderingContext === "undefined") return;
+    if (!mount) return;
+    const showFallback = () => {
+      mount.dataset.webglFallback = "true";
+      mount.style.display = "block";
+      mount.style.minHeight = "318px";
+    };
+    if (typeof WebGLRenderingContext === "undefined") {
+      showFallback();
+      return;
+    }
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 80);
@@ -44,7 +53,8 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
     } catch {
-      // Keep the cinematic CSS backdrop and the DOM target deck available when WebGL cannot initialise.
+      // Keep a visible, dimensioned art fallback and the DOM target deck when WebGL cannot initialise.
+      showFallback();
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -192,5 +202,5 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     };
   }, [active, motionRunning, safeTarget]);
 
-  return <div ref={mountRef} className="dzn-ranger-range-3d" data-live={active && safeTarget ? "true" : "false"} />;
+  return <div ref={mountRef} className="dzn-ranger-range-3d" data-live={active && safeTarget ? "true" : "false"} style={{ display: "block" }} />;
 }
