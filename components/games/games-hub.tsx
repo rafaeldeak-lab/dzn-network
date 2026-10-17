@@ -452,11 +452,12 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
   }
 
   const required = payload?.round.requiredLetter.toUpperCase() ?? "-";
+  const relayPhase = !payload ? "LINK" : payload.round.version < 8 ? "ESTABLISH" : payload.round.version < 32 ? "ROUTE" : "SUSTAIN";
   return <section aria-labelledby="word-chain-title" className={styles.wordChainPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>03 / NETWORK RELAY</span><h2 id="word-chain-title">DZN Word Chain</h2></div><Radio size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Word Chain" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     {payload && <>
-      <div className={styles.chainCurrent}><span>Current signal</span><strong>{payload.round.currentWord}</strong><div>Next word starts with <b>{required}</b></div></div>
+      <div className={styles.chainCurrent}><div className={styles.chainReadout}><span>Current signal</span><small>{`${relayPhase} // TURN ${payload.round.version.toString().padStart(2, "0")}`}</small></div><strong>{payload.round.currentWord}</strong><div>Next word starts with <b>{required}</b></div></div>
       <form className={styles.chainForm} onSubmit={event => { event.preventDefault(); void play(); }}>
         <label htmlFor="word-chain-entry">Your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
           placeholder={`${required.toLowerCase()}...`} disabled={busy || !payload.round.canPlay} onChange={event => setWord(event.target.value.replace(/[^a-zA-Z]/g, "").slice(0, 18))} />
