@@ -348,6 +348,7 @@ export function OwnerDiscordAccessPage() {
   async function checkDelivery() {
     if (checkingDelivery || discoveringDelivery) return;
     setCheckingDelivery(true); setNotice(null);
+    setDeliveryDiagnostic(null);
     setDeliveryDiscovery(null);
     try {
       const response = await fetch("/api/owner/discord/owner-access-delivery", { credentials: "include", cache: "no-store" });
@@ -355,7 +356,10 @@ export function OwnerDiscordAccessPage() {
       if (!response.ok || !next) throw new Error("The central Discord delivery check is unavailable.");
       setDeliveryDiagnostic(next);
       setNotice(next.message);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable."); }
+    } catch (error) {
+      setDeliveryDiagnostic(null);
+      setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable.");
+    }
     finally { setCheckingDelivery(false); }
   }
   async function discoverDeliveryCandidates() {

@@ -148,7 +148,8 @@ async function run() {
   assert.match(ownerQueuePage, /!checks\.botHasUnexpectedInviteChannelPermissions/, "The readiness checklist must not mark an overprivileged invite-channel overwrite ready.");
   assert.match(ownerQueuePage, /checks\.targetRoleSafe/, "The readiness checklist must not mark an unsafe configured owner role ready.");
   assert.match(ownerQueuePage, /if \(checkingDelivery \|\| discoveringDelivery\) return;/, "Only one central Discord inspection may run at a time, preventing stale inspection states from racing.");
-  assert.match(ownerQueuePage, /setCheckingDelivery\(true\); setNotice\(null\);\s*setDeliveryDiscovery\(null\);/, "A newer configured-delivery check must invalidate an older candidate discovery before reporting readiness.");
+  assert.match(ownerQueuePage, /setCheckingDelivery\(true\); setNotice\(null\);\s*setDeliveryDiagnostic\(null\);\s*setDeliveryDiscovery\(null\);/, "A newer configured-delivery check must invalidate older delivery state before reporting readiness.");
+  assert.match(ownerQueuePage, /catch \(error\) \{\s*setDeliveryDiagnostic\(null\);/, "A failed configured-delivery check must clear stale readiness instead of retaining an earlier green diagnostic.");
   assert.match(ownerQueuePage, /setDiscoveringDelivery\(true\);\s*setDeliveryDiagnostic\(null\);\s*setDeliveryDiscovery\(null\);/, "A newer candidate discovery must invalidate an older configured-delivery diagnostic before reporting readiness.");
   assert.match(ownerQueuePage, /Run the read-only check before enabling owner delivery/, "The checklist must preserve the no-message, no-role-change boundary for central Discord inspection.");
   assert.match(ownerQueuePage, /must have no role-level permissions/, "The owner console must explain that a discovered owner role with global permissions cannot be used for delivery.");
