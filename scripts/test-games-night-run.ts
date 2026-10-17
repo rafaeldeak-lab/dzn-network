@@ -281,6 +281,7 @@ async function run() {
   const nightRunScene = readFileSync("components/games/night-run-3d.tsx", "utf8");
   const nightRunPanel = readFileSync("components/games/games-hub.tsx", "utf8");
   assert.match(nightRunScene, /dznNightRunRecon/, "The Night Run renderer must expose its masked-signal state for visual QA.");
+  assert.match(nightRunScene, /scannerRing\.visible = requiresRecon \|\| scannerAvailable/, "The scanner ring must not appear on ordinary reduced-motion gates.");
   assert.match(nightRunPanel, /action: "scan"/, "The accessible Night Run controls must dispatch the same authoritative scan action.");
   assert.match(nightRunPanel, /!game\.safeLane/, "The accessible lane deck must remain disabled while an encrypted route is masked.");
   console.log(`Night Run tests passed: ${passed}`);

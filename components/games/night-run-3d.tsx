@@ -249,6 +249,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     const scannerRing = new THREE.Mesh(scannerRingGeometry, scannerRingMaterial);
     scannerRing.rotation.x = Math.PI / 2;
     scannerRing.position.set(0, 0.09, -3.95);
+    scannerRing.visible = requiresRecon || scannerAvailable;
     gateGroup.add(scannerRing);
 
     const rainGeometry = new THREE.BufferGeometry();
