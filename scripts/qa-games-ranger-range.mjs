@@ -35,6 +35,8 @@ try {
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Ranger Range" }).waitFor();
+    const mountainOutpost = await page.locator('[aria-labelledby="ranger-range-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
+    assert.match(mountainOutpost, /ranger-range-mountain-outpost-v2\.png/);
     if (index === 0) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "POST"),
