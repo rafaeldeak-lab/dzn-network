@@ -30,6 +30,8 @@ try {
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Signal Shift" }).waitFor();
+    const matrixRoom = await page.locator('[aria-labelledby="signal-shift-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
+    assert.match(matrixRoom, /signal-shift-matrix-v2\.png/);
     if (index === 0) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/signal-shift") && response.request().method() === "POST"),
