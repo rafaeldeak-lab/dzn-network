@@ -80,8 +80,8 @@ try {
       await liveLane.click({ force: true });
       const driveResponse = await driveResponsePromise;
       assert.equal(driveResponse.status(), 200, await driveResponse.text());
-      assert.equal(await page.locator('[data-lane][disabled]').count(), 3, "lanes must close between server-issued gates");
       await page.getByText("1 / 9", { exact: true }).waitFor({ timeout: 5_000 });
+      assert.equal(await page.locator('[data-lane][disabled]').count(), 3, "lanes must close between server-issued gates");
       await page.waitForTimeout(900);
       await waitForCanvasSize(canvas);
     }
