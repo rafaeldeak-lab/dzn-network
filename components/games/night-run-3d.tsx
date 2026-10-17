@@ -35,7 +35,6 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     if (!mount || typeof WebGLRenderingContext === "undefined") return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x070a1a);
     scene.fog = new THREE.FogExp2(0x070a1a, 0.038);
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 110);
     camera.position.set(9.5, 7.6, 13.5);
@@ -49,6 +48,16 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     renderer.domElement.dataset.dznNightRunCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
+    const backgroundScene = new THREE.Scene();
+    const backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
+    backgroundCamera.position.z = 1;
+    renderer.autoClear = false;
+    const renderFrame = () => {
+      renderer.clear();
+      renderer.render(backgroundScene, backgroundCamera);
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+    };
 
     scene.add(new THREE.HemisphereLight(0x98b8ff, 0x0a0817, 2.6));
     const moon = new THREE.DirectionalLight(0x899bff, 3.6);
@@ -71,17 +80,37 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     const materials: { dispose: () => void }[] = [];
     const textures: { dispose: () => void }[] = [];
 
-    // Original district art keeps the distant skyline legible while the live, clickable
-    // road, gates, rain, lights, and hazards remain rendered in Three.js in front of it.
-    const districtTexture = new THREE.TextureLoader().load("/images/games/night-run-district-v2.png");
+    // Original district art is cropped like `background-size: cover`, preserving its aspect
+    // ratio at every canvas size. The live road, gates, rain, lights, and hazards remain
+    // real Three.js objects in front of it.
+    const districtTexture = new THREE.TextureLoader().load("/images/games/night-run-district-v2.png", () => {
+      // Reduced-motion mode intentionally has no continuous render loop, so a loaded
+      // backdrop needs one explicit frame to appear after the first static render.
+      renderFrame();
+    });
     districtTexture.colorSpace = THREE.SRGBColorSpace;
     textures.push(districtTexture);
-    const districtBackdropGeometry = new THREE.PlaneGeometry(48, 22);
-    const districtBackdropMaterial = new THREE.MeshBasicMaterial({ map: districtTexture, transparent: true, opacity: 0.48, depthWrite: false });
+    const districtBackdropGeometry = new THREE.PlaneGeometry(2, 2);
+    const districtBackdropMaterial = new THREE.MeshBasicMaterial({ map: districtTexture, depthTest: false, depthWrite: false });
     disposables.push(districtBackdropGeometry); materials.push(districtBackdropMaterial);
     const districtBackdrop = new THREE.Mesh(districtBackdropGeometry, districtBackdropMaterial);
-    districtBackdrop.position.set(0, 8.9, -27);
-    scene.add(districtBackdrop);
+    backgroundScene.add(districtBackdrop);
+    const updateDistrictCrop = (width: number, height: number) => {
+      const viewportAspect = width / height;
+      const imageAspect = 16 / 9;
+      if (viewportAspect >= imageAspect) {
+        const repeatY = imageAspect / viewportAspect;
+        districtTexture.repeat.set(1, repeatY);
+        districtTexture.offset.set(0, (1 - repeatY) / 2);
+        renderer.domElement.dataset.dznNightRunBackdropFit = "crop-y";
+      } else {
+        const repeatX = viewportAspect / imageAspect;
+        districtTexture.repeat.set(repeatX, 1);
+        districtTexture.offset.set((1 - repeatX) / 2, 0);
+        renderer.domElement.dataset.dznNightRunBackdropFit = "crop-x";
+      }
+      districtTexture.needsUpdate = true;
+    };
 
     const roadGeometry = new THREE.PlaneGeometry(12.8, 26, 1, 1);
     const roadTexture = createRoadTexture();
@@ -89,7 +118,17 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     roadTexture.wrapS = THREE.RepeatWrapping;
     roadTexture.wrapT = THREE.RepeatWrapping;
     roadTexture.repeat.set(1.25, 3.6);
-    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x26355b, emissive: 0x07122f, emissiveIntensity: 0.9, metalness: 0.86, roughness: 0.25, map: roadTexture });
+    const roadMaterial = new THREE.MeshStandardMaterial({
+      color: 0x42689a,
+      emissive: 0x07122f,
+      emissiveIntensity: 0.9,
+      metalness: 0.86,
+      roughness: 0.25,
+      map: roadTexture,
+      transparent: true,
+      opacity: 0.44,
+      depthWrite: false,
+    });
     disposables.push(roadGeometry); materials.push(roadMaterial);
     const road = new THREE.Mesh(roadGeometry, roadMaterial);
     road.rotation.x = -Math.PI / 2;
@@ -97,7 +136,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     environment.add(road);
 
     const shoulderGeometry = new THREE.PlaneGeometry(23, 27);
-    const shoulderMaterial = new THREE.MeshStandardMaterial({ color: 0x070a13, metalness: 0.22, roughness: 0.94 });
+    const shoulderMaterial = new THREE.MeshStandardMaterial({ color: 0x060915, metalness: 0.22, roughness: 0.94, transparent: true, opacity: 0.22, depthWrite: false });
     disposables.push(shoulderGeometry); materials.push(shoulderMaterial);
     const shoulder = new THREE.Mesh(shoulderGeometry, shoulderMaterial);
     shoulder.rotation.x = -Math.PI / 2;
@@ -129,25 +168,9 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     }
     environment.add(speedMarkers);
 
-    const buildingGeometry = new THREE.BoxGeometry(1, 1, 1);
-    const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x293663, emissive: 0x080d32, emissiveIntensity: 1.1, metalness: 0.68, roughness: 0.5 });
-    disposables.push(buildingGeometry); materials.push(buildingMaterial);
-    const windowGeometry = new THREE.PlaneGeometry(0.42, 0.26);
-    const windowMaterials = [0x6b3dff, 0x31caff, 0xd23dff].map(color => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.88 }));
-    disposables.push(windowGeometry); materials.push(...windowMaterials);
-    for (let index = 0; index < 18; index++) {
-      const side = index % 2 ? -1 : 1;
-      const row = Math.floor(index / 2);
-      const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
-      const height = 1.2 + ((index * 7) % 4) * 0.65;
-      building.scale.set(1.2 + (index % 3) * 0.25, height, 1.2 + (index % 2) * 0.45);
-      building.position.set(side * (7 + (index % 3) * 1.25), height / 2, 5.6 - row * 2.6);
-      environment.add(building);
-      const window = new THREE.Mesh(windowGeometry, windowMaterials[index % windowMaterials.length]);
-      window.position.set(building.position.x - side * (building.scale.x / 2 + 0.01), building.position.y + 0.2, building.position.z);
-      window.rotation.y = side * Math.PI / 2;
-      environment.add(window);
-    }
+    // The detailed city belongs to the original district scene rather than placeholder
+    // foreground blocks. Keeping the live layer to route-critical objects makes the
+    // gate state easy to read without obscuring the city art.
 
     const signGeometry = new THREE.PlaneGeometry(1.7, 0.66);
     disposables.push(signGeometry);
@@ -278,7 +301,8 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.render(scene, camera);
+      updateDistrictCrop(width, height);
+      renderFrame();
     });
     resize.observe(mount);
 
@@ -316,7 +340,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
         rainPosition.needsUpdate = true;
         starField.rotation.y = elapsed * 0.014;
       }
-      renderer.render(scene, camera);
+      renderFrame();
       renderer.domElement.dataset.renderFrames = String(Number(renderer.domElement.dataset.renderFrames ?? 0) + 1);
       if (motionRunning) frame = requestAnimationFrame(render);
     }

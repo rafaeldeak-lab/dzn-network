@@ -53,6 +53,8 @@ try {
       const rect = button.getBoundingClientRect(); return rect.width >= 44 && rect.height >= 44;
     }));
     assert.equal(touchSafe, true, `${scenario.name} lane controls must stay touch-safe`);
+    const expectedBackdropFit = await canvas.evaluate(element => element.clientWidth / element.clientHeight >= 16 / 9 ? "crop-y" : "crop-x");
+    assert.equal(await canvas.getAttribute("data-dzn-night-run-backdrop-fit"), expectedBackdropFit, `${scenario.name} must crop the city art without stretching it`);
 
     // Let the server-issued gate arrive before comparing frame counters; the renderer remounts once to adopt its live lane.
     await page.waitForTimeout(900);
