@@ -66,7 +66,11 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || typeof WebGLRenderingContext === "undefined") return;
+    if (!mount) return;
+    if (typeof WebGLRenderingContext === "undefined") {
+      unavailableRef.current();
+      return;
+    }
 
     const palette = INTENSITY_COLORS[intensity];
     const scene = new THREE.Scene();
