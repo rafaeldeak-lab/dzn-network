@@ -106,7 +106,10 @@ try {
     fallbackPage.on("pageerror", error => fallbackErrors.push(error.message));
     await fallbackPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     await fallbackPage.getByRole("button", { name: /Ranger Range/ }).click();
-    await fallbackPage.getByRole("button", { name: "Start range" }).click();
+    // The isolated preview intentionally shares one synthetic player fixture across
+    // browser contexts. Reuse the range opened by the desktop pass rather than
+    // attempting a competing second start, so this path tests only the WebGL fallback.
+    await fallbackPage.getByRole("group", { name: "Ranger Range targets" }).waitFor();
     const fallbackMount = fallbackPage.locator(".dzn-ranger-range-3d");
     await fallbackMount.waitFor({ state: "attached" });
     await fallbackPage.waitForFunction(() => document.querySelector(".dzn-ranger-range-3d")?.getAttribute("data-webgl-fallback") === "true");
