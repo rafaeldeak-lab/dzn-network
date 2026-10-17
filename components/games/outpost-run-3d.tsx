@@ -62,9 +62,9 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, s
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x02080d);
     scene.fog = new THREE.FogExp2(0x071015, 0.085);
-    const camera = new THREE.PerspectiveCamera(27, 1, 0.1, 42);
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 42);
     camera.position.set(5.2, 6.25, 6.75);
-    camera.zoom = 1.25;
+    camera.zoom = 1;
     camera.lookAt(0, 0, -0.15);
     camera.updateProjectionMatrix();
 
@@ -114,7 +114,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, s
     }
     const board = new THREE.Group();
     board.rotation.y = -0.27;
-    board.scale.setScalar(1.45);
+    board.scale.setScalar(1);
     scene.add(board);
 
     const terrainGeometry = new THREE.BoxGeometry(1, 0.23, 1);
