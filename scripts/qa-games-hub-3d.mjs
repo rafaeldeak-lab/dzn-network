@@ -17,13 +17,17 @@ preview.stderr.on("data", chunk => { previewLog += chunk; });
 const origin = await waitForOrigin();
 const browser = await chromium.launch({ headless: true });
 const results = [];
+const requestedViewport = Number(process.env.DZN_QA_VIEWPORT ?? 0);
+const requestedMotion = process.env.DZN_QA_MOTION;
+const scenarios = [
+  { width: 1440, height: 1000, reducedMotion: "no-preference" },
+  { width: 390, height: 844, reducedMotion: "no-preference" },
+  { width: 390, height: 844, reducedMotion: "reduce" },
+].filter((scenario) => (!requestedViewport || scenario.width === requestedViewport) && (!requestedMotion || scenario.reducedMotion === requestedMotion));
 
 try {
-  for (const scenario of [
-    { width: 1440, height: 1000, reducedMotion: "no-preference" },
-    { width: 390, height: 844, reducedMotion: "no-preference" },
-    { width: 390, height: 844, reducedMotion: "reduce" },
-  ]) {
+  assert.ok(scenarios.length > 0, "Games Hub visual QA scenario filter selected no viewports.");
+  for (const scenario of scenarios) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: scenario.height }, reducedMotion: scenario.reducedMotion });
     const page = await context.newPage();
     const errors = [], failed = [], writes = [];
@@ -33,6 +37,17 @@ try {
     page.on("request", request => { if (request.method() !== "GET" && request.method() !== "HEAD") writes.push({ url: request.url(), method: request.method(), body: request.postDataJSON?.() }); });
 
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+    const briefingImage = page.getByAltText("Night reconnaissance terrain with a DZN minefield scanner and survey markers");
+    await briefingImage.waitFor({ state: "visible" });
+    const briefing = await briefingImage.evaluate(image => {
+      const board = image.closest('[class*="readyBoard"]');
+      const bounds = board?.getBoundingClientRect();
+      return { naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, width: bounds?.width ?? 0, height: bounds?.height ?? 0 };
+    });
+    assert.ok(briefing.naturalWidth > 600 && briefing.naturalHeight > 300, `Minefield briefing image did not load: ${JSON.stringify(briefing)}`);
+    assert.ok(briefing.width <= scenario.width && briefing.height >= 300, `Minefield briefing must remain visible and bounded: ${JSON.stringify(briefing)}`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Minefield briefing overflow at ${scenario.width}px`);
+    await page.screenshot({ path: path.join(output, `briefing-${scenario.width}-${scenario.reducedMotion}.png`), fullPage: true });
     const canvas = page.locator('canvas[data-dzn-minefield-canvas="true"]');
     if (await canvas.count() === 0) await page.getByRole("button", { name: "Start mission" }).click();
     await canvas.waitFor({ state: "visible" });
@@ -93,7 +108,7 @@ try {
     assert.deepEqual(errors, []);
     assert.deepEqual(failed, []);
     await page.screenshot({ path: path.join(output, `games-${scenario.width}-${scenario.reducedMotion}.png`), fullPage: true });
-    results.push({ ...scenario, before, after, canvasState, layout, writes: writes.map(entry => ({ method: entry.method, path: new URL(entry.url).pathname, action: entry.body?.action })) });
+    results.push({ ...scenario, briefing, before, after, canvasState, layout, writes: writes.map(entry => ({ method: entry.method, path: new URL(entry.url).pathname, action: entry.body?.action })) });
     await context.close();
   }
   await writeFile(path.join(output, "results.json"), JSON.stringify(results, null, 2));

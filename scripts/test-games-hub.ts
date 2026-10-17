@@ -51,6 +51,8 @@ async function run() {
   assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
   assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
   assert.match(gamesHubSource, /Ranger Range/, "Games Hub must retain the server-verified Ranger Range route.");
+  assert.match(gamesHubSource, /minefield-night-recon-v2\.png/, "Minefield must use the dedicated reconnaissance briefing artwork rather than a generic scanner placeholder.");
+  assert.match(gamesHubSource, /Clear every safe sector before the window closes\./, "Minefield briefing must communicate the actual objective before the player starts.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
   assert.match(gamesHubSource, /const estimatedServerNow = result\.serverTime;/, "Relay Rush must begin each display clock estimate from the server timestamp instead of projecting the previous request duration.");
