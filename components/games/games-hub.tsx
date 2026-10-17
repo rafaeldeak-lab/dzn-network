@@ -556,7 +556,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
       </div>
       <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><span className={styles.hideSeekCoordinate}>X {reticle.x.toString().padStart(4, "0")} / Y {reticle.y.toString().padStart(4, "0")}</span></div>
       <ol className={styles.hideSeekBrief} aria-label="Classified signal brief">
-        {game.clues.map((clue, index) => <li key={clue.id} data-found={clue.found}><span>{clue.found ? <Check size={15} /> : (index + 1).toString().padStart(2, "0")}</span><p>{clue.clue}</p></li>)}
+        {game.clues.map((clue) => <li key={clue.slot} data-found={clue.found}><span>{clue.found ? <Check size={15} /> : clue.slot.toString().padStart(2, "0")}</span><p>{clue.clue}</p></li>)}
       </ol>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>All signals recovered</strong><span>{payload.rewardGranted ? `Daily reward recorded: +${HIDE_SEEK_REWARD.xp} XP and +${HIDE_SEEK_REWARD.parts} parts.` : payload.rewardedToday ? "Practice hunt complete. Today's reward was already recorded." : "Hunt complete."}</span></div></>

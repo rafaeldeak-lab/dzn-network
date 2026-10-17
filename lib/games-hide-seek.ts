@@ -4,7 +4,7 @@ export const HIDE_SEEK_MAX_MISSES = 6;
 export type HideSeekScene = "legacy" | "recon-v2";
 
 export type HideSeekSignalBrief = {
-  id: string;
+  slot: number;
   clue: string;
   found: boolean;
 };

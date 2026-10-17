@@ -38,7 +38,10 @@ function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastSca
   const scene = targets[0]?.scene;
   if (!scene || targets.some(target => target.scene !== scene)) throw new Error("Invalid stored target scene");
   const status = row.status === "playing" && now >= row.started_at + TTL ? "expired" : row.status;
-  const clues = targets.map(target => ({ id: target.id, clue: target.clue, found: found.has(target.id) }));
+  // Keep the canonical target identities server-held until each matching scan succeeds.
+  // Ordinal briefing slots give the player usable mission progress without allowing an
+  // old response to correlate a current unrecovered clue with a known coordinate.
+  const clues = targets.map((target, index) => ({ slot: index + 1, clue: target.clue, found: found.has(target.id) }));
   const recoveredSignals = targets.filter(target => found.has(target.id)).map(target => ({ id: target.id, x: target.x, y: target.y, clue: target.clue }));
   return { id: row.id, version: row.version, status, foundCount: found.size, misses: row.misses,
     maxMisses: HIDE_SEEK_MAX_MISSES, startedAt: row.started_at, expiresAt: row.started_at + TTL,

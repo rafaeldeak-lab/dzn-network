@@ -75,9 +75,9 @@ async function run() {
     assert.equal(state.game?.clues.length, 4);
     assert.equal(state.game?.recoveredSignals.length, 0);
     assert.equal(state.game?.lastScan, null);
-    assert.equal(new Set(state.game?.clues.map(target => target.id)).size, 4);
-    assert.ok(state.game?.clues.every(target => target.id.startsWith("recon-") && target.clue.length > 16 && !target.found));
-    assert.doesNotMatch(JSON.stringify(state.game), /"x"\s*:|"y"\s*:/, "Unrecovered target coordinates must never reach the browser.");
+    assert.deepEqual(state.game?.clues.map(target => target.slot), [1, 2, 3, 4]);
+    assert.ok(state.game?.clues.every(target => target.clue.length > 16 && !target.found));
+    assert.doesNotMatch(JSON.stringify(state.game), /"x"\s*:|"y"\s*:|"id"\s*:\s*"(?:recon|signal)-/, "Unrecovered target coordinates and canonical IDs must never reach the browser.");
   });
   await test("legacy in-progress hunts retain their original classified brief", async fixture => {
     await start(fixture);
@@ -85,8 +85,8 @@ async function run() {
       .run(JSON.stringify(["signal-01", "signal-02", "signal-03", "signal-04"]));
     const legacy = await payload(await call(fixture));
     assert.equal(legacy.game?.scene, "legacy");
-    assert.ok(legacy.game?.clues.every(target => target.id.startsWith("signal-")));
-    assert.doesNotMatch(JSON.stringify(legacy.game), /"x"\s*:|"y"\s*:/);
+    assert.deepEqual(legacy.game?.clues.map(target => target.slot), [1, 2, 3, 4]);
+    assert.doesNotMatch(JSON.stringify(legacy.game), /"x"\s*:|"y"\s*:|"id"\s*:\s*"(?:recon|signal)-/);
   });
   await test("strict request validation rejects forged shapes and coordinates", async fixture => {
     const state = await start(fixture);
@@ -103,10 +103,11 @@ async function run() {
     assert.equal(state.game?.lastScan, "signal-acquired");
     assert.equal(state.game?.recoveredSignals.length, 1);
     assert.deepEqual(state.game?.recoveredSignals[0], { id: recovered.id, x: recovered.x, y: recovered.y, clue: recovered.clue });
-    assert.equal(state.game?.clues.find(clue => clue.id === recovered.id)?.found, true);
-    assert.equal(state.game?.clues.find(clue => clue.id === hidden.id)?.found, false);
+    assert.equal(state.game?.clues[0]?.found, true);
+    assert.equal(state.game?.clues[1]?.found, false);
     assert.equal(state.game?.recoveredSignals.some(signal => signal.id === hidden.id), false);
     assert.doesNotMatch(JSON.stringify(state.game), new RegExp(`\\"x\\"\\s*:\\s*${hidden.x}`));
+    assert.doesNotMatch(JSON.stringify(state.game), new RegExp(hidden.id), "An unrecovered canonical target ID must stay server-held.");
     state = await payload(await call(fixture, scan(state, emptyPoint(fixture))));
     assert.equal(state.game?.lastScan, "empty");
   });
