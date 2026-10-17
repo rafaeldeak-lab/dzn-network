@@ -1478,6 +1478,7 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
   const game = payload?.game;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
+  const specialistAvailable = payload?.specialistAvailable ?? false;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const answerLength = game?.answerLength ?? CIPHER_GRID_WORD_LENGTH;
@@ -1492,7 +1493,7 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>06 / FIELD CRYPTOGRAPHY</span><h2 id="cipher-grid-title">DZN Cipher Grid</h2></div><KeyRound size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Cipher Grid" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.cipherGridTools}>
-      <div><strong>{game ? `${objective.label} / ${game.attempts.length} of ${game.maxAttempts} attempts` : "Standard and specialist field ciphers"}</strong><span>{game ? objective.briefing : "The DZN server chooses and verifies every encrypted term and reward."}</span></div>
+      <div><strong>{game ? `${objective.label} / ${game.attempts.length} of ${game.maxAttempts} attempts` : specialistAvailable ? "Field and specialist ciphers" : "Standard field ciphers"}</strong><span>{game ? objective.briefing : "The DZN server chooses and verifies every encrypted term and reward."}</span></div>
       <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New decode available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Decode in progress" : game ? "New decode" : "Start decode"}</button>
@@ -1536,7 +1537,7 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
             : !active ? <><Clock3 size={22} /><div><strong>Decode expired</strong><span>Start a new field cipher when ready.</span></div></>
               : <><Radio size={20} /><div><strong>Decode in progress</strong><span>Use the marks to narrow the DZN field word before the window closes.</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode a live field signal.</h3><p>Field ciphers run at five letters and five attempts. Specialist ciphers extend to six letters with four attempts. Only the verified server can award progression.</p><div className={styles.rewardPills}><span>5 or 6 letters</span><span>4 or 5 attempts</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode a live field signal.</h3><p>{specialistAvailable ? "Field ciphers run at five letters and five attempts. Specialist ciphers extend to six letters with four attempts." : "Field ciphers run at five letters and five attempts. More specialist protocols are introduced only when the verified server makes them available."} Only the verified server can award progression.</p><div className={styles.rewardPills}><span>{specialistAvailable ? "5 or 6 letters" : "5 letters"}</span><span>{specialistAvailable ? "4 or 5 attempts" : "5 attempts"}</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

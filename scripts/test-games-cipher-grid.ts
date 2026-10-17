@@ -75,7 +75,9 @@ async function run() {
   }, false);
 
   await test("reading is mutation-free and never reveals the server-held answer", async fixture => {
-    assert.equal((await payload(await call(fixture))).game, null);
+    const empty = await payload(await call(fixture));
+    assert.equal(empty.game, null);
+    assert.equal(empty.specialistAvailable, true);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_cipher_grid_sessions").get()?.count, 0);
     const state = await start(fixture);
     assert.equal(state.game?.attempts.length, 0);
@@ -141,6 +143,7 @@ async function run() {
 
   await test("specialist ciphers stay disabled until their separately controlled feature flag is enabled", async fixture => {
     (fixture.env as Env).DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED = "false";
+    assert.equal((await payload(await call(fixture))).specialistAvailable, false);
     for (let index = 0; index < 12; index++) {
       const state = await start(fixture);
       assert.equal(state.game?.difficulty, "field");

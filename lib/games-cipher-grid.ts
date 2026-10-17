@@ -24,5 +24,6 @@ export type CipherGridPayload = {
   serverTime: number;
   rewardedToday: boolean;
   rewardGranted: boolean;
+  specialistAvailable: boolean;
   game: CipherGridGame | null;
 };

@@ -136,11 +136,11 @@ function gameView(row: CipherGridRow, now: number): CipherGridGame {
   };
 }
 
-async function readCipherGrid(db: D1Database, user: SessionUser, now: number, rewardGranted = false): Promise<CipherGridPayload> {
+async function readCipherGrid(db: D1Database, user: SessionUser, now: number, specialistAvailable: boolean, rewardGranted = false): Promise<CipherGridPayload> {
   const game = await db.prepare("SELECT * FROM dzn_cipher_grid_sessions WHERE user_id = ?").bind(user.id).first<CipherGridRow>();
   const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_cipher_grid_reward_ledger WHERE user_id = ? AND reward_key = ?")
     .bind(user.id, dayKey(now)).first<{ rewarded: number }>();
-  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: game ? gameView(game, now) : null };
+  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, specialistAvailable, game: game ? gameView(game, now) : null };
 }
 
 export async function handleGamesCipherGrid(request: Request, env: Env): Promise<Response> {
@@ -156,7 +156,8 @@ export async function handleGamesCipherGrid(request: Request, env: Env): Promise
     }
     const db = requireDb(env);
     const now = Date.now();
-    if (request.method === "GET") return reply(await readCipherGrid(db, user, now));
+    const specialistAvailable = env.DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED === "true";
+    if (request.method === "GET") return reply(await readCipherGrid(db, user, now, specialistAvailable));
 
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 1024);
     if (!parsed.ok) return reply({ error: "Invalid Cipher Grid request." }, parsed.status);
@@ -175,7 +176,7 @@ export async function handleGamesCipherGrid(request: Request, env: Env): Promise
         status = 'playing', version = 0, started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_cipher_grid_sessions.started_at <= ?`)
         // Specialist answers are separately flag-gated because they require migration 0106.
-        .bind(user.id, crypto.randomUUID(), chooseAnswer(env.DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED === "true"), now, now, now - START_COOLDOWN_MS).run();
+        .bind(user.id, crypto.randomUUID(), chooseAnswer(specialistAvailable), now, now, now - START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another decode." }, 429);
     } else if (body.action === "guess") {
       const keys = Object.keys(body);
@@ -212,7 +213,7 @@ export async function handleGamesCipherGrid(request: Request, env: Env): Promise
       if (!result[0].meta.changes) return reply({ error: "Another guess reached this decode first. Refresh to continue." }, 409);
       rewardGranted = status === "won" && Boolean(result[1]?.meta.changes);
     } else return reply({ error: "Unknown Cipher Grid action." }, 400);
-    return reply(await readCipherGrid(db, user, now, rewardGranted));
+    return reply(await readCipherGrid(db, user, now, specialistAvailable, rewardGranted));
   } catch {
     return reply({ error: "DZN Cipher Grid is temporarily unavailable. Your Hub progress is unchanged." }, 503);
   }
