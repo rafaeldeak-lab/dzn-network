@@ -531,6 +531,10 @@
 .cipherGridReadout { display: grid; gap: 5px; text-align: center; }
 .cipherGridReadout > span { color: #a9d6d1; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .cipherGridReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); text-shadow: 0 2px 14px #000; }
+.cipherGridMission { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; padding: 8px; border-block: 1px solid #70c9bc2b; color: #badbd6; background: #0613168c; font: 700 10px var(--font-geist-mono), monospace; }
+.cipherGridMission span { display: inline-flex; align-items: center; gap: 5px; padding-inline: 7px; }
+.cipherGridMission[data-difficulty=specialist] { border-color: #e8bf616b; color: #ffe5ab; background: #1d160a9c; }
+.cipherGridMission[data-difficulty=specialist] svg { color: #ffc44f; }
 .cipherGridBoard { display: grid; gap: 7px; width: min(100%, 456px); margin: 0 auto; padding: 12px; border: 1px solid #527177; border-radius: 6px; background: #061114bc; box-shadow: inset 0 0 0 1px #8ce3d214, inset 0 -28px 48px #0000005c; }
 .cipherGridRow { display: grid; grid-template-columns: repeat(var(--cipher-columns, 6), minmax(0, 1fr)); gap: 7px; }
 .cipherGridTile { display: grid; place-items: center; aspect-ratio: 1; min-width: 0; border: 1px solid #466066; border-radius: 4px; color: #e7f0ef; background: #0c1a1ddb; font: 700 clamp(16px, 4vw, 22px) var(--font-geist-mono), monospace; line-height: 1; box-shadow: inset 0 1px #c4fff20d; }

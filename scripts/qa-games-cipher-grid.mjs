@@ -44,7 +44,8 @@ try {
         page.getByRole("button", { name: "Submit" }).click(),
       ]);
       assert.equal(guessResponse.status(), 200, await guessResponse.text());
-      await page.getByText("1 / 5 attempts", { exact: true }).waitFor();
+      await page.getByText("FIELD CIPHER / 1 of 5 attempts", { exact: true }).waitFor();
+      await page.getByText("Standard protocol", { exact: true }).waitFor();
       assert.equal(await page.locator('[role="gridcell"][data-mark]').count(), 5);
     } else await page.getByRole("grid", { name: "Cipher Grid attempts" }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);

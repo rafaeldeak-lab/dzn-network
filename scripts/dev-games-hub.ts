@@ -23,6 +23,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0087_games_hub_hide_seek.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0096_games_hub_relay_rush.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0097_games_hub_cipher_grid.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0106_games_hub_cipher_grid_specialist.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0098_games_hub_echo_array.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0099_games_hub_outpost_run.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0100_games_hub_signal_shift.sql", "utf8"));
@@ -35,6 +36,7 @@ async function main() {
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
   fixture.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
   fixture.env.DZN_GAMES_CIPHER_GRID_ENABLED = "true";
+  fixture.env.DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED = "false";
   fixture.env.DZN_GAMES_ECHO_ARRAY_ENABLED = "true";
   fixture.env.DZN_GAMES_OUTPOST_RUN_ENABLED = "true";
   fixture.env.DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true";
