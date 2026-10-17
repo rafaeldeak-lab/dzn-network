@@ -5,7 +5,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
-  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, ScanSearch, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
@@ -1345,18 +1345,23 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
   const clockNow = Math.max(now, runNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow && game.gateEndsAt > clockNow);
-  const gateOpen = Boolean(active && game?.safeLane && clockNow >= game.gateStartsAt && clockNow < game.gateEndsAt);
+  const gateOpen = Boolean(active && clockNow >= (game?.gateStartsAt ?? 0) && clockNow < (game?.gateEndsAt ?? 0));
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
   const drive = useCallback((lane: NightRunLane) => {
-    if (!game || !active || !gateOpen || busy || cooldown) return;
+    if (!game || !game.safeLane || !active || !gateOpen || busy || cooldown) return;
     void mutate({ action: "drive", gameId: game.id, version: game.version, lane });
+  }, [active, busy, cooldown, game, gateOpen, mutate]);
+
+  const scan = useCallback(() => {
+    if (!game || !game.scannerAvailable || !active || !gateOpen || busy || cooldown) return;
+    void mutate({ action: "scan", gameId: game.id, version: game.version });
   }, [active, busy, cooldown, game, gateOpen, mutate]);
 
   useEffect(() => {
     if (!game || game.status !== "playing") return;
-    const nextRefreshAt = game.safeLane ? game.gateEndsAt + 45 : game.gateStartsAt + 45;
     const clock = serverClock.current;
     const serverNow = clock.time + performance.now() - clock.measuredAt;
+    const nextRefreshAt = serverNow < game.gateStartsAt ? game.gateStartsAt + 45 : game.gateEndsAt + 45;
     const timer = window.setTimeout(() => void load(), Math.max(45, nextRefreshAt - serverNow));
     return () => window.clearTimeout(timer);
   }, [game, load]);
@@ -1369,12 +1374,12 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
       const lane = event.key === "ArrowLeft" || event.key.toLowerCase() === "a" ? "left"
         : event.key === "ArrowDown" || event.key.toLowerCase() === "s" ? "centre"
           : event.key === "ArrowRight" || event.key.toLowerCase() === "d" ? "right" : null;
-      if (!lane || !gateOpen || busy || cooldown) return;
+      if (!lane || !game?.safeLane || !gateOpen || busy || cooldown) return;
       event.preventDefault(); drive(lane);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, cooldown, drive, gateOpen]);
+  }, [busy, cooldown, drive, game?.safeLane, gateOpen]);
 
   return <section aria-labelledby="night-run-title" className={styles.nightRunPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>12 / CONVOY ESCAPE</span><h2 id="night-run-title">DZN Night Run</h2></div><Radio size={24} /></div>
@@ -1387,13 +1392,14 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
     </div>
     {game ? <>
       <div className={styles.nightRunMeta}><span><Radio size={14} />{game.gatesCleared} / {game.totalGates}</span><span><Target size={14} />{game.collisions} collisions</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen} data-intensity={game.intensity}>
-        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? `${game.intensity} / GATE LIVE` : `${game.intensity} / CONVOY MOVING` : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
-        <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown} motionRunning={motionRunning} onDrive={drive} />
+      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen} data-intensity={game.intensity} data-recon={game.scannerAvailable}>
+        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? game.scannerAvailable ? `${game.intensity} / SIGNAL JAMMED` : `${game.intensity} / GATE LIVE` : `${game.intensity} / CONVOY MOVING` : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? game.scannerAvailable ? "Jammer gate: scan the route" : `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
+        <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown || game.scannerAvailable} motionRunning={motionRunning} requiresRecon={game.requiresRecon} scannerAvailable={game.scannerAvailable} onDrive={drive} />
+        {game.scannerAvailable && <div className={styles.nightRunRecon} role="status"><div><ScanSearch size={20} /><span><strong>Encrypted convoy gate</strong><small>The safe lane stays masked until this one server-recorded scan completes.</small></span></div><button type="button" className={styles.secondary} disabled={busy || cooldown} onClick={scan}><ScanSearch size={17} />Run gate scan</button></div>}
         <div className={styles.nightRunLanes} role="group" aria-label="Night Run convoy lanes">
           {NIGHT_RUN_LANES.map((lane, index) => {
             const live = gateOpen && game.safeLane === lane;
-            return <button key={lane} type="button" data-lane={lane} data-live={live} disabled={!gateOpen || busy || cooldown}
+            return <button key={lane} type="button" data-lane={lane} data-live={live} disabled={!gateOpen || !game.safeLane || busy || cooldown}
               aria-label={`${lane} lane (${["A", "S", "D"][index]})${live ? ", safe lane" : ""}`} onClick={() => drive(lane)}>
               <span>{String(index + 1).padStart(2, "0")}</span><strong>{lane}</strong><small>{live ? "Drive now" : "Perimeter route"}</small><kbd>{["A", "S", "D"][index]}</kbd>
             </button>;
@@ -1405,7 +1411,7 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Convoy escaped</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${NIGHT_RUN_REWARD.xp} XP and +${NIGHT_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice escape complete. Today's reward was already recorded." : "Night Run complete."}</span></div></>
           : game.status === "failed" ? <><Target size={22} /><div><strong>Convoy intercepted</strong><span>Two collision decisions ended the run. Existing Hub progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Night Run expired</strong><span>Start another convoy run when you are ready.</span></div></>
-              : <><Radio size={20} /><div><strong>{gateOpen ? "Gate open" : "Convoy moving"}</strong><span>{gateOpen ? "Drive through the lit safe lane before the gate closes." : "The DZN server is preparing the next verified gate."}</span></div></>}
+              : <><Radio size={20} /><div><strong>{gateOpen ? game.scannerAvailable ? "Jammer gate" : "Gate open" : "Convoy moving"}</strong><span>{gateOpen ? game.scannerAvailable ? "Run the scanner to reveal the safe lane before the gate closes." : "Drive through the lit safe lane before the gate closes." : "The DZN server is preparing the next verified gate."}</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.nightRunReady}><Radio size={34} /><h3>Take the convoy through the blackout.</h3><p>Read nine perimeter gates in the rendered Night Run city. The escape accelerates through recon, pursuit and lockdown while the server validates every safe lane.</p><div className={styles.rewardPills}><span>9 gates</span><span>+{NIGHT_RUN_REWARD.xp} XP</span><span>+{NIGHT_RUN_REWARD.parts} parts</span></div></div>}
   </section>;

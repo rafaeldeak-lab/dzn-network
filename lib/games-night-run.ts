@@ -8,6 +8,7 @@ export const NIGHT_RUN_TTL_MS = 3 * 60 * 1_000;
 export const NIGHT_RUN_START_COOLDOWN_MS = 5_000;
 export const NIGHT_RUN_GATE_LEAD_MS = 650;
 export const NIGHT_RUN_GATE_WINDOW_MS = 2_450;
+export const NIGHT_RUN_RECON_SCAN_GRACE_MS = 700;
 export const NIGHT_RUN_MIN_REACTION_MS = 120;
 export const NIGHT_RUN_MIN_ACTION_INTERVAL_MS = 145;
 
@@ -38,6 +39,8 @@ export type NightRunGame = {
   collisions: number;
   maxCollisions: number;
   safeLane: NightRunLane | null;
+  requiresRecon: boolean;
+  scannerAvailable: boolean;
   gateStartsAt: number;
   gateEndsAt: number;
   intensity: NightRunIntensity;
