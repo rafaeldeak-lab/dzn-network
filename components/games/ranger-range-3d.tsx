@@ -42,7 +42,14 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     camera.position.set(0, 2.8, 7.9);
     camera.lookAt(0, 1.15, -7.4);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    } catch {
+      // The DOM controls below the scene remain the accessible fallback when WebGL is unavailable.
+      mount.style.display = "none";
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -203,7 +210,9 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(targetMeshes, false)[0]?.object as THREE.Mesh | undefined;
       const target = hit?.userData.target as RangerRangeTarget | undefined;
-      if (target && target === liveTargetRef.current) fireRef.current(target);
+      // Selection is intentionally scored by the existing server action. Dropping a wrong
+      // canvas click would make the 3D input easier than the accessible target deck.
+      if (target && liveTargetRef.current) fireRef.current(target);
     };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
