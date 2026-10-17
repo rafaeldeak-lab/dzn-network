@@ -38,7 +38,9 @@ export type OwnerDiscordDeliveryDiscovery = {
   checks: {
     botTokenConfigured: boolean;
     botIdentity: boolean;
+    botGuildMembershipChecked: boolean;
     botGuildMembership: boolean;
+    candidateConfigurationChecked: boolean;
     canManageRoles: boolean;
     botHasAdministrator: boolean;
     botHasUnexpectedGuildPermissions: boolean;
@@ -158,12 +160,14 @@ export async function discoverOwnerDiscordDeliveryCandidates(
       return discovery(membership.response.status === 404 ? "not_connected" : "discord_error", "DZN Bot is not available in the selected central Discord server.", checkedAt, guildId, {
         botTokenConfigured: true,
         botIdentity: true,
+        botGuildMembershipChecked: true,
       });
     }
     if (!rolesResponse.response.ok || !Array.isArray(rolesResponse.payload) || !channelsResponse.response.ok || !Array.isArray(channelsResponse.payload)) {
       return discovery("discord_error", "DZN could not read the central Discord role and channel configuration.", checkedAt, guildId, {
         botTokenConfigured: true,
         botIdentity: true,
+        botGuildMembershipChecked: true,
         botGuildMembership: true,
       });
     }
@@ -235,7 +239,9 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const checks = {
       botTokenConfigured: true,
       botIdentity: true,
+      botGuildMembershipChecked: true,
       botGuildMembership: true,
+      candidateConfigurationChecked: true,
       canManageRoles,
       botHasAdministrator,
       botHasUnexpectedGuildPermissions,
@@ -283,7 +289,9 @@ function discovery(
     checks: {
       botTokenConfigured: false,
       botIdentity: false,
+      botGuildMembershipChecked: false,
       botGuildMembership: false,
+      candidateConfigurationChecked: false,
       canManageRoles: false,
       botHasAdministrator: false,
       botHasUnexpectedGuildPermissions: false,

@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
-type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean } };
+type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembershipChecked: boolean; botGuildMembership: boolean; roleConfigurationChecked: boolean; inviteChannelChecked: boolean; inviteChannel: boolean; inviteChannelPrivate: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleSafe: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean; botHasUnexpectedInviteChannelPermissions: boolean } };
 type RejectedOwnerRoleReason = "invalid_role_id" | "server_default_role" | "managed_role" | "invalid_permissions" | "guild_permissions";
 type DeliveryDiscovery = {
   ok: boolean;
@@ -24,7 +24,9 @@ type DeliveryDiscovery = {
   checks: {
     botTokenConfigured: boolean;
     botIdentity: boolean;
+    botGuildMembershipChecked: boolean;
     botGuildMembership: boolean;
+    candidateConfigurationChecked: boolean;
     canManageRoles: boolean;
     botHasAdministrator: boolean;
     botHasUnexpectedGuildPermissions: boolean;
@@ -85,6 +87,102 @@ type Payload = {
   message?: string;
 };
 
+type DeliveryReadinessItem = {
+  label: string;
+  detail: string;
+  state: "ready" | "blocked" | "unchecked";
+};
+
+function deliveryReadinessItems(
+  diagnostic: DeliveryDiagnostic | null,
+  discovery: DeliveryDiscovery | null,
+): DeliveryReadinessItem[] {
+  if (!diagnostic && !discovery) {
+    return [
+      {
+        label: "Central Discord has not been checked",
+        detail: "Run the read-only check before enabling owner delivery. It does not send an invite, change a role, or contact anyone.",
+        state: "unchecked",
+      },
+    ];
+  }
+
+  const checks = diagnostic?.checks;
+  const discoveryChecks = discovery?.checks;
+  const deliveryMembershipChecked = Boolean(checks?.botIdentity && checks.botGuildMembershipChecked);
+  const discoveryMembershipChecked = Boolean(discoveryChecks?.botIdentity && discoveryChecks.botGuildMembershipChecked);
+  const discoveryPreflightComplete = Boolean(discoveryMembershipChecked && discoveryChecks?.botGuildMembership);
+  const configurationChecked = Boolean(checks?.roleConfigurationChecked || discoveryChecks?.candidateConfigurationChecked);
+  const inspectionUnverified = !deliveryMembershipChecked && !discoveryMembershipChecked;
+  const hasPrivateInviteCandidate = discoveryPreflightComplete && (discovery?.privateInviteChannelCandidates.length ?? 0) > 0;
+  const hasVerifiedOwnerRoleCandidate = discoveryPreflightComplete && (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false);
+  const inviteChannelUnchecked = !configurationChecked || Boolean(checks?.roleConfigurationChecked && !checks.inviteChannelChecked);
+  const roleUnchecked = !configurationChecked;
+  const permissionUnchecked = !configurationChecked;
+  return [
+    {
+      label: "Bot identity and DZN server connection",
+      detail: checks?.botIdentity && checks.botGuildMembership
+        ? "The configured bot can identify itself and is connected to the central DZN server."
+        : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership
+          ? "The read-only discovery found the bot in the central DZN server; final configuration is still required."
+        : deliveryMembershipChecked || discoveryMembershipChecked
+          ? "The read-only check confirmed that DZN Bot is not currently a member of the central DZN server. Add the bot before enabling owner delivery."
+        : inspectionUnverified
+          ? "The latest Discord read-only check stopped before bot and server membership could be verified. Run it again before changing bot or server settings."
+            : "The bot must be connected to the central DZN server before delivery can be enabled.",
+      state: checks?.botIdentity && checks.botGuildMembership ? "ready" : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership ? "unchecked" : deliveryMembershipChecked || discoveryMembershipChecked ? "blocked" : "unchecked",
+    },
+    {
+      label: "Private one-use invite channel",
+      detail: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions
+        ? "The bot can create a one-use invite in the approved private channel with only the required channel permissions."
+        : inviteChannelUnchecked
+          ? "The latest delivery check did not complete the private-channel inspection. Resolve the reported diagnostic and run the check again."
+          : hasPrivateInviteCandidate
+          ? "A private channel is available. It must be saved as the central invite channel before delivery can be enabled."
+        : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
+      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : inviteChannelUnchecked || hasPrivateInviteCandidate ? "unchecked" : "blocked",
+    },
+    {
+      label: "Verified Server Owner role",
+      detail: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot
+        ? "The dedicated zero-permission owner role exists, is safe to grant, and can be assigned below the bot role."
+        : roleUnchecked
+          ? "The latest read-only check stopped before the owner role could be inspected. Resolve the reported diagnostic and run it again."
+        : hasVerifiedOwnerRoleCandidate
+          ? "A safe zero-permission owner role is available. It must be selected before delivery can be enabled."
+        : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
+      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : roleUnchecked || hasVerifiedOwnerRoleCandidate ? "unchecked" : "blocked",
+    },
+    {
+      label: "Least-privilege bot permissions",
+      detail: permissionUnchecked
+        ? "The latest read-only check stopped before the bot permission boundary could be inspected. Resolve the diagnostic and run it again."
+        : checks
+        ? checks.botHasAdministrator || checks.botHasUnexpectedGuildPermissions
+          ? "Blocked: remove Administrator and any unrelated guild permissions before owner delivery is enabled."
+          : checks.canManageRoles
+            ? "The bot has the limited permissions required to assign or remove only the verified owner role."
+            : "The bot still needs Manage Roles to deliver and revoke the verified owner role."
+        : discoveryChecks?.candidateConfigurationChecked
+          ? discoveryChecks.botHasAdministrator || discoveryChecks.botHasUnexpectedGuildPermissions
+            ? "Blocked: the read-only check found Administrator or unrelated guild permissions on the bot."
+            : discoveryChecks.canManageRoles
+              ? "The bot can manage roles without the high-risk guild permissions that block this workflow."
+              : "The bot still needs Manage Roles before delivery can be configured."
+          : "Run central Discord discovery to verify the bot permission boundary.",
+      state: permissionUnchecked
+        ? "unchecked"
+        : checks?.roleConfigurationChecked
+        ? checks.botHasAdministrator || checks.botHasUnexpectedGuildPermissions || !checks.canManageRoles ? "blocked" : "ready"
+        : discoveryChecks?.candidateConfigurationChecked
+          ? discoveryChecks.botHasAdministrator || discoveryChecks.botHasUnexpectedGuildPermissions || !discoveryChecks.canManageRoles ? "blocked" : "unchecked"
+          : "unchecked",
+    },
+  ];
+}
+
 export function OwnerDiscordAccessPage() {
   const [status, setStatus] = useState<Status | "all">("pending");
   const [search, setSearch] = useState("");
@@ -109,6 +207,7 @@ export function OwnerDiscordAccessPage() {
   const filterRevision = useRef(0);
   const hasAssignableVerifiedOwnerRole = deliveryDiscovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false;
   const hasPermissionedVerifiedOwnerRole = deliveryDiscovery?.rejectedVerifiedOwnerRoles.some((role) => role.reason === "guild_permissions") ?? false;
+  const deliveryReadiness = deliveryReadinessItems(deliveryDiagnostic, deliveryDiscovery);
 
   function setQueueStatus(nextStatus: Status | "all") {
     if (nextStatus === status) return;
@@ -271,20 +370,26 @@ export function OwnerDiscordAccessPage() {
     }
   }
   async function checkDelivery() {
-    if (checkingDelivery) return;
+    if (checkingDelivery || discoveringDelivery) return;
     setCheckingDelivery(true); setNotice(null);
+    setDeliveryDiagnostic(null);
+    setDeliveryDiscovery(null);
     try {
       const response = await fetch("/api/owner/discord/owner-access-delivery", { credentials: "include", cache: "no-store" });
       const next = await response.json().catch(() => null) as DeliveryDiagnostic | null;
       if (!response.ok || !next) throw new Error("The central Discord delivery check is unavailable.");
       setDeliveryDiagnostic(next);
       setNotice(next.message);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable."); }
+    } catch (error) {
+      setDeliveryDiagnostic(null);
+      setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable.");
+    }
     finally { setCheckingDelivery(false); }
   }
   async function discoverDeliveryCandidates() {
-    if (discoveringDelivery) return;
+    if (discoveringDelivery || checkingDelivery) return;
     setDiscoveringDelivery(true);
+    setDeliveryDiagnostic(null);
     setDeliveryDiscovery(null);
     setNotice(null);
     try {
@@ -371,7 +476,7 @@ export function OwnerDiscordAccessPage() {
               <p className="mt-2 text-sm leading-6 text-zinc-400">
                 {payload?.delivery}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot has Administrator. Remove it before owner delivery can be enabled.</span> : deliveryDiagnostic?.checks.botHasUnexpectedGuildPermissions ? <span className="text-xs font-bold text-amber-100">Bot has extra guild permissions. Restrict it to the owner-delivery allowlist before enabling delivery.</span> : null}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery || discoveringDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot has Administrator. Remove it before owner delivery can be enabled.</span> : deliveryDiagnostic?.checks.botHasUnexpectedGuildPermissions ? <span className="text-xs font-bold text-amber-100">Bot has extra guild permissions. Restrict it to the owner-delivery allowlist before enabling delivery.</span> : null}</div>
             </section>
             <section className="mt-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -384,7 +489,7 @@ export function OwnerDiscordAccessPage() {
                 <button
                   type="button"
                   onClick={() => void discoverDeliveryCandidates()}
-                  disabled={discoveringDelivery}
+                  disabled={discoveringDelivery || checkingDelivery}
                   className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50"
                 >
                   {discoveringDelivery ? "Finding safe candidates..." : "Find safe DZN candidates"}
@@ -464,6 +569,37 @@ export function OwnerDiscordAccessPage() {
                   </div>
                 </div>
               ) : null}
+            </section>
+            <section className="mt-3 rounded-lg border border-violet-300/15 bg-violet-300/[0.035] p-4">
+              <div className="flex items-center gap-2 text-violet-100">
+                <ShieldCheck size={18} />
+                <span className="font-black">Owner delivery readiness</span>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+                This checklist is read-only. Keep private delivery disabled until every item is ready; then run one real approved-owner delivery before relying on automation.
+              </p>
+              <ul className="mt-4 grid gap-2 lg:grid-cols-2">
+                {deliveryReadiness.map((item) => (
+                  <li
+                    key={item.label}
+                    className={`rounded-md border p-3 ${item.state === "ready" ? "border-emerald-300/20 bg-emerald-300/[0.04]" : item.state === "blocked" ? "border-amber-300/20 bg-amber-300/[0.045]" : "border-white/10 bg-black/15"}`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {item.state === "ready" ? (
+                        <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-200" size={16} />
+                      ) : item.state === "blocked" ? (
+                        <CircleAlert className="mt-0.5 shrink-0 text-amber-100" size={16} />
+                      ) : (
+                        <RefreshCw className="mt-0.5 shrink-0 text-zinc-500" size={16} />
+                      )}
+                      <div>
+                        <p className="text-sm font-black text-zinc-100">{item.label}</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-400">{item.detail}</p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </section>
             <section className="mt-5 flex flex-col gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4 md:flex-row">
               <div className="flex flex-wrap gap-2">

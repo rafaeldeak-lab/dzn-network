@@ -367,7 +367,10 @@ async function run() {
       const diagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(diagnostic.ok, true);
       assert.equal(diagnostic.status, "ready");
+      assert.equal(diagnostic.checks.targetRoleSafe, true);
       assert.equal(diagnostic.checks.targetRoleBelowBot, true);
+      assert.equal(diagnostic.checks.inviteChannelChecked, true);
+      assert.equal(diagnostic.checks.inviteChannelPrivate, true);
       assert.equal(diagnostic.checks.canCreateInvite, true);
       assert.equal(diagnostic.checks.botHasAdministrator, false, "The delivery workflow must work with least-privilege role permissions rather than Administrator.");
       assert.equal(diagnostic.checks.botHasUnexpectedGuildPermissions, false, "The least-privilege fixture must contain only the owner-delivery allowlist.");
@@ -381,9 +384,18 @@ async function run() {
       assert.match(missingChannelOverwriteDiagnostic.message, /explicit private-channel overwrite/, "The diagnostic must explain the channel-scoped requirement.");
       channelScopedPermissionsGranted = true;
 
+      channelEveryoneOverwritePermissions = viewChannel.toString();
+      const publicInviteChannelDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(publicInviteChannelDiagnostic.ok, false, "A channel where @everyone can view must block owner delivery.");
+      assert.equal(publicInviteChannelDiagnostic.status, "permission_missing");
+      assert.equal(publicInviteChannelDiagnostic.checks.inviteChannelPrivate, false, "A public channel must remain explicitly non-private in the diagnostic.");
+      assert.match(publicInviteChannelDiagnostic.message, /deny View Channel to @everyone/, "The diagnostic must explain the required @everyone privacy boundary.");
+      channelEveryoneOverwritePermissions = "0";
+
       channelRoleOverwritePermissions = (BigInt(privateInviteChannelPermissions) | manageChannels).toString();
       const unsafeRoleOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(unsafeRoleOverwriteDiagnostic.ok, false, "An extra permission in the bot role's private-channel overwrite must block owner delivery.");
+      assert.equal(unsafeRoleOverwriteDiagnostic.checks.inviteChannelPrivate, true, "An overprivileged but private channel must retain its private-channel diagnosis.");
       assert.equal(unsafeRoleOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
       assert.match(unsafeRoleOverwriteDiagnostic.message, /private invite channel grants DZN Bot permissions outside the owner-delivery allowlist/, "The diagnostic must explain the effective private-channel permission allowlist.");
       channelRoleOverwritePermissions = privateInviteChannelPermissions;
@@ -404,6 +416,7 @@ async function run() {
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(administratorDiagnostic.ok, false, "Administrator must block invite and role-grant delivery.");
       assert.equal(administratorDiagnostic.status, "permission_missing");
+      assert.equal(administratorDiagnostic.checks.inviteChannelChecked, false, "A failed role or bot preflight must not claim the private invite channel was checked.");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
       assert.match(administratorDiagnostic.message, /Remove Administrator/, "The diagnostic must require least-privilege bot permissions before delivery.");
       activeBotPermissions = botPermissions;
@@ -443,11 +456,13 @@ async function run() {
       const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);
       assert.equal(everyoneRoleDiagnostic.ok, false, "The central guild's @everyone role must never be accepted as the owner role.");
       assert.equal(everyoneRoleDiagnostic.status, "not_configured");
+      assert.equal(everyoneRoleDiagnostic.checks.targetRoleSafe, false, "An unsafe owner role must remain explicitly unsafe in the diagnostic.");
 
       activeVerifiedOwnerRolePermissions = (BigInt(1) << BigInt(28)).toString();
       const manageRolesDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(manageRolesDiagnostic.ok, false, "A configured owner role with Manage Roles must never be accepted.");
       assert.equal(manageRolesDiagnostic.status, "not_configured");
+      assert.equal(manageRolesDiagnostic.checks.targetRoleSafe, false, "A configured owner role with guild permissions must not appear ready in the owner console.");
       activeVerifiedOwnerRolePermissions = "0";
 
       assert.equal((await applicantDeliveryRoute(context(env, request("POST", { action: "invite", requestId: "approved_request" }, applicantSession.token)))).status, 403, "Cross-origin invite requests must be refused.");
