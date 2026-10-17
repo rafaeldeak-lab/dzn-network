@@ -428,14 +428,19 @@
 .signalShiftMeta span[data-intensity] { color: #b7d8e8; text-transform: uppercase; }
 .signalShiftMeta span[data-intensity="pressure"] { color: #ffd67a; }
 .signalShiftMeta span[data-intensity="blackout"] { color: #ff9bac; }
-.signalShiftStage { display: grid; gap: 18px; padding: 22px; border: 1px solid #4a4f65; border-radius: 6px; background: #10121a; }
+.signalShiftPanel { position: relative; isolation: isolate; overflow: hidden; padding: 18px; border: 1px solid #4c5267; border-radius: 6px; background: #10111a; }
+.signalShiftPanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .9; background-image: linear-gradient(90deg, #090a13ee 0%, #12111bde 47%, #0c0d15ed 100%), url("/images/games/signal-shift-matrix-v2.png"); background-position: center; background-size: cover; }
+.signalShiftPanel > * { position: relative; z-index: 1; }
+.signalShiftStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #59658a; border-radius: 6px; background: #090b14da; box-shadow: inset 0 0 0 1px #d6d6ff0d, inset 0 -84px 110px #03030ab8, 0 20px 48px #0000004a; }
+.signalShiftStage > * { position: relative; z-index: 1; }
+.signalShiftStage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(circle at 50% 49%, #6a7ee21b, transparent 46%), repeating-linear-gradient(0deg, transparent 0 36px, #a1b0ff0b 37px 38px), repeating-linear-gradient(90deg, transparent 0 36px, #a1b0ff08 37px 38px); }
 .signalShiftStage[data-intensity="pressure"] { border-color: #786f4b; box-shadow: inset 0 0 72px #3a311457; }
-.signalShiftStage[data-intensity="blackout"] { border-color: #875169; background-color: #1a0f1d; box-shadow: inset 0 0 86px #4b173b82, 0 0 22px #3b173a36; }
+.signalShiftStage[data-intensity="blackout"] { border-color: #875169; background-color: #1a0f1dd9; box-shadow: inset 0 0 86px #4b173b82, 0 0 22px #3b173a36; }
 .signalShiftReadout { display: grid; gap: 5px; text-align: center; }
 .signalShiftReadout > span { color: #9ca6c9; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .signalShiftReadout > strong { color: #eef1ff; font-size: clamp(18px, 3vw, 26px); }
-.signalShiftGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; width: min(100%, 440px); aspect-ratio: 1; margin: 0 auto; padding: 7px; border: 1px solid #505b83; border-radius: 5px; background: #090b13; }
-.signalShiftTile { display: grid; align-content: center; justify-items: center; gap: 4px; min-width: 0; min-height: 0; padding: 4px; border: 1px solid #3a4262; border-radius: 4px; color: #dce2fc; background: #171b2b; font-family: var(--font-geist-mono), monospace; transition: border-color 110ms ease, color 110ms ease, background-color 110ms ease, transform 110ms ease; }
+.signalShiftGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; width: min(100%, 440px); aspect-ratio: 1; margin: 0 auto; padding: 7px; border: 1px solid #6777a5; border-radius: 5px; background: #060814e6; box-shadow: inset 0 0 0 1px #b9c5ff10, 0 18px 32px #00000059; }
+.signalShiftTile { display: grid; align-content: center; justify-items: center; gap: 4px; min-width: 0; min-height: 0; padding: 4px; border: 1px solid #465078; border-radius: 4px; color: #dce2fc; background: linear-gradient(145deg, #1b2034f2, #101422ec); box-shadow: inset 0 1px #dbe5ff0d, inset 0 -12px 18px #00000026; font-family: var(--font-geist-mono), monospace; transition: border-color 110ms ease, color 110ms ease, background-color 110ms ease, transform 110ms ease; }
 .signalShiftTile small { color: #8994bd; font-size: clamp(7px, 1.4vw, 9px); font-weight: 800; line-height: 1; }
 .signalShiftTile strong { font-size: clamp(18px, 5vw, 31px); line-height: .9; }
 .signalShiftTile > span { color: #9ceee5; font-size: clamp(8px, 1.6vw, 11px); font-weight: 800; letter-spacing: .08em; }
