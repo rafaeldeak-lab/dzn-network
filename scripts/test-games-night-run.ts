@@ -281,9 +281,13 @@ async function run() {
   const nightRunScene = readFileSync("components/games/night-run-3d.tsx", "utf8");
   const nightRunPanel = readFileSync("components/games/games-hub.tsx", "utf8");
   assert.match(nightRunScene, /dznNightRunRecon/, "The Night Run renderer must expose its masked-signal state for visual QA.");
+  assert.match(nightRunScene, /dznNightRunIntensity/, "The renderer must expose the server-issued intensity for visual QA.");
+  assert.match(nightRunScene, /const pursuers/, "The escape scene must render the pursuit convoy rather than a static empty route.");
+  assert.match(nightRunScene, /mastBeacon/, "The player convoy must retain its live signal-beacon model.");
   assert.match(nightRunScene, /scannerRing\.visible = requiresRecon \|\| scannerAvailable/, "The scanner ring must not appear on ordinary reduced-motion gates.");
   assert.match(nightRunPanel, /action: "scan"/, "The accessible Night Run controls must dispatch the same authoritative scan action.");
   assert.match(nightRunPanel, /!game\.safeLane/, "The accessible lane deck must remain disabled while an encrypted route is masked.");
+  assert.match(nightRunPanel, /nightRunTelemetry/, "The accessible Night Run panel must expose convoy state outside the WebGL scene.");
   console.log(`Night Run tests passed: ${passed}`);
 }
 
