@@ -30,6 +30,7 @@ const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.
 const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => module.RangerRange3D), { ssr: false });
 const OutpostRun3D = dynamic(() => import("./outpost-run-3d").then(module => module.OutpostRun3D), { ssr: false });
 const SignalShift3D = dynamic(() => import("./signal-shift-3d").then(module => module.SignalShift3D), { ssr: false });
+const CircuitForge3D = dynamic(() => import("./circuit-forge-3d").then(module => module.CircuitForge3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -296,7 +297,7 @@ export function GamesHub() {
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
 
@@ -1065,10 +1066,11 @@ function SignalShiftPanel({ now, motionRunning, onProgress }: { now: number; mot
   </section>;
 }
 
-function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<CircuitForgePayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [threeUnavailableGameId, setThreeUnavailableGameId] = useState<string | null>(null);
   const generation = useRef(0);
   const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(CIRCUIT_FORGE_COOLDOWN_MS);
 
@@ -1103,6 +1105,7 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
   }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
+  const threeUnavailable = threeUnavailableGameId === game?.id;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
@@ -1125,21 +1128,27 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
       <div className={styles.circuitForgeMeta}><span><Settings2 size={14} />{game.poweredCount} / {game.tiles.length} powered</span><span><Target size={14} />{game.rotations} / {game.maxRotations} rotations</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.circuitForgeStage} data-status={game.status}>
         <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
-        <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
-          {game.tiles.map((tile, index) => {
-            const rotatable = active && !tile.core;
-            return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
-              data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy || cooldown}
-              title={tile.core ? "Command core" : "Rotate relay clockwise"}
-              aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
-              onClick={() => rotate(index)}>
-              {tile.mask & 1 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireNorth}`} aria-hidden="true" /> : null}
-              {tile.mask & 2 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireEast}`} aria-hidden="true" /> : null}
-              {tile.mask & 4 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireSouth}`} aria-hidden="true" /> : null}
-              {tile.mask & 8 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireWest}`} aria-hidden="true" /> : null}
-              <span className={styles.circuitForgeNode}>{tile.core ? "CORE" : String(index + 1).padStart(2, "0")}</span>
-            </button>;
-          })}
+        <div className={`${styles.circuitForgeConsole} ${threeUnavailable ? styles.circuitForgeConsoleFallback : ""}`}>
+          {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+          <div className={styles.circuitForgeControlDeck}>
+            <div className={styles.circuitForgeDeckHeading}><span>MANUAL RELAY DECK</span><strong>Direct conduit control</strong><small>Use the tactile grid when you need a precise clockwise relay turn.</small></div>
+            <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
+              {game.tiles.map((tile, index) => {
+                const rotatable = active && !tile.core;
+                return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
+                  data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy || cooldown}
+                  title={tile.core ? "Command core" : "Rotate relay clockwise"}
+                  aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
+                  onClick={() => rotate(index)}>
+                  {tile.mask & 1 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireNorth}`} aria-hidden="true" /> : null}
+                  {tile.mask & 2 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireEast}`} aria-hidden="true" /> : null}
+                  {tile.mask & 4 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireSouth}`} aria-hidden="true" /> : null}
+                  {tile.mask & 8 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireWest}`} aria-hidden="true" /> : null}
+                  <span className={styles.circuitForgeNode}>{tile.core ? "CORE" : String(index + 1).padStart(2, "0")}</span>
+                </button>;
+              })}
+            </div>
+          </div>
         </div>
         <p className={styles.circuitForgeHint}>Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core.</p>
       </div>
