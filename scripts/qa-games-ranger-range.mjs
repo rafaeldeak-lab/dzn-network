@@ -46,6 +46,8 @@ try {
     }
     const rangeCanvas = page.locator('canvas[data-dzn-ranger-range-canvas="true"]');
     await rangeCanvas.waitFor({ state: "visible" });
+    const rangeBackdrop = await page.locator(".dzn-ranger-range-3d").evaluate(element => getComputedStyle(element).backgroundImage);
+    assert.match(rangeBackdrop, /ranger-range-cinematic-v1\.png/);
     const rangeVisual = await rangeCanvas.evaluate(element => {
       const canvas = element;
       const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
@@ -62,7 +64,7 @@ try {
       return { width: canvas.width, height: canvas.height, litPixels, distinct: colours.size };
     });
     assert.ok(rangeVisual.width > 250 && rangeVisual.height > 180, `${viewport.name} range canvas is undersized: ${JSON.stringify(rangeVisual)}`);
-    assert.ok(rangeVisual.litPixels > 500 && rangeVisual.distinct > 20, `${viewport.name} range canvas appears blank: ${JSON.stringify(rangeVisual)}`);
+    assert.ok(rangeVisual.litPixels > 100 && rangeVisual.distinct > 9, `${viewport.name} interactive target layer appears blank: ${JSON.stringify(rangeVisual)}`);
     await page.getByRole("group", { name: "Ranger Range targets" }).waitFor();
     const targets = page.getByRole("group", { name: "Ranger Range targets" }).getByRole("button");
     assert.equal(await targets.count(), 6);
@@ -93,6 +95,39 @@ try {
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
     assert.deepEqual(errors, []);
     await context.close();
+  }
+  const fallbackContext = await browser.newContext({ viewport: { width: 834, height: 900 }, reducedMotion: "reduce" });
+  try {
+    await fallbackContext.addInitScript(() => {
+      Object.defineProperty(window, "WebGLRenderingContext", { configurable: true, value: undefined });
+    });
+    const fallbackPage = await fallbackContext.newPage();
+    const fallbackErrors = [];
+    fallbackPage.on("pageerror", error => fallbackErrors.push(error.message));
+    await fallbackPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+    await fallbackPage.getByRole("button", { name: /Ranger Range/ }).click();
+    // The isolated preview intentionally shares one synthetic player fixture across
+    // browser contexts. Reuse the range opened by the desktop pass rather than
+    // attempting a competing second start, so this path tests only the WebGL fallback.
+    await fallbackPage.getByRole("group", { name: "Ranger Range targets" }).waitFor();
+    const fallbackMount = fallbackPage.locator(".dzn-ranger-range-3d");
+    await fallbackMount.waitFor({ state: "attached" });
+    await fallbackPage.waitForFunction(() => document.querySelector(".dzn-ranger-range-3d")?.getAttribute("data-webgl-fallback") === "true");
+    const fallbackPresentation = await fallbackMount.evaluate(element => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return { state: element.getAttribute("data-webgl-fallback"), display: style.display, visibility: style.visibility, width: rect.width, height: rect.height, background: style.backgroundImage };
+    });
+    assert.equal(fallbackPresentation.state, "true", `WebGL fallback state was not applied: ${JSON.stringify(fallbackPresentation)}`);
+    assert.equal(fallbackPresentation.display, "block", `WebGL fallback mount is not displayed: ${JSON.stringify(fallbackPresentation)}`);
+    assert.notEqual(fallbackPresentation.visibility, "hidden", `WebGL fallback mount is hidden: ${JSON.stringify(fallbackPresentation)}`);
+    assert.ok(fallbackPresentation.width > 300 && fallbackPresentation.height >= 300, `WebGL fallback mount has no visible area: ${JSON.stringify(fallbackPresentation)}`);
+    assert.match(fallbackPresentation.background, /ranger-range-cinematic-v1\.png/);
+    assert.equal(await fallbackPage.locator('canvas[data-dzn-ranger-range-canvas="true"]').count(), 0);
+    assert.equal(await fallbackPage.getByRole("group", { name: "Ranger Range targets" }).getByRole("button").count(), 6);
+    assert.deepEqual(fallbackErrors, []);
+  } finally {
+    await fallbackContext.close();
   }
   console.log("DZN Ranger Range desktop, tablet, and phone rendered QA passed.");
 } finally {
