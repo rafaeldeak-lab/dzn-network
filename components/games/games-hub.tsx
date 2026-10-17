@@ -1291,7 +1291,7 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
       <div><strong>{game ? `${game.shotsCleared} / ${game.totalShots} plates cleared` : "Eight escalating range plates"}</strong><span>{game ? `${game.intensity} phase - ${game.maxMisses - game.misses} misses remaining` : "The target window shortens as the range enters pressure and blackout phases."}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New range run available five seconds after the last start" : undefined}
-        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Range in progress" : game ? "New range" : "Start range"}</button>
+        onClick={() => void mutate({ action: "start", protocol: "wind-v1" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Range in progress" : game ? "New range" : "Start range"}</button>
     </div>
     {game ? <>
       <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>

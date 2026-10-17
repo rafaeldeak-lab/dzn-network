@@ -44,8 +44,8 @@ async function payload(response: Response) {
   return response.json() as Promise<RangerRangePayload>;
 }
 
-async function start(fixture: Fixture) {
-  return payload(await call(fixture, { action: "start" }));
+async function start(fixture: Fixture, protocol: "wind-v1" | "legacy" = "wind-v1") {
+  return payload(await call(fixture, protocol === "wind-v1" ? { action: "start", protocol } : { action: "start" }));
 }
 
 function openTarget(fixture: Fixture) {
@@ -119,6 +119,15 @@ async function run() {
     assert.ok(visible.game?.wind);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("old pages receive a still-air sequence when they start a fresh range", async fixture => {
+    const started = await start(fixture, "legacy");
+    openTarget(fixture);
+    const state = await visibleTarget(fixture);
+    assert.equal(state.game?.wind, "calm");
+    const result = await payload(await call(fixture, { action: "fire", gameId: started.game!.id, version: state.game!.version, target: state.game!.target! }));
+    assert.equal(result.game?.shotsCleared, 1);
   });
 
   await test("range sessions tighten their server-issued target window during later phases", async fixture => {

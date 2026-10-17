@@ -66,6 +66,16 @@ function createTargetSequence(): Array<[RangerRangeTarget, RangerRangeWind]> {
   return sequence;
 }
 
+function createLegacyTargetSequence(): RangerRangeTarget[] {
+  const sequence: RangerRangeTarget[] = [];
+  while (sequence.length < RANGER_RANGE_TOTAL_SHOTS) {
+    const previous = sequence.at(-1);
+    const candidates = previous ? RANGER_RANGE_TARGETS.filter(target => target !== previous) : RANGER_RANGE_TARGETS;
+    sequence.push(candidates[randomIndex(candidates.length)]);
+  }
+  return sequence;
+}
+
 function parseTargetSequence(value: string): RangerRangeShot[] {
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed) || parsed.length !== RANGER_RANGE_TOTAL_SHOTS) {
@@ -148,7 +158,10 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
 
     let rewardGranted = false;
     if (body.action === "start") {
-      if (Object.keys(body).length !== 1) return reply({ error: "Invalid Ranger Range request." }, 400);
+      const keys = Object.keys(body);
+      const windScoredStart = keys.length === 2 && keys.every(key => ["action", "protocol"].includes(key)) && body.protocol === "wind-v1";
+      const legacyStart = keys.length === 1;
+      if (!windScoredStart && !legacyStart) return reply({ error: "Invalid Ranger Range request." }, 400);
       const targetStartsAt = now + RANGER_RANGE_TARGET_LEAD_MS;
       const result = await db.prepare(`INSERT INTO dzn_ranger_range_sessions
         (user_id, id, target_sequence_json, shot_index, misses, status, version, target_started_at, started_at, updated_at)
@@ -157,7 +170,7 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
         shot_index = 0, misses = 0, status = 'playing', version = 0, target_started_at = excluded.target_started_at,
         started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_ranger_range_sessions.started_at <= ?`)
-        .bind(user.id, crypto.randomUUID(), JSON.stringify(createTargetSequence()), targetStartsAt, now, now, now - RANGER_RANGE_START_COOLDOWN_MS).run();
+        .bind(user.id, crypto.randomUUID(), JSON.stringify(windScoredStart ? createTargetSequence() : createLegacyTargetSequence()), targetStartsAt, now, now, now - RANGER_RANGE_START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before beginning another range run." }, 429);
     } else if (body.action === "fire") {
       const keys = Object.keys(body);
