@@ -28,6 +28,7 @@ type PlayGame = HubGameId;
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.NightRun3D), { ssr: false });
 const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => module.RangerRange3D), { ssr: false });
+const OutpostRun3D = dynamic(() => import("./outpost-run-3d").then(module => module.OutpostRun3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -292,7 +293,7 @@ export function GamesHub() {
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -834,7 +835,7 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
   </section>;
 }
 
-function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<OutpostRunPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -912,6 +913,11 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
       <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span data-objective={game.objective}><Radio size={14} />{game.objective === "beacon" ? "beacon required" : "relay extraction"}</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.outpostRunStage} data-status={game.status} data-intensity={game.intensity} data-objective={game.objective}>
         <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / ${game.objective === "beacon" ? "FIELD BEACON" : "EMERGENCY RELAY"}` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? game.objective === "beacon" ? "Secure the field beacon before extraction" : game.intensity === "calibration" ? "Trace the emergency relay" : game.intensity === "pressure" ? "Commit to the surviving route" : "Break through the blackout" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
+        <div className={styles.outpostRunTerrain}>
+          <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} scanHint={game.scanHint}
+            active={active} disabled={busy || cooldown} motionRunning={motionRunning} onMove={sendMove} />
+          <span className={styles.outpostRunTerrainLabel}>LIVE TERRAIN // CLICK AN ADJACENT TILE OR USE THE COMMAND PAD</span>
+        </div>
         <div className={styles.outpostRunMapShell} data-active={active} data-intensity={game.intensity} data-objective={game.objective}>
           <span className={styles.outpostRunCoordinate} aria-hidden="true">DZN / FIELD-05</span>
           <span className={styles.outpostRunSweep} aria-hidden="true" />
