@@ -39,7 +39,7 @@ try {
       await page.waitForTimeout(260);
       const [scanResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Use field scanner" }).click(),
+        page.getByRole("button", { name: /Use beacon scanner/ }).click(),
       ]);
       assert.equal(scanResponse.status(), 200, await scanResponse.text());
       await page.waitForTimeout(260);
@@ -50,6 +50,10 @@ try {
       assert.equal(moveResponse.status(), 200, await moveResponse.text());
     }
     await page.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
+    if (index === 0) {
+      assert.equal(await page.locator('[data-objective="beacon"]').first().textContent(), "beacon required");
+      assert.match(await page.getByText("Secure the field beacon before extraction").textContent() ?? "", /field beacon/);
+    }
     assert.equal(await page.locator('[role="gridcell"]').count(), 25);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
