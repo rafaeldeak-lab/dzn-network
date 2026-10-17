@@ -33,8 +33,9 @@ try {
     }
     await answers.first().waitFor();
     const briefing = page.locator('div[class*="triviaQuestion"]');
-    assert.match(await briefing.evaluate(element => getComputedStyle(element, "::before").backgroundImage), /trivia-intelligence-v2/);
+    assert.match(await briefing.evaluate(element => getComputedStyle(element).backgroundImage), /trivia-command-table-v1/);
     assert.equal(await answers.count(), 4);
+    assert.equal(await page.getByRole("group", { name: "Field response pads" }).count(), 1);
     await page.reload({ waitUntil: "networkidle" });
     const [resumeResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "GET"),
