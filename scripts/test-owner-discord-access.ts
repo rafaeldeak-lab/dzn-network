@@ -145,6 +145,7 @@ async function run() {
   assert.match(ownerQueuePage, /Owner delivery readiness/, "The owner console must turn central Discord diagnostics into a clear owner-delivery readiness checklist.");
   assert.match(ownerQueuePage, /Keep private delivery disabled until every item is ready/, "The readiness checklist must not imply that discovery or diagnostics have enabled Discord automation.");
   assert.match(ownerQueuePage, /checks\.inviteChannelPrivate/, "The readiness checklist must not mark an invite channel ready unless the backend confirms it is private to @everyone.");
+  assert.match(ownerQueuePage, /const inviteChannelUnchecked = Boolean\(checks && !checks\.inviteChannelChecked\)/, "The readiness checklist must distinguish an unperformed private-channel check from a completed negative result.");
   assert.match(ownerQueuePage, /!checks\.botHasUnexpectedInviteChannelPermissions/, "The readiness checklist must not mark an overprivileged invite-channel overwrite ready.");
   assert.match(ownerQueuePage, /checks\.targetRoleSafe/, "The readiness checklist must not mark an unsafe configured owner role ready.");
   assert.match(ownerQueuePage, /const diagnosticUnverified = diagnostic\?\.status === "discord_error"/, "An incomplete Discord diagnostic must be distinguished from a completed negative check.");

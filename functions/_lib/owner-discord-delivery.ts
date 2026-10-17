@@ -78,6 +78,7 @@ type DeliveryDiagnostic = {
     botTokenConfigured: boolean;
     botIdentity: boolean;
     botGuildMembership: boolean;
+    inviteChannelChecked: boolean;
     inviteChannel: boolean;
     inviteChannelPrivate: boolean;
     canViewInviteChannel: boolean;
@@ -826,6 +827,7 @@ async function checkDiscordRoleConfiguration(
       botTokenConfigured: true,
       botIdentity: true,
       botGuildMembership: true,
+      inviteChannelChecked: false,
       inviteChannel: false,
       inviteChannelPrivate: false,
       canViewInviteChannel: false,
@@ -893,8 +895,9 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
       };
     }
     const channel = channelResponse.payload as DiscordChannel;
+    const channelChecks = { ...rolePreflight.checks, inviteChannelChecked: true };
     if (String(channel.guild_id ?? "") !== configuration.guildId || ![0, 5].includes(Number(channel.type))) {
-      return { ok: false as const, status: "not_configured" as const, message: "The configured private invite channel does not belong to the central DZN Discord server.", httpStatus: null, checks: rolePreflight.checks };
+      return { ok: false as const, status: "not_configured" as const, message: "The configured private invite channel does not belong to the central DZN Discord server.", httpStatus: null, checks: channelChecks };
     }
     const channelPermissions = evaluateChannelPermissions(rolePreflight.basePermissions, channel, configuration.guildId, rolePreflight.botRoleIds, rolePreflight.botId);
     const channelScopedPermissions = getBotChannelOverwritePermissions(channel, rolePreflight.botRoleIds, rolePreflight.botId);
@@ -904,7 +907,7 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
     const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions | everyoneChannelPermissions);
     const checks = {
-      ...rolePreflight.checks,
+      ...channelChecks,
       inviteChannel: true,
       inviteChannelPrivate: privateToEveryone,
       canViewInviteChannel,
@@ -1271,7 +1274,7 @@ function diagnostic(status: DeliveryDiagnostic["status"], message: string, check
 }
 
 function diagnosticChecks(): DeliveryDiagnostic["checks"] {
-  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannel: false, inviteChannelPrivate: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleSafe: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
+  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannelChecked: false, inviteChannel: false, inviteChannelPrivate: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleSafe: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
 }
 
 function safeAttempt(row: Record<string, unknown>): OwnerDiscordDeliveryAttempt | null {

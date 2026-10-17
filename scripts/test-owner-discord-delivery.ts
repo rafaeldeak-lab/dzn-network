@@ -369,6 +369,7 @@ async function run() {
       assert.equal(diagnostic.status, "ready");
       assert.equal(diagnostic.checks.targetRoleSafe, true);
       assert.equal(diagnostic.checks.targetRoleBelowBot, true);
+      assert.equal(diagnostic.checks.inviteChannelChecked, true);
       assert.equal(diagnostic.checks.inviteChannelPrivate, true);
       assert.equal(diagnostic.checks.canCreateInvite, true);
       assert.equal(diagnostic.checks.botHasAdministrator, false, "The delivery workflow must work with least-privilege role permissions rather than Administrator.");
@@ -415,6 +416,7 @@ async function run() {
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
       assert.equal(administratorDiagnostic.ok, false, "Administrator must block invite and role-grant delivery.");
       assert.equal(administratorDiagnostic.status, "permission_missing");
+      assert.equal(administratorDiagnostic.checks.inviteChannelChecked, false, "A failed role or bot preflight must not claim the private invite channel was checked.");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
       assert.match(administratorDiagnostic.message, /Remove Administrator/, "The diagnostic must require least-privilege bot permissions before delivery.");
       activeBotPermissions = botPermissions;
