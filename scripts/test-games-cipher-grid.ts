@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesCipherGrid, markCipherGridGuess } from "../functions/_lib/games-cipher-grid";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
-import { CIPHER_GRID_LEGACY_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_TTL_MS, CIPHER_GRID_WORD_LENGTH, type CipherGridPayload } from "../lib/games-cipher-grid";
+import { CIPHER_GRID_LEGACY_MAX_ATTEMPTS, CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_TTL_MS, CIPHER_GRID_WORD_LENGTH, type CipherGridPayload } from "../lib/games-cipher-grid";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof cipherGridFixture>>;
@@ -122,9 +122,14 @@ async function run() {
     fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET attempts_json = ? WHERE user_id = 'local-player'").run(JSON.stringify(attempts));
     const legacy = await payload(await call(fixture));
     assert.equal(legacy.game?.answerLength, CIPHER_GRID_WORD_LENGTH);
-    assert.equal(legacy.game?.maxAttempts, CIPHER_GRID_LEGACY_MAX_ATTEMPTS);
+    assert.equal(legacy.game?.maxAttempts, CIPHER_GRID_MAX_ATTEMPTS);
     assert.equal(legacy.game?.status, "failed");
     assert.equal((await call(fixture, guess(legacy, "CACHE"))).status, 409);
+    const sixAttempts = [...attempts, { guess: "CACHE", marks: ["absent", "absent", "absent", "absent", "absent"] }];
+    fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET attempts_json = ? WHERE user_id = 'local-player'").run(JSON.stringify(sixAttempts));
+    const historic = await payload(await call(fixture));
+    assert.equal(historic.game?.maxAttempts, CIPHER_GRID_LEGACY_MAX_ATTEMPTS);
+    assert.equal(historic.game?.status, "failed");
     fixture.db.sqlite.exec("UPDATE dzn_cipher_grid_sessions SET started_at = started_at - 6000");
     const restarted = await start(fixture);
     assert.equal(restarted.game?.status, "playing");

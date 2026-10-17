@@ -99,7 +99,7 @@ function gameView(row: CipherGridRow, now: number): CipherGridGame {
     status,
     attempts,
     answerLength: CIPHER_GRID_WORD_LENGTH,
-    maxAttempts: legacyAttemptLimit || attempts.length > CIPHER_GRID_MAX_ATTEMPTS ? CIPHER_GRID_LEGACY_MAX_ATTEMPTS : CIPHER_GRID_MAX_ATTEMPTS,
+    maxAttempts: attempts.length > CIPHER_GRID_MAX_ATTEMPTS ? CIPHER_GRID_LEGACY_MAX_ATTEMPTS : CIPHER_GRID_MAX_ATTEMPTS,
     startedAt: row.started_at,
     expiresAt: row.started_at + CIPHER_GRID_TTL_MS,
   };
