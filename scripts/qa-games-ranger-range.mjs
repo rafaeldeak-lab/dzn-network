@@ -46,6 +46,8 @@ try {
     }
     const rangeCanvas = page.locator('canvas[data-dzn-ranger-range-canvas="true"]');
     await rangeCanvas.waitFor({ state: "visible" });
+    const rangeBackdrop = await page.locator(".dzn-ranger-range-3d").evaluate(element => getComputedStyle(element).backgroundImage);
+    assert.match(rangeBackdrop, /ranger-range-cinematic-v1\.png/);
     const rangeVisual = await rangeCanvas.evaluate(element => {
       const canvas = element;
       const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
@@ -62,7 +64,7 @@ try {
       return { width: canvas.width, height: canvas.height, litPixels, distinct: colours.size };
     });
     assert.ok(rangeVisual.width > 250 && rangeVisual.height > 180, `${viewport.name} range canvas is undersized: ${JSON.stringify(rangeVisual)}`);
-    assert.ok(rangeVisual.litPixels > 500 && rangeVisual.distinct > 20, `${viewport.name} range canvas appears blank: ${JSON.stringify(rangeVisual)}`);
+    assert.ok(rangeVisual.litPixels > 100 && rangeVisual.distinct > 9, `${viewport.name} interactive target layer appears blank: ${JSON.stringify(rangeVisual)}`);
     await page.getByRole("group", { name: "Ranger Range targets" }).waitFor();
     const targets = page.getByRole("group", { name: "Ranger Range targets" }).getByRole("button");
     assert.equal(await targets.count(), 6);
