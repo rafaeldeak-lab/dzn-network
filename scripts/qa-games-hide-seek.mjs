@@ -15,9 +15,10 @@ let browser;
 try {
   const origin = await waitForOrigin();
   browser = await chromium.launch({ headless: true });
-  for (const [index, viewport] of [{ name: "desktop", width: 1440, height: 1000 }, { name: "phone", width: 390, height: 844 }].entries()) {
+  for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "phone", width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
@@ -29,37 +30,27 @@ try {
     assert.equal(loadResponse.status(), 200);
     await page.getByRole("heading", { name: "DZN Signal Hunt" }).waitFor();
     const scene = page.getByRole("group", { name: "DZN signal hunt reconnaissance scene" });
-    if (index === 0) {
+    const startButton = page.getByRole("button", { name: /^(Start hunt|New hunt)$/ });
+    if (await startButton.count()) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/hide-seek") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Start hunt" }).click(),
+        startButton.click(),
       ]);
       assert.equal(startResponse.status(), 200, await startResponse.text());
-      assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
-      for (let target = 0; target < 4; target++) {
-        const button = page.locator('button[class*="hideSeekTarget"][data-found="false"]').first();
-        const position = await button.evaluate(element => ({
-          x: Number.parseFloat(element.style.left),
-          y: Number.parseFloat(element.style.top),
-          opacity: getComputedStyle(element).opacity,
-        }));
-        assert.equal(position.opacity, "0");
-        await button.hover();
-        assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), "0");
-        const bounds = await scene.boundingBox();
-        assert.ok(bounds);
-        const [scanResponse] = await Promise.all([
-          page.waitForResponse(response => response.url().endsWith("/api/games/hide-seek") && response.request().method() === "POST"),
-          scene.click({ position: { x: bounds.width * position.x / 100, y: bounds.height * position.y / 100 } }),
-        ]);
-        assert.equal(scanResponse.status(), 200, await scanResponse.text());
-      }
-      await page.getByText("All signals recovered").waitFor();
-      await page.getByText(/Daily reward recorded/).waitFor();
-    } else {
-      assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
-      await page.getByText("All signals recovered").waitFor();
     }
+    assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
+    assert.equal(await page.locator('[class*="hideSeekTarget"]').count(), 0, "Unrecovered target markers must not be emitted into the DOM.");
+    assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0, "No recovered marker should exist before a server-confirmed scan.");
+    await scene.focus();
+    for (let press = 0; press < 10; press++) await page.keyboard.press("ArrowRight");
+    await page.getByText("X 1000 / Y 0500").waitFor();
+    const [scanResponse] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith("/api/games/hide-seek") && response.request().method() === "POST"),
+      page.keyboard.press("Enter"),
+    ]);
+    assert.equal(scanResponse.status(), 200, await scanResponse.text());
+    await page.getByText("Empty sweep").waitFor();
+    assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
     assert.deepEqual(errors, []);

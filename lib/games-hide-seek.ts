@@ -3,11 +3,17 @@ export const HIDE_SEEK_TARGET_COUNT = 4;
 export const HIDE_SEEK_MAX_MISSES = 6;
 export type HideSeekScene = "legacy" | "recon-v2";
 
-export type HideSeekTarget = {
+export type HideSeekSignalBrief = {
+  id: string;
+  clue: string;
+  found: boolean;
+};
+
+export type HideSeekRecoveredSignal = {
   id: string;
   x: number;
   y: number;
-  found: boolean;
+  clue: string;
 };
 
 export type HideSeekGame = {
@@ -20,7 +26,10 @@ export type HideSeekGame = {
   startedAt: number;
   expiresAt: number;
   scene: HideSeekScene;
-  targets: HideSeekTarget[];
+  targetCount: number;
+  clues: HideSeekSignalBrief[];
+  recoveredSignals: HideSeekRecoveredSignal[];
+  lastScan: "signal-acquired" | "empty" | null;
 };
 
 export type HideSeekPayload = {
