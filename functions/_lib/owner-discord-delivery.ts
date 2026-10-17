@@ -79,10 +79,12 @@ type DeliveryDiagnostic = {
     botIdentity: boolean;
     botGuildMembership: boolean;
     inviteChannel: boolean;
+    inviteChannelPrivate: boolean;
     canViewInviteChannel: boolean;
     canCreateInvite: boolean;
     canManageRoles: boolean;
     targetRole: boolean;
+    targetRoleSafe: boolean;
     targetRoleBelowBot: boolean;
     botHasAdministrator: boolean;
     botHasUnexpectedGuildPermissions: boolean;
@@ -825,10 +827,12 @@ async function checkDiscordRoleConfiguration(
       botIdentity: true,
       botGuildMembership: true,
       inviteChannel: false,
+      inviteChannelPrivate: false,
       canViewInviteChannel: false,
       canCreateInvite: false,
       canManageRoles,
       targetRole: Boolean(targetRole),
+      targetRoleSafe: false,
       targetRoleBelowBot: Boolean(targetRole && targetRolePosition < botHighestPosition),
       botHasAdministrator: hasAdministrator,
       botHasUnexpectedGuildPermissions: hasUnexpectedGuildPermissions,
@@ -847,14 +851,15 @@ async function checkDiscordRoleConfiguration(
       httpStatus: null,
       checks,
     };
-    if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
+    const safeRoleChecks = { ...checks, targetRoleSafe: true };
+    if (!safeRoleChecks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks: safeRoleChecks };
     if (hasAdministrator && purpose === "delivery") {
       return {
         ok: false as const,
         status: "permission_missing" as const,
         message: "DZN Bot has Administrator. Remove Administrator and grant only Manage Roles plus View Channel and Create Instant Invite on the private invite channel before owner delivery can run.",
         httpStatus: null,
-        checks,
+        checks: safeRoleChecks,
       };
     }
     if (hasUnexpectedGuildPermissions && purpose === "delivery") {
@@ -863,11 +868,11 @@ async function checkDiscordRoleConfiguration(
         status: "permission_missing" as const,
         message: "DZN Bot has guild permissions outside the owner-delivery allowlist. Grant Manage Roles only through a bot role, and grant View Channel plus Create Instant Invite only through the configured private-channel overwrite before owner delivery can run.",
         httpStatus: null,
-        checks,
+        checks: safeRoleChecks,
       };
     }
-    if (!canManageRoles && !(purpose === "cleanup" && hasAdministrator)) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
-    return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions, everyoneBasePermissions };
+    if (!canManageRoles && !(purpose === "cleanup" && hasAdministrator)) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks: safeRoleChecks };
+    return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks: safeRoleChecks, botId, botRoleIds, basePermissions, everyoneBasePermissions };
   } catch {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
   }
@@ -898,7 +903,14 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     const canViewInviteChannel = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
     const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
     const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions | everyoneChannelPermissions);
-    const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite, botHasUnexpectedInviteChannelPermissions: hasUnexpectedInviteChannelPermissions };
+    const checks = {
+      ...rolePreflight.checks,
+      inviteChannel: true,
+      inviteChannelPrivate: privateToEveryone,
+      canViewInviteChannel,
+      canCreateInvite,
+      botHasUnexpectedInviteChannelPermissions: hasUnexpectedInviteChannelPermissions,
+    };
     if (!privateToEveryone) {
       return { ok: false as const, status: "permission_missing" as const, message: "The configured owner invite channel must deny View Channel to @everyone.", httpStatus: null, checks };
     }
@@ -1259,7 +1271,7 @@ function diagnostic(status: DeliveryDiagnostic["status"], message: string, check
 }
 
 function diagnosticChecks(): DeliveryDiagnostic["checks"] {
-  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannel: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
+  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannel: false, inviteChannelPrivate: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleSafe: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
 }
 
 function safeAttempt(row: Record<string, unknown>): OwnerDiscordDeliveryAttempt | null {

@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
-type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean } };
+type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; inviteChannelPrivate: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleSafe: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean; botHasUnexpectedInviteChannelPermissions: boolean } };
 type RejectedOwnerRoleReason = "invalid_role_id" | "server_default_role" | "managed_role" | "invalid_permissions" | "guild_permissions";
 type DeliveryDiscovery = {
   ok: boolean;
@@ -119,21 +119,21 @@ function deliveryReadinessItems(
     },
     {
       label: "Private one-use invite channel",
-      detail: checks?.inviteChannel && checks.canViewInviteChannel && checks.canCreateInvite
-        ? "The bot can create a one-use invite in the approved private channel."
+      detail: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions
+        ? "The bot can create a one-use invite in the approved private channel with only the required channel permissions."
         : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0
           ? "A private channel is available. It must be saved as the central invite channel before delivery can be enabled."
           : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
-      state: checks?.inviteChannel && checks.canViewInviteChannel && checks.canCreateInvite ? "ready" : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0 ? "unchecked" : "blocked",
+      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0 ? "unchecked" : "blocked",
     },
     {
       label: "Verified Server Owner role",
-      detail: checks?.targetRole && checks.targetRoleBelowBot
-        ? "The dedicated owner role exists and can be assigned below the bot role."
+      detail: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot
+        ? "The dedicated zero-permission owner role exists, is safe to grant, and can be assigned below the bot role."
         : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false)
           ? "A safe zero-permission owner role is available. It must be selected before delivery can be enabled."
           : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
-      state: checks?.targetRole && checks.targetRoleBelowBot ? "ready" : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false) ? "unchecked" : "blocked",
+      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false) ? "unchecked" : "blocked",
     },
     {
       label: "Least-privilege bot permissions",
