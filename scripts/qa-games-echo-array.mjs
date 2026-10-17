@@ -30,6 +30,8 @@ try {
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Echo Array" }).waitFor();
+    const signalChamber = await page.locator('[aria-labelledby="echo-array-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
+    assert.match(signalChamber, /echo-array-signal-chamber-v2\.png/);
     if (index === 0) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/echo-array") && response.request().method() === "POST"),
