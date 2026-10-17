@@ -49,6 +49,8 @@ try {
     }
     await page.getByRole("grid", { name: "Signal Shift tactical grid" }).waitFor({ state: index === 0 ? "visible" : "attached" });
     assert.equal(await page.locator('[role="gridcell"]').count(), 16);
+    await page.locator('[data-dzn-signal-shift-canvas="true"]').waitFor({ state: "visible" });
+    assert.equal(await page.locator('[data-dzn-signal-shift-intensity]').getAttribute("data-dzn-signal-shift-intensity"), "calibration");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
     assert.deepEqual(errors, []);
