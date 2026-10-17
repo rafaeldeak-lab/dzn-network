@@ -17,6 +17,7 @@ type SignalShift3DProps = {
   motionRunning: boolean;
   movableTiles: number[];
   onMove: (tile: number) => void;
+  onUnavailable: () => void;
 };
 
 const INTENSITY_COLORS: Record<SignalShiftIntensity, { primary: number; alert: number }> = {
@@ -53,13 +54,15 @@ function labelTexture(label: string, color: string, caption = "SECTOR") {
   return texture;
 }
 
-export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, motionRunning, movableTiles, onMove }: SignalShift3DProps) {
+export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, motionRunning, movableTiles, onMove, onUnavailable }: SignalShift3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const moveRef = useRef(onMove);
   const disabledRef = useRef(disabled);
+  const unavailableRef = useRef(onUnavailable);
 
   useEffect(() => { moveRef.current = onMove; }, [onMove]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -72,7 +75,13 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 100);
     camera.position.set(7.4, 7.9, 10.6);
     camera.lookAt(0, 0.55, 0);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    let renderer: any;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    } catch {
+      unavailableRef.current();
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -234,6 +243,7 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
     let hovered: any = null;
     let pointerX = 0;
     let pointerY = 0;
+    let pointerDown: { id: number; tile: number; x: number; y: number; moved: boolean } | null = null;
     let frame = 0;
     const setPointer = (event: PointerEvent) => {
       const bounds = renderer.domElement.getBoundingClientRect();
@@ -248,6 +258,7 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       return raycaster.intersectObjects(hitboxes, false)[0]?.object as any;
     };
     const onPointerMove = (event: PointerEvent) => {
+      if (pointerDown && pointerDown.id === event.pointerId && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 8) pointerDown.moved = true;
       const next = hitTile(event) ?? null;
       if (hovered !== next) {
         if (hovered?.userData.group) hovered.userData.group.scale.setScalar(1);
@@ -261,14 +272,25 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       hovered = null;
       renderer.domElement.style.cursor = "default";
     };
-    const onPointerUp = (event: PointerEvent) => {
-      if (event.button !== 0 || disabledRef.current) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || disabledRef.current) { pointerDown = null; return; }
       const hit = hitTile(event);
-      if (hit?.userData.movable) moveRef.current(hit.userData.tile);
+      pointerDown = hit?.userData.movable ? { id: event.pointerId, tile: hit.userData.tile, x: event.clientX, y: event.clientY, moved: false } : null;
+      if (pointerDown && renderer.domElement.setPointerCapture) renderer.domElement.setPointerCapture(event.pointerId);
     };
+    const onPointerUp = (event: PointerEvent) => {
+      const started = pointerDown;
+      pointerDown = null;
+      if (event.button !== 0 || disabledRef.current || !started || started.id !== event.pointerId || started.moved) return;
+      const hit = hitTile(event);
+      if (hit?.userData.movable && hit.userData.tile === started.tile) moveRef.current(hit.userData.tile);
+    };
+    const onPointerCancel = () => { pointerDown = null; };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointercancel", onPointerCancel);
 
     const resize = new ResizeObserver(entries => {
       const width = Math.max(1, entries[0]?.contentRect.width ?? mount.clientWidth);
@@ -285,7 +307,9 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
         resize.disconnect();
         renderer.domElement.removeEventListener("pointermove", onPointerMove);
         renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+        renderer.domElement.removeEventListener("pointerdown", onPointerDown);
         renderer.domElement.removeEventListener("pointerup", onPointerUp);
+        renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
         mount.removeChild(renderer.domElement);
         dispose();
       };
@@ -310,7 +334,9 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       resize.disconnect();
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       mount.removeChild(renderer.domElement);
       dispose();
     };

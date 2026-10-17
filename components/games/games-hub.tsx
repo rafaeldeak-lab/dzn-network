@@ -960,6 +960,7 @@ function SignalShiftPanel({ now, motionRunning, onProgress }: { now: number; mot
   const [payload, setPayload] = useState<SignalShiftPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [threeUnavailableGameId, setThreeUnavailableGameId] = useState<string | null>(null);
   const generation = useRef(0);
   const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(SIGNAL_SHIFT_COOLDOWN_MS);
 
@@ -994,6 +995,7 @@ function SignalShiftPanel({ now, motionRunning, onProgress }: { now: number; mot
   }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
+  const threeUnavailable = threeUnavailableGameId === game?.id;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
@@ -1034,8 +1036,8 @@ function SignalShiftPanel({ now, motionRunning, onProgress }: { now: number; mot
       <div className={styles.signalShiftMeta}><span><Target size={14} />{game.moves} / {game.maxMoves} shifts</span><span><Microchip size={14} />{game.gridSize} x {game.gridSize} relay grid</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.signalShiftStage} data-status={game.status} data-intensity={game.intensity}>
         <div className={styles.signalShiftReadout} aria-live="polite"><span>{active ? `RELAY MATRIX / ${game.intensity.toUpperCase()}` : game.status === "won" ? "RELAY MATRIX / STABLE" : "RELAY MATRIX / CLOSED"}</span><strong>{active ? game.intensity === "blackout" ? "Complete the final relay reroute" : game.intensity === "pressure" ? "Routing pressure is increasing" : "Route each sector into sequence" : game.status === "won" ? "Signal line restored" : game.status === "failed" ? "Shift limit reached" : "Signal window expired"}</strong></div>
-        <div className={styles.signalShiftConsole}>
-          <SignalShift3D key={game.version} tiles={game.tiles} gridSize={game.gridSize} intensity={game.intensity} active={active} disabled={busy || cooldown} motionRunning={motionRunning} movableTiles={movableTiles} onMove={move} />
+        <div className={`${styles.signalShiftConsole} ${threeUnavailable ? styles.signalShiftConsoleFallback : ""}`}>
+          {!threeUnavailable && <SignalShift3D key={game.version} tiles={game.tiles} gridSize={game.gridSize} intensity={game.intensity} active={active} disabled={busy || cooldown} motionRunning={motionRunning} movableTiles={movableTiles} onMove={move} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
           <div className={styles.signalShiftControlDeck}>
             <div className={styles.signalShiftDeckHeading}><span>TACTICAL OVERRIDE</span><strong>Direct relay control</strong><small>Choose a lit sector to move it into the open core slot.</small></div>
             <div className={styles.signalShiftGrid} role="grid" aria-label="Signal Shift tactical grid">
