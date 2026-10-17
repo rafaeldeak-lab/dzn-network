@@ -1,19 +1,38 @@
-export type HideSeekTargetDefinition = { id: string; x: number; y: number };
+import type { HideSeekScene } from "../../lib/games-hide-seek";
 
-// Stable, visually fair slots on the original DZN outpost scene. The server selects four per round.
-export const HIDE_SEEK_TARGETS: readonly HideSeekTargetDefinition[] = [
-  { id: "signal-01", x: 151, y: 306 },
-  { id: "signal-02", x: 264, y: 441 },
-  { id: "signal-03", x: 355, y: 243 },
-  { id: "signal-04", x: 456, y: 464 },
-  { id: "signal-05", x: 551, y: 333 },
-  { id: "signal-06", x: 651, y: 469 },
-  { id: "signal-07", x: 731, y: 259 },
-  { id: "signal-08", x: 826, y: 443 },
-  { id: "signal-09", x: 902, y: 304 },
-  { id: "signal-10", x: 197, y: 696 },
-  { id: "signal-11", x: 521, y: 731 },
-  { id: "signal-12", x: 842, y: 699 },
+export type HideSeekTargetDefinition = { id: string; x: number; y: number; scene: HideSeekScene };
+
+// Old sessions retain the scene and coordinates they started with.
+export const HIDE_SEEK_LEGACY_TARGETS: readonly HideSeekTargetDefinition[] = [
+  { id: "signal-01", x: 151, y: 306, scene: "legacy" },
+  { id: "signal-02", x: 264, y: 441, scene: "legacy" },
+  { id: "signal-03", x: 355, y: 243, scene: "legacy" },
+  { id: "signal-04", x: 456, y: 464, scene: "legacy" },
+  { id: "signal-05", x: 551, y: 333, scene: "legacy" },
+  { id: "signal-06", x: 651, y: 469, scene: "legacy" },
+  { id: "signal-07", x: 731, y: 259, scene: "legacy" },
+  { id: "signal-08", x: 826, y: 443, scene: "legacy" },
+  { id: "signal-09", x: 902, y: 304, scene: "legacy" },
+  { id: "signal-10", x: 197, y: 696, scene: "legacy" },
+  { id: "signal-11", x: 521, y: 731, scene: "legacy" },
+  { id: "signal-12", x: 842, y: 699, scene: "legacy" },
 ] as const;
 
+// New runs use the original reconnaissance scene. Targets are grounded in distinct terrain and equipment details.
+export const HIDE_SEEK_RECON_TARGETS: readonly HideSeekTargetDefinition[] = [
+  { id: "recon-01", x: 205, y: 258, scene: "recon-v2" },
+  { id: "recon-02", x: 338, y: 385, scene: "recon-v2" },
+  { id: "recon-03", x: 486, y: 307, scene: "recon-v2" },
+  { id: "recon-04", x: 538, y: 486, scene: "recon-v2" },
+  { id: "recon-05", x: 647, y: 584, scene: "recon-v2" },
+  { id: "recon-06", x: 755, y: 355, scene: "recon-v2" },
+  { id: "recon-07", x: 889, y: 456, scene: "recon-v2" },
+  { id: "recon-08", x: 828, y: 669, scene: "recon-v2" },
+  { id: "recon-09", x: 734, y: 781, scene: "recon-v2" },
+  { id: "recon-10", x: 407, y: 723, scene: "recon-v2" },
+  { id: "recon-11", x: 142, y: 706, scene: "recon-v2" },
+  { id: "recon-12", x: 947, y: 772, scene: "recon-v2" },
+] as const;
+
+export const HIDE_SEEK_TARGETS: readonly HideSeekTargetDefinition[] = [...HIDE_SEEK_LEGACY_TARGETS, ...HIDE_SEEK_RECON_TARGETS];
 export const HIDE_SEEK_TARGET_BY_ID = new Map(HIDE_SEEK_TARGETS.map(target => [target.id, target]));

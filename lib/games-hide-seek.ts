@@ -1,6 +1,7 @@
 export const HIDE_SEEK_REWARD = { xp: 60, parts: 2 } as const;
 export const HIDE_SEEK_TARGET_COUNT = 4;
 export const HIDE_SEEK_MAX_MISSES = 6;
+export type HideSeekScene = "legacy" | "recon-v2";
 
 export type HideSeekTarget = {
   id: string;
@@ -18,6 +19,7 @@ export type HideSeekGame = {
   maxMisses: number;
   startedAt: number;
   expiresAt: number;
+  scene: HideSeekScene;
   targets: HideSeekTarget[];
 };
 

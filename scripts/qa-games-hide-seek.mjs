@@ -28,24 +28,36 @@ try {
     ]);
     assert.equal(loadResponse.status(), 200);
     await page.getByRole("heading", { name: "DZN Signal Hunt" }).waitFor();
+    const scene = page.getByRole("group", { name: "DZN signal hunt reconnaissance scene" });
     if (index === 0) {
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/hide-seek") && response.request().method() === "POST"),
         page.getByRole("button", { name: "Start hunt" }).click(),
       ]);
       assert.equal(startResponse.status(), 200, await startResponse.text());
+      assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
       for (let target = 0; target < 4; target++) {
-        const button = page.getByRole("button", { name: /Investigate concealed signal/ }).first();
-        await button.waitFor();
+        const button = page.locator('button[class*="hideSeekTarget"][data-found="false"]').first();
+        const position = await button.evaluate(element => ({
+          x: Number.parseFloat(element.style.left),
+          y: Number.parseFloat(element.style.top),
+          opacity: getComputedStyle(element).opacity,
+        }));
+        assert.equal(position.opacity, "0");
+        await button.hover();
+        assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), "0");
+        const bounds = await scene.boundingBox();
+        assert.ok(bounds);
         const [scanResponse] = await Promise.all([
           page.waitForResponse(response => response.url().endsWith("/api/games/hide-seek") && response.request().method() === "POST"),
-          button.click(),
+          scene.click({ position: { x: bounds.width * position.x / 100, y: bounds.height * position.y / 100 } }),
         ]);
         assert.equal(scanResponse.status(), 200, await scanResponse.text());
       }
       await page.getByText("All signals recovered").waitFor();
       await page.getByText(/Daily reward recorded/).waitFor();
     } else {
+      assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
       await page.getByText("All signals recovered").waitFor();
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);

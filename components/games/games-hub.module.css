@@ -270,10 +270,15 @@
 .hideSeekMeta span:last-child { margin-left: auto; }
 .hideSeekScene { position: relative; isolation: isolate; overflow: hidden; width: 100%; aspect-ratio: 3 / 2; border: 1px solid #465759; border-radius: 6px; background: #0c1111; cursor: crosshair; }
 .hideSeekScene > img { z-index: -1; object-fit: cover; }
-.hideSeekScene::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 5px, #09131318 6px); }
-.hideSeekTarget { position: absolute; translate: -50% -50%; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #96a39366; border-radius: 50%; color: #c1c9b7aa; background: #25322c99; box-shadow: 0 0 0 3px #07100e44; opacity: .58; }
-.hideSeekTarget:not(:disabled):hover, .hideSeekTarget:not(:disabled):focus-visible { color: #c8fff5; border-color: var(--cyan); background: #0c4a43dd; opacity: 1; outline: 2px solid #ffffff; outline-offset: 2px; }
+.hideSeekScene::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: linear-gradient(#93d6ca13 1px, transparent 1px), linear-gradient(90deg, #93d6ca13 1px, transparent 1px), radial-gradient(ellipse at center, transparent 38%, #02070799 100%); background-size: 12.5% 12.5%, 12.5% 12.5%, 100% 100%; mix-blend-mode: screen; }
+.hideSeekScene::after { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(180deg, transparent 0 44%, #9adbd530 49%, transparent 54%); animation: hide-seek-sweep 6s ease-in-out infinite; }
+.hideSeekOverlay { position: absolute; inset: 0; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; padding: 12px; color: #d4eee8aa; font: 10px var(--font-geist-mono), monospace; letter-spacing: .12em; pointer-events: none; }
+.hideSeekOverlay i { width: 36px; height: 36px; border: 1px solid #b8eee366; border-left-color: transparent; border-bottom-color: transparent; }
+.hideSeekTarget { position: absolute; z-index: 2; translate: -50% -50%; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #96a39366; border-radius: 50%; color: #c1c9b7aa; background: #25322c99; box-shadow: 0 0 0 3px #07100e44; opacity: .58; }
+.hideSeekTarget[data-found=false] { border-color: transparent; color: transparent; background: transparent; box-shadow: none; opacity: 0; }
+.hideSeekTarget:not(:disabled):focus-visible { color: #c8fff5; border-color: var(--cyan); background: #0c4a43dd; opacity: 1; outline: 2px solid #ffffff; outline-offset: 2px; }
 .hideSeekTarget[data-found=true] { color: #06100d; border-color: #70ebbd; background: #70ebbd; opacity: 1; }
+@keyframes hide-seek-sweep { 0%, 14% { transform: translateY(-55%); opacity: 0; } 26%, 74% { opacity: .72; } 86%, 100% { transform: translateY(55%); opacity: 0; } }
 .relayRushTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .relayRushTools > div { display: grid; gap: 4px; }
 .relayRushTools strong { font-size: 13px; }
@@ -544,7 +549,7 @@
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
 @media (max-width: 360px) { .hubNav { align-items: flex-start; } .hubNav .navActions { width: 100%; justify-content: space-between; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
-@media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
+@media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after, .hideSeekScene::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
 
 .rangerRangeTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .rangerRangeTools > div { display: grid; gap: 4px; }
