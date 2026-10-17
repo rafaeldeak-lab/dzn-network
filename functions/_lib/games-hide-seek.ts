@@ -1,7 +1,7 @@
 import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
-import { HIDE_SEEK_TARGETS, HIDE_SEEK_TARGET_BY_ID } from "./games-hide-seek-targets";
+import { HIDE_SEEK_RECON_TARGETS, HIDE_SEEK_TARGET_BY_ID } from "./games-hide-seek-targets";
 import { HIDE_SEEK_MAX_MISSES, HIDE_SEEK_REWARD, type HideSeekGame, type HideSeekPayload } from "../../lib/games-hide-seek";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
@@ -13,7 +13,7 @@ type HideSeekRow = { user_id: string; id: string; target_ids_json: string; found
   status: "playing" | "won" | "failed"; version: number; started_at: number; updated_at: number };
 
 function selectTargets() {
-  const slots = [...HIDE_SEEK_TARGETS];
+  const slots = [...HIDE_SEEK_RECON_TARGETS];
   for (let index = slots.length - 1; index > 0; index--) {
     const swap = crypto.getRandomValues(new Uint32Array(1))[0] % (index + 1);
     [slots[index], slots[swap]] = [slots[swap], slots[index]];
@@ -30,11 +30,17 @@ function parseIds(value: string) {
 function gameView(row: HideSeekRow, now: number): HideSeekGame {
   const targetIds = parseIds(row.target_ids_json);
   const found = new Set(parseIds(row.found_ids_json));
+  const targets = targetIds.map(id => {
+    const target = HIDE_SEEK_TARGET_BY_ID.get(id);
+    if (!target) throw new Error("Invalid stored target");
+    return target;
+  });
+  const scene = targets[0]?.scene;
+  if (!scene || targets.some(target => target.scene !== scene)) throw new Error("Invalid stored target scene");
   const status = row.status === "playing" && now >= row.started_at + TTL ? "expired" : row.status;
   return { id: row.id, version: row.version, status, foundCount: found.size, misses: row.misses,
     maxMisses: HIDE_SEEK_MAX_MISSES, startedAt: row.started_at, expiresAt: row.started_at + TTL,
-    targets: targetIds.map(id => { const target = HIDE_SEEK_TARGET_BY_ID.get(id); if (!target) throw new Error("Invalid stored target");
-      return { ...target, found: found.has(id) }; }) };
+    scene, targets: targets.map(target => ({ ...target, found: found.has(target.id) })) };
 }
 
 async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false): Promise<HideSeekPayload> {

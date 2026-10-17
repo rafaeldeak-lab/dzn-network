@@ -56,12 +56,22 @@ async function run() {
     const response = await call(fixture); assert.equal(response.status, 503);
     assert.doesNotMatch(await response.text(), /sqlite|select |table|dzn_hide_seek/i);
   }, false);
-  await test("read is mutation-free and a new hunt uses four unique fair slots", async fixture => {
+  await test("read is mutation-free and a new hunt uses four unique recon-scene slots", async fixture => {
     assert.equal((await payload(await call(fixture))).game, null);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_hide_seek_sessions").get()?.count, 0);
     const state = await start(fixture); assert.equal(state.game?.targets.length, 4);
+    assert.equal(state.game?.scene, "recon-v2");
     assert.equal(new Set(state.game?.targets.map(target => target.id)).size, 4);
+    assert.ok(state.game?.targets.every(target => target.id.startsWith("recon-")));
     assert.ok(state.game?.targets.every(target => target.x >= 0 && target.x <= 1000 && target.y >= 0 && target.y <= 1000));
+  });
+  await test("legacy in-progress hunts retain their original scene coordinates", async fixture => {
+    await start(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_hide_seek_sessions SET target_ids_json = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify(["signal-01", "signal-02", "signal-03", "signal-04"]));
+    const legacy = await payload(await call(fixture));
+    assert.equal(legacy.game?.scene, "legacy");
+    assert.ok(legacy.game?.targets.every(target => target.id.startsWith("signal-")));
   });
   await test("strict request validation rejects forged shapes and coordinates", async fixture => {
     const state = await start(fixture);

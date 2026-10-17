@@ -522,19 +522,22 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
     </div>
     {game ? <>
       <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
-      <div className={styles.hideSeekScene} role="group" aria-label="DZN outpost signal hunt scene" aria-disabled={!active || busy}
+      <div className={styles.hideSeekScene} data-scene={game.scene} role="group" aria-label="DZN signal hunt reconnaissance scene" aria-disabled={!active || busy}
         onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scan(Math.round((event.clientX - bounds.left) / bounds.width * 1000), Math.round((event.clientY - bounds.top) / bounds.height * 1000)); }}>
-        <Image src="/images/games/dzn-outpost.webp" alt="DZN mountain communications outpost" fill sizes="(max-width: 760px) 100vw, 760px" />
+        <Image src={game.scene === "recon-v2" ? "/images/games/signal-hunt-recon-v2.png" : "/images/games/dzn-outpost.webp"}
+          alt={game.scene === "recon-v2" ? "Storm reconnaissance station in the DZN mountain range" : "DZN mountain communications outpost"}
+          fill sizes="(max-width: 760px) 100vw, 760px" />
+        <div className={styles.hideSeekOverlay} aria-hidden="true"><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><i /></div>
         {game.targets.map((target, index) => <button key={target.id} type="button" className={styles.hideSeekTarget} data-found={target.found}
           style={{ left: `${target.x / 10}%`, top: `${target.y / 10}%` }} disabled={!active || busy || target.found}
-          aria-label={target.found ? `Signal ${index + 1} found` : `Investigate concealed signal ${index + 1}`}
+          aria-label={target.found ? `Signal ${index + 1} found` : `Search position ${index + 1}`}
           onClick={event => { event.stopPropagation(); scan(target.x, target.y); }}>{target.found ? <Check size={15} /> : <Search size={14} />}</button>)}
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>All signals recovered</strong><span>{payload.rewardGranted ? `Daily reward recorded: +${HIDE_SEEK_REWARD.xp} XP and +${HIDE_SEEK_REWARD.parts} parts.` : payload.rewardedToday ? "Practice hunt complete. Today's reward was already recorded." : "Hunt complete."}</span></div></>
           : game.status === "failed" ? <><Target size={22} /><div><strong>Search window closed</strong><span>Too many empty scans. Your existing progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Hunt expired</strong><span>Start a new reconnaissance run when ready.</span></div></>
-              : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Inspect the scene closely. Every find is checked by DZN.</span></div></>}
+              : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Sweep terrain, infrastructure and shadow lines. Every find is checked by DZN.</span></div></>}
       </div>
     </> : <div className={styles.triviaReady}><Search size={34} /><h3>Search the outpost.</h3><p>Find four concealed DZN signals. Mouse, touch and keyboard targets are supported.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
   </section>;
