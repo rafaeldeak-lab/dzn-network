@@ -890,7 +890,7 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
         </div>
         <div className={styles.outpostRunCommand}>
           <button className={styles.outpostRunScan} disabled={busy || cooldown || !active || !game.scanAvailable}
-            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : game.objective === "beacon" ? "Use beacon scanner" : "Scanner spent"}</button>
+            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : game.scanAvailable ? game.objective === "beacon" ? "Use beacon scanner" : "Use relay scanner" : "Scanner spent"}</button>
           <div className={styles.outpostRunControls} aria-label="Outpost movement controls">
             {OUTPOST_RUN_DIRECTIONS.map(direction => { const meta = OUTPOST_RUN_DIRECTION_META[direction]; const DirectionIcon = meta.icon; return <button key={direction} type="button"
               className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}

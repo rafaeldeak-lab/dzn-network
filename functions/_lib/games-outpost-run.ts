@@ -207,7 +207,7 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
     intensity: outpostRunIntensity(row.moves),
     objective: layout.beacon && !layout.beaconSecured ? "beacon" : "relay",
     beaconSecured: Boolean(layout.beaconSecured),
-    scanHint: row.scanned && !layout.beaconSecured ? layout.scanHint ?? null : null,
+    scanHint: row.scanned ? layout.scanHint ?? null : null,
     scanAvailable: status === "playing" && row.scanned === 0,
     visibleCells: visibleCells(layout, visited),
     startedAt: row.started_at,

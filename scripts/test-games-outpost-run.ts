@@ -171,7 +171,13 @@ async function run() {
     }
     assert.equal(state.game?.objective, "relay");
     assert.equal(state.game?.beaconSecured, true);
+    assert.equal(state.game?.scanAvailable, true, "Reaching the beacon without scanning must preserve the one relay scan.");
     assert.ok(state.game?.visibleCells.some(cell => cell.kind === "beacon"), "Only the entered beacon cell may become visible to the browser.");
+
+    settle(fixture);
+    state = await payload(await call(fixture, command(state, "scan")));
+    assert.match(state.game?.scanHint ?? "", /north|south|east|west|relay acquired/, "An unused scanner spent after the beacon must return a relay bearing.");
+    assert.equal(state.game?.scanAvailable, false);
 
     fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET layout_json = ? WHERE user_id = 'local-player'")
       .run(JSON.stringify({ target: layout.target, hazards: layout.hazards }));
