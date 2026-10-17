@@ -148,7 +148,9 @@ async function run() {
   assert.match(ownerQueuePage, /!checks\.botHasUnexpectedInviteChannelPermissions/, "The readiness checklist must not mark an overprivileged invite-channel overwrite ready.");
   assert.match(ownerQueuePage, /checks\.targetRoleSafe/, "The readiness checklist must not mark an unsafe configured owner role ready.");
   assert.match(ownerQueuePage, /const diagnosticUnverified = diagnostic\?\.status === "discord_error"/, "An incomplete Discord diagnostic must be distinguished from a completed negative check.");
-  assert.match(ownerQueuePage, /diagnosticUnverified \? "unchecked" : "blocked"/, "Discord transport failures must leave affected readiness items unchecked rather than reporting unperformed checks as blockers.");
+  assert.match(ownerQueuePage, /const discoveryUnverified = discovery\?\.status === "discord_error"/, "An incomplete candidate discovery must be distinguished from a completed negative check.");
+  assert.match(ownerQueuePage, /const inspectionUnverified = diagnosticUnverified \|\| discoveryUnverified/, "Any incomplete read-only inspection must keep readiness checks unverified.");
+  assert.match(ownerQueuePage, /inspectionUnverified \? "unchecked" : "blocked"/, "Discord transport failures must leave affected readiness items unchecked rather than reporting unperformed checks as blockers.");
   assert.match(ownerQueuePage, /if \(checkingDelivery \|\| discoveringDelivery\) return;/, "Only one central Discord inspection may run at a time, preventing stale inspection states from racing.");
   assert.match(ownerQueuePage, /setCheckingDelivery\(true\); setNotice\(null\);\s*setDeliveryDiagnostic\(null\);\s*setDeliveryDiscovery\(null\);/, "A newer configured-delivery check must invalidate older delivery state before reporting readiness.");
   assert.match(ownerQueuePage, /catch \(error\) \{\s*setDeliveryDiagnostic\(null\);/, "A failed configured-delivery check must clear stale readiness instead of retaining an earlier green diagnostic.");
