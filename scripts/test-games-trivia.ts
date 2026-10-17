@@ -46,6 +46,8 @@ async function answerRound(fixture: Fixture, correctCount = 5) {
 }
 
 async function run() {
+  const releaseGuide = readFileSync("docs/DZN_GAMES_TRIVIA_RELEASE.md", "utf8");
+  assert.match(releaseGuide, /Recruit and Operator require at least four correct answers\. Specialist requires five correct answers\./);
   await test("authentication, origin, method and feature switches fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start", difficulty: "recruit" }, { origin: "https://foreign.test" })).status, 403);
