@@ -1129,7 +1129,7 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
       <div className={styles.circuitForgeStage} data-status={game.status}>
         <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
         <div className={`${styles.circuitForgeConsole} ${threeUnavailable ? styles.circuitForgeConsoleFallback : ""}`}>
-          {!threeUnavailable && <CircuitForge3D key={game.version} tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+          {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
           <div className={styles.circuitForgeControlDeck}>
             <div className={styles.circuitForgeDeckHeading}><span>MANUAL RELAY DECK</span><strong>Direct conduit control</strong><small>Use the tactile grid when you need a precise clockwise relay turn.</small></div>
             <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">

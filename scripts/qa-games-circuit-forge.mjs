@@ -36,6 +36,7 @@ try {
       await relay.waitFor();
       await relay.click();
       await page.waitForTimeout(180);
+      assert.equal(await page.locator('canvas[data-dzn-circuit-forge-canvas="true"]').count(), 1);
     }
     await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: viewport.name === "desktop" ? "visible" : "attached" });
     await page.locator('canvas[data-dzn-circuit-forge-canvas="true"]').waitFor({ state: "visible" });

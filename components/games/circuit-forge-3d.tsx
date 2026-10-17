@@ -28,10 +28,18 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
   const rotateRef = useRef(onRotate);
   const disabledRef = useRef(disabled);
   const unavailableRef = useRef(onUnavailable);
+  const tilesRef = useRef(tiles);
+  const activeRef = useRef(active);
+  const updateVisualsRef = useRef<((nextTiles: CircuitForgeTile[], playing: boolean) => void) | null>(null);
 
   useEffect(() => { rotateRef.current = onRotate; }, [onRotate]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
   useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
+  useEffect(() => {
+    tilesRef.current = tiles;
+    activeRef.current = active;
+    updateVisualsRef.current?.(tiles, active);
+  }, [active, tiles]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -104,13 +112,15 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     const verticalGeometry = new THREE.BoxGeometry(0.1, 0.075, 0.54);
     const nodeGeometry = new THREE.SphereGeometry(0.13, 14, 10);
     geometries.push(tileGeometry, edgeGeometry, horizontalGeometry, verticalGeometry, nodeGeometry);
+    const tileVisuals: any[] = [];
     const hitboxes: any[] = [];
     const poweredNodes: any[] = [];
     const coreRings: any[] = [];
     const half = (gridSize - 1) / 2;
     const gap = 1.12;
-    for (let index = 0; index < tiles.length; index++) {
-      const tile = tiles[index];
+    const initialTiles = tilesRef.current;
+    for (let index = 0; index < initialTiles.length; index++) {
+      const tile = initialTiles[index];
       const row = Math.floor(index / gridSize);
       const column = index % gridSize;
       const group = new THREE.Group();
@@ -131,15 +141,19 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       group.add(new THREE.LineSegments(edgeGeometry, edgeMaterial));
       const cableMaterial = new THREE.MeshStandardMaterial({ color: isCore ? 0xffdf7a : lit ? 0x7af2df : 0x756d50, emissive: isCore ? 0xf4ad2b : lit ? 0x27c4ad : 0x17160f, emissiveIntensity: lit || isCore ? 1.3 : 0.2, metalness: 0.58, roughness: 0.2 });
       materials.push(cableMaterial);
-      const cable = (geometry: any, x: number, z: number) => {
+      const cable = (geometry: any, x: number, z: number, visible: boolean) => {
         const mesh = new THREE.Mesh(geometry, cableMaterial);
         mesh.position.set(x, 0.14, z);
+        mesh.visible = visible;
         group.add(mesh);
+        return mesh;
       };
-      if (tile.mask & NORTH) cable(verticalGeometry, 0, -0.27);
-      if (tile.mask & EAST) cable(horizontalGeometry, 0.27, 0);
-      if (tile.mask & SOUTH) cable(verticalGeometry, 0, 0.27);
-      if (tile.mask & WEST) cable(horizontalGeometry, -0.27, 0);
+      const wires = [
+        cable(verticalGeometry, 0, -0.27, Boolean(tile.mask & NORTH)),
+        cable(horizontalGeometry, 0.27, 0, Boolean(tile.mask & EAST)),
+        cable(verticalGeometry, 0, 0.27, Boolean(tile.mask & SOUTH)),
+        cable(horizontalGeometry, -0.27, 0, Boolean(tile.mask & WEST)),
+      ];
       const nodeMaterial = new THREE.MeshStandardMaterial({ color: isCore ? 0xffecae : lit ? 0xc9fff5 : 0x908869, emissive: isCore ? 0xffc34d : lit ? 0x4bf0d7 : 0x272519, emissiveIntensity: isCore ? 1.9 : lit ? 1.25 : 0.12, metalness: 0.5, roughness: 0.22 });
       materials.push(nodeMaterial);
       const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
@@ -161,11 +175,39 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       geometries.push(hitboxGeometry); materials.push(hitboxMaterial);
       const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
       hitbox.position.y = 0.24;
-      hitbox.userData = { index, rotatable: active && !isCore, group };
+      hitbox.userData = { index, rotatable: activeRef.current && !isCore, group };
       group.add(hitbox);
       hitboxes.push(hitbox);
+      tileVisuals.push({ tileMaterial, edgeMaterial, cableMaterial, nodeMaterial, hitbox, wires });
       table.add(group);
     }
+
+    const applyTileState = (nextTiles: CircuitForgeTile[], playing: boolean) => {
+      nextTiles.forEach((tile, index) => {
+        const visual = tileVisuals[index];
+        if (!visual) return;
+        const lit = tile.powered;
+        const isCore = tile.core;
+        visual.tileMaterial.color.setHex(isCore ? 0x5f4819 : lit ? 0x133a34 : 0x222016);
+        visual.tileMaterial.emissive.setHex(isCore ? 0x5f4413 : lit ? 0x0b5b4d : 0x11100b);
+        visual.tileMaterial.emissiveIntensity = isCore ? 1.15 : lit ? 0.98 : 0.24;
+        visual.edgeMaterial.color.setHex(isCore ? 0xffdc72 : lit ? 0x71eedb : 0x706743);
+        visual.edgeMaterial.opacity = lit || isCore ? 0.96 : 0.53;
+        visual.cableMaterial.color.setHex(isCore ? 0xffdf7a : lit ? 0x7af2df : 0x756d50);
+        visual.cableMaterial.emissive.setHex(isCore ? 0xf4ad2b : lit ? 0x27c4ad : 0x17160f);
+        visual.cableMaterial.emissiveIntensity = lit || isCore ? 1.3 : 0.2;
+        visual.nodeMaterial.color.setHex(isCore ? 0xffecae : lit ? 0xc9fff5 : 0x908869);
+        visual.nodeMaterial.emissive.setHex(isCore ? 0xffc34d : lit ? 0x4bf0d7 : 0x272519);
+        visual.nodeMaterial.emissiveIntensity = isCore ? 1.9 : lit ? 1.25 : 0.12;
+        visual.hitbox.userData.rotatable = playing && !isCore;
+        visual.wires[0].visible = Boolean(tile.mask & NORTH);
+        visual.wires[1].visible = Boolean(tile.mask & EAST);
+        visual.wires[2].visible = Boolean(tile.mask & SOUTH);
+        visual.wires[3].visible = Boolean(tile.mask & WEST);
+      });
+    };
+    updateVisualsRef.current = applyTileState;
+    applyTileState(initialTiles, activeRef.current);
 
     const beaconGeometry = new THREE.CylinderGeometry(0.08, 0.15, 1.1, 8);
     const beaconMaterial = new THREE.MeshStandardMaterial({ color: 0xf5ce6b, emissive: 0xe8a73d, emissiveIntensity: 1.45, metalness: 0.63, roughness: 0.2 });
@@ -215,6 +257,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       return raycaster.intersectObjects(hitboxes, false)[0]?.object as any;
     };
     const onPointerMove = (event: PointerEvent) => {
+      if (!event.isPrimary) return;
       if (pointerDown && pointerDown.id === event.pointerId && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 8) pointerDown.moved = true;
       const next = hitTile(event) ?? null;
       if (hovered !== next) {
@@ -230,19 +273,20 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       renderer.domElement.style.cursor = "default";
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 || disabledRef.current) { pointerDown = null; return; }
+      if (!event.isPrimary || event.button !== 0 || disabledRef.current || pointerDown) return;
       const hit = hitTile(event);
       pointerDown = hit?.userData.rotatable ? { id: event.pointerId, index: hit.userData.index, x: event.clientX, y: event.clientY, moved: false } : null;
       if (pointerDown && renderer.domElement.setPointerCapture) renderer.domElement.setPointerCapture(event.pointerId);
     };
     const onPointerUp = (event: PointerEvent) => {
+      if (!event.isPrimary) return;
       const started = pointerDown;
       pointerDown = null;
       if (event.button !== 0 || disabledRef.current || !started || started.id !== event.pointerId || started.moved) return;
       const hit = hitTile(event);
       if (hit?.userData.rotatable && hit.userData.index === started.index) rotateRef.current(hit.userData.index);
     };
-    const onPointerCancel = () => { pointerDown = null; };
+    const onPointerCancel = (event: PointerEvent) => { if (event.isPrimary) pointerDown = null; };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerleave", onPointerLeave);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
@@ -267,6 +311,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       mount.removeChild(renderer.domElement);
+      updateVisualsRef.current = null;
       dispose();
     };
     if (!motionRunning) {
@@ -290,7 +335,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     };
     frame = window.requestAnimationFrame(render);
     return cleanUp;
-  }, [active, gridSize, motionRunning, tiles]);
+  }, [gridSize, motionRunning]);
 
   return <div ref={mountRef} className="dzn-circuit-forge-3d" aria-hidden="true" />;
 }
