@@ -6,9 +6,10 @@ export const RANGER_RANGE_SIGHTS = ["left", "centre", "right"] as const;
 export type RangerRangeSight = (typeof RANGER_RANGE_SIGHTS)[number];
 
 export const RANGER_RANGE_WIND_META: Record<RangerRangeWind, { label: string; correction: RangerRangeSight; instruction: string }> = {
-  left: { label: "Crosswind from left", correction: "right", instruction: "Hold right" },
+  // A wind from the left pushes an arrow right, so the player holds left to compensate.
+  left: { label: "Crosswind from left", correction: "left", instruction: "Hold left" },
   calm: { label: "Still air", correction: "centre", instruction: "Hold centre" },
-  right: { label: "Crosswind from right", correction: "left", instruction: "Hold left" },
+  right: { label: "Crosswind from right", correction: "right", instruction: "Hold right" },
 };
 
 export function rangerRangeSightForWind(wind: RangerRangeWind): RangerRangeSight {

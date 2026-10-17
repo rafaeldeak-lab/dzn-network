@@ -83,6 +83,10 @@ async function completeRun(fixture: Fixture, initial?: RangerRangePayload) {
 }
 
 async function run() {
+  assert.equal(rangerRangeSightForWind("left"), "left", "A crosswind from the left must be held into the wind.");
+  assert.equal(rangerRangeSightForWind("calm"), "centre", "Still air must keep the neutral hold.");
+  assert.equal(rangerRangeSightForWind("right"), "right", "A crosswind from the right must be held into the wind.");
+
   await test("authentication, origin, method, feature switches and invalid shapes fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start" }, { origin: "https://foreign.test" })).status, 403);
