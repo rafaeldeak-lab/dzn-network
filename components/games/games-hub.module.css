@@ -238,8 +238,13 @@
 .triviaChoices button strong { color: #eff8f7; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .wordChainNotice { display: flex; align-items: center; gap: 10px; padding: 12px; margin-bottom: 14px; border: 1px solid #675b32; border-radius: 6px; color: #f1d886; background: #292516; font-size: 12px; }
 .wordChainNotice span { flex: 1; }
-.chainCurrent { display: grid; justify-items: center; gap: 7px; padding: 28px 16px; border-block: 1px solid #303738; text-align: center; }
+.wordChainPanel { position: relative; isolation: isolate; overflow: hidden; padding: 18px; border: 1px solid #364948; border-radius: 6px; background: #0d1414; }
+.wordChainPanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: linear-gradient(90deg, #071010ef 0%, #0b1514e8 44%, #07100ee0 100%), url("/images/games/word-chain-relay-v2.png"); background-position: center; background-size: cover; opacity: .82; }
+.wordChainPanel > * { position: relative; z-index: 1; }
+.chainCurrent { display: grid; justify-items: center; gap: 9px; padding: 24px 16px; border: 1px solid #49605e; border-radius: 5px; background: #071110c9; text-align: center; }
+.chainReadout { display: flex; justify-content: space-between; align-items: center; width: min(100%, 430px); gap: 12px; }
 .chainCurrent > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; text-transform: uppercase; }
+.chainReadout > span, .chainReadout small { color: #a8c9c3; font: 10px var(--font-geist-mono), monospace; letter-spacing: .1em; }
 .chainCurrent > strong { color: #eff7f6; font-size: clamp(28px, 6vw, 48px); text-transform: uppercase; }
 .chainCurrent > div { color: var(--muted); font-size: 12px; }
 .chainCurrent b { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-left: 5px; border: 1px solid #4ccabb; border-radius: 4px; color: var(--cyan); background: #17302e; }
@@ -550,6 +555,7 @@
 @media (max-width: 360px) { .hubNav { align-items: flex-start; } .hubNav .navActions { width: 100%; justify-content: space-between; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after, .hideSeekScene::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
+@media (max-width: 560px) { .wordChainPanel { padding: 13px; } .chainReadout { align-items: flex-start; flex-direction: column; gap: 4px; } }
 
 .rangerRangeTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .rangerRangeTools > div { display: grid; gap: 4px; }

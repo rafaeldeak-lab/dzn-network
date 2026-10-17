@@ -29,6 +29,8 @@ try {
     const state = await loadResponse.json();
     await page.getByRole("heading", { name: "DZN Word Chain" }).waitFor();
     await page.getByText(state.round.currentWord, { exact: true }).first().waitFor();
+    const relay = page.locator('section[class*="wordChainPanel"]');
+    assert.match(await relay.evaluate(element => getComputedStyle(element, "::before").backgroundImage), /word-chain-relay-v2/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (index === 0) {
       const dictionary = ["ability", "access", "action", "active", "adapt", "eager", "early", "earth", "knife", "label", "ocean", "radio", "scale", "table"];
