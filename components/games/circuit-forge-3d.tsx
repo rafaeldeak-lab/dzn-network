@@ -31,6 +31,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
   const tilesRef = useRef(tiles);
   const activeRef = useRef(active);
   const updateVisualsRef = useRef<((nextTiles: CircuitForgeTile[], playing: boolean) => void) | null>(null);
+  const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => { rotateRef.current = onRotate; }, [onRotate]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
@@ -39,6 +40,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     tilesRef.current = tiles;
     activeRef.current = active;
     updateVisualsRef.current?.(tiles, active);
+    renderRef.current?.();
   }, [active, tiles]);
 
   useEffect(() => {
@@ -207,6 +209,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       });
     };
     updateVisualsRef.current = applyTileState;
+    renderRef.current = () => renderer.render(scene, camera);
     applyTileState(initialTiles, activeRef.current);
 
     const beaconGeometry = new THREE.CylinderGeometry(0.08, 0.15, 1.1, 8);
@@ -312,6 +315,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       mount.removeChild(renderer.domElement);
       updateVisualsRef.current = null;
+      renderRef.current = null;
       dispose();
     };
     if (!motionRunning) {

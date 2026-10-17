@@ -21,7 +21,7 @@ try {
   const origin = `http://127.0.0.1:${port}`;
   browser = await chromium.launch({ headless: true });
   for (const viewport of [{ name: "desktop", width: 1440, height: 980 }, { name: "phone", width: 390, height: 844 }]) {
-    const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+    const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, reducedMotion: viewport.name === "phone" ? "reduce" : "no-preference" });
     const page = await context.newPage();
     const errors = [];
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
@@ -31,15 +31,17 @@ try {
     if (viewport.name === "desktop") {
       await page.getByRole("button", { name: "Start rebuild" }).click();
       await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: "visible" });
-      await page.waitForTimeout(160);
-      const relay = page.locator('[data-rotatable="true"]').first();
-      await relay.waitFor();
-      await relay.click();
-      await page.waitForTimeout(180);
-      assert.equal(await page.locator('canvas[data-dzn-circuit-forge-canvas="true"]').count(), 1);
     }
     await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: viewport.name === "desktop" ? "visible" : "attached" });
-    await page.locator('canvas[data-dzn-circuit-forge-canvas="true"]').waitFor({ state: "visible" });
+    const canvas = page.locator('canvas[data-dzn-circuit-forge-canvas="true"]');
+    await canvas.waitFor({ state: "visible" });
+    const before = await canvas.screenshot();
+    const relay = page.locator('[data-rotatable="true"]').first();
+    await relay.waitFor();
+    await relay.click();
+    await page.waitForTimeout(180);
+    assert.equal(await canvas.count(), 1);
+    assert.notDeepEqual(await canvas.screenshot(), before);
     assert.equal(await page.locator('[role="gridcell"]').count(), 25);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
