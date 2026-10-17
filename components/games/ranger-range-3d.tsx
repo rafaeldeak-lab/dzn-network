@@ -44,8 +44,7 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
     } catch {
-      // The DOM controls below the scene remain the accessible fallback when WebGL is unavailable.
-      mount.style.display = "none";
+      // Keep the cinematic CSS backdrop and the DOM target deck available when WebGL cannot initialise.
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));

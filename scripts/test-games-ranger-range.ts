@@ -215,7 +215,7 @@ async function run() {
   const rangerPanel = readFileSync("components/games/games-hub.tsx", "utf8");
   assert.match(rangerScene, /dznRangerRangeCanvas/, "The tactical range scene must expose its own render target for visual QA.");
   assert.match(rangerScene, /if \(target && liveTargetRef\.current\) fireRef\.current\(target\)/, "The 3D scene must forward every plate selection during a live window to the existing authoritative fire action so the server scores wrong shots.");
-  assert.match(rangerScene, /mount\.style\.display = "none"/, "The 3D scene must leave the accessible target deck usable when WebGL cannot be initialized.");
+  assert.match(rangerScene, /Keep the cinematic CSS backdrop and the DOM target deck available when WebGL cannot initialise/, "The 3D scene must retain the visual and accessible fallbacks when WebGL cannot be initialized.");
   assert.match(rangerPanel, /<RangerRange3D safeTarget=\{targetOpen \? game\.target : null\}/, "The tactical 3D range must render from the same server-issued live target as the accessible controls.");
 
   console.log(`Ranger Range tests passed: ${passed}`);
