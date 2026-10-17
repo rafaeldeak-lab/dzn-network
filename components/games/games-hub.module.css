@@ -611,6 +611,14 @@
 .rangerRangeReadout { display: grid; gap: 5px; text-align: center; }
 .rangerRangeReadout > span { color: #9ac9ae; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .1em; }
 .rangerRangeReadout > strong { color: #eefbf2; font-size: clamp(18px, 3vw, 26px); }
+.hub :global(.dzn-ranger-range-3d) { width: min(100%, 820px); min-height: 318px; aspect-ratio: 2.25 / 1; overflow: hidden; margin: 0 auto; border: 1px solid #5e7d66; border-radius: 5px; background: #04100a; box-shadow: inset 0 0 0 1px #b8e9b51a, 0 18px 34px #00000078; }
+.hub :global(.dzn-ranger-range-3d canvas) { display: block; width: 100%; height: 100%; touch-action: manipulation; }
+.hub :global(.dzn-ranger-range-3d[data-live=true]) { border-color: #e6c66a; box-shadow: inset 0 0 0 1px #fff0a66b, 0 0 24px #d8a94035, 0 18px 34px #00000078; }
+.rangerRangeDeck { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: min(100%, 820px); margin: 0 auto; }
+.rangerRangeDeck .rangerRangeTarget { min-height: 76px; padding: 8px 7px; }
+.rangerRangeDeck .rangerRangeBullseye { width: 27px; height: 27px; border-width: 3px; }
+.rangerRangeDeck .rangerRangeBullseye::before { width: 13px; height: 13px; border-width: 2px; }
+.rangerRangeDeck .rangerRangeBullseye i { width: 5px; height: 5px; }
 .rangerRangeField { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(108px, 1fr)); gap: 12px; width: min(100%, 720px); min-height: 238px; margin: 0 auto; padding: 14px 20px 14px 108px; border: 1px solid #527764; border-radius: 5px; background: linear-gradient(105deg, #0c1a10e8 0%, #07100bdc 45%, #0b1710e8 100%); box-shadow: inset 0 0 46px #071009, 0 16px 26px #00000040; }
 .rangerRangeField::before { content: ""; position: absolute; top: 18px; bottom: 18px; left: 92px; width: 1px; background: #9fe6b080; box-shadow: 26px 0 #2d5842, 52px 0 #1f4232; }
 .rangerRangeBow { position: absolute; top: 50%; left: 19px; z-index: 2; width: 76px; height: 202px; transform: translateY(-50%); filter: drop-shadow(0 8px 14px #020806cc); }
@@ -645,7 +653,7 @@
 .hub[data-motion=paused] .rangerRangeTarget[data-live=true], .hub[data-motion=paused] .rangerRangeBow[data-live=true] .rangerRangeArrow { animation-play-state: paused; }
 @keyframes ranger-range-plate { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
 @keyframes ranger-range-draw { from { transform: translateY(-50%) translateX(-5px) scaleX(.94); } to { transform: translateY(-50%) translateX(0) scaleX(1); } }
-@media (max-width: 560px) { .rangerRangeTools { align-items: stretch; flex-direction: column; } .rangerRangeMeta { gap: 10px; } .rangerRangeStage { min-height: 0; padding: 16px 10px; } .rangerRangeField { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(104px, 1fr)); min-height: 340px; padding: 10px; } .rangerRangeField::before { display: none; } .rangerRangeBow { display: none; } .rangerRangeTarget { min-height: 104px; } }
+@media (max-width: 560px) { .rangerRangeTools { align-items: stretch; flex-direction: column; } .rangerRangeMeta { gap: 10px; } .rangerRangeStage { min-height: 0; padding: 16px 10px; } .hub :global(.dzn-ranger-range-3d) { min-height: 292px; aspect-ratio: 4 / 3; } .rangerRangeDeck { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangerRangeTarget { min-height: 82px; } }
 @media (prefers-reduced-motion: reduce) { .rangerRangeTarget[data-live=true], .rangerRangeBow[data-live=true] .rangerRangeArrow { animation: none; } }
 
 .nightRunTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }

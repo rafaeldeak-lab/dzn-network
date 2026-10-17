@@ -211,6 +211,12 @@ async function run() {
     assert.ok(data.summary.history.some(entry => entry.kind === "ranger-range"));
   });
 
+  const rangerScene = readFileSync("components/games/ranger-range-3d.tsx", "utf8");
+  const rangerPanel = readFileSync("components/games/games-hub.tsx", "utf8");
+  assert.match(rangerScene, /dznRangerRangeCanvas/, "The tactical range scene must expose its own render target for visual QA.");
+  assert.match(rangerScene, /target === liveTargetRef\.current/, "The 3D scene must only send the server-issued live target back to the existing authoritative fire action.");
+  assert.match(rangerPanel, /<RangerRange3D safeTarget=\{targetOpen \? game\.target : null\}/, "The tactical 3D range must render from the same server-issued live target as the accessible controls.");
+
   console.log(`Ranger Range tests passed: ${passed}`);
 }
 
