@@ -2,6 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
+  CIPHER_GRID_LEGACY_MAX_ATTEMPTS,
   CIPHER_GRID_MAX_ATTEMPTS,
   CIPHER_GRID_REWARD,
   CIPHER_GRID_TTL_MS,
@@ -23,10 +24,14 @@ const isMark = (value: unknown): value is CipherGridMark => value === "correct" 
 // This server-only field lexicon is intentionally not returned by the API.
 // Guesses can be any five letters so players are not forced to know a hidden word list.
 const FIELD_WORDS = [
-  "CACHE", "CARGO", "COMMS", "CRATE", "FIELD", "FLARE", "FROST", "GEARS", "GUARD", "NORTH",
-  "RADIO", "RAIDS", "RELAY", "RIVER", "ROUTE", "SCOUT", "SHORE", "SCOPE", "SPARK", "TOWER",
-  "TRAIL", "TRACK", "VAULT", "WATER", "WATCH", "CABLE", "COVER", "DUSKS", "FENCE", "FIRES",
-  "FOCUS", "GATES", "LIGHT", "MARCH", "PINES", "RIDGE", "SHELL", "STASH", "STORM", "TOOLS",
+  "AMBER", "BLAZE", "BRINK", "CACHE", "CARGO", "CHOKE", "CIVIC", "CLOAK", "COMMS", "COVER",
+  "CRATE", "CREST", "DROWN", "DUSKS", "EMBER", "FAULT", "FENCE", "FIELD", "FIRES", "FLARE",
+  "FOCUS", "FROST", "GATES", "GEARS", "GHOST", "GLINT", "GUARD", "HAVEN", "HUSKS", "INLET",
+  "KNOTS", "LATCH", "LIGHT", "LURCH", "MARCH", "MASON", "MISTY", "NEXUS", "NORTH", "OASIS",
+  "PINES", "PRISM", "RADIO", "RAIDS", "RELAY", "RIFLE", "RIFTS", "RIDGE", "RIVER", "ROUTE",
+  "RUSTS", "SABLE", "SCALE", "SCOUT", "SCOPE", "SHARD", "SHELL", "SHORE", "SIEGE", "SLATE",
+  "SPARK", "SPORE", "STASH", "STORM", "SWAMP", "SWIFT", "THORN", "TOOLS", "TORCH", "TOWER",
+  "TRAIL", "TRACK", "TURBO", "VALVE", "VAULT", "VIGIL", "WATER", "WATCH", "WELDS", "WILDS", "WRECK",
 ] as const;
 
 type CipherGridRow = {
@@ -53,7 +58,7 @@ function chooseAnswer() {
 
 function parseAttempts(value: string): CipherGridAttempt[] {
   const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed) || parsed.length > CIPHER_GRID_MAX_ATTEMPTS) throw new Error("Invalid stored Cipher Grid attempts");
+  if (!Array.isArray(parsed) || parsed.length > CIPHER_GRID_LEGACY_MAX_ATTEMPTS) throw new Error("Invalid stored Cipher Grid attempts");
   return parsed.map(entry => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Invalid stored Cipher Grid attempt");
     const attempt = entry as { guess?: unknown; marks?: unknown };
@@ -65,6 +70,7 @@ function parseAttempts(value: string): CipherGridAttempt[] {
 }
 
 export function markCipherGridGuess(answer: string, guess: string): CipherGridMark[] {
+  if (!isGuess(answer) || !isGuess(guess)) throw new Error("Invalid Cipher Grid guess");
   const marks = Array<CipherGridMark>(CIPHER_GRID_WORD_LENGTH).fill("absent");
   const remaining = new Map<string, number>();
   for (let index = 0; index < CIPHER_GRID_WORD_LENGTH; index++) {
@@ -85,14 +91,15 @@ export function markCipherGridGuess(answer: string, guess: string): CipherGridMa
 function gameView(row: CipherGridRow, now: number): CipherGridGame {
   if (!isGuess(row.answer)) throw new Error("Invalid stored Cipher Grid answer");
   const attempts = parseAttempts(row.attempts_json);
-  const status = row.status === "playing" && now >= row.started_at + CIPHER_GRID_TTL_MS ? "expired" : row.status;
+  const legacyAttemptLimit = row.status === "playing" && attempts.length >= CIPHER_GRID_MAX_ATTEMPTS;
+  const status = legacyAttemptLimit ? "failed" : row.status === "playing" && now >= row.started_at + CIPHER_GRID_TTL_MS ? "expired" : row.status;
   return {
     id: row.id,
     version: row.version,
     status,
     attempts,
     answerLength: CIPHER_GRID_WORD_LENGTH,
-    maxAttempts: CIPHER_GRID_MAX_ATTEMPTS,
+    maxAttempts: attempts.length > CIPHER_GRID_MAX_ATTEMPTS ? CIPHER_GRID_LEGACY_MAX_ATTEMPTS : CIPHER_GRID_MAX_ATTEMPTS,
     startedAt: row.started_at,
     expiresAt: row.started_at + CIPHER_GRID_TTL_MS,
   };
