@@ -44,6 +44,25 @@ try {
       ]);
       assert.equal(startResponse.status(), 200, await startResponse.text());
     }
+    const rangeCanvas = page.locator('canvas[data-dzn-ranger-range-canvas="true"]');
+    await rangeCanvas.waitFor({ state: "visible" });
+    const rangeVisual = await rangeCanvas.evaluate(element => {
+      const canvas = element;
+      const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+      if (!gl) return { width: canvas.width, height: canvas.height, litPixels: 0, distinct: 0 };
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      let litPixels = 0;
+      const colours = new Set();
+      for (let pixel = 0; pixel < pixels.length; pixel += 16) {
+        const red = pixels[pixel], green = pixels[pixel + 1], blue = pixels[pixel + 2];
+        if (red + green + blue > 28) litPixels++;
+        colours.add(`${red >> 4}:${green >> 4}:${blue >> 4}`);
+      }
+      return { width: canvas.width, height: canvas.height, litPixels, distinct: colours.size };
+    });
+    assert.ok(rangeVisual.width > 250 && rangeVisual.height > 180, `${viewport.name} range canvas is undersized: ${JSON.stringify(rangeVisual)}`);
+    assert.ok(rangeVisual.litPixels > 500 && rangeVisual.distinct > 20, `${viewport.name} range canvas appears blank: ${JSON.stringify(rangeVisual)}`);
     await page.getByRole("group", { name: "Ranger Range targets" }).waitFor();
     const targets = page.getByRole("group", { name: "Ranger Range targets" }).getByRole("button");
     assert.equal(await targets.count(), 6);

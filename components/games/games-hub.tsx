@@ -27,6 +27,7 @@ type BoardView = "field" | "grid";
 type PlayGame = HubGameId;
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.NightRun3D), { ssr: false });
+const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => module.RangerRange3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -294,7 +295,7 @@ export function GamesHub() {
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
@@ -1126,7 +1127,7 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
   </section>;
 }
 
-function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<RangerRangePayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -1229,13 +1230,8 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
       <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen} data-intensity={game.intensity}>
         <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? `${game.intensity} / TARGET LIVE` : `${game.intensity} / BOW NOCKED` : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
-        <div className={styles.rangerRangeField} role="group" aria-label="Ranger Range targets">
-          <div className={styles.rangerRangeBow} data-live={targetOpen} aria-hidden="true">
-            <span className={styles.rangerRangeBowString} />
-            <span className={styles.rangerRangeArrow}><i /><b /></span>
-            <span className={styles.rangerRangeGrip} />
-            <span className={styles.rangerRangeBowLabel}>RANGE / 02</span>
-          </div>
+        <RangerRange3D safeTarget={targetOpen ? game.target : null} active={targetOpen} disabled={busy || cooldown || !active} motionRunning={motionRunning} onFire={fire} />
+        <div className={styles.rangerRangeDeck} role="group" aria-label="Ranger Range targets">
           {RANGER_RANGE_TARGETS.map(target => {
             const meta = RANGER_RANGE_TARGET_META[target];
             const live = targetOpen && game.target === target;
