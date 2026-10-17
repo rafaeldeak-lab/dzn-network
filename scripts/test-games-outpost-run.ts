@@ -125,7 +125,7 @@ async function run() {
 
   await test("each fresh run generates a bounded private route with a safe extraction path", async fixture => {
     const gameIds = new Set<string>();
-    for (let index = 0; index < 12; index++) {
+    for (let index = 0; index < 36; index++) {
       const state = await start(fixture);
       assert.ok(state.game);
       const layout = layoutFor(fixture);
@@ -142,7 +142,7 @@ async function run() {
       gameIds.add(state.game.id);
       fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
     }
-    assert.equal(gameIds.size, 12);
+    assert.equal(gameIds.size, 36);
   });
 
   await test("strict request validation rejects forged shapes, rewards, early movement and repeat scans", async fixture => {

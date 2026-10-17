@@ -65,9 +65,32 @@
 .balances small { font-size: 9px; font-weight: 650; color: var(--muted); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 38px; align-items: start; }
 .mainColumn, .sidebar { min-width: 0; }
-.gamePicker { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; margin-bottom: 22px; }
-.gamePicker button { position: relative; isolation: isolate; min-width: 0; min-height: 84px; display: flex; align-items: center; gap: 12px; overflow: hidden; padding: 12px 14px; color: #b9c4c6; background: #0b1113; border: 1px solid #364144; border-radius: 6px; text-align: left; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
-.gamePicker button::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .86; background: linear-gradient(90deg, #071011f5 0%, #071011dc 48%, #07101126 100%), url("/images/games/cards/hide-seek-card-v1.webp") center / cover no-repeat; }
+.operationsCommand { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(260px, .82fr); gap: 22px; min-height: 262px; overflow: hidden; margin-bottom: 16px; padding: 23px; border: 1px solid #435256; border-radius: 6px; background: #071011; box-shadow: inset 0 0 0 1px #d0fff008, 0 18px 40px #0007; }
+.operationsCommandArt { z-index: -3; object-fit: cover; object-position: center; }
+.operationsCommandScrim { position: absolute; inset: 0; z-index: -2; pointer-events: none; background: linear-gradient(90deg, #050c0ff4 0%, #071114e6 42%, #061014ad 67%, #07101288 100%); }
+.operationsCommandCopy { display: grid; align-content: start; gap: 9px; min-width: 0; }
+.operationsCommandCopy .eyebrow { color: #9fe6df; }
+.operationsCommandCopy h2 { max-width: 470px; color: #f1f8f8; font-size: clamp(23px, 3vw, 32px); }
+.operationsCommandCopy p { max-width: 515px; color: #c0cdcb; font-size: 12px; line-height: 1.58; }
+.operationFocus { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 4px 10px; margin-top: 7px; padding-top: 12px; border-top: 1px solid #71dac444; }
+.operationFocus > span, .operationFocus small { font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .11em; text-transform: uppercase; }
+.operationFocus > span { grid-row: 1 / 3; color: #8af6e7; }
+.operationFocus strong { color: #f1f8f8; font-size: 14px; }
+.operationFocus small { color: #d9be79; }
+.operationsRecord { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; align-self: stretch; margin: 0; border: 1px solid #5bd3ca47; background: #59d9ce26; }
+.operationsRecord > div { display: grid; align-content: center; min-width: 0; min-height: 92px; padding: 13px; background: #071215dc; }
+.operationsRecord dt { color: #90aaa7; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .1em; text-transform: uppercase; }
+.operationsRecord dd { display: grid; gap: 3px; margin: 7px 0 0; color: #e5f1ee; font-size: 22px; font-weight: 850; line-height: 1; }
+.operationsRecord dd span { overflow-wrap: anywhere; color: #a8c0bd; font: 10px/1.35 var(--font-geist), Arial, sans-serif; font-weight: 600; }
+.clearanceTrack { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; align-items: center; gap: 10px; color: #c0d2cf; font-size: 10px; }
+.clearanceTrack progress { appearance: none; width: 100%; height: 5px; border: 0; background: #173032; }
+.clearanceTrack progress::-webkit-progress-bar { background: #173032; }
+.clearanceTrack progress::-webkit-progress-value { background: #5be5d2; }
+.clearanceTrack progress::-moz-progress-bar { background: #5be5d2; }
+.clearanceTrack strong { color: #d7b36a; font: 800 9px var(--font-geist-mono), monospace; text-align: right; }
+.gamePicker { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-bottom: 26px; }
+.gamePicker button { position: relative; isolation: isolate; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(48px, auto) auto; align-items: start; gap: 8px 11px; min-width: 0; min-height: 118px; overflow: hidden; padding: 13px; color: #b9c4c6; background: #0b1113; border: 1px solid #364144; border-radius: 5px; text-align: left; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.gamePicker button::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .82; background: linear-gradient(90deg, #071011fa 0%, #071011ed 53%, #07101148 100%), url("/images/games/cards/hide-seek-card-v1.webp") center / cover no-repeat; }
 .gamePicker button::after { content: ""; position: absolute; inset: auto 0 0; z-index: -1; height: 2px; background: linear-gradient(90deg, #44dcca, transparent 68%); opacity: .58; }
 .gamePicker button:hover, .gamePicker button:focus-visible { border-color: #86fff0; background: #182527; box-shadow: 0 10px 24px #0008, inset 0 0 0 1px #81fff022; transform: translateY(-1px); outline: none; }
 .gamePicker button:hover::before, .gamePicker button:focus-visible::before { opacity: 1; }
@@ -86,9 +109,13 @@
 .gamePicker button[data-game="ranger-range"]::before { background-image: linear-gradient(90deg, #0a1109f4 0%, #0a1109d8 48%, #0a110922 100%), url("/images/games/cards/ranger-range-card-v1.webp"); }
 .gamePicker button[data-game="night-run"]::before { background-image: linear-gradient(90deg, #0d0920f4 0%, #0d0920d8 48%, #0d092022 100%), url("/images/games/cards/night-run-card-v1.webp"); }
 .gamePicker button[data-game="relay-rush"], .gamePicker button[data-game="echo-array"], .gamePicker button[data-game="circuit-forge"] { border-color: #4c6177; }
-.gamePicker button > span { display: grid; gap: 3px; }
-.gamePicker strong { color: #f0f3f3; font-size: 13px; }
-.gamePicker small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.operationCode { display: inline-grid; place-items: center; min-width: 41px; min-height: 24px; padding: 0 5px; color: #bafff1; border: 1px solid #6be7d566; background: #0a2425dd; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .08em; }
+.operationDescription { display: grid; min-width: 0; gap: 3px; }
+.operationDescription small { color: #aad0ca; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .07em; text-transform: uppercase; overflow-wrap: anywhere; }
+.operationDescription strong { color: #f0f3f3; font-size: 15px; overflow-wrap: anywhere; }
+.operationDescription > span { color: #c2cece; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.operationPressure { grid-column: 1 / -1; width: fit-content; padding-top: 8px; border-top: 1px solid #9ff1e433; color: #d6b66f; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .07em; text-transform: uppercase; }
+.gamePicker button[aria-pressed=true] .operationPressure { color: #99fff0; }
 .sidebar { border-left: 1px solid #303738; padding-left: 28px; }
 .sectionTitle { margin-bottom: 24px; }
 .sectionTitle .eyebrow { display: block; margin-bottom: 7px; }
@@ -772,3 +799,20 @@
 @keyframes night-run-safe-lane { from { transform: translateY(0); } to { transform: translateY(-2px); } }
 @media (max-width: 560px) { .nightRunTools { align-items: stretch; flex-direction: column; } .nightRunMeta { gap: 10px; } .nightRunStage { min-height: 0; padding: 16px 10px; } .hub :global(.dzn-night-run-3d) { min-height: 260px; aspect-ratio: 4 / 3; } .nightRunRecon { align-items: stretch; flex-direction: column; } .nightRunRecon button { width: 100%; justify-content: center; } .nightRunLanes { gap: 7px; } .nightRunLanes button { min-height: 92px; padding-inline: 7px 24px; } }
 @media (prefers-reduced-motion: reduce) { .nightRunLanes button[data-live=true] { animation: none; } }
+
+@media (max-width: 900px) {
+  .operationsCommand { grid-template-columns: 1fr; }
+  .operationsRecord { max-width: 620px; }
+}
+
+@media (max-width: 560px) {
+  .operationsCommand { min-height: 0; gap: 16px; padding: 17px; }
+  .operationsCommandScrim { background: linear-gradient(180deg, #050c0ff2 0%, #071114dc 57%, #071012ae 100%); }
+  .operationsCommandCopy h2 { font-size: 25px; }
+  .operationsRecord > div { min-height: 79px; padding: 11px; }
+  .operationsRecord dd { font-size: 19px; }
+  .clearanceTrack { grid-template-columns: 1fr; gap: 6px; }
+  .clearanceTrack strong { text-align: left; }
+  .gamePicker { grid-auto-columns: minmax(250px, 78vw); grid-auto-flow: column; grid-template-columns: none; grid-template-rows: repeat(2, minmax(103px, 1fr)); gap: 7px; overflow-x: auto; padding: 1px 2px 10px; scroll-snap-type: inline mandatory; scrollbar-color: #5bd5c8 #101719; overscroll-behavior-inline: contain; }
+  .gamePicker button { min-height: 103px; scroll-snap-align: start; }
+}

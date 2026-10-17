@@ -37,6 +37,10 @@ try {
     page.on("request", request => { if (request.method() !== "GET" && request.method() !== "HEAD") writes.push({ url: request.url(), method: request.method(), body: request.postDataJSON?.() }); });
 
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+    if (scenario.width === 390) {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({ path: path.join(output, `operations-${scenario.width}-${scenario.reducedMotion}.png`) });
+    }
     const canvas = page.locator('canvas[data-dzn-minefield-canvas="true"]');
     const briefingImage = page.getByAltText("Night reconnaissance terrain with a DZN minefield scanner and survey markers");
     let briefing = null;
@@ -81,6 +85,12 @@ try {
       field: document.querySelector(".dzn-minefield-3d")?.getBoundingClientRect().toJSON(),
       main: document.querySelector("main")?.getBoundingClientRect().toJSON(),
       motion: document.querySelector("main")?.getAttribute("data-motion"),
+      operations: (() => {
+        const picker = document.querySelector('[aria-label="Choose an operation"]');
+        if (!(picker instanceof HTMLElement)) return null;
+        const style = getComputedStyle(picker);
+        return { autoFlow: style.gridAutoFlow, rows: style.gridTemplateRows, scrollWidth: picker.scrollWidth, clientWidth: picker.clientWidth };
+      })(),
     }));
 
     assert.equal(layout.overflow, false, `Games Hub overflow at ${scenario.width}px`);
@@ -88,6 +98,13 @@ try {
     assert.ok(canvasState.litPixels > 3000, `Canvas must contain rendered pixels: ${JSON.stringify(canvasState)}`);
     assert.ok(canvasState.distinct > 18, `Canvas must contain a real colour range: ${JSON.stringify(canvasState)}`);
     assert.ok(layout.field.width <= layout.main.width + 1, "3D field must stay inside the page");
+    if (scenario.width === 390) {
+      assert.equal(layout.operations?.autoFlow, "column", "Phone operation picker must use a compact two-row rail.");
+      assert.notEqual(layout.operations?.rows, "none", "Phone operation picker must reserve two grid rows.");
+      assert.ok((layout.operations?.scrollWidth ?? 0) > (layout.operations?.clientWidth ?? 0), "Phone operation picker must keep the catalogue horizontally browseable.");
+      await page.locator('[aria-label="Choose an operation"]').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(output, `operations-rail-${scenario.width}-${scenario.reducedMotion}.png`) });
+    }
     if (scenario.reducedMotion === "reduce") {
       assert.equal(layout.motion, "paused");
       assert.ok(after - before <= 1, `Reduced-motion scene should stay static: ${before} -> ${after}`);
