@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
   LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, ScanSearch, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
@@ -29,6 +29,7 @@ const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module
 const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.NightRun3D), { ssr: false });
 const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => module.RangerRange3D), { ssr: false });
 const OutpostRun3D = dynamic(() => import("./outpost-run-3d").then(module => module.OutpostRun3D), { ssr: false });
+const SignalShift3D = dynamic(() => import("./signal-shift-3d").then(module => module.SignalShift3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -294,7 +295,7 @@ export function GamesHub() {
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -955,7 +956,7 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
   </section>;
 }
 
-function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function SignalShiftPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<SignalShiftPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -1004,6 +1005,17 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
     const blankRow = Math.floor(blank / game.gridSize); const blankColumn = blank % game.gridSize;
     return Math.abs(row - blankRow) + Math.abs(column - blankColumn) === 1;
   };
+  const movableTiles = useMemo(() => {
+    if (!game || !active || blank < 0) return [];
+    const blankRow = Math.floor(blank / game.gridSize);
+    const blankColumn = blank % game.gridSize;
+    return game.tiles.filter((tile, index) => {
+      if (tile === 0) return false;
+      const row = Math.floor(index / game.gridSize);
+      const column = index % game.gridSize;
+      return Math.abs(row - blankRow) + Math.abs(column - blankColumn) === 1;
+    });
+  }, [active, blank, game]);
   const move = useCallback((tile: number) => {
     if (!game || !active || busy || cooldown) return;
     void mutate({ action: "move", gameId: game.id, version: game.version, tile });
@@ -1022,16 +1034,22 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
       <div className={styles.signalShiftMeta}><span><Target size={14} />{game.moves} / {game.maxMoves} shifts</span><span><Microchip size={14} />{game.gridSize} x {game.gridSize} relay grid</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.signalShiftStage} data-status={game.status} data-intensity={game.intensity}>
         <div className={styles.signalShiftReadout} aria-live="polite"><span>{active ? `RELAY MATRIX / ${game.intensity.toUpperCase()}` : game.status === "won" ? "RELAY MATRIX / STABLE" : "RELAY MATRIX / CLOSED"}</span><strong>{active ? game.intensity === "blackout" ? "Complete the final relay reroute" : game.intensity === "pressure" ? "Routing pressure is increasing" : "Route each sector into sequence" : game.status === "won" ? "Signal line restored" : game.status === "failed" ? "Shift limit reached" : "Signal window expired"}</strong></div>
-        <div className={styles.signalShiftGrid} role="grid" aria-label="Signal Shift tactical grid">
-          {game.tiles.map((tile, index) => {
-            const movable = active && tile !== 0 && isAdjacent(index);
-            const row = Math.floor(index / game.gridSize) + 1;
-            const column = index % game.gridSize + 1;
-            return <button type="button" key={`${tile}:${index}`} role="gridcell" className={styles.signalShiftTile}
-              data-blank={tile === 0} data-adjacent={movable} disabled={!movable || busy || cooldown}
-              aria-label={tile === 0 ? `Open relay slot, row ${row}, column ${column}` : `Sector ${tile}, row ${row}, column ${column}${movable ? ", available to shift" : ""}`}
-              onClick={() => move(tile)}>{tile === 0 ? <span>CORE</span> : <><small>SECTOR</small><strong>{String(tile).padStart(2, "0")}</strong></>}</button>;
-          })}
+        <div className={styles.signalShiftConsole}>
+          <SignalShift3D key={game.version} tiles={game.tiles} gridSize={game.gridSize} intensity={game.intensity} active={active} disabled={busy || cooldown} motionRunning={motionRunning} movableTiles={movableTiles} onMove={move} />
+          <div className={styles.signalShiftControlDeck}>
+            <div className={styles.signalShiftDeckHeading}><span>TACTICAL OVERRIDE</span><strong>Direct relay control</strong><small>Choose a lit sector to move it into the open core slot.</small></div>
+            <div className={styles.signalShiftGrid} role="grid" aria-label="Signal Shift tactical grid">
+              {game.tiles.map((tile, index) => {
+                const movable = active && tile !== 0 && isAdjacent(index);
+                const row = Math.floor(index / game.gridSize) + 1;
+                const column = index % game.gridSize + 1;
+                return <button type="button" key={`${tile}:${index}`} role="gridcell" className={styles.signalShiftTile}
+                  data-blank={tile === 0} data-adjacent={movable} disabled={!movable || busy || cooldown}
+                  aria-label={tile === 0 ? `Open relay slot, row ${row}, column ${column}` : `Sector ${tile}, row ${row}, column ${column}${movable ? ", available to shift" : ""}`}
+                  onClick={() => move(tile)}>{tile === 0 ? <span>CORE</span> : <><small>SECTOR</small><strong>{String(tile).padStart(2, "0")}</strong></>}</button>;
+              })}
+            </div>
+          </div>
         </div>
         <p className={styles.signalShiftHint}>Only sectors beside the open relay slot can move. Put sectors 01 through 15 in order, with the core slot at the end.</p>
       </div>
