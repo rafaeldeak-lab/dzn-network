@@ -967,9 +967,9 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Route in progress" : game ? "New route" : "Start routing"}</button>
     </div>
     {game ? <>
-      <div className={styles.signalShiftMeta}><span><Target size={14} />{game.moves} / {game.maxMoves} shifts</span><span><Microchip size={14} />{game.gridSize} x {game.gridSize} relay grid</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.signalShiftStage} data-status={game.status}>
-        <div className={styles.signalShiftReadout} aria-live="polite"><span>{active ? "RELAY MATRIX / LIVE" : game.status === "won" ? "RELAY MATRIX / STABLE" : "RELAY MATRIX / CLOSED"}</span><strong>{active ? "Route each sector into sequence" : game.status === "won" ? "Signal line restored" : game.status === "failed" ? "Shift limit reached" : "Signal window expired"}</strong></div>
+      <div className={styles.signalShiftMeta}><span><Target size={14} />{game.moves} / {game.maxMoves} shifts</span><span><Microchip size={14} />{game.gridSize} x {game.gridSize} relay grid</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.signalShiftStage} data-status={game.status} data-intensity={game.intensity}>
+        <div className={styles.signalShiftReadout} aria-live="polite"><span>{active ? `RELAY MATRIX / ${game.intensity.toUpperCase()}` : game.status === "won" ? "RELAY MATRIX / STABLE" : "RELAY MATRIX / CLOSED"}</span><strong>{active ? game.intensity === "blackout" ? "Complete the final relay reroute" : game.intensity === "pressure" ? "Routing pressure is increasing" : "Route each sector into sequence" : game.status === "won" ? "Signal line restored" : game.status === "failed" ? "Shift limit reached" : "Signal window expired"}</strong></div>
         <div className={styles.signalShiftGrid} role="grid" aria-label="Signal Shift tactical grid">
           {game.tiles.map((tile, index) => {
             const movable = active && tile !== 0 && isAdjacent(index);
@@ -989,7 +989,7 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
             : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start another route when you are ready.</span></div></>
               : <><Radio size={20} /><div><strong>Routing active</strong><span>Choose one highlighted neighbouring sector at a time. The server validates every shift.</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.signalShiftReady}><Target size={34} /><h3>Bring the relay matrix online.</h3><p>Shift sectors through a live four-by-four grid until every route is back in sequence. Only verified server wins award progression.</p><div className={styles.rewardPills}><span>72 shifts</span><span>+{SIGNAL_SHIFT_REWARD.xp} XP</span><span>+{SIGNAL_SHIFT_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.signalShiftReady}><Target size={34} /><h3>Bring the relay matrix online.</h3><p>Shift sectors through a deep live four-by-four grid until every route is back in sequence. Only verified server wins award progression.</p><div className={styles.rewardPills}><span>64 shifts</span><span>+{SIGNAL_SHIFT_REWARD.xp} XP</span><span>+{SIGNAL_SHIFT_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

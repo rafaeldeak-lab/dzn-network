@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesSignalShift } from "../functions/_lib/games-signal-shift";
 import type { Env } from "../functions/_lib/types";
-import { SIGNAL_SHIFT_REWARD, SIGNAL_SHIFT_TTL_MS, type SignalShiftPayload } from "../lib/games-signal-shift";
+import { SIGNAL_SHIFT_LEGACY_MAX_MOVES, SIGNAL_SHIFT_MAX_MOVES, SIGNAL_SHIFT_REWARD, SIGNAL_SHIFT_TTL_MS, signalShiftIntensity, type SignalShiftPayload } from "../lib/games-signal-shift";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof signalShiftFixture>>;
@@ -105,6 +105,8 @@ async function run() {
       const state = await start(fixture);
       assert.ok(state.game);
       assert.equal(state.game.tiles.length, 16);
+      assert.equal(state.game.maxMoves, SIGNAL_SHIFT_MAX_MOVES);
+      assert.equal(state.game.intensity, "calibration");
       assert.equal(new Set(state.game.tiles).size, 16);
       assert.notDeepEqual(state.game.tiles, Array.from({ length: 16 }, (_, index) => (index + 1) % 16));
       assert.equal(inversionParity(state.game.tiles), 1, "Every generated 4x4 board must be reachable from the solved arrangement.");
@@ -130,6 +132,35 @@ async function run() {
     assert.equal((await call(fixture, command(state))).status, 200);
   });
 
+  await test("later routing phases are derived server-side from the bounded move count", async () => {
+    assert.equal(signalShiftIntensity(0), "calibration");
+    assert.equal(signalShiftIntensity(21), "calibration");
+    assert.equal(signalShiftIntensity(22), "pressure");
+    assert.equal(signalShiftIntensity(43), "pressure");
+    assert.equal(signalShiftIntensity(44), "blackout");
+    assert.equal(signalShiftIntensity(SIGNAL_SHIFT_MAX_MOVES), "blackout");
+  });
+
+  await test("legacy sessions at or over the new cap stay visible as restartable failed routes", async fixture => {
+    await start(fixture);
+    setBoard(fixture, nearSolvedBoard(), SIGNAL_SHIFT_MAX_MOVES);
+    const atCap = await payload(await call(fixture));
+    assert.equal(atCap.game?.status, "failed");
+    assert.equal((await call(fixture, command(atCap))).status, 409);
+    setBoard(fixture, nearSolvedBoard(), SIGNAL_SHIFT_MAX_MOVES + 1);
+    const overCap = await payload(await call(fixture));
+    assert.equal(overCap.game?.moves, SIGNAL_SHIFT_MAX_MOVES + 1);
+    assert.equal(overCap.game?.maxMoves, SIGNAL_SHIFT_LEGACY_MAX_MOVES);
+    assert.equal(overCap.game?.status, "failed");
+    assert.equal(overCap.game?.intensity, "blackout");
+    assert.equal((await call(fixture, command(overCap))).status, 409);
+    fixture.db.sqlite.exec("UPDATE dzn_signal_shift_sessions SET started_at = started_at - 6000");
+    const restarted = await start(fixture);
+    assert.equal(restarted.game?.status, "playing");
+    assert.equal(restarted.game?.moves, 0);
+    assert.equal(restarted.game?.maxMoves, SIGNAL_SHIFT_MAX_MOVES);
+  });
+
   await test("legal server-validated shifts, win state and daily reward cap apply exactly", async fixture => {
     const state = await start(fixture);
     settle(fixture);
@@ -152,7 +183,7 @@ async function run() {
 
   await test("the shift cap, stale commands and expiry cannot mint a reward", async fixture => {
     await start(fixture);
-    setBoard(fixture, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 14, 15], 71);
+    setBoard(fixture, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 14, 15], SIGNAL_SHIFT_MAX_MOVES - 1);
     let state = await payload(await call(fixture));
     const final = await payload(await call(fixture, command(state, 14)));
     assert.equal(final.game?.status, "failed");

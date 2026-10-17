@@ -3,12 +3,14 @@ import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
   SIGNAL_SHIFT_GRID_SIZE,
+  SIGNAL_SHIFT_LEGACY_MAX_MOVES,
   SIGNAL_SHIFT_MAX_MOVES,
   SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS,
   SIGNAL_SHIFT_REWARD,
   SIGNAL_SHIFT_START_COOLDOWN_MS,
   SIGNAL_SHIFT_TILE_COUNT,
   SIGNAL_SHIFT_TTL_MS,
+  signalShiftIntensity,
   type SignalShiftGame,
   type SignalShiftPayload,
 } from "../../lib/games-signal-shift";
@@ -71,7 +73,8 @@ function createPuzzle() {
     const tiles = solvedTiles();
     let blank = SIGNAL_SHIFT_TILE_COUNT - 1;
     let previousBlank = -1;
-    const shuffles = 54 + randomIndex(19);
+    // Keep a known legal reverse route inside the 64-move cap while ensuring every board starts deep enough to feel like a real routing task.
+    const shuffles = 60 + randomIndex(5);
     for (let step = 0; step < shuffles; step++) {
       const options = neighbors(blank).filter(index => index !== previousBlank);
       const nextBlank = options[randomIndex(options.length)];
@@ -86,10 +89,11 @@ function createPuzzle() {
 
 function gameView(row: SignalShiftRow, now: number): SignalShiftGame {
   const tiles = parseTiles(row.tiles_json);
-  if (!Number.isInteger(row.moves) || row.moves < 0 || row.moves > SIGNAL_SHIFT_MAX_MOVES || !Number.isInteger(row.version) || row.version < 0 || row.version > 96) {
+  if (!Number.isInteger(row.moves) || row.moves < 0 || row.moves > SIGNAL_SHIFT_LEGACY_MAX_MOVES || !Number.isInteger(row.version) || row.version < 0 || row.version > 96) {
     throw new Error("Invalid stored Signal Shift state");
   }
-  const status = row.status === "playing" && now >= row.started_at + SIGNAL_SHIFT_TTL_MS ? "expired" : row.status;
+  const legacyOverCap = row.status === "playing" && row.moves >= SIGNAL_SHIFT_MAX_MOVES;
+  const status = legacyOverCap ? "failed" : row.status === "playing" && now >= row.started_at + SIGNAL_SHIFT_TTL_MS ? "expired" : row.status;
   return {
     id: row.id,
     version: row.version,
@@ -97,7 +101,8 @@ function gameView(row: SignalShiftRow, now: number): SignalShiftGame {
     gridSize: SIGNAL_SHIFT_GRID_SIZE,
     tiles,
     moves: row.moves,
-    maxMoves: SIGNAL_SHIFT_MAX_MOVES,
+    maxMoves: row.moves > SIGNAL_SHIFT_MAX_MOVES ? SIGNAL_SHIFT_LEGACY_MAX_MOVES : SIGNAL_SHIFT_MAX_MOVES,
+    intensity: signalShiftIntensity(Math.min(row.moves, SIGNAL_SHIFT_MAX_MOVES)),
     startedAt: row.started_at,
     expiresAt: row.started_at + SIGNAL_SHIFT_TTL_MS,
   };
