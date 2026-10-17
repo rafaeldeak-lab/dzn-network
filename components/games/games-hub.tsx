@@ -31,6 +31,7 @@ const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => m
 const OutpostRun3D = dynamic(() => import("./outpost-run-3d").then(module => module.OutpostRun3D), { ssr: false });
 const SignalShift3D = dynamic(() => import("./signal-shift-3d").then(module => module.SignalShift3D), { ssr: false });
 const CircuitForge3D = dynamic(() => import("./circuit-forge-3d").then(module => module.CircuitForge3D), { ssr: false });
+const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => module.EchoArray3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -294,7 +295,7 @@ export function GamesHub() {
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -703,11 +704,12 @@ function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
   </section>;
 }
 
-function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<EchoArrayPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [litNode, setLitNode] = useState<EchoArrayNode | null>(null);
+  const [threeUnavailableGameId, setThreeUnavailableGameId] = useState<string | null>(null);
   const generation = useRef(0);
   const serverClock = useRef({ time: 0, measuredAt: 0 });
   const [echoNow, setEchoNow] = useState(0);
@@ -759,6 +761,7 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
   }, [payload?.game, payload?.serverTime]);
 
   const game = payload?.game;
+  const threeUnavailable = threeUnavailableGameId === game?.id;
   const clockNow = Math.max(now, echoNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
@@ -820,10 +823,16 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
       <div className={styles.echoArrayMeta}><span><Microchip size={14} />Stage {game.stage} / {game.totalStages}</span><span><Target size={14} />{game.inputIndex} / {game.sequenceLength} nodes</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.echoArrayStage} data-revealing={revealing} data-status={game.status} data-intensity={game.intensity} aria-live="polite">
         <div className={styles.echoArrayReadout}><span>{active ? revealing ? `${game.intensity} / WATCH THE ARRAY` : `${game.intensity} / REPLAY THE ARRAY` : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
-        <div className={styles.echoArrayNodes} role="group" aria-label="Echo Array signal nodes">
-          {ECHO_ARRAY_NODE_ORDER.map(node => { const meta = ECHO_ARRAY_NODE_META[node]; const lit = revealing && litNode === node; return <button type="button" key={node} className={styles.echoArrayNode}
-            data-node={node} data-lit={lit} disabled={busy || cooldown || !inputOpen} onClick={() => submitNode(node)}
-            aria-label={`${meta.label} (${meta.key})${lit ? ", signal live" : ""}`}><span>{meta.key}</span><strong>{meta.label.replace(" array", "")}</strong><small>{lit ? "Pulse live" : revealing ? "Observe" : inputOpen ? "Select" : "Stand down"}</small></button>; })}
+        <div className={`${styles.echoArrayConsole} ${threeUnavailable ? styles.echoArrayConsoleFallback : ""}`}>
+          {!threeUnavailable && <EchoArray3D intensity={game.intensity} litNode={revealing ? litNode : null} inputOpen={inputOpen} disabled={busy || cooldown || !inputOpen} motionRunning={motionRunning} onSelect={submitNode} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+          <div className={styles.echoArrayControlDeck}>
+            <div className={styles.echoArrayDeckHeading}><span>DIRECT SIGNAL PAD</span><strong>Replay the stored signal</strong><small>Use the labelled controls for precise keyboard and touch input.</small></div>
+            <div className={styles.echoArrayNodes} role="group" aria-label="Echo Array signal nodes">
+              {ECHO_ARRAY_NODE_ORDER.map(node => { const meta = ECHO_ARRAY_NODE_META[node]; const lit = revealing && litNode === node; return <button type="button" key={node} className={styles.echoArrayNode}
+                data-node={node} data-lit={lit} disabled={busy || cooldown || !inputOpen} onClick={() => submitNode(node)}
+                aria-label={`${meta.label} (${meta.key})${lit ? ", signal live" : ""}`}><span>{meta.key}</span><strong>{meta.label.replace(" array", "")}</strong><small>{lit ? "Pulse live" : revealing ? "Observe" : inputOpen ? "Select" : "Stand down"}</small></button>; })}
+            </div>
+          </div>
         </div>
         <p className={styles.echoArrayHint}>Keyboard: 1 to 4 or the arrow keys. Each later stage reveals faster; the server records every cue, retry and reward.</p>
       </div>

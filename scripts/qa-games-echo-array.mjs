@@ -41,6 +41,29 @@ try {
     }
     await page.getByRole("group", { name: "Echo Array signal nodes" }).waitFor();
     await page.getByText("Repeat the stored signal", { exact: true }).waitFor({ timeout: 8_000 });
+    const echoCanvas = page.locator('canvas[data-dzn-echo-array-canvas="true"]');
+    await echoCanvas.waitFor({ state: "visible" });
+    assert.equal(await echoCanvas.count(), 1);
+    await echoCanvas.scrollIntoViewIfNeeded();
+    const canvasState = await echoCanvas.evaluate(element => {
+      const canvas = element;
+      const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+      if (!gl) return { width: canvas.width, height: canvas.height, litPixels: 0, colors: 0 };
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      let litPixels = 0;
+      const colors = new Set();
+      for (let offset = 0; offset < pixels.length; offset += 16) {
+        const red = pixels[offset], green = pixels[offset + 1], blue = pixels[offset + 2];
+        if (red + green + blue > 28) litPixels++;
+        colors.add(`${red >> 4}:${green >> 4}:${blue >> 4}`);
+      }
+      return { width: canvas.width, height: canvas.height, litPixels, colors: colors.size };
+    });
+    assert.ok(canvasState.width >= 280 && canvasState.height >= 260, `Echo Array canvas is undersized: ${JSON.stringify(canvasState)}`);
+    assert.ok(canvasState.litPixels > canvasState.width * canvasState.height * 0.008, `Echo Array canvas is blank: ${JSON.stringify(canvasState)}`);
+    assert.ok(canvasState.colors > 18, `Echo Array canvas lacks colour range: ${JSON.stringify(canvasState)}`);
+    await echoCanvas.screenshot({ path: path.join(output, `${viewport.name}-canvas.png`) });
     const nodeButtons = page.locator('[aria-label^="North array"], [aria-label^="East array"], [aria-label^="South array"], [aria-label^="West array"]');
     assert.equal(await nodeButtons.count(), 4);
     assert.equal(await nodeButtons.evaluateAll(nodes => nodes.every(node => !node.hasAttribute("disabled"))), true);
@@ -50,6 +73,7 @@ try {
         nodeButtons.first().click(),
       ]);
       assert.equal(tapResponse.status(), 200, await tapResponse.text());
+      assert.equal(await echoCanvas.count(), 1);
     }
     await page.getByText(/Stage 1 \/ 3/, { exact: true }).first().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
