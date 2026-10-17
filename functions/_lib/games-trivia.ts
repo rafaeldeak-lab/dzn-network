@@ -90,7 +90,7 @@ export async function handleGamesTrivia(request: Request, env: Env): Promise<Res
       const correct = triviaPresentation(question, row.id).answer === body.answer ? 1 : 0;
       const final = row.current_index === ids.length - 1;
       const correctTotal = row.correct_count + correct;
-      const nextStatus = final ? (correctTotal >= 4 ? "passed" : "failed") : "playing";
+      const nextStatus = final ? (correctTotal >= TRIVIA_DIFFICULTIES[row.difficulty].passMark ? "passed" : "failed") : "playing";
       const update = db.prepare(`UPDATE dzn_trivia_sessions SET current_index = current_index + 1,
         correct_count = correct_count + ?, status = ?, version = version + 1, updated_at = ?
         WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing'`)

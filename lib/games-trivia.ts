@@ -1,7 +1,7 @@
 export const TRIVIA_DIFFICULTIES = {
-  recruit: { label: "Recruit", xp: 40, parts: 1 },
-  operator: { label: "Operator", xp: 80, parts: 2 },
-  specialist: { label: "Specialist", xp: 120, parts: 3 },
+  recruit: { label: "Recruit", passMark: 4, xp: 40, parts: 1 },
+  operator: { label: "Operator", passMark: 4, xp: 80, parts: 2 },
+  specialist: { label: "Specialist", passMark: 5, xp: 120, parts: 3 },
 } as const;
 
 export type TriviaDifficulty = keyof typeof TRIVIA_DIFFICULTIES;

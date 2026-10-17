@@ -6,7 +6,7 @@ import { handleGamesTrivia, triviaPresentation } from "../functions/_lib/games-t
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { questionById, TRIVIA_QUESTIONS } from "../functions/_lib/games-trivia-questions";
 import type { Env } from "../functions/_lib/types";
-import type { TriviaPayload } from "../lib/games-trivia";
+import { TRIVIA_DIFFICULTIES, type TriviaPayload } from "../lib/games-trivia";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof triviaFixture>>;
@@ -86,17 +86,23 @@ async function run() {
     assert.equal((await call(fixture, { action: "answer", gameId: state.game!.id, version: 0, answer })).status, 409);
     assert.equal((await call(fixture, { action: "start", difficulty: "operator" })).status, 429);
   });
-  await test("four correct answers pass and award exact daily reward once", async fixture => {
+  await test("difficulty clearances are explicit and specialist requires a perfect briefing", async fixture => {
+    assert.equal(TRIVIA_DIFFICULTIES.recruit.passMark, 4);
+    assert.equal(TRIVIA_DIFFICULTIES.operator.passMark, 4);
+    assert.equal(TRIVIA_DIFFICULTIES.specialist.passMark, 5);
     await payload(await call(fixture, { action: "start", difficulty: "specialist" }));
     const completed = await answerRound(fixture, 4);
-    assert.equal(completed.game?.status, "passed");
+    assert.equal(completed.game?.status, "failed");
     assert.equal(completed.game?.correct, 4);
-    assert.deepEqual(completed.rewardedToday, ["specialist"]);
-    const reward = fixture.db.sqlite.prepare("SELECT difficulty, xp, parts FROM dzn_trivia_reward_ledger").get()!;
-    assert.equal(reward.difficulty, "specialist"); assert.equal(reward.xp, 120); assert.equal(reward.parts, 3);
+    assert.deepEqual(completed.rewardedToday, []);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_trivia_reward_ledger").get()?.count, 0);
     fixture.db.sqlite.exec("UPDATE dzn_trivia_sessions SET started_at = started_at - 6000");
     await payload(await call(fixture, { action: "start", difficulty: "specialist" }));
-    await answerRound(fixture, 5);
+    const cleared = await answerRound(fixture, 5);
+    assert.equal(cleared.game?.status, "passed");
+    assert.deepEqual(cleared.rewardedToday, ["specialist"]);
+    const reward = fixture.db.sqlite.prepare("SELECT difficulty, xp, parts FROM dzn_trivia_reward_ledger").get()!;
+    assert.equal(reward.difficulty, "specialist"); assert.equal(reward.xp, 120); assert.equal(reward.parts, 3);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_trivia_reward_ledger").get()?.count, 1);
   });
   await test("three correct answers fail without minting a reward", async fixture => {
