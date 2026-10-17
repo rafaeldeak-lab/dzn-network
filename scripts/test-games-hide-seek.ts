@@ -77,6 +77,8 @@ async function run() {
     assert.equal(state.game?.lastScan, null);
     assert.deepEqual(state.game?.clues.map(target => target.slot), [1, 2, 3, 4]);
     assert.ok(state.game?.clues.every(target => target.clue.length > 16 && !target.found));
+    const selected = selectedTargets(fixture);
+    assert.ok(state.game?.clues.every((brief, index) => brief.clue.includes(selected[index].clue)), "Each classified briefing clue must describe the target selected for this hunt.");
     assert.doesNotMatch(JSON.stringify(state.game), /"x"\s*:|"y"\s*:|"id"\s*:\s*"(?:recon|signal)-/, "Unrecovered target coordinates and canonical IDs must never reach the browser.");
     const firstBrief = state.game?.clues.map(target => target.clue);
     const replacementId = state.game?.id.startsWith("f")

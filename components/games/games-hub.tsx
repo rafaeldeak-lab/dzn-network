@@ -516,7 +516,11 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   // Derive a centered scanner until this hunt has an intentional pointer or key action.
   // This avoids a synchronous effect update every time a fresh hunt arrives.
   const reticlePoint = game && reticle.gameId !== game.id ? { x: 500, y: 500 } : reticle;
-  function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
+  function scan(x: number, y: number) {
+    if (!game || !active || busy) return;
+    if (game.recoveredSignals.some((signal) => Math.hypot(signal.x - x, signal.y - y) <= 45)) return;
+    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y });
+  }
   function scanAt(x: number, y: number) {
     const point = { x: Math.max(0, Math.min(1000, Math.round(x))), y: Math.max(0, Math.min(1000, Math.round(y))) };
     setReticle({ gameId: game?.id ?? "", ...point });
@@ -546,7 +550,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
     {game ? <>
       <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
       <div className={styles.hideSeekScene} data-scene={game.scene} role="group" tabIndex={active ? 0 : -1}
-        aria-label="DZN signal hunt reconnaissance scene. Click to scan terrain. With keyboard focus, use arrow keys to move the scan reticle and Enter to scan."
+        aria-label="DZN signal hunt reconnaissance scene. Click to scan terrain. With keyboard focus, use arrow keys to move the scan reticle and Enter to scan. Recovered signals cannot consume another scan."
         aria-disabled={!active || busy} onKeyDown={handleSceneKeyDown}
         onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scanAt((event.clientX - bounds.left) / bounds.width * 1000, (event.clientY - bounds.top) / bounds.height * 1000); }}>
         <Image src={game.scene === "recon-v2" ? "/images/games/signal-hunt-recon-v2.png" : "/images/games/dzn-outpost.webp"}
