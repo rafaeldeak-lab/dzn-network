@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesCipherGrid, markCipherGridGuess } from "../functions/_lib/games-cipher-grid";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
-import { CIPHER_GRID_LEGACY_MAX_ATTEMPTS, CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_TTL_MS, CIPHER_GRID_WORD_LENGTH, type CipherGridPayload } from "../lib/games-cipher-grid";
+import { CIPHER_GRID_LEGACY_MAX_ATTEMPTS, CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_SPECIALIST_MAX_ATTEMPTS, CIPHER_GRID_SPECIALIST_WORD_LENGTH, CIPHER_GRID_TTL_MS, CIPHER_GRID_WORD_LENGTH, type CipherGridPayload } from "../lib/games-cipher-grid";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof cipherGridFixture>>;
@@ -14,8 +14,12 @@ let passed = 0;
 
 async function cipherGridFixture(migrate = true) {
   const fixture = await gamesFixture();
-  if (migrate) fixture.db.sqlite.exec(readFileSync("migrations/0097_games_hub_cipher_grid.sql", "utf8"));
+  if (migrate) {
+    fixture.db.sqlite.exec(readFileSync("migrations/0097_games_hub_cipher_grid.sql", "utf8"));
+    fixture.db.sqlite.exec(readFileSync("migrations/0106_games_hub_cipher_grid_specialist.sql", "utf8"));
+  }
   (fixture.env as Env).DZN_GAMES_CIPHER_GRID_ENABLED = "true";
+  (fixture.env as Env).DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED = "true";
   return fixture;
 }
 
@@ -44,6 +48,11 @@ function answerFor(fixture: Fixture) {
   return answer;
 }
 
+function blankGuess(state: CipherGridPayload) {
+  if (!state.game) throw new Error("Expected an active Cipher Grid game");
+  return "A".repeat(state.game.answerLength);
+}
+
 function guess(state: CipherGridPayload, word: string) {
   assert.ok(state.game);
   return { action: "guess", gameId: state.game.id, version: state.game.version, guess: word };
@@ -70,7 +79,7 @@ async function run() {
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_cipher_grid_sessions").get()?.count, 0);
     const state = await start(fixture);
     assert.equal(state.game?.attempts.length, 0);
-    assert.equal(state.game?.answerLength, CIPHER_GRID_WORD_LENGTH);
+    assert.ok([CIPHER_GRID_WORD_LENGTH, CIPHER_GRID_SPECIALIST_WORD_LENGTH].includes(state.game?.answerLength ?? 0));
     assert.equal(JSON.stringify(state).includes('"answer"'), false);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
@@ -88,6 +97,7 @@ async function run() {
 
   await test("duplicate-aware letter scoring marks only the available copies", async () => {
     assert.deepEqual(markCipherGridGuess("SHELL", "LEECH"), ["present", "absent", "correct", "absent", "present"]);
+    assert.deepEqual(markCipherGridGuess("CIPHER", "REPEAT"), ["present", "present", "correct", "absent", "absent", "absent"]);
   });
 
   await test("only the exact server answer wins and grants one bounded daily reward", async fixture => {
@@ -108,18 +118,48 @@ async function run() {
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_cipher_grid_reward_ledger").get()?.count, 1);
   });
 
-  await test("five wrong guesses fail without minting a reward", async fixture => {
+  await test("wrong guesses fail at the server-selected attempt limit without minting a reward", async fixture => {
     let state = await start(fixture);
-    for (let attempt = 0; attempt < 5; attempt++) state = await payload(await call(fixture, guess(state, "AAAAA")));
+    for (let attempt = 0; attempt < state.game!.maxAttempts; attempt++) state = await payload(await call(fixture, guess(state, blankGuess(state))));
     assert.equal(state.game?.status, "failed");
-    assert.equal(state.game?.attempts.length, 5);
+    assert.equal(state.game?.attempts.length, state.game?.maxAttempts);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_cipher_grid_reward_ledger").get()?.count, 0);
+  });
+
+  await test("six-letter specialist ciphers use the shorter verified attempt budget", async fixture => {
+    await start(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET answer = ?, attempts_json = '[]', status = 'playing', version = 0 WHERE user_id = 'local-player'").run("CIPHER");
+    let specialist = await payload(await call(fixture));
+    assert.equal(specialist.game?.difficulty, "specialist");
+    assert.equal(specialist.game?.answerLength, CIPHER_GRID_SPECIALIST_WORD_LENGTH);
+    assert.equal(specialist.game?.maxAttempts, CIPHER_GRID_SPECIALIST_MAX_ATTEMPTS);
+    assert.equal((await call(fixture, guess(specialist, "AAAAA"))).status, 400, "A specialist session must reject a five-letter guess.");
+    for (let attempt = 0; attempt < CIPHER_GRID_SPECIALIST_MAX_ATTEMPTS; attempt++) specialist = await payload(await call(fixture, guess(specialist, "AAAAAA")));
+    assert.equal(specialist.game?.status, "failed");
+    assert.equal(specialist.game?.attempts.length, CIPHER_GRID_SPECIALIST_MAX_ATTEMPTS);
+  });
+
+  await test("specialist ciphers stay disabled until their separately controlled feature flag is enabled", async fixture => {
+    (fixture.env as Env).DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED = "false";
+    for (let index = 0; index < 12; index++) {
+      const state = await start(fixture);
+      assert.equal(state.game?.difficulty, "field");
+      assert.equal(state.game?.answerLength, CIPHER_GRID_WORD_LENGTH);
+      fixture.db.sqlite.exec("UPDATE dzn_cipher_grid_sessions SET started_at = started_at - 6000");
+    }
+  });
+
+  await test("the specialist migration accepts six-letter ciphers while retaining the five-letter constraint", async fixture => {
+    await start(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET answer = ?, attempts_json = '[]' WHERE user_id = 'local-player'").run("CIPHER");
+    assert.throws(() => fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET answer = 'SEVENTH' WHERE user_id = 'local-player'").run());
+    assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   });
 
   await test("legacy sessions at the former sixth-guess threshold stay visible and restartable", async fixture => {
     await start(fixture);
     const attempts = Array.from({ length: 5 }, () => ({ guess: "AAAAA", marks: ["absent", "absent", "absent", "absent", "absent"] }));
-    fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET attempts_json = ? WHERE user_id = 'local-player'").run(JSON.stringify(attempts));
+    fixture.db.sqlite.prepare("UPDATE dzn_cipher_grid_sessions SET answer = 'CACHE', attempts_json = ? WHERE user_id = 'local-player'").run(JSON.stringify(attempts));
     const legacy = await payload(await call(fixture));
     assert.equal(legacy.game?.answerLength, CIPHER_GRID_WORD_LENGTH);
     assert.equal(legacy.game?.maxAttempts, CIPHER_GRID_MAX_ATTEMPTS);
@@ -133,7 +173,7 @@ async function run() {
     fixture.db.sqlite.exec("UPDATE dzn_cipher_grid_sessions SET started_at = started_at - 6000");
     const restarted = await start(fixture);
     assert.equal(restarted.game?.status, "playing");
-    assert.equal(restarted.game?.maxAttempts, 5);
+    assert.ok([CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_SPECIALIST_MAX_ATTEMPTS].includes(restarted.game?.maxAttempts ?? 0));
   });
 
   await test("another player cannot read or advance a private decode", async fixture => {
