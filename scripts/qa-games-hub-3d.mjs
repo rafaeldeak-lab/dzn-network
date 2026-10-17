@@ -37,19 +37,22 @@ try {
     page.on("request", request => { if (request.method() !== "GET" && request.method() !== "HEAD") writes.push({ url: request.url(), method: request.method(), body: request.postDataJSON?.() }); });
 
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-    const briefingImage = page.getByAltText("Night reconnaissance terrain with a DZN minefield scanner and survey markers");
-    await briefingImage.waitFor({ state: "visible" });
-    const briefing = await briefingImage.evaluate(image => {
-      const board = image.closest('[class*="readyBoard"]');
-      const bounds = board?.getBoundingClientRect();
-      return { naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, width: bounds?.width ?? 0, height: bounds?.height ?? 0 };
-    });
-    assert.ok(briefing.naturalWidth > 600 && briefing.naturalHeight > 300, `Minefield briefing image did not load: ${JSON.stringify(briefing)}`);
-    assert.ok(briefing.width <= scenario.width && briefing.height >= 300, `Minefield briefing must remain visible and bounded: ${JSON.stringify(briefing)}`);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Minefield briefing overflow at ${scenario.width}px`);
-    await page.screenshot({ path: path.join(output, `briefing-${scenario.width}-${scenario.reducedMotion}.png`), fullPage: true });
     const canvas = page.locator('canvas[data-dzn-minefield-canvas="true"]');
-    if (await canvas.count() === 0) await page.getByRole("button", { name: "Start mission" }).click();
+    const briefingImage = page.getByAltText("Night reconnaissance terrain with a DZN minefield scanner and survey markers");
+    let briefing = null;
+    if (await canvas.count() === 0) {
+      await briefingImage.waitFor({ state: "visible" });
+      briefing = await briefingImage.evaluate(image => {
+        const board = image.closest('[class*="readyBoard"]');
+        const bounds = board?.getBoundingClientRect();
+        return { naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, width: bounds?.width ?? 0, height: bounds?.height ?? 0 };
+      });
+      assert.ok(briefing.naturalWidth > 600 && briefing.naturalHeight > 300, `Minefield briefing image did not load: ${JSON.stringify(briefing)}`);
+      assert.ok(briefing.width <= scenario.width && briefing.height >= 300, `Minefield briefing must remain visible and bounded: ${JSON.stringify(briefing)}`);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Minefield briefing overflow at ${scenario.width}px`);
+      await page.screenshot({ path: path.join(output, `briefing-${scenario.width}-${scenario.reducedMotion}.png`), fullPage: true });
+      await page.getByRole("button", { name: "Start mission" }).click();
+    }
     await canvas.waitFor({ state: "visible" });
     await page.waitForTimeout(350);
 
