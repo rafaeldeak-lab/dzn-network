@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
-type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannelChecked: boolean; inviteChannel: boolean; inviteChannelPrivate: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleSafe: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean; botHasUnexpectedInviteChannelPermissions: boolean } };
+type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembershipChecked: boolean; botGuildMembership: boolean; roleConfigurationChecked: boolean; inviteChannelChecked: boolean; inviteChannel: boolean; inviteChannelPrivate: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleSafe: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean; botHasUnexpectedGuildPermissions: boolean; botHasUnexpectedInviteChannelPermissions: boolean } };
 type RejectedOwnerRoleReason = "invalid_role_id" | "server_default_role" | "managed_role" | "invalid_permissions" | "guild_permissions";
 type DeliveryDiscovery = {
   ok: boolean;
@@ -24,7 +24,9 @@ type DeliveryDiscovery = {
   checks: {
     botTokenConfigured: boolean;
     botIdentity: boolean;
+    botGuildMembershipChecked: boolean;
     botGuildMembership: boolean;
+    candidateConfigurationChecked: boolean;
     canManageRoles: boolean;
     botHasAdministrator: boolean;
     botHasUnexpectedGuildPermissions: boolean;
@@ -107,14 +109,16 @@ function deliveryReadinessItems(
 
   const checks = diagnostic?.checks;
   const discoveryChecks = discovery?.checks;
-  const deliveryPreflightComplete = Boolean(checks?.botIdentity && checks.botGuildMembership);
-  const discoveryPreflightComplete = Boolean(discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership);
-  const inspectionUnverified = !deliveryPreflightComplete && !discoveryPreflightComplete;
+  const deliveryMembershipChecked = Boolean(checks?.botIdentity && checks.botGuildMembershipChecked);
+  const discoveryMembershipChecked = Boolean(discoveryChecks?.botIdentity && discoveryChecks.botGuildMembershipChecked);
+  const discoveryPreflightComplete = Boolean(discoveryMembershipChecked && discoveryChecks?.botGuildMembership);
+  const configurationChecked = Boolean(checks?.roleConfigurationChecked || discoveryChecks?.candidateConfigurationChecked);
+  const inspectionUnverified = !deliveryMembershipChecked && !discoveryMembershipChecked;
   const hasPrivateInviteCandidate = discoveryPreflightComplete && (discovery?.privateInviteChannelCandidates.length ?? 0) > 0;
   const hasVerifiedOwnerRoleCandidate = discoveryPreflightComplete && (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false);
-  const inviteChannelUnchecked = !deliveryPreflightComplete || !checks?.inviteChannelChecked;
-  const roleUnchecked = !deliveryPreflightComplete;
-  const permissionUnchecked = !deliveryPreflightComplete && !discoveryPreflightComplete;
+  const inviteChannelUnchecked = !configurationChecked || Boolean(checks?.roleConfigurationChecked && !checks.inviteChannelChecked);
+  const roleUnchecked = !configurationChecked;
+  const permissionUnchecked = !configurationChecked;
   return [
     {
       label: "Bot identity and DZN server connection",
@@ -122,10 +126,12 @@ function deliveryReadinessItems(
         ? "The configured bot can identify itself and is connected to the central DZN server."
         : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership
           ? "The read-only discovery found the bot in the central DZN server; final configuration is still required."
+        : deliveryMembershipChecked || discoveryMembershipChecked
+          ? "The read-only check confirmed that DZN Bot is not currently a member of the central DZN server. Add the bot before enabling owner delivery."
         : inspectionUnverified
           ? "The latest Discord read-only check stopped before bot and server membership could be verified. Run it again before changing bot or server settings."
             : "The bot must be connected to the central DZN server before delivery can be enabled.",
-      state: checks?.botIdentity && checks.botGuildMembership ? "ready" : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership ? "unchecked" : inspectionUnverified ? "unchecked" : "blocked",
+      state: checks?.botIdentity && checks.botGuildMembership ? "ready" : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership ? "unchecked" : deliveryMembershipChecked || discoveryMembershipChecked ? "blocked" : "unchecked",
     },
     {
       label: "Private one-use invite channel",
@@ -135,10 +141,8 @@ function deliveryReadinessItems(
           ? "The latest delivery check did not complete the private-channel inspection. Resolve the reported diagnostic and run the check again."
           : hasPrivateInviteCandidate
           ? "A private channel is available. It must be saved as the central invite channel before delivery can be enabled."
-          : inspectionUnverified
-            ? "The latest Discord read-only check did not complete. Do not change the invite channel until it can be verified."
-            : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
-      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : inviteChannelUnchecked ? "unchecked" : hasPrivateInviteCandidate ? "unchecked" : inspectionUnverified ? "unchecked" : "blocked",
+        : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
+      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : inviteChannelUnchecked || hasPrivateInviteCandidate ? "unchecked" : "blocked",
     },
     {
       label: "Verified Server Owner role",
@@ -148,10 +152,8 @@ function deliveryReadinessItems(
           ? "The latest read-only check stopped before the owner role could be inspected. Resolve the reported diagnostic and run it again."
         : hasVerifiedOwnerRoleCandidate
           ? "A safe zero-permission owner role is available. It must be selected before delivery can be enabled."
-          : inspectionUnverified
-            ? "The latest Discord read-only check did not complete. Do not change the owner role until it can be verified."
-            : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
-      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : roleUnchecked || hasVerifiedOwnerRoleCandidate ? "unchecked" : inspectionUnverified ? "unchecked" : "blocked",
+        : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
+      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : roleUnchecked || hasVerifiedOwnerRoleCandidate ? "unchecked" : "blocked",
     },
     {
       label: "Least-privilege bot permissions",
@@ -163,7 +165,7 @@ function deliveryReadinessItems(
           : checks.canManageRoles
             ? "The bot has the limited permissions required to assign or remove only the verified owner role."
             : "The bot still needs Manage Roles to deliver and revoke the verified owner role."
-        : discoveryChecks
+        : discoveryChecks?.candidateConfigurationChecked
           ? discoveryChecks.botHasAdministrator || discoveryChecks.botHasUnexpectedGuildPermissions
             ? "Blocked: the read-only check found Administrator or unrelated guild permissions on the bot."
             : discoveryChecks.canManageRoles
@@ -172,9 +174,9 @@ function deliveryReadinessItems(
           : "Run central Discord discovery to verify the bot permission boundary.",
       state: permissionUnchecked
         ? "unchecked"
-        : checks
+        : checks?.roleConfigurationChecked
         ? checks.botHasAdministrator || checks.botHasUnexpectedGuildPermissions || !checks.canManageRoles ? "blocked" : "ready"
-        : discoveryChecks
+        : discoveryChecks?.candidateConfigurationChecked
           ? discoveryChecks.botHasAdministrator || discoveryChecks.botHasUnexpectedGuildPermissions || !discoveryChecks.canManageRoles ? "blocked" : "unchecked"
           : "unchecked",
     },

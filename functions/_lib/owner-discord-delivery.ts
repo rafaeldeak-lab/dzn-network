@@ -77,7 +77,9 @@ type DeliveryDiagnostic = {
   checks: {
     botTokenConfigured: boolean;
     botIdentity: boolean;
+    botGuildMembershipChecked: boolean;
     botGuildMembership: boolean;
+    roleConfigurationChecked: boolean;
     inviteChannelChecked: boolean;
     inviteChannel: boolean;
     inviteChannelPrivate: boolean;
@@ -790,12 +792,12 @@ async function checkDiscordRoleConfiguration(
   fetcher: DiscordFetch,
   purpose: "delivery" | "cleanup" = "delivery",
 ): Promise<RoleDeliveryPreflight> {
-  const failedChecks = (status: DeliveryDiagnostic["status"], message: string, httpStatus: number | null = null) => ({
+  const failedChecks = (status: DeliveryDiagnostic["status"], message: string, httpStatus: number | null = null, checks = diagnosticChecks()) => ({
     ok: false as const,
     status,
     message,
     httpStatus,
-    checks: diagnosticChecks(),
+    checks,
   });
   try {
     const identity = await discordRequest(fetcher, configuration, "/users/@me");
@@ -807,8 +809,9 @@ async function checkDiscordRoleConfiguration(
       discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(botId)}`),
       discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/roles`),
     ]);
-    if (!membership.response.ok) return failedChecks(membership.response.status === 404 ? "not_connected" : "discord_error", "DZN Bot is not available in the configured DZN Discord server.", membership.response.status);
-    if (!rolesResponse.response.ok || !Array.isArray(rolesResponse.payload)) return failedChecks("discord_error", "DZN could not read the central Discord role configuration.", rolesResponse.response.status);
+    const membershipChecks = { ...diagnosticChecks(), botTokenConfigured: true, botIdentity: true, botGuildMembershipChecked: true, botGuildMembership: membership.response.ok };
+    if (!membership.response.ok) return failedChecks(membership.response.status === 404 ? "not_connected" : "discord_error", "DZN Bot is not available in the configured DZN Discord server.", membership.response.status, membershipChecks);
+    if (!rolesResponse.response.ok || !Array.isArray(rolesResponse.payload)) return failedChecks("discord_error", "DZN could not read the central Discord role configuration.", rolesResponse.response.status, membershipChecks);
 
     const roles = rolesResponse.payload as DiscordRole[];
     const targetRole = roles.find((role) => String(role.id ?? "") === configuration.verifiedOwnerRoleId);
@@ -824,9 +827,8 @@ async function checkDiscordRoleConfiguration(
     const hasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, everyoneBasePermissions);
     const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const checks = {
-      botTokenConfigured: true,
-      botIdentity: true,
-      botGuildMembership: true,
+      ...membershipChecks,
+      roleConfigurationChecked: true,
       inviteChannelChecked: false,
       inviteChannel: false,
       inviteChannelPrivate: false,
@@ -1274,7 +1276,7 @@ function diagnostic(status: DeliveryDiagnostic["status"], message: string, check
 }
 
 function diagnosticChecks(): DeliveryDiagnostic["checks"] {
-  return { botTokenConfigured: false, botIdentity: false, botGuildMembership: false, inviteChannelChecked: false, inviteChannel: false, inviteChannelPrivate: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleSafe: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
+  return { botTokenConfigured: false, botIdentity: false, botGuildMembershipChecked: false, botGuildMembership: false, roleConfigurationChecked: false, inviteChannelChecked: false, inviteChannel: false, inviteChannelPrivate: false, canViewInviteChannel: false, canCreateInvite: false, canManageRoles: false, targetRole: false, targetRoleSafe: false, targetRoleBelowBot: false, botHasAdministrator: false, botHasUnexpectedGuildPermissions: false, botHasUnexpectedInviteChannelPermissions: false };
 }
 
 function safeAttempt(row: Record<string, unknown>): OwnerDiscordDeliveryAttempt | null {
