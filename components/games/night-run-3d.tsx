@@ -17,6 +17,7 @@ type NightRun3DProps = {
   scannerAvailable: boolean;
   intensity: NightRunIntensity;
   gatesCleared: number;
+  totalGates: number;
   collisions: number;
   onDrive: (lane: NightRunLane) => void;
 };
@@ -27,7 +28,7 @@ const LANES: { id: NightRunLane; x: number; label: string }[] = [
   { id: "right", x: 3.15, label: "Right" },
 ];
 
-export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, intensity, gatesCleared, collisions, onDrive }: NightRun3DProps) {
+export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, intensity, gatesCleared, totalGates, collisions, onDrive }: NightRun3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const driveRef = useRef(onDrive);
   const disabledRef = useRef(disabled);
@@ -53,7 +54,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     renderer.domElement.dataset.dznNightRunCanvas = "true";
     renderer.domElement.dataset.dznNightRunRecon = scannerAvailable ? "masked" : requiresRecon ? "cleared" : "none";
     renderer.domElement.dataset.dznNightRunIntensity = intensity;
-    renderer.domElement.dataset.dznNightRunGate = String(gatesCleared + 1);
+    renderer.domElement.dataset.dznNightRunGate = String(Math.min(totalGates, gatesCleared + 1));
     renderer.domElement.dataset.dznNightRunHull = String(Math.max(0, 100 - collisions * 50));
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
@@ -480,7 +481,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [active, collisions, gatesCleared, intensity, motionRunning, requiresRecon, safeLane, scannerAvailable]);
+  }, [active, collisions, gatesCleared, intensity, motionRunning, requiresRecon, safeLane, scannerAvailable, totalGates]);
 
   return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
 }
