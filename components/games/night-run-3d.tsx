@@ -35,7 +35,6 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     if (!mount || typeof WebGLRenderingContext === "undefined") return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x070a1a);
     scene.fog = new THREE.FogExp2(0x070a1a, 0.038);
     const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 110);
     camera.position.set(9.5, 7.6, 13.5);
@@ -49,6 +48,16 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     renderer.domElement.dataset.dznNightRunCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
+    const backgroundScene = new THREE.Scene();
+    const backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
+    backgroundCamera.position.z = 1;
+    renderer.autoClear = false;
+    const renderFrame = () => {
+      renderer.clear();
+      renderer.render(backgroundScene, backgroundCamera);
+      renderer.clearDepth();
+      renderer.render(scene, camera);
+    };
 
     scene.add(new THREE.HemisphereLight(0x98b8ff, 0x0a0817, 2.6));
     const moon = new THREE.DirectionalLight(0x899bff, 3.6);
@@ -71,16 +80,37 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
     const materials: { dispose: () => void }[] = [];
     const textures: { dispose: () => void }[] = [];
 
-    // Original district art fills the evacuation-city horizon. The live road, gates, rain,
-    // lights, and hazards remain real Three.js objects in front of it.
+    // Original district art is cropped like `background-size: cover`, preserving its aspect
+    // ratio at every canvas size. The live road, gates, rain, lights, and hazards remain
+    // real Three.js objects in front of it.
     const districtTexture = new THREE.TextureLoader().load("/images/games/night-run-district-v2.png", () => {
       // Reduced-motion mode intentionally has no continuous render loop, so a loaded
       // backdrop needs one explicit frame to appear after the first static render.
-      renderer.render(scene, camera);
+      renderFrame();
     });
     districtTexture.colorSpace = THREE.SRGBColorSpace;
     textures.push(districtTexture);
-    scene.background = districtTexture;
+    const districtBackdropGeometry = new THREE.PlaneGeometry(2, 2);
+    const districtBackdropMaterial = new THREE.MeshBasicMaterial({ map: districtTexture, depthTest: false, depthWrite: false });
+    disposables.push(districtBackdropGeometry); materials.push(districtBackdropMaterial);
+    const districtBackdrop = new THREE.Mesh(districtBackdropGeometry, districtBackdropMaterial);
+    backgroundScene.add(districtBackdrop);
+    const updateDistrictCrop = (width: number, height: number) => {
+      const viewportAspect = width / height;
+      const imageAspect = 16 / 9;
+      if (viewportAspect >= imageAspect) {
+        const repeatY = imageAspect / viewportAspect;
+        districtTexture.repeat.set(1, repeatY);
+        districtTexture.offset.set(0, (1 - repeatY) / 2);
+        renderer.domElement.dataset.dznNightRunBackdropFit = "crop-y";
+      } else {
+        const repeatX = viewportAspect / imageAspect;
+        districtTexture.repeat.set(repeatX, 1);
+        districtTexture.offset.set((1 - repeatX) / 2, 0);
+        renderer.domElement.dataset.dznNightRunBackdropFit = "crop-x";
+      }
+      districtTexture.needsUpdate = true;
+    };
 
     const roadGeometry = new THREE.PlaneGeometry(12.8, 26, 1, 1);
     const roadTexture = createRoadTexture();
@@ -271,7 +301,8 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.render(scene, camera);
+      updateDistrictCrop(width, height);
+      renderFrame();
     });
     resize.observe(mount);
 
@@ -309,7 +340,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, onDrive 
         rainPosition.needsUpdate = true;
         starField.rotation.y = elapsed * 0.014;
       }
-      renderer.render(scene, camera);
+      renderFrame();
       renderer.domElement.dataset.renderFrames = String(Number(renderer.domElement.dataset.renderFrames ?? 0) + 1);
       if (motionRunning) frame = requestAnimationFrame(render);
     }
