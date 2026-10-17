@@ -76,6 +76,11 @@ function parseTargetSequence(value: string): RangerRangeShot[] {
   });
 }
 
+function isLegacyTargetOnlySequence(value: string) {
+  const parsed = JSON.parse(value) as unknown;
+  return Array.isArray(parsed) && parsed.length === RANGER_RANGE_TOTAL_SHOTS && parsed.every(isTarget);
+}
+
 function targetEndsAt(row: RangerRangeRow) {
   return row.target_started_at + rangerRangeTargetWindowMs(row.shot_index);
 }
@@ -153,13 +158,18 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before beginning another range run." }, 429);
     } else if (body.action === "fire") {
       const keys = Object.keys(body);
-      if (keys.length !== 5 || keys.some(key => !["action", "gameId", "version", "target", "sight"].includes(key)) ||
-        !isId(body.gameId) || !Number.isInteger(body.version) || !isTarget(body.target) || !isSight(body.sight)) {
+      const modernRequest = keys.length === 5 && keys.every(key => ["action", "gameId", "version", "target", "sight"].includes(key));
+      const legacyRequest = keys.length === 4 && keys.every(key => ["action", "gameId", "version", "target"].includes(key));
+      if ((!modernRequest && !legacyRequest) || !isId(body.gameId) || !Number.isInteger(body.version) || !isTarget(body.target)
+        || (modernRequest && !isSight(body.sight))) {
         return reply({ error: "Choose a valid range target." }, 400);
       }
       const row = await db.prepare("SELECT * FROM dzn_ranger_range_sessions WHERE user_id = ?").bind(user.id).first<RangerRangeRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This range run is not available." }, 404);
       const sequence = parseTargetSequence(row.target_sequence_json);
+      if (legacyRequest && !isLegacyTargetOnlySequence(row.target_sequence_json)) {
+        return reply({ error: "Choose a valid range target." }, 400);
+      }
       if (row.status !== "playing" || row.version !== body.version || row.shot_index >= sequence.length ||
         now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEndsAt(row)) {
         return reply({ error: "This range run changed or ended. Refresh to continue." }, 409);
@@ -168,7 +178,8 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       if (now < row.updated_at + RANGER_RANGE_MIN_ACTION_INTERVAL_MS) return reply({ error: "Release one arrow at a time." }, 429);
 
       const shot = sequence[row.shot_index];
-      const correct = shot?.target === body.target && rangerRangeSightForWind(shot.wind) === body.sight;
+      const sight: RangerRangeSight = legacyRequest ? "centre" : body.sight as RangerRangeSight;
+      const correct = shot?.target === body.target && rangerRangeSightForWind(shot.wind) === sight;
       const nextShot = correct ? row.shot_index + 1 : row.shot_index;
       const misses = correct ? row.misses : row.misses + 1;
       const status: RangerRangeRow["status"] = nextShot === RANGER_RANGE_TOTAL_SHOTS ? "won" : misses >= RANGER_RANGE_MAX_MISSES ? "failed" : "playing";

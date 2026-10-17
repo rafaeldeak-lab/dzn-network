@@ -94,7 +94,7 @@ async function run() {
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "false";
     assert.equal((await call(fixture)).status, 404);
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
-    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge" }]) {
+    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge", sight: "centre" }]) {
       assert.equal((await call(fixture, body)).status, 400);
     }
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_sessions").get()?.count, 0);
@@ -183,8 +183,17 @@ async function run() {
       .run(JSON.stringify(["ridge", "ruins", "road", "treeline", "tower", "ravine", "ridge", "road"]), Date.now() - 600, Date.now() - 600);
     const state = await visibleTarget(fixture);
     assert.equal(state.game?.wind, "calm");
-    const result = await payload(await call(fixture, fire(state, state.game!.target!)));
+    const result = await payload(await call(fixture, { action: "fire", gameId: state.game!.id, version: state.game!.version, target: state.game!.target! }));
     assert.equal(result.game?.shotsCleared, 1);
+  });
+
+  await test("a current wind-scored session rejects the old four-field fire request", async fixture => {
+    await start(fixture);
+    openTarget(fixture);
+    const state = await visibleTarget(fixture);
+    const response = await call(fixture, { action: "fire", gameId: state.game!.id, version: state.game!.version, target: state.game!.target! });
+    assert.equal(response.status, 400);
+    assert.equal((await visibleTarget(fixture)).game?.shotsCleared, 0);
   });
 
   await test("wrong targets use bounded misses and cannot mint a reward", async fixture => {
