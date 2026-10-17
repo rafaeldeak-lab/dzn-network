@@ -92,7 +92,7 @@ function gameView(row: SignalShiftRow, now: number): SignalShiftGame {
   if (!Number.isInteger(row.moves) || row.moves < 0 || row.moves > SIGNAL_SHIFT_LEGACY_MAX_MOVES || !Number.isInteger(row.version) || row.version < 0 || row.version > 96) {
     throw new Error("Invalid stored Signal Shift state");
   }
-  const legacyOverCap = row.status === "playing" && row.moves > SIGNAL_SHIFT_MAX_MOVES;
+  const legacyOverCap = row.status === "playing" && row.moves >= SIGNAL_SHIFT_MAX_MOVES;
   const status = legacyOverCap ? "failed" : row.status === "playing" && now >= row.started_at + SIGNAL_SHIFT_TTL_MS ? "expired" : row.status;
   return {
     id: row.id,

@@ -141,15 +141,19 @@ async function run() {
     assert.equal(signalShiftIntensity(SIGNAL_SHIFT_MAX_MOVES), "blackout");
   });
 
-  await test("over-cap legacy sessions stay visible as restartable failed routes", async fixture => {
+  await test("legacy sessions at or over the new cap stay visible as restartable failed routes", async fixture => {
     await start(fixture);
+    setBoard(fixture, nearSolvedBoard(), SIGNAL_SHIFT_MAX_MOVES);
+    const atCap = await payload(await call(fixture));
+    assert.equal(atCap.game?.status, "failed");
+    assert.equal((await call(fixture, command(atCap))).status, 409);
     setBoard(fixture, nearSolvedBoard(), SIGNAL_SHIFT_MAX_MOVES + 1);
-    const legacy = await payload(await call(fixture));
-    assert.equal(legacy.game?.moves, SIGNAL_SHIFT_MAX_MOVES + 1);
-    assert.equal(legacy.game?.maxMoves, SIGNAL_SHIFT_LEGACY_MAX_MOVES);
-    assert.equal(legacy.game?.status, "failed");
-    assert.equal(legacy.game?.intensity, "blackout");
-    assert.equal((await call(fixture, command(legacy))).status, 409);
+    const overCap = await payload(await call(fixture));
+    assert.equal(overCap.game?.moves, SIGNAL_SHIFT_MAX_MOVES + 1);
+    assert.equal(overCap.game?.maxMoves, SIGNAL_SHIFT_LEGACY_MAX_MOVES);
+    assert.equal(overCap.game?.status, "failed");
+    assert.equal(overCap.game?.intensity, "blackout");
+    assert.equal((await call(fixture, command(overCap))).status, 409);
     fixture.db.sqlite.exec("UPDATE dzn_signal_shift_sessions SET started_at = started_at - 6000");
     const restarted = await start(fixture);
     assert.equal(restarted.game?.status, "playing");
