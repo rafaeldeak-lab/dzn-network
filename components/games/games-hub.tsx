@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
   LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
@@ -13,7 +13,7 @@ import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
-import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
+import { CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
 import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
@@ -1421,17 +1421,18 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
-  const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, CIPHER_GRID_WORD_LENGTH));
+  const answerLength = game?.answerLength ?? CIPHER_GRID_WORD_LENGTH;
+  const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, answerLength));
   const submit = useCallback(() => {
-    if (!game || !active || busy || entry.length !== CIPHER_GRID_WORD_LENGTH) return;
+    if (!game || !active || busy || entry.length !== answerLength) return;
     void mutate({ action: "guess", gameId: game.id, version: game.version, guess: entry });
-  }, [active, busy, entry, game, mutate]);
+  }, [active, answerLength, busy, entry, game, mutate]);
 
   return <section aria-labelledby="cipher-grid-title" className={styles.cipherGridPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>06 / FIELD CRYPTOGRAPHY</span><h2 id="cipher-grid-title">DZN Cipher Grid</h2></div><KeyRound size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Cipher Grid" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.cipherGridTools}>
-      <div><strong>{game ? `${game.attempts.length} / ${game.maxAttempts} attempts` : "Six field-word attempts"}</strong><span>{game ? "Decode the five-letter DZN field word." : "The answer and reward are verified by the DZN server."}</span></div>
+      <div><strong>{game ? `${game.attempts.length} / ${game.maxAttempts} attempts` : "Five encrypted field terms"}</strong><span>{game ? `Decode the ${game.answerLength}-character DZN field term.` : "The answer and reward are verified by the DZN server."}</span></div>
       <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New decode available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Decode in progress" : game ? "New decode" : "Start decode"}</button>
@@ -1439,12 +1440,12 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
     {game ? <>
       <div className={styles.cipherGridMeta}><span><KeyRound size={14} />{game.attempts.length} / {game.maxAttempts}</span><span><Target size={14} />{game.answerLength} letters</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <form className={styles.cipherGridStage} aria-label="Cipher Grid field-word puzzle" onSubmit={event => { event.preventDefault(); submit(); }}>
-        <div className={styles.cipherGridReadout} aria-live="polite"><span>{active ? "LIVE FIELD CIPHER" : game.status === "won" ? "CIPHER RESOLVED" : "CIPHER CLOSED"}</span><strong>{active ? "Build a five-letter field word" : game.status === "won" ? "Signal decoded" : game.status === "failed" ? "No attempts remain" : "Decode window expired"}</strong></div>
+        <div className={styles.cipherGridReadout} aria-live="polite"><span>{active ? "LIVE FIELD CIPHER" : game.status === "won" ? "CIPHER RESOLVED" : "CIPHER CLOSED"}</span><strong>{active ? `Reconstruct the ${game.answerLength}-character field term` : game.status === "won" ? "Signal decoded" : game.status === "failed" ? "No attempts remain" : "Decode window expired"}</strong></div>
         <div className={styles.cipherGridBoard} role="grid" aria-label="Cipher Grid attempts">
-          {Array.from({ length: CIPHER_GRID_MAX_ATTEMPTS }, (_, rowIndex) => {
+          {Array.from({ length: game.maxAttempts }, (_, rowIndex) => {
             const attempt = game.attempts[rowIndex];
             const draft = active && rowIndex === game.attempts.length ? entry : "";
-            return <div key={rowIndex} className={styles.cipherGridRow} role="row">{Array.from({ length: CIPHER_GRID_WORD_LENGTH }, (_, columnIndex) => {
+            return <div key={rowIndex} className={styles.cipherGridRow} style={{ "--cipher-columns": game.answerLength } as CSSProperties} role="row">{Array.from({ length: game.answerLength }, (_, columnIndex) => {
               const letter = attempt?.guess[columnIndex] ?? draft[columnIndex] ?? "";
               const mark = attempt?.marks[columnIndex];
               return <span key={columnIndex} className={styles.cipherGridTile} role="gridcell" data-mark={mark} data-entry={Boolean(letter)} aria-label={`Attempt ${rowIndex + 1}, letter ${columnIndex + 1}${letter ? `: ${letter}` : ": blank"}`}>{letter}</span>;
@@ -1454,23 +1455,23 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
         <div className={styles.cipherGridEntry}>
           <label htmlFor="cipher-grid-entry">Field word</label>
           <input id="cipher-grid-entry" value={entry} disabled={busy || !active} onChange={event => normalize(event.target.value)}
-            autoCapitalize="characters" autoComplete="off" autoCorrect="off" inputMode="text" maxLength={CIPHER_GRID_WORD_LENGTH} placeholder="TYPE 5 LETTERS" />
-          <button type="submit" className={styles.primary} disabled={busy || !active || entry.length !== CIPHER_GRID_WORD_LENGTH}><KeyRound size={17} />Submit</button>
+            autoCapitalize="characters" autoComplete="off" autoCorrect="off" inputMode="text" maxLength={game.answerLength} placeholder={`TYPE ${game.answerLength} LETTERS`} />
+          <button type="submit" className={styles.primary} disabled={busy || !active || entry.length !== game.answerLength}><KeyRound size={17} />Submit</button>
         </div>
         <div className={styles.cipherGridKeyboard} role="group" aria-label="Cipher Grid keyboard">
           {CIPHER_GRID_KEYS.map(row => <div key={row}>{Array.from(row).map(letter => <button type="button" key={letter} className={styles.cipherGridKey}
-            data-mark={cipherGridKeyMark(payload, letter)} disabled={busy || !active || entry.length >= CIPHER_GRID_WORD_LENGTH} onClick={() => normalize(`${entry}${letter}`)}>{letter}</button>)}</div>)}
+            data-mark={cipherGridKeyMark(payload, letter)} disabled={busy || !active || entry.length >= game.answerLength} onClick={() => normalize(`${entry}${letter}`)}>{letter}</button>)}</div>)}
           <div><button type="button" className={`${styles.cipherGridKey} ${styles.cipherGridWideKey}`} disabled={busy || !active || !entry} onClick={() => setEntry(value => value.slice(0, -1))}><X size={16} /><span>Backspace</span></button></div>
         </div>
         <p className={styles.cipherGridHint}>Teal means the right letter in the right slot. Amber means the letter belongs elsewhere. The server keeps the answer private.</p>
       </form>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Cipher resolved</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIPHER_GRID_REWARD.xp} XP and +${CIPHER_GRID_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice decode complete. Today's reward was already recorded." : "Decode complete."}</span></div></>
-          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>Six guesses ended the decode. Existing Hub progress is unchanged.</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>{game.maxAttempts} guesses ended the decode. Existing Hub progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Decode expired</strong><span>Start a new field cipher when ready.</span></div></>
               : <><Radio size={20} /><div><strong>Decode in progress</strong><span>Use the marks to narrow the DZN field word before the window closes.</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode the field signal.</h3><p>Find a five-letter DZN field word in six attempts. Only the verified server can award progression.</p><div className={styles.rewardPills}><span>6 attempts</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode the field signal.</h3><p>Reconstruct a five-character DZN field term in five attempts. Only the verified server can award progression.</p><div className={styles.rewardPills}><span>5 letters</span><span>5 attempts</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

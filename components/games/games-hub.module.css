@@ -465,17 +465,18 @@
 .cipherGridMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .cipherGridMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .cipherGridMeta span:last-child { margin-left: auto; }
-.cipherGridStage { display: grid; gap: 18px; padding: 22px; border: 1px solid #465759; border-radius: 6px; background: #0c1213; }
+.cipherGridStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #486269; border-radius: 6px; background-color: #080e10; background-image: linear-gradient(#041015d2, #071015e8), url("/images/games/cipher-grid-terminal-v2.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 92px #020506c9, 0 18px 42px #00000042; }
+.cipherGridStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .75; background-image: repeating-linear-gradient(0deg, transparent 0 31px, #61c8be13 32px 33px), repeating-linear-gradient(90deg, transparent 0 31px, #61c8be10 32px 33px); }
 .cipherGridReadout { display: grid; gap: 5px; text-align: center; }
-.cipherGridReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
-.cipherGridReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
-.cipherGridBoard { display: grid; gap: 7px; width: min(100%, 390px); margin: 0 auto; }
-.cipherGridRow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
-.cipherGridTile { display: grid; place-items: center; aspect-ratio: 1; min-width: 0; border: 1px solid #3f5051; border-radius: 4px; color: #e7f0ef; background: #111b1c; font: 700 20px var(--font-geist-mono), monospace; line-height: 1; }
-.cipherGridTile[data-entry=true] { border-color: #6d898a; background: #172526; }
-.cipherGridTile[data-mark=correct] { border-color: #5ee4d4; color: #dffefa; background: #16433e; }
-.cipherGridTile[data-mark=present] { border-color: #e8bf61; color: #fff5d8; background: #4a3a1b; }
-.cipherGridTile[data-mark=absent] { border-color: #394548; color: #8a999b; background: #182022; }
+.cipherGridReadout > span { color: #a9d6d1; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
+.cipherGridReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); text-shadow: 0 2px 14px #000; }
+.cipherGridBoard { display: grid; gap: 7px; width: min(100%, 456px); margin: 0 auto; padding: 12px; border: 1px solid #527177; border-radius: 6px; background: #061114bc; box-shadow: inset 0 0 0 1px #8ce3d214, inset 0 -28px 48px #0000005c; }
+.cipherGridRow { display: grid; grid-template-columns: repeat(var(--cipher-columns, 6), minmax(0, 1fr)); gap: 7px; }
+.cipherGridTile { display: grid; place-items: center; aspect-ratio: 1; min-width: 0; border: 1px solid #466066; border-radius: 4px; color: #e7f0ef; background: #0c1a1ddb; font: 700 clamp(16px, 4vw, 22px) var(--font-geist-mono), monospace; line-height: 1; box-shadow: inset 0 1px #c4fff20d; }
+.cipherGridTile[data-entry=true] { border-color: #7bb8b1; background: #173438e0; }
+.cipherGridTile[data-mark=correct] { border-color: #5ee4d4; color: #dffefa; background: #16433ee8; }
+.cipherGridTile[data-mark=present] { border-color: #e8bf61; color: #fff5d8; background: #4a3a1be8; }
+.cipherGridTile[data-mark=absent] { border-color: #394f54; color: #8a999b; background: #142125e8; }
 .cipherGridEntry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: min(100%, 520px); margin: 0 auto; }
 .cipherGridEntry label { color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .cipherGridEntry input { min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid #415658; border-radius: 5px; color: #eef6f5; background: #10191a; font: 700 14px var(--font-geist-mono), monospace; letter-spacing: .12em; text-align: center; text-transform: uppercase; }
