@@ -369,6 +369,8 @@
 .outpostRunMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .outpostRunMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .outpostRunMeta span:last-child { margin-left: auto; }
+.outpostRunMeta span[data-objective] { color: #c1f6ee; font-weight: 800; text-transform: uppercase; }
+.outpostRunMeta span[data-objective="relay"] { color: #9eeef3; }
 .outpostRunMeta span[data-intensity] { color: #a8d7dc; text-transform: uppercase; }
 .outpostRunMeta span[data-intensity="pressure"] { color: #ffd67a; }
 .outpostRunMeta span[data-intensity="blackout"] { color: #ff9bac; }
@@ -376,12 +378,14 @@
 .outpostRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: radial-gradient(circle at 50% 0, #5475862e, transparent 45%), repeating-linear-gradient(0deg, transparent 0 40px, #5ebeb30d 41px 42px), repeating-linear-gradient(90deg, transparent 0 40px, #5ebeb308 41px 42px); }
 .outpostRunStage[data-intensity="pressure"] { border-color: #87724b; box-shadow: inset 0 0 88px #46391666; }
 .outpostRunStage[data-intensity="blackout"] { border-color: #8b4f68; box-shadow: inset 0 0 96px #491a3c8a, 0 0 24px #34203859; }
+.outpostRunStage[data-objective="beacon"] { border-color: #507f7c; box-shadow: inset 0 0 92px #153c3d73; }
 .outpostRunReadout { display: grid; gap: 5px; text-align: center; }
 .outpostRunReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .outpostRunReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
 .outpostRunMapShell { position: relative; isolation: isolate; width: min(100%, 456px); aspect-ratio: 1; margin: 0 auto; padding: 22px; border: 1px solid #537173; border-radius: 6px; overflow: hidden; background: linear-gradient(#061012b8, #0b141ad1), url("/images/games/outpost-run-expanse-v2.png") center / cover; box-shadow: inset 0 0 0 1px #8ce3d20f, inset 0 -42px 54px #0000005c, 0 18px 42px #00000045; }
 .outpostRunMapShell[data-intensity="pressure"] { border-color: #a18951; }
 .outpostRunMapShell[data-intensity="blackout"] { border-color: #a85d7b; box-shadow: inset 0 0 0 1px #ffb7d741, inset 0 -42px 54px #1708118f, 0 18px 42px #00000062; }
+.outpostRunMapShell[data-objective="beacon"] { border-color: #71c9c1; box-shadow: inset 0 0 0 1px #abfff45c, inset 0 -42px 54px #041c1c82, 0 18px 42px #00000055; }
 .outpostRunMapShell::before, .outpostRunMapShell::after { content: ""; position: absolute; inset: 10px; z-index: -1; pointer-events: none; border: 1px solid #a4e7df1e; }
 .outpostRunMapShell::before { background-image: linear-gradient(120deg, transparent 44%, #b3fff808 45% 47%, transparent 48%), linear-gradient(26deg, transparent 40%, #f9cb6a0a 41% 43%, transparent 44%), repeating-linear-gradient(90deg, transparent 0 47px, #6be7d20b 48px 49px); opacity: .86; }
 .outpostRunMapShell::after { inset: auto 16px 16px; height: 18%; border-width: 1px 0 0; background: linear-gradient(90deg, #6cf4e718, transparent 20% 78%, #f6c56718); clip-path: polygon(0 100%, 17% 28%, 31% 65%, 46% 8%, 61% 66%, 76% 24%, 100% 100%); opacity: .75; }
@@ -400,6 +404,7 @@
 .outpostRunCell[data-terrain=clear] { color: #a5c9ba; background: linear-gradient(145deg, #28483d, #17312f); border-color: #5d8d7f; }
 .outpostRunCell[data-terrain=start] { color: #f0da7d; background: linear-gradient(145deg, #4b4824, #2d311d); border-color: #9a8c46; }
 .outpostRunCell[data-terrain=hazard] { color: #ffb069; background: linear-gradient(145deg, #5b3520, #351e18); border-color: #a16136; }
+.outpostRunCell[data-terrain=beacon] { color: #fff0a4; background: linear-gradient(145deg, #62562b, #383117); border-color: #d7c56b; box-shadow: inset 0 0 0 1px #fff1a152, 0 0 18px #e7cc6261; }
 .outpostRunCell[data-terrain=relay] { color: #84ffec; background: linear-gradient(145deg, #1e5b52, #123632); border-color: #5ee0cc; box-shadow: inset 0 0 0 1px #acfff168, 0 0 18px #36dac95c; }
 .outpostRunCell[data-player=true] { border-color: #f0f6f4; box-shadow: inset 0 0 0 1px #f0f6f4a3, 0 0 18px #4de5d86b; }
 .outpostRunPlayer { position: absolute; z-index: 2; color: #ffffff; filter: drop-shadow(0 1px 5px #000); }

@@ -2,9 +2,9 @@
 
 ## Scope
 
-This source-only release adds DZN Outpost Run to the authenticated Games Hub. It is an original tactical extraction game: the player crosses a five-by-five fog grid, uses one scanner reading, preserves stamina around hazards, and reaches a server-held emergency relay before the run expires.
+This source-only release adds DZN Outpost Run to the authenticated Games Hub. It is an original tactical extraction game: the player crosses a five-by-five fog grid, uses one scanner reading, preserves stamina around hazards, secures a server-held field beacon, and only then reaches the emergency relay before the run expires.
 
-The server owns the selected field layout, relay position, hazard positions, player coordinates, visibility, stamina, movement count, scan use, expiry, result, daily reward, Hub history, XP, Workshop parts, and challenge totals. The browser receives only previously entered cells and never the stored layout.
+The server owns the selected field layout, beacon and relay positions, hazard positions, player coordinates, visibility, stamina, movement count, scan use, expiry, result, daily reward, Hub history, XP, Workshop parts, and challenge totals. New sessions receive a two-stage route with a protected six-to-eight-move extraction line and a limited recovery budget; existing sessions without a beacon remain valid direct-relay runs. The browser receives only previously entered cells and never the stored layout.
 
 The game adds no paid advantage, server-stat effect, competitive-ranking effect, Discord role change, Discord message, or payment action.
 

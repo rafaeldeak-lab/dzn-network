@@ -11,7 +11,7 @@ import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof outpostFixture>>;
 type Coordinate = { row: number; column: number };
-type Layout = { target: Coordinate; hazards: Coordinate[] };
+type Layout = { target: Coordinate; hazards: Coordinate[]; beacon?: Coordinate; beaconSecured?: boolean };
 let passed = 0;
 
 async function outpostFixture(migrate = true) {
@@ -78,7 +78,9 @@ function safePath(start: Coordinate, target: Coordinate, hazards: Coordinate[]):
 async function completeRun(fixture: Fixture, initial: OutpostRunPayload, stopBeforeFinal = false) {
   let state = initial;
   const layout = layoutFor(fixture);
-  const moves = safePath({ row: 2, column: 2 }, layout.target, layout.hazards);
+  const beaconPath = layout.beacon ? safePath({ row: 2, column: 2 }, layout.beacon, layout.hazards) : [];
+  const relayPath = safePath(layout.beacon ?? { row: 2, column: 2 }, layout.target, layout.hazards);
+  const moves = [...beaconPath, ...relayPath];
   const count = stopBeforeFinal ? moves.length - 1 : moves.length;
   for (let index = 0; index < count; index++) {
     settle(fixture);
@@ -132,7 +134,11 @@ async function run() {
       assert.equal(layout.hazards.length, 5);
       assert.equal(new Set(layout.hazards.map(hazard => `${hazard.row}:${hazard.column}`)).size, layout.hazards.length);
       assert.ok(Math.abs(layout.target.row - 2) + Math.abs(layout.target.column - 2) >= 4);
-      assert.ok(safePath({ row: 2, column: 2 }, layout.target, layout.hazards).length <= OUTPOST_RUN_MAX_MOVES);
+      assert.ok(layout.beacon, "Every newly generated tactical run must have a field beacon.");
+      const beaconPath = safePath({ row: 2, column: 2 }, layout.beacon!, layout.hazards);
+      const relayPath = safePath(layout.beacon!, layout.target, layout.hazards);
+      assert.ok(beaconPath.length + relayPath.length >= 6, "The beacon objective must make a fresh run meaningfully longer than a direct relay sprint.");
+      assert.ok(beaconPath.length + relayPath.length <= OUTPOST_RUN_MAX_MOVES - 2, "The server must leave a small recovery budget around the protected two-stage route.");
       gameIds.add(state.game.id);
       fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
     }
@@ -151,6 +157,33 @@ async function run() {
     const scanned = await payload(await call(fixture, command(state, "scan")));
     settle(fixture);
     assert.equal((await call(fixture, command(scanned, "scan"))).status, 409);
+  });
+
+  await test("new tactical runs require the field beacon before the relay and preserve legacy sessions", async fixture => {
+    let state = await start(fixture);
+    const layout = layoutFor(fixture);
+    assert.equal(state.game?.objective, "beacon");
+    assert.equal(state.game?.beaconSecured, false);
+    assert.ok(layout.beacon);
+    for (const direction of safePath({ row: 2, column: 2 }, layout.beacon!, layout.hazards)) {
+      settle(fixture);
+      state = await payload(await call(fixture, command(state, "move", direction)));
+    }
+    assert.equal(state.game?.objective, "relay");
+    assert.equal(state.game?.beaconSecured, true);
+    assert.equal(state.game?.scanAvailable, true, "Reaching the beacon without scanning must preserve the one relay scan.");
+    assert.ok(state.game?.visibleCells.some(cell => cell.kind === "beacon"), "Only the entered beacon cell may become visible to the browser.");
+
+    settle(fixture);
+    state = await payload(await call(fixture, command(state, "scan")));
+    assert.match(state.game?.scanHint ?? "", /north|south|east|west|relay acquired/, "An unused scanner spent after the beacon must return a relay bearing.");
+    assert.equal(state.game?.scanAvailable, false);
+
+    fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET layout_json = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify({ target: layout.target, hazards: layout.hazards }));
+    const legacy = await payload(await call(fixture));
+    assert.equal(legacy.game?.objective, "relay", "Existing sessions without a beacon must remain playable as direct relay runs.");
+    assert.equal(legacy.game?.beaconSecured, false);
   });
 
   await test("server-owned layout, hazards, extraction and daily reward cap apply exactly", async fixture => {

@@ -8,7 +8,7 @@ export const OUTPOST_RUN_MIN_MOVE_INTERVAL_MS = 180;
 
 export const OUTPOST_RUN_DIRECTIONS = ["north", "east", "south", "west"] as const;
 export type OutpostRunDirection = (typeof OUTPOST_RUN_DIRECTIONS)[number];
-export type OutpostRunCellKind = "start" | "clear" | "hazard" | "relay";
+export type OutpostRunCellKind = "start" | "clear" | "hazard" | "beacon" | "relay";
 export type OutpostRunStatus = "playing" | "won" | "failed" | "expired";
 export type OutpostRunIntensity = "calibration" | "pressure" | "blackout";
 
@@ -36,6 +36,8 @@ export type OutpostRunGame = {
   moves: number;
   maxMoves: number;
   intensity: OutpostRunIntensity;
+  objective: "beacon" | "relay";
+  beaconSecured: boolean;
   scanHint: string | null;
   scanAvailable: boolean;
   visibleCells: OutpostRunCell[];
