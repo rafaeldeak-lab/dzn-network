@@ -57,7 +57,10 @@ function createTargetSequence(): Array<[RangerRangeTarget, RangerRangeWind]> {
   while (sequence.length < RANGER_RANGE_TOTAL_SHOTS) {
     const previous = sequence.at(-1)?.[0];
     const candidates = previous ? RANGER_RANGE_TARGETS.filter(target => target !== previous) : RANGER_RANGE_TARGETS;
-    const wind = sequence.length < 2 ? "calm" : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)];
+    // Let players calibrate twice, then guarantee an early crosswind before later random conditions.
+    const wind = sequence.length < 2 ? "calm" : sequence.length === 2
+      ? (randomIndex(2) === 0 ? "left" : "right")
+      : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)];
     sequence.push([candidates[randomIndex(candidates.length)], wind]);
   }
   return sequence;
