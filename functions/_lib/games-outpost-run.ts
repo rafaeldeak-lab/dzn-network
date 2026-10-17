@@ -142,17 +142,37 @@ function protectedRoute(from: Coordinate, target: Coordinate) {
   return route;
 }
 
+function hasSafeRoute(from: Coordinate, target: Coordinate, hazards: Coordinate[]) {
+  const queue = [from];
+  const visited = new Set([`${from.row}:${from.column}`]);
+  while (queue.length) {
+    const position = queue.shift()!;
+    if (sameCoordinate(position, target)) return true;
+    for (const direction of OUTPOST_RUN_DIRECTIONS) {
+      const next = moveCoordinate(position, direction);
+      const key = `${next.row}:${next.column}`;
+      if (!isCoordinate(next) || visited.has(key) || hazards.some(hazard => sameCoordinate(hazard, next))) continue;
+      visited.add(key);
+      queue.push(next);
+    }
+  }
+  return false;
+}
+
 function chooseLayout(): OutpostLayout {
-  const target = extractionTargets[randomIndex(extractionTargets.length)];
-  const beaconCandidates = coordinates.filter(cell => !sameCoordinate(cell, start) && !sameCoordinate(cell, target)
-    && manhattanDistance(start, cell) >= 2
-    && manhattanDistance(start, cell) + manhattanDistance(cell, target) >= 6
-    && manhattanDistance(start, cell) + manhattanDistance(cell, target) <= OUTPOST_RUN_MAX_MOVES - 2);
-  const beacon = beaconCandidates[randomIndex(beaconCandidates.length)];
-  const route = [...protectedRoute(start, beacon), ...protectedRoute(beacon, target).slice(1)];
-  const protectedCells = new Set(route.map(cell => `${cell.row}:${cell.column}`));
-  const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, GENERATED_HAZARD_COUNT);
-  return { target, hazards, beacon, beaconSecured: false };
+  for (let attempt = 0; attempt < 48; attempt++) {
+    const target = extractionTargets[randomIndex(extractionTargets.length)];
+    const beaconCandidates = coordinates.filter(cell => !sameCoordinate(cell, start) && !sameCoordinate(cell, target)
+      && manhattanDistance(start, cell) >= 2
+      && manhattanDistance(start, cell) + manhattanDistance(cell, target) >= 6
+      && manhattanDistance(start, cell) + manhattanDistance(cell, target) <= OUTPOST_RUN_MAX_MOVES - 2);
+    const beacon = beaconCandidates[randomIndex(beaconCandidates.length)];
+    const route = [...protectedRoute(start, beacon), ...protectedRoute(beacon, target).slice(1)];
+    const protectedCells = new Set(route.map(cell => `${cell.row}:${cell.column}`));
+    const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, GENERATED_HAZARD_COUNT);
+    if (hasSafeRoute(start, beacon, hazards) && hasSafeRoute(beacon, target, hazards)) return { target, hazards, beacon, beaconSecured: false };
+  }
+  throw new Error("Unable to build a safe Outpost Run route");
 }
 
 function moveCoordinate(position: Coordinate, direction: OutpostRunDirection): Coordinate {

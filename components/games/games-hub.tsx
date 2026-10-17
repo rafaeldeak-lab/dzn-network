@@ -9,6 +9,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, Circ
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
+import { HUB_OPERATIONS, buildOperationsRecord, operationForGame } from "@/lib/games-operations";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
@@ -206,6 +207,8 @@ export function GamesHub() {
   ] : [];
   const equipmentProgress = { xp, assemblies: summary?.assemblies ?? 0 };
   const equipmentCollected = HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, equipmentProgress)).length;
+  const operationsRecord = summary ? buildOperationsRecord(summary) : null;
+  const selectedOperation = operationForGame(selectedPlayGame);
 
   function start() {
     setReplace(false); setTool("reveal");
@@ -246,20 +249,32 @@ export function GamesHub() {
       {error && <div className={styles.error} role="alert"><span>{error}</span><button title="Refresh saved progress" disabled={busy} onClick={() => void refresh()}><RefreshCw size={18} /></button></div>}
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
-          {view === "play" && <div className={styles.gamePicker} role="group" aria-label="Choose a game">
-            {availableGames.minefield && <button data-game="minefield" aria-pressed={selectedPlayGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical breach</small></span></button>}
-            {availableGames.trivia && <button data-game="trivia" aria-pressed={selectedPlayGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival intel</small></span></button>}
-            {availableGames["word-chain"] && <button data-game="word-chain" aria-pressed={selectedPlayGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
-            {availableGames["hide-seek"] && <button data-game="hide-seek" aria-pressed={selectedPlayGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Concealed beacon sweep</small></span></button>}
-            {availableGames["relay-rush"] && <button data-game="relay-rush" aria-pressed={selectedPlayGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Server-timed reaction run</small></span></button>}
-            {availableGames["cipher-grid"] && <button data-game="cipher-grid" aria-pressed={selectedPlayGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code breach</small></span></button>}
-            {availableGames["echo-array"] && <button data-game="echo-array" aria-pressed={selectedPlayGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
-            {availableGames["outpost-run"] && <button data-game="outpost-run" aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
-            {availableGames["signal-shift"] && <button data-game="signal-shift" aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
-            {availableGames["circuit-forge"] && <button data-game="circuit-forge" aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
-            {availableGames["ranger-range"] && <button data-game="ranger-range" aria-pressed={selectedPlayGame === "ranger-range"} onClick={() => setPlayGame("ranger-range")}><Crosshair size={17} /><span><strong>Ranger Range</strong><small>Escalating bow drill</small></span></button>}
-            {availableGames["night-run"] && <button data-game="night-run" aria-pressed={selectedPlayGame === "night-run"} onClick={() => setPlayGame("night-run")}><Radio size={17} /><span><strong>Night Run</strong><small>3D blackout escape</small></span></button>}
-          </div>}
+          {view === "play" && operationsRecord && <>
+            <section className={styles.operationsCommand} aria-labelledby="operations-command-title">
+              <Image className={styles.operationsCommandArt} src="/images/games/operations-command-v1.webp" alt="" fill sizes="(max-width: 760px) 100vw, 900px" priority />
+              <div className={styles.operationsCommandScrim} aria-hidden="true" />
+              <div className={styles.operationsCommandCopy}>
+                <span className={styles.eyebrow}>DZN OPERATIONS / VERIFIED FIELD RECORD</span>
+                <h2 id="operations-command-title">Choose your next operation.</h2>
+                <p>Every result below is checked by the DZN game service before it changes your record. Pick a discipline, clear the operation, and build one connected field history.</p>
+                <div className={styles.operationFocus}><span>{selectedOperation.code}</span><strong>{selectedOperation.name}</strong><small>{selectedOperation.pressure}</small></div>
+              </div>
+              <dl className={styles.operationsRecord} aria-label="Your verified operations record">
+                <div><dt>Clearance</dt><dd>LV {operationsRecord.clearance.level}<span>{operationsRecord.clearance.title}</span></dd></div>
+                <div><dt>Recent record</dt><dd>{operationsRecord.recentOutcomes}<span>Latest verified outcomes</span></dd></div>
+                <div><dt>Weekly XP</dt><dd>{operationsRecord.weeklyXp.toLocaleString()}<span>Current seven-day window</span></dd></div>
+                <div><dt>Field streak</dt><dd>{operationsRecord.streak}<span>Consecutive reward days</span></dd></div>
+              </dl>
+              <div className={styles.clearanceTrack}><span>Clearance progress</span><progress value={operationsRecord.clearanceProgress} max={100} aria-label="Field clearance progress" /><strong>{operationsRecord.clearance.nextXp === null ? "Maximum clearance" : `${Math.max(0, operationsRecord.clearance.nextXp - xp).toLocaleString()} XP to next clearance`}</strong></div>
+            </section>
+            <div className={styles.gamePicker} role="group" aria-label="Choose an operation">
+              {Object.values(HUB_OPERATIONS).filter(operation => availableGames[operation.id]).map(operation => <button key={operation.id} data-game={operation.id} aria-pressed={selectedPlayGame === operation.id} onClick={() => setPlayGame(operation.id)}>
+                <span className={styles.operationCode}>{operation.code}</span>
+                <span className={styles.operationDescription}><small>{operation.discipline}</small><strong>{operation.name}</strong><span>{operation.objective}</span></span>
+                <span className={styles.operationPressure}>{selectedPlayGame === operation.id ? "Selected" : operation.pressure}</span>
+              </button>)}
+            </div>
+          </>}
           {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
             <div className={styles.gameTools}>

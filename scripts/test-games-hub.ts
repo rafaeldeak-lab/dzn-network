@@ -53,6 +53,11 @@ async function run() {
   assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
   assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
   assert.match(gamesHubSource, /Ranger Range/, "Games Hub must retain the server-verified Ranger Range route.");
+  assert.match(gamesHubSource, /HUB_OPERATIONS/, "Games Hub must present every available mode through the shared Operations Command metadata.");
+  assert.match(gamesHubSource, /operations-command-v1\.webp/, "Games Hub must use the original Operations Command artwork, not copied third-party art.");
+  assert.match(gamesHubSource, /Every result below is checked by the DZN game service/, "Operations Command must describe the server-verified reward boundary truthfully.");
+  assert.match(gamesHubStyles, /\.operationsCommand/, "Games Hub must retain the compact Operations Command layout.");
+  assert.match(gamesHubStyles, /grid-auto-flow: column/, "Narrow Games Hub layouts must use a compact browseable operations rail instead of a twelve-card vertical stack.");
   assert.match(gamesHubSource, /minefield-night-recon-v2\.png/, "Minefield must use the dedicated reconnaissance briefing artwork rather than a generic scanner placeholder.");
   assert.match(gamesHubStyles, /minefield-command-table-v1\.webp/, "The 3D Minefield field must use the original demining command-table environment.");
   assert.match(minefieldSceneSource, /alpha: true/, "The Minefield tactical tiles must render transparently above the command-table environment.");
