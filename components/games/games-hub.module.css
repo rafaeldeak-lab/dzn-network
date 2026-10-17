@@ -332,18 +332,22 @@
 .echoArrayMeta span[data-intensity] { color: #a8e5df; text-transform: uppercase; }
 .echoArrayMeta span[data-intensity="echo"] { color: #ffd67a; }
 .echoArrayMeta span[data-intensity="blackout"] { color: #ff9bac; }
-.echoArrayStage { position: relative; isolation: isolate; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 370px; overflow: hidden; padding: 22px; border: 1px solid #465759; border-radius: 6px; background: #0c1213; }
-.echoArrayStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: repeating-linear-gradient(0deg, transparent 0 40px, #5ebeb311 41px 42px), repeating-linear-gradient(90deg, transparent 0 40px, #5ebeb30d 41px 42px); }
-.echoArrayStage::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border: 2px solid #55e1d300; transition: border-color 160ms ease; }
+.echoArrayPanel { position: relative; isolation: isolate; overflow: hidden; padding: 18px; border: 1px solid #455951; border-radius: 6px; background: #0c1315; }
+.echoArrayPanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .9; background-image: linear-gradient(90deg, #061011eb 0%, #081719d9 47%, #090e12e8 100%), url("/images/games/echo-array-signal-chamber-v2.png"); background-position: center; background-size: cover; }
+.echoArrayPanel > * { position: relative; z-index: 1; }
+.echoArrayStage { position: relative; isolation: isolate; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 370px; overflow: hidden; padding: 22px; border: 1px solid #527478; border-radius: 6px; background: #071113c7; box-shadow: inset 0 0 0 1px #a1fbef12, inset 0 -70px 100px #020a0bb8, 0 20px 48px #00000045; }
+.echoArrayStage > * { position: relative; z-index: 1; }
+.echoArrayStage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(circle at 50% 50%, #60dac51a, transparent 46%), repeating-linear-gradient(0deg, transparent 0 40px, #5ebeb311 41px 42px), repeating-linear-gradient(90deg, transparent 0 40px, #5ebeb30d 41px 42px); }
+.echoArrayStage::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; border: 2px solid #55e1d300; transition: border-color 160ms ease; }
 .echoArrayStage[data-revealing=true]::after { border-color: #55e1d34d; }
 .echoArrayStage[data-intensity="echo"] { border-color: #907947; box-shadow: inset 0 0 72px #4c35166e; }
-.echoArrayStage[data-intensity="blackout"] { border-color: #97536a; background: #190b16; box-shadow: inset 0 0 86px #5c183c80, 0 0 24px #48132c36; }
-.echoArrayStage[data-intensity="blackout"]::before { background-image: repeating-linear-gradient(0deg, transparent 0 28px, #ff7ab524 29px 30px), repeating-linear-gradient(90deg, transparent 0 28px, #5eeaff1c 29px 30px); }
+.echoArrayStage[data-intensity="blackout"] { border-color: #97536a; background: #190b16ce; box-shadow: inset 0 0 86px #5c183c80, 0 0 24px #48132c36; }
+.echoArrayStage[data-intensity="blackout"]::before { background-image: radial-gradient(circle at 50% 50%, #ff6daa24, transparent 48%), repeating-linear-gradient(0deg, transparent 0 28px, #ff7ab524 29px 30px), repeating-linear-gradient(90deg, transparent 0 28px, #5eeaff1c 29px 30px); }
 .echoArrayReadout { display: grid; gap: 5px; text-align: center; }
 .echoArrayReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .echoArrayReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
 .echoArrayNodes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 12px; width: min(100%, 470px); margin: 0 auto; padding: 24px 0; }
-.echoArrayNode { min-width: 0; min-height: 114px; display: grid; align-content: center; justify-items: center; gap: 6px; padding: 12px 8px; border: 1px solid #3f5051; border-radius: 6px; color: #c6d2d2; background: #131b1c; text-align: center; transition: border-color 110ms ease, background-color 110ms ease, color 110ms ease, box-shadow 110ms ease; }
+.echoArrayNode { min-width: 0; min-height: 114px; display: grid; align-content: center; justify-items: center; gap: 6px; padding: 12px 8px; border: 1px solid #4d6668; border-radius: 6px; color: #c6d2d2; background: linear-gradient(145deg, #122326ed, #0b1418e8); box-shadow: inset 0 1px #c4fff016, inset 0 -14px 22px #00000038; text-align: center; transition: border-color 110ms ease, background-color 110ms ease, color 110ms ease, box-shadow 110ms ease; }
 .echoArrayNode > span { display: grid; place-items: center; width: 29px; height: 25px; border: 1px solid currentColor; border-radius: 4px; color: #dce8e8; font: 11px var(--font-geist-mono), monospace; font-weight: 800; }
 .echoArrayNode strong { color: #eff6f5; font-size: 14px; }
 .echoArrayNode small { color: var(--muted); font-size: 10px; }
