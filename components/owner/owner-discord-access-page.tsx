@@ -105,7 +105,8 @@ function deliveryReadinessItems(
     ];
   }
 
-  const checks = diagnostic?.checks;
+  const diagnosticUnverified = diagnostic?.status === "discord_error";
+  const checks = diagnosticUnverified ? undefined : diagnostic?.checks;
   const discoveryChecks = discovery?.checks;
   return [
     {
@@ -114,8 +115,10 @@ function deliveryReadinessItems(
         ? "The configured bot can identify itself and is connected to the central DZN server."
         : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership
           ? "The read-only discovery found the bot in the central DZN server; final configuration is still required."
-          : "The bot must be connected to the central DZN server before delivery can be enabled.",
-      state: checks?.botIdentity && checks.botGuildMembership ? "ready" : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership ? "unchecked" : "blocked",
+          : diagnosticUnverified
+            ? "The latest Discord read-only check did not complete. Run it again before changing bot or server settings."
+            : "The bot must be connected to the central DZN server before delivery can be enabled.",
+      state: checks?.botIdentity && checks.botGuildMembership ? "ready" : discoveryChecks?.botIdentity && discoveryChecks.botGuildMembership ? "unchecked" : diagnosticUnverified ? "unchecked" : "blocked",
     },
     {
       label: "Private one-use invite channel",
@@ -123,8 +126,10 @@ function deliveryReadinessItems(
         ? "The bot can create a one-use invite in the approved private channel with only the required channel permissions."
         : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0
           ? "A private channel is available. It must be saved as the central invite channel before delivery can be enabled."
-          : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
-      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0 ? "unchecked" : "blocked",
+          : diagnosticUnverified
+            ? "The latest Discord read-only check did not complete. Do not change the invite channel until it can be verified."
+            : "Create or select a channel that is private to the DZN team and verified owners; do not use a public channel.",
+      state: checks?.inviteChannel && checks.inviteChannelPrivate && checks.canViewInviteChannel && checks.canCreateInvite && !checks.botHasUnexpectedInviteChannelPermissions ? "ready" : (discovery?.privateInviteChannelCandidates.length ?? 0) > 0 ? "unchecked" : diagnosticUnverified ? "unchecked" : "blocked",
     },
     {
       label: "Verified Server Owner role",
@@ -132,8 +137,10 @@ function deliveryReadinessItems(
         ? "The dedicated zero-permission owner role exists, is safe to grant, and can be assigned below the bot role."
         : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false)
           ? "A safe zero-permission owner role is available. It must be selected before delivery can be enabled."
-          : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
-      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false) ? "unchecked" : "blocked",
+          : diagnosticUnverified
+            ? "The latest Discord read-only check did not complete. Do not change the owner role until it can be verified."
+            : "The owner role must be a zero-permission role below the bot. Channel access belongs in channel overwrites, not the role itself.",
+      state: checks?.targetRole && checks.targetRoleSafe && checks.targetRoleBelowBot ? "ready" : (discovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false) ? "unchecked" : diagnosticUnverified ? "unchecked" : "blocked",
     },
     {
       label: "Least-privilege bot permissions",
