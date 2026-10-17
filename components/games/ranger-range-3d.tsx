@@ -2,11 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { RangerRangeTarget } from "@/lib/games-ranger-range";
+import type { RangerRangeTarget, RangerRangeWind } from "@/lib/games-ranger-range";
 
 type RangerRange3DProps = {
   safeTarget: RangerRangeTarget | null;
+  wind: RangerRangeWind | null;
   active: boolean;
+  sightReady: boolean;
   disabled: boolean;
   motionRunning: boolean;
   onFire: (target: RangerRangeTarget) => void;
@@ -21,15 +23,19 @@ const TARGETS: Array<{ id: RangerRangeTarget; x: number; z: number; distance: nu
   { id: "ravine", x: 1.4, z: -5.8, distance: 0.72 },
 ];
 
-export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onFire }: RangerRange3DProps) {
+export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, motionRunning, onFire }: RangerRange3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const fireRef = useRef(onFire);
   const disabledRef = useRef(disabled);
   const liveTargetRef = useRef<RangerRangeTarget | null>(safeTarget);
+  const windRef = useRef<RangerRangeWind | null>(wind);
+  const sightReadyRef = useRef(sightReady);
 
   useEffect(() => { fireRef.current = onFire; }, [onFire]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
   useEffect(() => { liveTargetRef.current = active ? safeTarget : null; }, [active, safeTarget]);
+  useEffect(() => { windRef.current = active ? wind : null; }, [active, wind]);
+  useEffect(() => { sightReadyRef.current = sightReady; }, [sightReady]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -45,6 +51,7 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     }
 
     const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x07100b, 0.035);
     const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 80);
     camera.position.set(0, 2.8, 7.9);
     camera.lookAt(0, 1.15, -7.4);
@@ -73,6 +80,56 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
     const rangeLight = new THREE.PointLight(0x4fe5b5, 11, 22, 1.7);
     rangeLight.position.set(0, 2.5, 2);
     scene.add(rangeLight);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(34, 42, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0x112018, roughness: 0.95, metalness: 0.02, transparent: true, opacity: 0.72 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(0, -0.02, -9);
+    scene.add(ground);
+
+    const bowGroup = new THREE.Group();
+    bowGroup.position.set(-1.2, 0.65, 3.05);
+    bowGroup.rotation.set(-0.08, 0.2, -0.06);
+    const bowMaterial = new THREE.MeshStandardMaterial({ color: 0x9a5b2d, roughness: 0.44, metalness: 0.08 });
+    const bowCore = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.72, 8), bowMaterial);
+    bowGroup.add(bowCore);
+    const upperLimb = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0.34, 0), new THREE.Vector3(-0.35, 0.95, -0.08), new THREE.Vector3(-0.12, 1.65, -0.16),
+    ]), 18, 0.052, 8, false);
+    const lowerLimb = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -0.34, 0), new THREE.Vector3(-0.35, -0.95, -0.08), new THREE.Vector3(-0.12, -1.65, -0.16),
+    ]), 18, 0.052, 8, false);
+    bowGroup.add(new THREE.Mesh(upperLimb, bowMaterial), new THREE.Mesh(lowerLimb, bowMaterial));
+    const stringGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-0.12, 1.65, -0.16), new THREE.Vector3(0.19, 0, 0.08), new THREE.Vector3(-0.12, -1.65, -0.16),
+    ]);
+    const stringMaterial = new THREE.LineBasicMaterial({ color: 0xe5f8d6, transparent: true, opacity: 0.84 });
+    bowGroup.add(new THREE.Line(stringGeometry, stringMaterial));
+    scene.add(bowGroup);
+
+    const arrowGroup = new THREE.Group();
+    arrowGroup.position.set(-1.01, 0.64, 2.65);
+    const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0xb39b75, roughness: 0.4, metalness: 0.16 });
+    const arrowShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.6, 6), arrowMaterial);
+    arrowShaft.rotation.x = Math.PI / 2;
+    arrowGroup.add(arrowShaft);
+    const arrowHead = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 5), new THREE.MeshStandardMaterial({ color: 0xcad6d4, roughness: 0.24, metalness: 0.8 }));
+    arrowHead.rotation.x = Math.PI / 2;
+    arrowHead.position.z = -0.9;
+    arrowGroup.add(arrowHead);
+    const fletching = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.28), new THREE.MeshStandardMaterial({ color: 0x50dbc5, emissive: 0x0f403b, emissiveIntensity: 0.7 }));
+    fletching.position.z = 0.56;
+    arrowGroup.add(fletching);
+    scene.add(arrowGroup);
+
+    const windGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.45, 1.5, -4.8), new THREE.Vector3(-0.35, 1.68, -5.2), new THREE.Vector3(0.8, 1.46, -5.6),
+    ]);
+    const windMaterial = new THREE.LineBasicMaterial({ color: 0x72d9db, transparent: true, opacity: 0 });
+    const windRibbon = new THREE.Line(windGeometry, windMaterial);
+    scene.add(windRibbon);
 
     const disposables: Array<{ dispose: () => void }> = [];
     const materials: Array<{ dispose: () => void }> = [];
@@ -125,11 +182,12 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
       pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
       pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
     };
+    let releasedAt = 0;
     const onPointerMove = (event: PointerEvent) => {
       updatePointer(event);
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(targetMeshes, false)[0]?.object as THREE.Mesh | undefined;
-      renderer.domElement.style.cursor = hit?.userData.target === liveTargetRef.current && !disabledRef.current ? "crosshair" : "default";
+      renderer.domElement.style.cursor = hit?.userData.target === liveTargetRef.current && sightReadyRef.current && !disabledRef.current ? "crosshair" : "default";
     };
     const onPointerUp = (event: PointerEvent) => {
       if (event.button !== 0 || disabledRef.current) return;
@@ -139,7 +197,10 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
       const target = hit?.userData.target as RangerRangeTarget | undefined;
       // Selection is intentionally scored by the existing server action. Dropping a wrong
       // canvas click would make the 3D input easier than the accessible target deck.
-      if (target && liveTargetRef.current) fireRef.current(target);
+      if (target && liveTargetRef.current && sightReadyRef.current) {
+        releasedAt = performance.now();
+        fireRef.current(target);
+      }
     };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -173,6 +234,29 @@ export function RangerRange3D({ safeTarget, active, disabled, motionRunning, onF
         ringMaterial.color.setHex(live ? 0xffe8a0 : 0x9ecab0);
         ringMaterial.opacity = live ? 0.96 : 0;
         light.intensity = live ? 3.3 + (motionRunning ? Math.sin(seconds * 7) * 0.7 : 0) : 0;
+      }
+      const activeWind = windRef.current;
+      const direction = activeWind === "left" ? -1 : activeWind === "right" ? 1 : 0;
+      windRibbon.visible = Boolean(activeWind);
+      windMaterial.opacity = activeWind === "calm" ? 0.18 : 0.52;
+      windMaterial.color.setHex(activeWind === "left" ? 0x76aaf1 : activeWind === "right" ? 0xebc36f : 0x8ab8ae);
+      if (motionRunning && activeWind !== "calm") {
+        windRibbon.position.x = Math.sin(seconds * 2.4) * 0.15 * direction;
+        windRibbon.rotation.z = Math.sin(seconds * 2.8) * 0.07 * direction;
+        bowGroup.rotation.z = -0.06 + Math.sin(seconds * 3.3) * 0.018 * direction;
+      } else {
+        windRibbon.position.x = 0;
+        windRibbon.rotation.z = 0;
+        bowGroup.rotation.z = -0.06;
+      }
+      const arrowElapsed = releasedAt ? time - releasedAt : 0;
+      if (arrowElapsed > 0 && arrowElapsed < 560) {
+        arrowGroup.visible = true;
+        arrowGroup.position.z = 2.65 - arrowElapsed * 0.022;
+        arrowGroup.position.x = -1.01 + direction * Math.min(1.4, arrowElapsed * 0.0018);
+      } else {
+        arrowGroup.visible = arrowElapsed === 0 || arrowElapsed >= 560;
+        arrowGroup.position.set(-1.01, 0.64, 2.65);
       }
       if (motionRunning) {
         reticle.rotation.z = seconds * 0.7;

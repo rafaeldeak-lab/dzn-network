@@ -9,8 +9,10 @@ import {
   RANGER_RANGE_REWARD,
   RANGER_RANGE_TOTAL_SHOTS,
   RANGER_RANGE_TTL_MS,
+  rangerRangeSightForWind,
   rangerRangeTargetWindowMs,
   type RangerRangePayload,
+  type RangerRangeSight,
   type RangerRangeTarget,
 } from "../lib/games-ranger-range";
 import { gamesFixture } from "./lib/games-hub-local";
@@ -42,8 +44,8 @@ async function payload(response: Response) {
   return response.json() as Promise<RangerRangePayload>;
 }
 
-async function start(fixture: Fixture) {
-  return payload(await call(fixture, { action: "start" }));
+async function start(fixture: Fixture, protocol: "wind-v1" | "legacy" = "wind-v1") {
+  return payload(await call(fixture, protocol === "wind-v1" ? { action: "start", protocol } : { action: "start" }));
 }
 
 function openTarget(fixture: Fixture) {
@@ -58,9 +60,10 @@ async function visibleTarget(fixture: Fixture) {
   return state;
 }
 
-function fire(state: RangerRangePayload, target: RangerRangeTarget) {
+function fire(state: RangerRangePayload, target: RangerRangeTarget, sight?: RangerRangeSight) {
   assert.ok(state.game);
-  return { action: "fire", gameId: state.game.id, version: state.game.version, target };
+  assert.ok(state.game.wind);
+  return { action: "fire", gameId: state.game.id, version: state.game.version, target, sight: sight ?? rangerRangeSightForWind(state.game.wind) };
 }
 
 function wrongTarget(target: RangerRangeTarget): RangerRangeTarget {
@@ -80,6 +83,10 @@ async function completeRun(fixture: Fixture, initial?: RangerRangePayload) {
 }
 
 async function run() {
+  assert.equal(rangerRangeSightForWind("left"), "left", "A crosswind from the left must be held into the wind.");
+  assert.equal(rangerRangeSightForWind("calm"), "centre", "Still air must keep the neutral hold.");
+  assert.equal(rangerRangeSightForWind("right"), "right", "A crosswind from the right must be held into the wind.");
+
   await test("authentication, origin, method, feature switches and invalid shapes fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start" }, { origin: "https://foreign.test" })).status, 403);
@@ -87,7 +94,7 @@ async function run() {
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "false";
     assert.equal((await call(fixture)).status, 404);
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
-    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge" }]) {
+    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge", sight: "centre" }]) {
       assert.equal((await call(fixture, body)).status, 400);
     }
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_sessions").get()?.count, 0);
@@ -103,13 +110,24 @@ async function run() {
     const started = await start(fixture);
     assert.equal(started.game?.totalShots, RANGER_RANGE_TOTAL_SHOTS);
     assert.equal(started.game?.target, null);
+    assert.equal(started.game?.wind, null);
     assert.ok((started.game?.targetStartsAt ?? 0) > started.serverTime);
     assert.equal(JSON.stringify(started).includes("target_sequence_json"), false);
     openTarget(fixture);
     const visible = await visibleTarget(fixture);
     assert.ok(visible.game?.target);
+    assert.ok(visible.game?.wind);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("old pages receive a still-air sequence when they start a fresh range", async fixture => {
+    const started = await start(fixture, "legacy");
+    openTarget(fixture);
+    const state = await visibleTarget(fixture);
+    assert.equal(state.game?.wind, "calm");
+    const result = await payload(await call(fixture, { action: "fire", gameId: started.game!.id, version: state.game!.version, target: state.game!.target! }));
+    assert.equal(result.game?.shotsCleared, 1);
   });
 
   await test("range sessions tighten their server-issued target window during later phases", async fixture => {
@@ -154,6 +172,37 @@ async function run() {
     assert.equal(state.game?.status, "won");
     assert.equal(state.rewardGranted, false);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_reward_ledger").get()?.count, 1);
+  });
+
+  await test("a wrong wind hold is scored as a bounded miss even when the live plate is correct", async fixture => {
+    await start(fixture);
+    openTarget(fixture);
+    const state = await visibleTarget(fixture);
+    const sight = rangerRangeSightForWind(state.game!.wind!);
+    const wrongSight: RangerRangeSight = sight === "left" ? "right" : "left";
+    const result = await payload(await call(fixture, fire(state, state.game!.target!, wrongSight)));
+    assert.equal(result.game?.shotsCleared, 0);
+    assert.equal(result.game?.misses, 1);
+    assert.equal(result.game?.status, "playing");
+  });
+
+  await test("legacy target-only sessions remain playable as still-air range runs", async fixture => {
+    await start(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET target_sequence_json = ?, target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify(["ridge", "ruins", "road", "treeline", "tower", "ravine", "ridge", "road"]), Date.now() - 600, Date.now() - 600);
+    const state = await visibleTarget(fixture);
+    assert.equal(state.game?.wind, "calm");
+    const result = await payload(await call(fixture, { action: "fire", gameId: state.game!.id, version: state.game!.version, target: state.game!.target! }));
+    assert.equal(result.game?.shotsCleared, 1);
+  });
+
+  await test("a current wind-scored session rejects the old four-field fire request", async fixture => {
+    await start(fixture);
+    openTarget(fixture);
+    const state = await visibleTarget(fixture);
+    const response = await call(fixture, { action: "fire", gameId: state.game!.id, version: state.game!.version, target: state.game!.target! });
+    assert.equal(response.status, 400);
+    assert.equal((await visibleTarget(fixture)).game?.shotsCleared, 0);
   });
 
   await test("wrong targets use bounded misses and cannot mint a reward", async fixture => {
@@ -214,10 +263,13 @@ async function run() {
   const rangerScene = readFileSync("components/games/ranger-range-3d.tsx", "utf8");
   const rangerPanel = readFileSync("components/games/games-hub.tsx", "utf8");
   assert.match(rangerScene, /dznRangerRangeCanvas/, "The tactical range scene must expose its own render target for visual QA.");
-  assert.match(rangerScene, /if \(target && liveTargetRef\.current\) fireRef\.current\(target\)/, "The 3D scene must forward every plate selection during a live window to the existing authoritative fire action so the server scores wrong shots.");
+  assert.match(rangerScene, /if \(target && liveTargetRef\.current && sightReadyRef\.current\)/, "The 3D scene must require a selected sight hold before forwarding a live plate selection to the authoritative fire action.");
+  assert.match(rangerScene, /const bowGroup = new THREE\.Group\(\)/, "Ranger Range must retain the rendered bow foreground rather than falling back to a flat target deck.");
+  assert.match(rangerScene, /const windRibbon = new THREE\.Line/, "Ranger Range must visualise the server-issued range condition in the WebGL scene.");
   assert.match(rangerScene, /const showFallback = \(\) =>/, "The WebGL fallback must retain a dedicated art state.");
   assert.doesNotMatch(rangerScene, /mount\.style\.display = "none"/, "The WebGL fallback must not hide the cinematic backdrop or the accessible target deck.");
-  assert.match(rangerPanel, /<RangerRange3D safeTarget=\{targetOpen \? game\.target : null\}/, "The tactical 3D range must render from the same server-issued live target as the accessible controls.");
+  assert.match(rangerPanel, /RANGER_RANGE_WIND_META/, "The accessible range controls must present the server-issued wind condition without exposing server storage.");
+  assert.match(rangerPanel, /<RangerRange3D safeTarget=\{targetOpen \? game\.target : null\} wind=\{targetOpen \? game\.wind : null\}/, "The tactical 3D range must render from the same server-issued target and wind condition as the accessible controls.");
 
   console.log(`Ranger Range tests passed: ${passed}`);
 }

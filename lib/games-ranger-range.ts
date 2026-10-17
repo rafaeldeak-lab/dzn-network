@@ -1,5 +1,20 @@
 export const RANGER_RANGE_TARGETS = ["ridge", "ruins", "road", "treeline", "tower", "ravine"] as const;
 export type RangerRangeTarget = (typeof RANGER_RANGE_TARGETS)[number];
+export const RANGER_RANGE_WINDS = ["left", "calm", "right"] as const;
+export type RangerRangeWind = (typeof RANGER_RANGE_WINDS)[number];
+export const RANGER_RANGE_SIGHTS = ["left", "centre", "right"] as const;
+export type RangerRangeSight = (typeof RANGER_RANGE_SIGHTS)[number];
+
+export const RANGER_RANGE_WIND_META: Record<RangerRangeWind, { label: string; correction: RangerRangeSight; instruction: string }> = {
+  // A wind from the left pushes an arrow right, so the player holds left to compensate.
+  left: { label: "Crosswind from left", correction: "left", instruction: "Hold left" },
+  calm: { label: "Still air", correction: "centre", instruction: "Hold centre" },
+  right: { label: "Crosswind from right", correction: "right", instruction: "Hold right" },
+};
+
+export function rangerRangeSightForWind(wind: RangerRangeWind): RangerRangeSight {
+  return RANGER_RANGE_WIND_META[wind].correction;
+}
 
 export const RANGER_RANGE_TOTAL_SHOTS = 8;
 export const RANGER_RANGE_MAX_MISSES = 2;
@@ -38,6 +53,7 @@ export type RangerRangeGame = {
   misses: number;
   maxMisses: number;
   target: RangerRangeTarget | null;
+  wind: RangerRangeWind | null;
   targetStartsAt: number;
   targetEndsAt: number;
   intensity: RangerRangeIntensity;
