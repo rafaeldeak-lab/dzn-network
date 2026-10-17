@@ -10,6 +10,7 @@ type Minefield3DProps = {
   disabled: boolean;
   motionRunning: boolean;
   onMove: (x: number, y: number, tool: "reveal" | "flag") => void;
+  onUnsupported: () => void;
 };
 
 const TILE_COLORS = {
@@ -19,31 +20,47 @@ const TILE_COLORS = {
   open: 0x17313a,
 };
 
-export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Minefield3DProps) {
+export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUnsupported }: Minefield3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const moveRef = useRef(onMove);
   const toolRef = useRef(tool);
   const disabledRef = useRef(disabled);
+  const unsupportedRef = useRef(onUnsupported);
 
   useEffect(() => { moveRef.current = onMove; }, [onMove]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { unsupportedRef.current = onUnsupported; }, [onUnsupported]);
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || typeof WebGLRenderingContext === "undefined") return;
+    if (!mount) return;
+    const showGridFallback = () => {
+      mount.dataset.webglFallback = "true";
+      unsupportedRef.current();
+    };
+    if (typeof WebGLRenderingContext === "undefined") {
+      showGridFallback();
+      return;
+    }
 
     const size = game.cells.length;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x02070b);
     scene.fog = new THREE.FogExp2(0x02070b, 0.022);
 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 180);
     camera.position.set(size * 0.74, size * 0.9, size * 0.98);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
+    } catch {
+      showGridFallback();
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;

@@ -74,6 +74,8 @@ try {
       }
       return { width: canvas.width, height: canvas.height, litPixels, distinct: colors.size };
     });
+    const commandTable = await page.locator(".dzn-minefield-3d").evaluate(element => getComputedStyle(element).backgroundImage);
+    assert.match(commandTable, /minefield-command-table-v1\.webp/);
     const layout = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       field: document.querySelector(".dzn-minefield-3d")?.getBoundingClientRect().toJSON(),
@@ -113,6 +115,23 @@ try {
     await page.screenshot({ path: path.join(output, `games-${scenario.width}-${scenario.reducedMotion}.png`), fullPage: true });
     results.push({ ...scenario, briefing, before, after, canvasState, layout, writes: writes.map(entry => ({ method: entry.method, path: new URL(entry.url).pathname, action: entry.body?.action })) });
     await context.close();
+  }
+  const fallbackContext = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+  try {
+    await fallbackContext.addInitScript(() => {
+      Object.defineProperty(window, "WebGLRenderingContext", { configurable: true, value: undefined });
+    });
+    const fallbackPage = await fallbackContext.newPage();
+    const fallbackErrors = [];
+    fallbackPage.on("pageerror", error => fallbackErrors.push(error.message));
+    await fallbackPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+    await fallbackPage.getByRole("group", { name: /Minesweeper board/i }).waitFor();
+    assert.equal(await fallbackPage.locator('canvas[data-dzn-minefield-canvas="true"]').count(), 0);
+    assert.equal(await fallbackPage.getByRole("button", { name: "Tactical grid", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await fallbackPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    assert.deepEqual(fallbackErrors, []);
+  } finally {
+    await fallbackContext.close();
   }
   await writeFile(path.join(output, "results.json"), JSON.stringify(results, null, 2));
   console.log("Games Hub 3D canvas, interaction, reduced-motion and responsive QA passed.");
