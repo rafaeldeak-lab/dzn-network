@@ -43,6 +43,17 @@ try {
   checks.push("Signed-out visitors can stop scenery without a game, account or header pause button");
   await page.goto(`${base}/__local-login`);
   await page.getByLabel("Difficulty", { exact: true }).waitFor();
+  const gamePicker = page.getByRole("group", { name: "Choose a game" });
+  const pickerCards = gamePicker.getByRole("button");
+  assert.equal(await pickerCards.count(), 12);
+  const pickerArt = await pickerCards.evaluateAll(cards => cards.map(card => getComputedStyle(card, "::before").backgroundImage));
+  assert.ok(pickerArt.every(background => /\/images\/games\/cards\//.test(background)), `Game picker must use compact card artwork: ${JSON.stringify(pickerArt)}`);
+  for (const card of ["minefield", "trivia", "word-chain", "hide-seek", "relay-rush", "cipher-grid", "echo-array", "outpost-run", "signal-shift", "circuit-forge", "ranger-range", "night-run"]) {
+    const thumbnail = await context.request.get(`${base}/images/games/cards/${card}-card-v1.webp`);
+    assert.equal(thumbnail.status(), 200);
+    assert.ok((await thumbnail.body()).length < 30_000, `${card} picker artwork must remain thumbnail-sized`);
+  }
+  checks.push("Each game card has compact, game-specific artwork without eager full-resolution environment downloads");
   const homeLink = page.getByRole("link", { name: "DZN Network home", exact: true });
   assert.equal(await homeLink.getAttribute("href"), "/");
   await homeLink.locator("img").evaluate(image => image.decode());

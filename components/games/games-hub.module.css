@@ -65,14 +65,26 @@
 .balances small { font-size: 9px; font-weight: 650; color: var(--muted); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 38px; align-items: start; }
 .mainColumn, .sidebar { min-width: 0; }
-.gamePicker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
-.gamePicker button { position: relative; isolation: isolate; min-width: 0; min-height: 68px; display: flex; align-items: center; gap: 12px; overflow: hidden; padding: 11px 14px; color: #b9c4c6; background: #151a1c; border: 1px solid #364144; border-radius: 6px; text-align: left; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
-.gamePicker button::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .55; background: radial-gradient(circle at 82% 18%, #43e5ff3b, transparent 42%), linear-gradient(135deg, #12282f80, transparent 63%); }
+.gamePicker { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; margin-bottom: 22px; }
+.gamePicker button { position: relative; isolation: isolate; min-width: 0; min-height: 84px; display: flex; align-items: center; gap: 12px; overflow: hidden; padding: 12px 14px; color: #b9c4c6; background: #0b1113; border: 1px solid #364144; border-radius: 6px; text-align: left; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.gamePicker button::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .86; background: linear-gradient(90deg, #071011f5 0%, #071011dc 48%, #07101126 100%), url("/images/games/cards/hide-seek-card-v1.webp") center / cover no-repeat; }
+.gamePicker button::after { content: ""; position: absolute; inset: auto 0 0; z-index: -1; height: 2px; background: linear-gradient(90deg, #44dcca, transparent 68%); opacity: .58; }
 .gamePicker button:hover, .gamePicker button:focus-visible { border-color: #86fff0; background: #182527; box-shadow: 0 10px 24px #0008, inset 0 0 0 1px #81fff022; transform: translateY(-1px); outline: none; }
+.gamePicker button:hover::before, .gamePicker button:focus-visible::before { opacity: 1; }
 .gamePicker button[aria-pressed=true] { color: var(--cyan); background: #17302e; border-color: #4ccabb; box-shadow: inset 3px 0 #72ffe6, 0 10px 24px #0008; }
-.gamePicker button[data-game="night-run"]::before { background: radial-gradient(circle at 88% 14%, #e361ff63, transparent 34%), linear-gradient(135deg, #1a1240, #100d24 70%); }
-.gamePicker button[data-game="ranger-range"]::before { background: radial-gradient(circle at 84% 18%, #ffcf5c4d, transparent 34%), linear-gradient(135deg, #20321f, #101a12 70%); }
-.gamePicker button[data-game="minefield"]::before { background: radial-gradient(circle at 86% 16%, #57eaff5c, transparent 36%), linear-gradient(135deg, #102d36, #0c171c 70%); }
+.gamePicker button[aria-pressed=true]::after { height: 3px; opacity: 1; }
+.gamePicker button[data-game="minefield"]::before { background-image: linear-gradient(90deg, #061116f4 0%, #061116d8 48%, #06111622 100%), url("/images/games/cards/minefield-card-v1.webp"); }
+.gamePicker button[data-game="trivia"]::before { background-image: linear-gradient(90deg, #07100ff4 0%, #07100fd8 48%, #07100f22 100%), url("/images/games/cards/trivia-card-v1.webp"); }
+.gamePicker button[data-game="word-chain"]::before { background-image: linear-gradient(90deg, #071112f4 0%, #071112d8 48%, #07111222 100%), url("/images/games/cards/word-chain-card-v1.webp"); }
+.gamePicker button[data-game="hide-seek"]::before { background-image: linear-gradient(90deg, #07110ff4 0%, #07110fd8 48%, #07110f22 100%), url("/images/games/cards/hide-seek-card-v1.webp"); }
+.gamePicker button[data-game="relay-rush"]::before { background-image: linear-gradient(90deg, #071019f4 0%, #071019d8 48%, #07101922 100%), url("/images/games/cards/relay-rush-card-v1.webp"); }
+.gamePicker button[data-game="cipher-grid"]::before { background-image: linear-gradient(90deg, #101014f4 0%, #101014d8 48%, #10101422 100%), url("/images/games/cards/cipher-grid-card-v1.webp"); }
+.gamePicker button[data-game="echo-array"]::before { background-image: linear-gradient(90deg, #071018f4 0%, #071018d8 48%, #07101822 100%), url("/images/games/cards/echo-array-card-v1.webp"); }
+.gamePicker button[data-game="outpost-run"]::before { background-image: linear-gradient(90deg, #071111f4 0%, #071111d8 48%, #07111122 100%), url("/images/games/cards/outpost-run-card-v1.webp"); }
+.gamePicker button[data-game="signal-shift"]::before { background-image: linear-gradient(90deg, #07131af4 0%, #07131ad8 48%, #07131a22 100%), url("/images/games/cards/signal-shift-card-v1.webp"); }
+.gamePicker button[data-game="circuit-forge"]::before { background-image: linear-gradient(90deg, #0b1012f4 0%, #0b1012d8 48%, #0b101222 100%), url("/images/games/cards/circuit-forge-card-v1.webp"); }
+.gamePicker button[data-game="ranger-range"]::before { background-image: linear-gradient(90deg, #0a1109f4 0%, #0a1109d8 48%, #0a110922 100%), url("/images/games/cards/ranger-range-card-v1.webp"); }
+.gamePicker button[data-game="night-run"]::before { background-image: linear-gradient(90deg, #0d0920f4 0%, #0d0920d8 48%, #0d092022 100%), url("/images/games/cards/night-run-card-v1.webp"); }
 .gamePicker button[data-game="relay-rush"], .gamePicker button[data-game="echo-array"], .gamePicker button[data-game="circuit-forge"] { border-color: #4c6177; }
 .gamePicker button > span { display: grid; gap: 3px; }
 .gamePicker strong { color: #f0f3f3; font-size: 13px; }
