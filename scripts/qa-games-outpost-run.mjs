@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 const output = path.resolve("artifacts/games-outpost-run");
 await mkdir(output, { recursive: true });
@@ -26,7 +27,7 @@ try {
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     const [loadResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /Outpost Run/ }).click(),
+      page.locator('[data-game="outpost-run"]').click(),
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Outpost Run" }).waitFor();
@@ -59,6 +60,16 @@ try {
     });
     assert.ok(terrainBounds.width >= 260 && terrainBounds.height >= 140, "The tactical terrain should retain a usable visual footprint.");
     assert.ok(terrainBounds.pixels > 20_000, "The tactical terrain canvas should have a real render buffer.");
+    const terrainImage = await sharp(await terrainCanvas.screenshot()).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let litPixels = 0;
+    const sampledColours = new Set();
+    for (let offset = 0; offset < terrainImage.data.length; offset += terrainImage.info.channels * 19) {
+      const red = terrainImage.data[offset]; const green = terrainImage.data[offset + 1]; const blue = terrainImage.data[offset + 2];
+      if (red + green + blue > 75) litPixels++;
+      sampledColours.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
+    }
+    assert.ok(litPixels > 80, "The tactical terrain must contain visible mission lighting, not a black canvas.");
+    assert.ok(sampledColours.size > 18, "The tactical terrain must contain meaningful visual detail, not a flat placeholder.");
     if (index === 0) {
       assert.equal(await page.locator('[data-objective="beacon"]').first().textContent(), "beacon required");
       assert.match(await page.getByText("Secure the field beacon before extraction").textContent() ?? "", /field beacon/);
@@ -72,7 +83,7 @@ try {
   const motionContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "no-preference" });
   const motionPage = await motionContext.newPage();
   await motionPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-  await motionPage.getByRole("button", { name: /Outpost Run/ }).click();
+  await motionPage.locator('[data-game="outpost-run"]').click();
   await motionPage.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
   await motionPage.waitForFunction(() => document.querySelector('main[data-motion="running"]') !== null);
   const sweepName = await readSweep(motionPage, "animation-name");
@@ -89,7 +100,7 @@ try {
   await pausedContext.addInitScript(() => localStorage.setItem("dzn.games.motion", "paused"));
   const pausedPage = await pausedContext.newPage();
   await pausedPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-  await pausedPage.getByRole("button", { name: /Outpost Run/ }).click();
+  await pausedPage.locator('[data-game="outpost-run"]').click();
   await pausedPage.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
   await pausedPage.waitForFunction(() => document.querySelector('main[data-motion="paused"]') !== null);
   assert.equal(await readSweep(pausedPage, "animation-name"), "none");
