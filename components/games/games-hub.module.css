@@ -623,7 +623,14 @@
 .cipherGridMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .cipherGridMeta span:last-child { margin-left: auto; }
 .cipherGridStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #486269; border-radius: 6px; background-color: #080e10; background-image: linear-gradient(#041015d2, #071015e8), url("/images/games/cipher-grid-terminal-v2.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 92px #020506c9, 0 18px 42px #00000042; }
-.cipherGridStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .75; background-image: repeating-linear-gradient(0deg, transparent 0 31px, #61c8be13 32px 33px), repeating-linear-gradient(90deg, transparent 0 31px, #61c8be10 32px 33px); }
+.cipherGridStage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .75; background-image: repeating-linear-gradient(0deg, transparent 0 31px, #61c8be13 32px 33px), repeating-linear-gradient(90deg, transparent 0 31px, #61c8be10 32px 33px); }
+.cipherGridStage > *:not(.cipherGridScene):not(.cipherGridSceneHud) { position: relative; z-index: 2; }
+.cipherGridScene { position: absolute; z-index: 1; inset: 24px 14%; min-height: 260px; pointer-events: none; opacity: .9; }
+.cipherGridScene :global(.dzn-cipher-grid-3d), .cipherGridScene :global(.dzn-cipher-grid-3d) canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
+.cipherGridSceneHud { position: absolute; z-index: 3; top: 14px; left: 14px; display: grid; gap: 3px; max-width: calc(100% - 28px); padding: 7px 9px; border: 1px solid #6de6d44a; border-left: 3px solid #a9fff2; border-radius: 3px; color: #b1f9ef; background: #061416c7; box-shadow: 0 8px 22px #0000004a; font-family: var(--font-geist-mono), monospace; pointer-events: none; }
+.cipherGridSceneHud span { color: #82cdc4; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
+.cipherGridSceneHud strong { overflow: hidden; color: #ecfffc; font-size: 11px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.cipherGridSceneHud small { overflow: hidden; color: #94d9d0; font-size: 8px; font-weight: 800; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
 .cipherGridReadout { display: grid; gap: 5px; text-align: center; }
 .cipherGridReadout > span { color: #a9d6d1; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
 .cipherGridReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); text-shadow: 0 2px 14px #000; }
@@ -696,6 +703,27 @@
 @media (max-width: 560px) { .triviaChoices, .chainFeed ol, .hideSeekBrief { grid-template-columns: 1fr; } .triviaQuestion h3 { font-size: 18px; } .chainForm > div, .hideSeekTools, .hideSeekConsole, .relayRushTools, .echoArrayTools, .outpostRunTools, .signalShiftTools, .circuitForgeTools, .cipherGridTools { align-items: stretch; flex-direction: column; } .hideSeekCoordinate { align-self: flex-start; } .relayRushStage, .echoArrayStage { min-height: 320px; padding: 16px 12px; } .outpostRunStage, .signalShiftStage, .circuitForgeStage { padding: 16px 12px; } .outpostRunTerrainHud { top: 14px; left: 15px; padding: 6px 8px; } .outpostRunTerrainHud span, .outpostRunTerrainHud small { font-size: 7px; } .outpostRunTerrainHud strong { font-size: 10px; } .relayRushLanes { gap: 7px; } .relayRushLane { min-height: 126px; padding-inline: 4px; } .relayRushLane strong { font-size: 12px; } .echoArrayConsole { grid-template-columns: 1fr; padding: 12px 0; } .echoArrayConsole :global(.dzn-echo-array-3d) { min-height: 300px; } .echoArrayControlDeck { padding: 12px; } .echoArrayNodes { gap: 8px; padding: 0; } .echoArrayNode { min-height: 106px; } .outpostRunMeta { gap: 10px; } .outpostRunCommand { grid-template-columns: 1fr; } .outpostRunControls { justify-content: center; } .relayRushMeta, .echoArrayMeta, .signalShiftMeta, .circuitForgeMeta, .cipherGridMeta { gap: 10px; } .signalShiftConsole, .circuitForgeConsole { grid-template-columns: 1fr; } .signalShiftConsole :global(.dzn-signal-shift-3d) { min-height: 305px; } .circuitForgeSceneFrame, .circuitForgeConsole :global(.dzn-circuit-forge-3d) { min-height: 320px; } .signalShiftControlDeck, .circuitForgeControlDeck { padding: 12px; } .signalShiftGrid, .circuitForgeGrid { gap: 5px; padding: 5px; } .circuitForgeNode { min-width: 22px; min-height: 19px; } .cipherGridStage { padding: 16px 10px; } .cipherGridBoard { gap: 5px; } .cipherGridRow { gap: 5px; } .cipherGridEntry { grid-template-columns: 1fr; } .cipherGridEntry label { text-align: center; } .cipherGridEntry .primary { justify-content: center; } .cipherGridKey { height: 35px; } .cipherGridWideKey { min-width: 118px; } }
 @media (max-width: 560px) { .triviaQuestion { padding: 18px 14px; } .triviaBriefing { align-items: flex-start; flex-direction: column; gap: 12px; } .triviaProgress { width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; } }
 @media (max-width: 560px) { .triviaPanel { padding: 13px; } }
+@media (max-width: 560px) {
+  .cipherGridStage { gap: 10px; padding: 13px 8px; }
+  .cipherGridScene { inset: 14px 0; opacity: .72; }
+  .cipherGridSceneHud { top: 8px; left: 8px; padding: 5px 7px; }
+  .cipherGridReadout { gap: 3px; }
+  .cipherGridReadout > strong { font-size: 17px; }
+  .cipherGridMission { gap: 2px; padding: 4px; font-size: 9px; }
+  .cipherGridMission span { gap: 3px; padding-inline: 4px; }
+  .cipherGridBoard { gap: 4px; width: min(100%, 300px); padding: 6px; }
+  .cipherGridRow { gap: 4px; }
+  .cipherGridTile { font-size: 17px; }
+  .cipherGridEntry { grid-template-columns: auto minmax(0, 1fr) auto; gap: 5px; }
+  .cipherGridEntry label { font-size: 10px; text-align: left; }
+  .cipherGridEntry input { min-height: 36px; padding-inline: 6px; font-size: 12px; }
+  .cipherGridEntry .primary { min-height: 36px; padding: 6px 8px; font-size: 11px; }
+  .cipherGridKeyboard { gap: 4px; padding: 5px; }
+  .cipherGridKeyboard > div { gap: 3px; }
+  .cipherGridKey { width: clamp(24px, 8vw, 31px); height: 30px; font-size: 11px; }
+  .cipherGridWideKey { min-width: 108px; padding-inline: 8px; }
+  .cipherGridHint { font-size: 10px !important; line-height: 1.35; }
+}
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
 @media (max-width: 360px) { .hubNav { align-items: flex-start; } .hubNav .navActions { width: 100%; justify-content: space-between; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
