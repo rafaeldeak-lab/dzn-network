@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { handleCommandCentre } from "../functions/_lib/command-centre";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleSurvivalCommand } from "../functions/_lib/survival-command";
 import type { Env } from "../functions/_lib/types";
 import type { SurvivalCommandPayload } from "../lib/survival-command";
@@ -70,6 +71,7 @@ async function run() {
   assert.match(client, /serverDayKey/);
   assert.match(client, /payload\.deployment\.dayKey === serverDayKey/);
   assert.match(client, /deployment\.used \+ selected\.deploymentCost > deployment\.capacity/);
+  assert.match(client, /Base recovery estimates only/);
   assert.match(scene, /dznSurvivalCommandCanvas/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
   assert.match(playerHubRoute, /DZN_SURVIVAL_COMMAND_ENABLED === "true"/);
@@ -152,6 +154,22 @@ async function run() {
         .run(randomUUID(), randomUUID(), new Date().toISOString().slice(0, 10), index + 1, index + 2, index + 2);
     }
     assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() })).status, 409);
+  });
+
+  await test("retained Store accounts erase every private Survival Command record", async value => {
+    await establish(value);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET ready_at = started_at + 1 WHERE id = ?").run(started.expedition!.id);
+    const ready = await payload(await request(value));
+    await payload(await request(value, { action: "resolve", expeditionId: ready.expedition!.id, version: ready.expedition!.version, requestId: randomUUID(), decision: ready.expedition!.incident!.actions[0] }));
+    value.db.sqlite.exec("CREATE TABLE store_orders (id TEXT PRIMARY KEY, purchasing_user_id TEXT NOT NULL)");
+    value.db.sqlite.prepare("INSERT INTO store_orders (id, purchasing_user_id) VALUES ('retained-order', 'local-player')").run();
+    assert.equal(await eraseOrRetainAccountUser(value.db as unknown as D1Database, "local-player"), 1);
+    assert.match(String(value.db.sqlite.prepare("SELECT discord_id FROM users WHERE id = 'local-player'").get()?.discord_id), /^deleted-/);
+    for (const table of ["dzn_survival_command_profiles", "dzn_survival_command_expeditions", "dzn_survival_command_resolution_ledger"]) {
+      assert.equal(value.db.sqlite.prepare(`SELECT COUNT(*) count FROM ${table} WHERE user_id = 'local-player'`).get()?.count, 0);
+    }
+    assert.equal(value.db.sqlite.prepare("SELECT COUNT(*) count FROM store_orders WHERE purchasing_user_id = 'local-player'").get()?.count, 1);
   });
 
   const miniflare = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('local test'); } }", d1Databases: ["DB"] });
