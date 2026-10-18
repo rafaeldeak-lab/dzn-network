@@ -40,13 +40,14 @@ function paletteFor(kind: CellKind) {
   return { tile: 0x183740, emissive: 0x0c2931, glow: 0x5d9da7 };
 }
 
-function scanVector(scanHint: string | null) {
+export function scanVector(scanHint: string | null) {
   const hint = scanHint?.toLowerCase() ?? "";
-  if (hint.includes("north")) return new THREE.Vector3(0, 0, -1);
-  if (hint.includes("east")) return new THREE.Vector3(1, 0, 0);
-  if (hint.includes("south")) return new THREE.Vector3(0, 0, 1);
-  if (hint.includes("west")) return new THREE.Vector3(-1, 0, 0);
-  return new THREE.Vector3(0, 0, -1);
+  const direction = new THREE.Vector3();
+  if (hint.includes("north")) direction.z -= 1;
+  if (hint.includes("south")) direction.z += 1;
+  if (hint.includes("east")) direction.x += 1;
+  if (hint.includes("west")) direction.x -= 1;
+  return direction.lengthSq() ? direction.normalize() : new THREE.Vector3(0, 0, -1);
 }
 
 export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, intensity, scanHint, active, disabled, motionRunning, onMove }: OutpostRun3DProps) {
