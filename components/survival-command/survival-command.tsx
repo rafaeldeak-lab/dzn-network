@@ -38,6 +38,7 @@ export function SurvivalCommand() {
   const [motionRunning, setMotionRunning] = useState(true);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const mutationLock = useRef(false);
+  const readyRefreshRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/player/survival-command", { cache: "no-store" });
@@ -73,6 +74,13 @@ export function SurvivalCommand() {
   const selected = payload?.sectors.find(sector => sector.key === selectedSector) ?? null;
   const expedition = payload?.expedition ?? null;
   const activeRemaining = expedition ? Math.max(0, expedition.readyAt - serverNow) : 0;
+
+  useEffect(() => {
+    if (!expedition || expedition.state !== "in-transit" || activeRemaining > 0) return;
+    if (readyRefreshRef.current === expedition.id) return;
+    readyRefreshRef.current = expedition.id;
+    void refresh().catch(reason => setError(reason instanceof Error ? reason.message : "The field decision could not be loaded."));
+  }, [activeRemaining, expedition, refresh]);
 
   const mutate = async (key: string, body: Record<string, unknown>) => {
     if (mutationLock.current) return;
@@ -174,5 +182,6 @@ function DecisionDossier({ expedition, sector, busy, onResolve }: { expedition: 
 
 function DeployDossier({ selected, approach, busy, deployment, onApproach, onDeploy }: { selected: SurvivalCommandPayload["sectors"][number] | null; approach: SurvivalCommandApproach; busy: string | null; deployment: SurvivalCommandPayload["deployment"]; onApproach: (approach: SurvivalCommandApproach) => void; onDeploy: () => void }) {
   const locked = !selected?.unlocked;
-  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />{selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />{selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><button className={styles.primaryAction} disabled={busy !== null || locked || !selected || deployment.used >= deployment.capacity} onClick={onDeploy}><Truck size={18} />{locked ? "Sector locked" : deployment.used >= deployment.capacity ? "Deployment capacity reached" : busy === "deploy" ? "Dispatching..." : `Dispatch team (${selected?.deploymentCost ?? 0} capacity)`}</button></>;
+  const capacityExceeded = !selected || deployment.used + selected.deploymentCost > deployment.capacity;
+  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />{selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />{selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><button className={styles.primaryAction} disabled={busy !== null || locked || capacityExceeded} onClick={onDeploy}><Truck size={18} />{locked ? "Sector locked" : capacityExceeded ? "Insufficient deployment capacity" : busy === "deploy" ? "Dispatching..." : `Dispatch team (${selected?.deploymentCost ?? 0} capacity)`}</button></>;
 }

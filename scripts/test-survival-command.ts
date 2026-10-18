@@ -65,6 +65,9 @@ async function run() {
   assert.match(migration, /idx_dzn_survival_command_one_active_expedition/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
   assert.match(client, /Route plan/);
+  assert.match(client, /readyRefreshRef/);
+  assert.match(client, /activeRemaining > 0/);
+  assert.match(client, /deployment\.used \+ selected\.deploymentCost > deployment\.capacity/);
   assert.match(scene, /dznSurvivalCommandCanvas/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
   assert.match(playerHubRoute, /DZN_SURVIVAL_COMMAND_ENABLED === "true"/);
