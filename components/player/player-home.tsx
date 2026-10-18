@@ -9,6 +9,7 @@ import {
   Crown,
   ExternalLink,
   Gamepad2,
+  Hammer,
   Loader2,
   LockKeyhole,
   Pencil,
@@ -264,6 +265,13 @@ const playerActionCards: PlayerActionCard[] = [
     description: "Play verified DZN challenges and review your website-only progression.",
     icon: <Gamepad2 aria-hidden="true" className="h-5 w-5" />,
     tone: "violet",
+  },
+  {
+    href: "/command-centre",
+    title: "Command Centre",
+    description: "Build a private DZN settlement with verified Games Hub parts and server-timed construction.",
+    icon: <Hammer aria-hidden="true" className="h-5 w-5" />,
+    tone: "emerald",
   },
   {
     href: "/player/profile",
