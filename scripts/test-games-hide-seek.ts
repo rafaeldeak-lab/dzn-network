@@ -147,6 +147,14 @@ async function run() {
     assert.equal(fixture.db.sqlite.prepare("SELECT found_ids_json FROM dzn_hide_seek_sessions").get()?.found_ids_json, "[]");
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_hide_seek_reward_ledger").get()?.count, 0);
   });
+  await test("the client scanner visualises only the player scan point and confirmed aggregate state", async () => {
+    const hubSource = readFileSync("components/games/games-hub.tsx", "utf8");
+    const visualSource = readFileSync("components/games/signal-hunt-3d.tsx", "utf8");
+    assert.match(hubSource, /const SignalHunt3D = dynamic/);
+    assert.match(hubSource, /scanPoint=\{reticlePoint\}/);
+    assert.match(visualSource, /const unavailableRef = useRef\(onUnavailable\);/);
+    assert.doesNotMatch(visualSource, /recoveredSignals|target_ids_json|HIDE_SEEK_TARGET_BY_ID/);
+  });
   await test("Hub preserves Signal Hunt rewards after the play flag is disabled", async fixture => {
     let state = await start(fixture);
     for (const target of selectedTargets(fixture)) state = await payload(await call(fixture, scan(state, target)));

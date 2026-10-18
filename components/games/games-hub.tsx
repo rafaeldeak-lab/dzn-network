@@ -36,6 +36,7 @@ const RelayRush3D = dynamic(() => import("./relay-rush-3d").then(module => modul
 const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => module.EchoArray3D), { ssr: false });
 const CipherGrid3D = dynamic(() => import("./cipher-grid-3d").then(module => module.CipherGrid3D), { ssr: false });
 const WordChain3D = dynamic(() => import("./word-chain-3d").then(module => module.WordChain3D), { ssr: false });
+const SignalHunt3D = dynamic(() => import("./signal-hunt-3d").then(module => module.SignalHunt3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -311,7 +312,7 @@ export function GamesHub() {
           </section>}
           {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -530,11 +531,12 @@ function WordChainPanel({ motionRunning, onProgress }: { motionRunning: boolean;
   </section>;
 }
 
-function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<HideSeekPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [reticle, setReticle] = useState({ gameId: "", x: 500, y: 500 });
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -604,14 +606,17 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
     </div>
     {game ? <>
       <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
-      <div className={styles.hideSeekScene} data-scene={game.scene} role="group" tabIndex={active ? 0 : -1}
+      <div className={styles.hideSeekScene} data-scene={game.scene} data-active={active} data-renderer={threeUnavailable ? "fallback" : "webgl"} role="group" tabIndex={active ? 0 : -1}
         aria-label="DZN signal hunt reconnaissance scene. Click to scan terrain. With keyboard focus, use arrow keys to move the scan reticle and Enter to scan. Recovered signals cannot consume another scan."
         aria-disabled={!active || busy} onKeyDown={handleSceneKeyDown}
         onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scanAt((event.clientX - bounds.left) / bounds.width * 1000, (event.clientY - bounds.top) / bounds.height * 1000); }}>
         <Image src={game.scene === "recon-v2" ? "/images/games/signal-hunt-recon-v2.png" : "/images/games/dzn-outpost.webp"}
           alt={game.scene === "recon-v2" ? "Storm reconnaissance station in the DZN mountain range" : "DZN mountain communications outpost"}
           fill sizes="(max-width: 760px) 100vw, 760px" />
-        <div className={styles.hideSeekOverlay} aria-hidden="true"><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><i /></div>
+        <div className={styles.hideSeekSceneVisual} aria-hidden="true">
+          {!threeUnavailable && <SignalHunt3D active={Boolean(active)} foundCount={game.foundCount} misses={game.misses} scanPoint={reticlePoint} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
+        </div>
+        <div className={styles.hideSeekOverlay} aria-hidden="true"><div><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><strong>{active ? "SCANNER ARMED" : "UPLINK STANDBY"}</strong></div><div><small>{`LOCKS ${game.foundCount.toString().padStart(2, "0")} / ${game.targetCount.toString().padStart(2, "0")}`}</small><i /></div></div>
         {active ? <span className={styles.hideSeekReticle} style={{ left: `${reticlePoint.x / 10}%`, top: `${reticlePoint.y / 10}%` }} aria-hidden="true"><Crosshair size={24} /></span> : null}
         {game.recoveredSignals.map((signal) => <span key={signal.slot} className={styles.hideSeekRecovered} style={{ left: `${signal.x / 10}%`, top: `${signal.y / 10}%` }} role="img" aria-label={`Recovered signal ${signal.slot}`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}><Check size={15} /></span>)}
       </div>
