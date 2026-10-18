@@ -39,6 +39,7 @@ export function SurvivalCommand() {
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const mutationLock = useRef(false);
   const readyRefreshRef = useRef<string | null>(null);
+  const dayRefreshRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/player/survival-command", { cache: "no-store" });
@@ -74,6 +75,7 @@ export function SurvivalCommand() {
   const selected = payload?.sectors.find(sector => sector.key === selectedSector) ?? null;
   const expedition = payload?.expedition ?? null;
   const activeRemaining = expedition ? Math.max(0, expedition.readyAt - serverNow) : 0;
+  const serverDayKey = serverNow ? new Date(serverNow).toISOString().slice(0, 10) : null;
 
   useEffect(() => {
     if (!expedition || expedition.state !== "in-transit" || activeRemaining > 0) return;
@@ -81,6 +83,13 @@ export function SurvivalCommand() {
     readyRefreshRef.current = expedition.id;
     void refresh().catch(reason => setError(reason instanceof Error ? reason.message : "The field decision could not be loaded."));
   }, [activeRemaining, expedition, refresh]);
+
+  useEffect(() => {
+    if (!payload || !serverDayKey || payload.deployment.dayKey === serverDayKey) return;
+    if (dayRefreshRef.current === serverDayKey) return;
+    dayRefreshRef.current = serverDayKey;
+    void refresh().catch(reason => setError(reason instanceof Error ? reason.message : "The new deployment cycle could not be loaded."));
+  }, [payload, refresh, serverDayKey]);
 
   const mutate = async (key: string, body: Record<string, unknown>) => {
     if (mutationLock.current) return;
