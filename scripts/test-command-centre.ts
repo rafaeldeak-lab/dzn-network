@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { handleCommandCentre } from "../functions/_lib/command-centre";
+import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
 import type { CommandCentrePayload } from "../lib/command-centre";
 import { gamesFixture } from "./lib/games-hub-local";
@@ -28,6 +29,14 @@ function call(fixture: Fixture, body?: unknown, options: { cookie?: string; orig
     method,
     headers: { cookie: options.cookie ?? fixture.cookie, origin: options.origin ?? "https://local.test", "content-type": "application/json" },
     body: method === "GET" ? undefined : JSON.stringify(body),
+  }), fixture.env);
+}
+
+function hubCall(fixture: Fixture, body: unknown) {
+  return handleGamesHub(new Request("https://local.test/api/games/hub", {
+    method: "POST",
+    headers: { cookie: fixture.cookie, origin: "https://local.test", "content-type": "application/json" },
+    body: JSON.stringify(body),
   }), fixture.env);
 }
 
@@ -101,9 +110,20 @@ async function run() {
     assert.equal(updated.version, headquarters.version + 1);
     assert.equal(upgraded.resources.partsAvailable, 4);
     assert.equal(fixture.db.sqlite.prepare("SELECT parts_spent FROM dzn_command_centre_spend_ledger").get()?.parts_spent, 8);
+    assert.equal((await hubCall(fixture, { action: "assemble", requestId: randomUUID() })).status, 409);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_game_reward_ledger WHERE kind = 'workshop'").get()?.count, 0);
     const replay = await payload(await call(fixture, { action: "start-upgrade", building: "headquarters", version: headquarters.version, requestId }));
     assert.equal(replay.resources.partsSpent, 8);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_command_centre_spend_ledger").get()?.count, 1);
+  });
+
+  await test("Games Hub assembly and Command Centre construction debit one shared part balance", async fixture => {
+    const initial = await establish(fixture);
+    grantRewards(fixture);
+    assert.equal((await hubCall(fixture, { action: "assemble", requestId: randomUUID() })).status, 200);
+    const headquarters = initial.buildings.find(building => building.building === "headquarters")!;
+    assert.equal((await call(fixture, { action: "start-upgrade", building: "headquarters", version: headquarters.version, requestId: randomUUID() })).status, 409);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_command_centre_spend_ledger").get()?.count, 0);
   });
 
   await test("player isolation, headquarters gates and insufficient rewards are enforced", async fixture => {

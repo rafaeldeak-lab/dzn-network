@@ -22,7 +22,7 @@ async function availableGameSchemas(db: D1Database) {
       'dzn_cipher_grid_sessions', 'dzn_cipher_grid_reward_ledger', 'dzn_echo_array_sessions', 'dzn_echo_array_reward_ledger',
       'dzn_outpost_run_sessions', 'dzn_outpost_run_reward_ledger', 'dzn_signal_shift_sessions', 'dzn_signal_shift_reward_ledger',
       'dzn_circuit_forge_sessions', 'dzn_circuit_forge_reward_ledger', 'dzn_ranger_range_sessions', 'dzn_ranger_range_reward_ledger',
-      'dzn_night_run_sessions', 'dzn_night_run_reward_ledger')`).all<{ name: string }>();
+      'dzn_night_run_sessions', 'dzn_night_run_reward_ledger', 'dzn_command_centre_spend_ledger')`).all<{ name: string }>();
   const names = new Set((rows.results ?? []).map(row => row.name));
   const complete = (...tables: string[]) => tables.every(table => names.has(table));
   return { trivia: complete("dzn_trivia_sessions", "dzn_trivia_reward_ledger"), wordChain: complete("dzn_word_chain_rounds", "dzn_word_chain_entries", "dzn_word_chain_reward_ledger"),
@@ -31,10 +31,11 @@ async function availableGameSchemas(db: D1Database) {
     outpostRun: complete("dzn_outpost_run_sessions", "dzn_outpost_run_reward_ledger"), signalShift: complete("dzn_signal_shift_sessions", "dzn_signal_shift_reward_ledger"),
     circuitForge: complete("dzn_circuit_forge_sessions", "dzn_circuit_forge_reward_ledger"),
     rangerRange: complete("dzn_ranger_range_sessions", "dzn_ranger_range_reward_ledger"),
-    nightRun: complete("dzn_night_run_sessions", "dzn_night_run_reward_ledger") };
+    nightRun: complete("dzn_night_run_sessions", "dzn_night_run_reward_ledger"),
+    commandCentreSpending: names.has("dzn_command_centre_spend_ledger") };
 }
 
-type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean; relayRush: boolean; cipherGrid: boolean; echoArray: boolean; outpostRun: boolean; signalShift: boolean; circuitForge: boolean; rangerRange: boolean; nightRun: boolean };
+type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean; relayRush: boolean; cipherGrid: boolean; echoArray: boolean; outpostRun: boolean; signalShift: boolean; circuitForge: boolean; rangerRange: boolean; nightRun: boolean; commandCentreSpending: boolean };
 
 function enabledGames(env: Env, schemas: ExtraLedgers): HubGameAvailability {
   const hubEnabled = env.DZN_GAMES_HUB_ENABLED === "true";
@@ -55,7 +56,7 @@ function enabledGames(env: Env, schemas: ExtraLedgers): HubGameAvailability {
 }
 
 export async function readHub(db: D1Database, user: SessionUser, now: number,
-  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false, rangerRange: false, nightRun: false },
+  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false, rangerRange: false, nightRun: false, commandCentreSpending: false },
   availableGames: HubGameAvailability = DEFAULT_HUB_GAME_AVAILABILITY): Promise<HubPayload> {
   const dayStart = Math.floor(now / DAY) * DAY;
   const rollingWeekStart = now - 7 * DAY;
@@ -368,7 +369,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         extraLedgers.rangerRange ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_ranger_range_reward_ledger WHERE user_id = ?)` : null,
         extraLedgers.nightRun ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_night_run_reward_ledger WHERE user_id = ?)` : null,
       ].filter((value): value is string => Boolean(value));
-      const availableParts = [`(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`, ...extraPartQueries].join(" + ");
+      const availableParts = `(${[`(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`, ...extraPartQueries].join(" + ")})${extraLedgers.commandCentreSpending
+        ? " - (SELECT COALESCE(SUM(parts_spent), 0) FROM dzn_command_centre_spend_ledger WHERE user_id = ?)" : ""}`;
       const statement = db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
         SELECT ?, ?, ?, 'workshop', NULL, 0, ?, ? WHERE
           (${availableParts}) >= ?
@@ -379,7 +381,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         ...(extraLedgers.cipherGrid ? [user.id] : []), ...(extraLedgers.echoArray ? [user.id] : []),
         ...(extraLedgers.outpostRun ? [user.id] : []), ...(extraLedgers.signalShift ? [user.id] : []),
         ...(extraLedgers.circuitForge ? [user.id] : []), ...(extraLedgers.rangerRange ? [user.id] : []),
-        ...(extraLedgers.nightRun ? [user.id] : []), WORKSHOP_PART_COST];
+        ...(extraLedgers.nightRun ? [user.id] : []), ...(extraLedgers.commandCentreSpending ? [user.id] : []), WORKSHOP_PART_COST];
       const result = await statement.bind(...bindings).run();
       if (!result.meta.changes) {
         const alreadyDone = await db.prepare("SELECT id FROM dzn_game_reward_ledger WHERE user_id = ? AND reward_key = ?")
