@@ -777,13 +777,22 @@
 .nightRunMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .nightRunMeta span:last-child { margin-left: auto; }
 .nightRunStage { position: relative; isolation: isolate; display: grid; gap: 14px; overflow: hidden; min-height: 490px; padding: 20px; border: 1px solid #47436a; border-radius: 6px; background: #070914; box-shadow: inset 0 0 80px #170d3c80; }
-.nightRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5; background: radial-gradient(circle at 50% 8%, #6633c44d, transparent 38%), linear-gradient(135deg, #090b1d, #050710 70%); }
+.nightRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: .74; background: radial-gradient(ellipse at 50% 0%, #7348d45c, transparent 43%), linear-gradient(135deg, #07091a, #050710 70%); }
+.nightRunStage::after { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .22; background-image: repeating-linear-gradient(90deg, transparent 0 37px, #b6a5ff17 37px 38px), linear-gradient(180deg, #ffffff0a, transparent 12%, transparent 87%, #b6a5ff0a); mask-image: linear-gradient(90deg, transparent, #000 16% 84%, transparent); }
+.nightRunStage > * { position: relative; z-index: 1; }
 .nightRunStage[data-intensity="pursuit"] { border-color: #6b5a9e; box-shadow: inset 0 0 92px #30135c80; }
 .nightRunStage[data-intensity="lockdown"] { border-color: #9b4e73; background: #130713; box-shadow: inset 0 0 110px #650d438a, 0 0 30px #5b1c5a32; }
 .nightRunStage[data-recon=true] { border-color: #b37b40; box-shadow: inset 0 0 96px #7b3e168a, 0 0 30px #ff9d2932; }
 .nightRunReadout { display: grid; gap: 5px; text-align: center; }
 .nightRunReadout > span { color: #bba8ff; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .12em; }
 .nightRunReadout > strong { color: #f1efff; font-size: clamp(18px, 3vw, 26px); text-transform: capitalize; }
+.nightRunTelemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; width: min(100%, 820px); margin: 0 auto; overflow: hidden; border: 1px solid #494469; border-radius: 4px; background: #494469; box-shadow: 0 12px 24px #02030b7d; }
+.nightRunTelemetry > div { display: grid; gap: 4px; min-width: 0; padding: 9px 11px; background: #0b0d1aeb; }
+.nightRunTelemetry span { color: #918ab1; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .1em; }
+.nightRunTelemetry strong { overflow: hidden; color: #f1efff; font: 800 11px var(--font-geist-mono), monospace; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+.nightRunTelemetry strong[data-intensity="recon"] { color: #83e4ff; }
+.nightRunTelemetry strong[data-intensity="pursuit"] { color: #ffd077; }
+.nightRunTelemetry strong[data-intensity="lockdown"] { color: #ff93b8; }
 .hub :global(.dzn-night-run-3d) { width: min(100%, 820px); min-height: 292px; aspect-ratio: 2.15 / 1; overflow: hidden; margin: 0 auto; border: 1px solid #49446c; border-radius: 5px; background: #040610; box-shadow: 0 18px 32px #0000006e; }
 .hub :global(.dzn-night-run-3d canvas) { display: block; width: 100%; height: 100%; touch-action: manipulation; }
 .nightRunRecon { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: min(100%, 820px); margin: 0 auto; padding: 11px 12px; border: 1px solid #855b32; border-radius: 4px; color: #ffd7a5; background: #2b160dce; }
@@ -810,7 +819,7 @@
 .nightRunReady p { max-width: 510px; }
 .hub[data-motion=paused] .nightRunLanes button[data-live=true] { animation-play-state: paused; }
 @keyframes night-run-safe-lane { from { transform: translateY(0); } to { transform: translateY(-2px); } }
-@media (max-width: 560px) { .nightRunTools { align-items: stretch; flex-direction: column; } .nightRunMeta { gap: 10px; } .nightRunStage { min-height: 0; padding: 16px 10px; } .hub :global(.dzn-night-run-3d) { min-height: 260px; aspect-ratio: 4 / 3; } .nightRunRecon { align-items: stretch; flex-direction: column; } .nightRunRecon button { width: 100%; justify-content: center; } .nightRunLanes { gap: 7px; } .nightRunLanes button { min-height: 92px; padding-inline: 7px 24px; } }
+@media (max-width: 560px) { .nightRunTools { align-items: stretch; flex-direction: column; } .nightRunMeta { gap: 10px; } .nightRunStage { min-height: 0; padding: 16px 10px; } .nightRunTelemetry { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nightRunTelemetry > div { min-height: 49px; padding: 8px 9px; } .hub :global(.dzn-night-run-3d) { min-height: 260px; aspect-ratio: 4 / 3; } .nightRunRecon { align-items: stretch; flex-direction: column; } .nightRunRecon button { width: 100%; justify-content: center; } .nightRunLanes { gap: 7px; } .nightRunLanes button { min-height: 92px; padding-inline: 7px 24px; } }
 @media (prefers-reduced-motion: reduce) { .nightRunLanes button[data-live=true] { animation: none; } }
 
 @media (max-width: 900px) {

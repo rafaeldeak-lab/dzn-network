@@ -25,26 +25,34 @@ try {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: scenario.height }, reducedMotion: scenario.reducedMotion });
     const page = await context.newPage();
     const errors = [];
+    const nightRunRequests = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+    page.on("request", request => { if (request.url().includes("/api/games/night-run")) nightRunRequests.push(`${request.method()} ${request.url()}`); });
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-    const [loadResponse] = await Promise.all([
-      page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /Night Run/ }).click(),
-    ]);
+    const loadResponsePromise = page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "GET");
+    await page.locator('[data-game="night-run"]').click();
+    const loadResponse = await loadResponsePromise.catch(cause => {
+      throw new Error(`${cause instanceof Error ? cause.message : "Night Run did not load"}; observed requests: ${JSON.stringify(nightRunRequests)}`);
+    });
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Night Run" }).waitFor();
     if (index === 0) {
       const startRun = page.getByRole("button", { name: "Start night run" });
       await waitForEnabled(startRun, "the Night Run start control");
-      const [startResponse] = await Promise.all([
-        page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "POST"),
-        startRun.click(),
-      ]);
+      const startResponsePromise = page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "POST");
+      await startRun.click();
+      let startResponse;
+      try { startResponse = await startResponsePromise; }
+      catch (cause) { throw new Error(`${cause instanceof Error ? cause.message : "Night Run start did not respond"}; observed requests: ${JSON.stringify(nightRunRequests)}`); }
       assert.equal(startResponse.status(), 200, await startResponse.text());
     }
     const canvas = page.locator('canvas[data-dzn-night-run-canvas="true"]');
     await canvas.waitFor({ state: "visible" });
+    // The server opens a fresh gate shortly after each start. Allow the WebGL scene
+    // to adopt that server state before reading the final mounted canvas.
+    await page.waitForTimeout(900);
+    await waitForCanvasSize(canvas);
     const lanes = page.getByRole("group", { name: "Night Run convoy lanes" }).getByRole("button");
     assert.equal(await lanes.count(), 3);
     const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
@@ -64,8 +72,20 @@ try {
     await waitForAttribute(canvas, "data-dzn-night-run-backdrop-fit", expectedBackdropFit);
     assert.equal(await canvas.getAttribute("data-dzn-night-run-backdrop-fit"), expectedBackdropFit, `${scenario.name} must crop the city art without stretching it: ${JSON.stringify(cropState)}`);
 
-    // Let the server-issued gate arrive before comparing frame counters; the renderer remounts once to adopt its live lane.
-    await page.waitForTimeout(900);
+    if (index === 0) {
+      await page.locator('[data-live="true"][data-lane]').waitFor({ timeout: 5_000 });
+      const liveLane = page.locator('[data-live="true"][data-lane]');
+      await waitForEnabled(liveLane, "the live lane");
+      const driveResponsePromise = page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "POST");
+      await liveLane.click({ force: true });
+      const driveResponse = await driveResponsePromise;
+      assert.equal(driveResponse.status(), 200, await driveResponse.text());
+      await page.getByText("1 / 9", { exact: true }).waitFor({ timeout: 5_000 });
+      assert.equal(await page.locator('[data-lane][disabled]').count(), 3, "lanes must close between server-issued gates");
+      await page.waitForTimeout(900);
+      await waitForCanvasSize(canvas);
+    }
+
     const before = Number(await canvas.getAttribute("data-render-frames"));
     await page.waitForTimeout(260);
     const after = Number(await canvas.getAttribute("data-render-frames"));
@@ -91,14 +111,6 @@ try {
     await canvas.screenshot({ path: path.join(output, `${scenario.name}-canvas.png`) });
     await page.screenshot({ path: path.join(output, `${scenario.name}.png`), fullPage: false });
 
-    if (index === 0) {
-      await page.locator('[data-live="true"][data-lane]').waitFor({ timeout: 5_000 });
-      const liveLane = page.locator('[data-live="true"][data-lane]');
-      await waitForEnabled(liveLane, "the live lane");
-      await liveLane.click({ force: true });
-      await page.getByText("1 / 9", { exact: true }).waitFor({ timeout: 5_000 });
-      assert.equal(await page.locator('[data-lane][disabled]').count(), 3, "lanes must close between server-issued gates");
-    }
     assert.deepEqual(errors, []);
     await context.close();
   }
@@ -132,4 +144,14 @@ async function waitForAttribute(locator, name, expected) {
     if (await locator.getAttribute(name) === expected) return;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
+}
+
+async function waitForCanvasSize(locator) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const size = await locator.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight }));
+    if (size.width >= 280 && size.height >= 220) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const finalSize = await locator.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight }));
+  assert.ok(finalSize.width >= 280 && finalSize.height >= 220, `Night Run canvas did not receive a usable layout: ${JSON.stringify(finalSize)}`);
 }

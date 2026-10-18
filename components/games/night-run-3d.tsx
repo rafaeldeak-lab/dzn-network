@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import * as ThreeModule from "three";
-import type { NightRunLane } from "@/lib/games-night-run";
+import type { NightRunIntensity, NightRunLane } from "@/lib/games-night-run";
 
 // Three's recursive declaration graph can exceed the TypeScript checker stack in this large client bundle.
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -15,6 +15,10 @@ type NightRun3DProps = {
   motionRunning: boolean;
   requiresRecon: boolean;
   scannerAvailable: boolean;
+  intensity: NightRunIntensity;
+  gatesCleared: number;
+  totalGates: number;
+  collisions: number;
   onDrive: (lane: NightRunLane) => void;
 };
 
@@ -24,7 +28,7 @@ const LANES: { id: NightRunLane; x: number; label: string }[] = [
   { id: "right", x: 3.15, label: "Right" },
 ];
 
-export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, onDrive }: NightRun3DProps) {
+export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, intensity, gatesCleared, totalGates, collisions, onDrive }: NightRun3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const driveRef = useRef(onDrive);
   const disabledRef = useRef(disabled);
@@ -49,6 +53,9 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     renderer.toneMappingExposure = 1.18;
     renderer.domElement.dataset.dznNightRunCanvas = "true";
     renderer.domElement.dataset.dznNightRunRecon = scannerAvailable ? "masked" : requiresRecon ? "cleared" : "none";
+    renderer.domElement.dataset.dznNightRunIntensity = intensity;
+    renderer.domElement.dataset.dznNightRunGate = String(Math.min(totalGates, gatesCleared + 1));
+    renderer.domElement.dataset.dznNightRunHull = String(Math.max(0, 100 - collisions * 50));
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
     const backgroundScene = new THREE.Scene();
@@ -191,20 +198,104 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       environment.add(sign);
     }
 
-    const vehicleGeometry = new THREE.BoxGeometry(1.16, 0.34, 1.8);
-    const vehicleMaterial = new THREE.MeshStandardMaterial({ color: 0x4ebfff, emissive: 0x073a82, emissiveIntensity: 1.1, metalness: 0.86, roughness: 0.23 });
-    const cabinGeometry = new THREE.BoxGeometry(0.72, 0.28, 0.78);
-    const cabinMaterial = new THREE.MeshStandardMaterial({ color: 0x09152f, emissive: 0x0a3f88, emissiveIntensity: 0.9, metalness: 0.72, roughness: 0.18 });
-    disposables.push(vehicleGeometry, cabinGeometry); materials.push(vehicleMaterial, cabinMaterial);
+    // The player convoy is deliberately built in-scene rather than represented by a
+    // single placeholder box: a low rally chassis, plated cabin, running gear, signal
+    // mast and reactive tail lamps make the route read as an actual escape vehicle.
     const vehicle = new THREE.Group();
+    const vehicleGeometry = new THREE.BoxGeometry(1.28, 0.28, 2.1);
+    const vehicleMaterial = new THREE.MeshStandardMaterial({ color: 0x1c6fbb, emissive: 0x062a65, emissiveIntensity: 1.25, metalness: 0.9, roughness: 0.19 });
+    const bumperGeometry = new THREE.BoxGeometry(1.42, 0.16, 0.22);
+    const bumperMaterial = new THREE.MeshStandardMaterial({ color: 0x111b2d, metalness: 0.92, roughness: 0.26 });
+    const cabinGeometry = new THREE.BoxGeometry(0.82, 0.36, 0.9);
+    const cabinMaterial = new THREE.MeshStandardMaterial({ color: 0x071226, emissive: 0x0c509f, emissiveIntensity: 1.15, metalness: 0.76, roughness: 0.13 });
+    const wingGeometry = new THREE.BoxGeometry(1.66, 0.06, 0.4);
+    const wheelGeometry = new THREE.CylinderGeometry(0.27, 0.27, 0.18, 12);
+    const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x06070c, roughness: 0.62, metalness: 0.31 });
+    const hubMaterial = new THREE.MeshStandardMaterial({ color: 0x74e9ff, emissive: 0x166a93, emissiveIntensity: 1.65, metalness: 0.9, roughness: 0.17 });
+    const exhaustGeometry = new THREE.CylinderGeometry(0.065, 0.09, 0.33, 10);
+    const signalGeometry = new THREE.CylinderGeometry(0.018, 0.018, 0.62, 8);
+    const headlightGeometry = new THREE.BoxGeometry(0.22, 0.08, 0.04);
+    const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xbef7ff, transparent: true, opacity: 0.95 });
+    const tailLightMaterial = new THREE.MeshBasicMaterial({ color: 0xff4f91, transparent: true, opacity: 0.92 });
+    disposables.push(vehicleGeometry, bumperGeometry, cabinGeometry, wingGeometry, wheelGeometry, exhaustGeometry, signalGeometry, headlightGeometry);
+    materials.push(vehicleMaterial, bumperMaterial, cabinMaterial, wheelMaterial, hubMaterial, headlightMaterial, tailLightMaterial);
     const vehicleBody = new THREE.Mesh(vehicleGeometry, vehicleMaterial);
-    vehicleBody.position.y = 0.3;
+    vehicleBody.position.y = 0.31;
     vehicle.add(vehicleBody);
+    const frontBumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
+    frontBumper.position.set(0, 0.25, -1.06);
+    vehicle.add(frontBumper);
+    const rearBumper = frontBumper.clone();
+    rearBumper.position.z = 1.06;
+    vehicle.add(rearBumper);
     const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-    cabin.position.set(0, 0.6, -0.08);
+    cabin.position.set(0, 0.62, -0.1);
     vehicle.add(cabin);
+    const wing = new THREE.Mesh(wingGeometry, bumperMaterial);
+    wing.position.set(0, 0.62, 0.93);
+    vehicle.add(wing);
+    const vehicleLights: any[] = [];
+    for (const x of [-0.43, 0.43]) {
+      for (const z of [-0.71, 0.73]) {
+        const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(x, 0.22, z);
+        vehicle.add(wheel);
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.185, 10), hubMaterial);
+        hub.rotation.z = Math.PI / 2;
+        hub.position.set(x + (x < 0 ? -0.004 : 0.004), 0.22, z);
+        vehicle.add(hub);
+        disposables.push(hub.geometry);
+      }
+      const headlamp = new THREE.Mesh(headlightGeometry, headlightMaterial);
+      headlamp.position.set(x, 0.4, -1.17);
+      vehicle.add(headlamp);
+      const tailLamp = new THREE.Mesh(headlightGeometry, tailLightMaterial);
+      tailLamp.position.set(x, 0.4, 1.17);
+      vehicle.add(tailLamp);
+      vehicleLights.push(tailLamp);
+    }
+    for (const x of [-0.34, 0.34]) {
+      const exhaust = new THREE.Mesh(exhaustGeometry, hubMaterial);
+      exhaust.rotation.x = Math.PI / 2;
+      exhaust.position.set(x, 0.25, 1.15);
+      vehicle.add(exhaust);
+    }
+    const mast = new THREE.Mesh(signalGeometry, hubMaterial);
+    mast.position.set(0, 1.15, 0.12);
+    vehicle.add(mast);
+    const mastBeacon = new THREE.PointLight(0x69eaff, 2.8, 3.6, 2);
+    mastBeacon.position.set(0, 1.4, 0.12);
+    vehicle.add(mastBeacon);
+    const exhaustLight = new THREE.PointLight(0x439dff, 4.6, 4.5, 2);
+    exhaustLight.position.set(0, 0.35, 1.45);
+    vehicle.add(exhaustLight);
     vehicle.position.set(0, 0, 5.6);
     environment.add(vehicle);
+
+    const pursuerGeometry = new THREE.BoxGeometry(0.74, 0.2, 1.28);
+    const pursuerCabinGeometry = new THREE.BoxGeometry(0.46, 0.2, 0.56);
+    const pursuerMaterial = new THREE.MeshStandardMaterial({ color: 0x381445, emissive: 0x4f104f, emissiveIntensity: 1.35, metalness: 0.88, roughness: 0.19 });
+    const pursuerCabinMaterial = new THREE.MeshStandardMaterial({ color: 0x16071f, emissive: 0x9d2e9a, emissiveIntensity: 1.2, metalness: 0.76, roughness: 0.14 });
+    disposables.push(pursuerGeometry, pursuerCabinGeometry); materials.push(pursuerMaterial, pursuerCabinMaterial);
+    const pursuers: any[] = [];
+    const pursuitPressure = intensity === "lockdown" ? 1 : intensity === "pursuit" ? 0.64 : 0.28;
+    for (let index = 0; index < 3; index++) {
+      const pursuer = new THREE.Group();
+      const body = new THREE.Mesh(pursuerGeometry, pursuerMaterial);
+      body.position.y = 0.17;
+      pursuer.add(body);
+      const canopy = new THREE.Mesh(pursuerCabinGeometry, pursuerCabinMaterial);
+      canopy.position.set(0, 0.4, -0.05);
+      pursuer.add(canopy);
+      const interceptorLight = new THREE.PointLight(0xff3b9d, 2.5, 3.2, 2);
+      interceptorLight.position.set(0, 0.35, -0.74);
+      pursuer.add(interceptorLight);
+      pursuer.userData = { index, x: [-4.6, 4.5, 0][index], z: -2.1 - index * 3.2 };
+      pursuer.position.set(pursuer.userData.x, 0.02, pursuer.userData.z + pursuitPressure * 4.4);
+      pursuers.push(pursuer);
+      environment.add(pursuer);
+    }
 
     const gateGroup = new THREE.Group();
     const gateHitboxes: any[] = [];
@@ -325,9 +416,23 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       if (motionRunning) {
         environment.rotation.y += ((-0.04 + pointerX * 0.055) - environment.rotation.y) * 0.03;
         environment.rotation.x += ((pointerY * -0.025) - environment.rotation.x) * 0.025;
-        vehicle.position.x += ((safeLane === "left" ? -0.45 : safeLane === "right" ? 0.45 : 0) - vehicle.position.x) * 0.018;
+        const convoyTargetX = active ? safeLane === "left" ? -0.45 : safeLane === "right" ? 0.45 : 0 : 0;
+        vehicle.position.x += (convoyTargetX - vehicle.position.x) * 0.018;
         vehicle.rotation.z = -vehicle.position.x * 0.05;
         vehicle.position.y = Math.sin(elapsed * 3.2) * 0.018;
+        vehicle.rotation.y = Math.sin(elapsed * 0.72) * 0.012;
+        mastBeacon.intensity = 2.4 + Math.sin(elapsed * 5.8) * 0.78;
+        exhaustLight.intensity = active ? 4.4 + Math.sin(elapsed * 9.2) * 1.4 : 1.6;
+        vehicleLights.forEach((light, index) => {
+          light.material.opacity = intensity === "lockdown" ? 0.58 + Math.sin(elapsed * 10 + index) * 0.34 : 0.92;
+        });
+        pursuers.forEach((pursuer) => {
+          const targetZ = pursuer.userData.z + pursuitPressure * 4.4;
+          pursuer.position.z = targetZ + Math.sin(elapsed * 1.7 + pursuer.userData.index) * 0.38;
+          pursuer.position.x = pursuer.userData.x + Math.sin(elapsed * 1.28 + pursuer.userData.index * 2.1) * (0.25 + pursuitPressure * 0.3);
+          pursuer.position.y = 0.06 + Math.sin(elapsed * 2.1 + pursuer.userData.index) * 0.07;
+          pursuer.rotation.z = Math.sin(elapsed * 1.28 + pursuer.userData.index * 2.1) * -0.08;
+        });
         gateGroup.position.z = Math.sin(elapsed * 1.7) * 0.05;
         roadTexture.offset.y = -(elapsed * 0.36 % 1);
         roadMarkers.forEach((marker, index) => {
@@ -376,7 +481,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [active, motionRunning, requiresRecon, safeLane, scannerAvailable]);
+  }, [active, collisions, gatesCleared, intensity, motionRunning, requiresRecon, safeLane, scannerAvailable, totalGates]);
 
   return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
 }
