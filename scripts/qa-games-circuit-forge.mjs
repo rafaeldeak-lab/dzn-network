@@ -50,6 +50,13 @@ try {
     assert.ok(pixels.info.width > 220 && pixels.info.height > 200, "Circuit Forge canvas should be visibly sized");
     assert.ok(bright > 90, "Circuit Forge scene should include visible power-station highlights");
     assert.ok(colors.size > 22, "Circuit Forge scene should retain varied rendered colour detail");
+    if (viewport.name === "phone") {
+      const [frameHeight, canvasHeight] = await Promise.all([
+        page.locator('[class*="circuitForgeSceneFrame"]').evaluate(element => element.getBoundingClientRect().height),
+        canvas.evaluate(element => element.getBoundingClientRect().height),
+      ]);
+      assert.ok(Math.abs(frameHeight - canvasHeight) <= 2, `Circuit Forge's mobile scene frame should not leave an empty strip below the canvas (frame ${frameHeight}, canvas ${canvasHeight})`);
+    }
     const relay = page.locator('[data-rotatable="true"]').first();
     await relay.waitFor();
     await relay.click();
