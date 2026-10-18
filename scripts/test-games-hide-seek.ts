@@ -153,6 +153,9 @@ async function run() {
     assert.match(hubSource, /const SignalHunt3D = dynamic/);
     assert.match(hubSource, /scanPoint=\{reticlePoint\}/);
     assert.match(visualSource, /const unavailableRef = useRef\(onUnavailable\);/);
+    assert.match(visualSource, /new THREE\.OrthographicCamera/);
+    assert.match(visualSource, /state\.scanPoint\.x \/ 1000 \* 2 - 1/);
+    assert.match(visualSource, /1 - state\.scanPoint\.y \/ 1000 \* 2/);
     assert.doesNotMatch(visualSource, /recoveredSignals|target_ids_json|HIDE_SEEK_TARGET_BY_ID/);
   });
   await test("Hub preserves Signal Hunt rewards after the play flag is disabled", async fixture => {

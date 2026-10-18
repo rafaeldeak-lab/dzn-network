@@ -41,9 +41,12 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     }
 
     const scene = new THREE.Scene();
+    const overlayScene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 70);
     camera.position.set(0, 7.2, 9.8);
     camera.lookAt(0, -0.25, 0);
+    const overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    overlayCamera.position.z = 2;
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -54,6 +57,7 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setClearColor(0x000000, 0);
+    renderer.autoClear = false;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.dataset.dznSignalHuntCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
@@ -75,25 +79,23 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     scene.add(horizon);
 
     const scanner = new THREE.Group();
-    scene.add(scanner);
-    const ringGeometry = new THREE.TorusGeometry(0.5, 0.028, 8, 48);
+    overlayScene.add(scanner);
+    const ringGeometry = new THREE.TorusGeometry(0.065, 0.0048, 8, 48);
     const ringMaterial = new THREE.MeshBasicMaterial({ color: 0x7df8e7, transparent: true, opacity: 0.92 });
     geometries.push(ringGeometry); materials.push(ringMaterial);
     const scanRing = new THREE.Mesh(ringGeometry, ringMaterial);
-    scanRing.rotation.x = Math.PI / 2;
     scanner.add(scanRing);
     const outerRing = new THREE.Mesh(ringGeometry, ringMaterial);
-    outerRing.rotation.x = Math.PI / 2;
     outerRing.scale.setScalar(1.85);
     outerRing.material = ringMaterial.clone();
     (outerRing.material as THREE.MeshBasicMaterial).opacity = 0.34;
     materials.push(outerRing.material as THREE.Material);
     scanner.add(outerRing);
-    const beamGeometry = new THREE.ConeGeometry(0.58, 2.15, 24, 1, true);
+    const beamGeometry = new THREE.ConeGeometry(0.06, 0.22, 24, 1, true);
     const beamMaterial = new THREE.MeshBasicMaterial({ color: 0x52dacb, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
     geometries.push(beamGeometry); materials.push(beamMaterial);
     const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-    beam.position.y = 0.06;
+    beam.position.y = 0.02;
     scanner.add(beam);
 
     const mastGeometry = new THREE.CylinderGeometry(0.035, 0.035, 1.1, 8);
@@ -132,11 +134,12 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     scene.add(particles);
 
     const applyState = (state: HuntVisualState) => {
-      const x = (state.scanPoint.x / 1000 - 0.5) * 9.6;
-      const z = (state.scanPoint.y / 1000 - 0.5) * 6.3;
+      // The scanner is an orthographic overlay: these values exactly match the reticle's percentage grid.
+      const x = state.scanPoint.x / 1000 * 2 - 1;
+      const y = 1 - state.scanPoint.y / 1000 * 2;
       const warning = Math.min(1, state.misses / 6);
       const activeColour = warning > 0.58 ? 0xffbb70 : 0x6ff4e0;
-      scanner.position.set(x, -0.64, z);
+      scanner.position.set(x, y, 0);
       ringMaterial.color.setHex(state.active ? activeColour : 0x7c9e9d);
       ringMaterial.opacity = state.active ? 0.9 : 0.35;
       beamMaterial.color.setHex(state.active ? activeColour : 0x5a8784);
@@ -151,7 +154,12 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     };
     applyStateRef.current = applyState;
     applyState(stateRef.current);
-    const render = () => renderer.render(scene, camera);
+    const render = () => {
+      renderer.clear();
+      renderer.render(scene, camera);
+      renderer.clearDepth();
+      renderer.render(overlayScene, overlayCamera);
+    };
     renderRef.current = render;
 
     const resize = new ResizeObserver(entries => {

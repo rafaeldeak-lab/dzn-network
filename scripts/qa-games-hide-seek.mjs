@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
-import sharp from "sharp";
 
 const output = path.resolve("artifacts/games-hide-seek");
 await mkdir(output, { recursive: true });
@@ -39,17 +38,25 @@ try {
     await page.locator('img[alt*="reconnaissance"]').waitFor();
     const scannerCanvas = page.locator('canvas[data-dzn-signal-hunt-canvas="true"]');
     await scannerCanvas.waitFor({ state: "visible" });
-    const scannerPixels = await sharp(await scannerCanvas.screenshot()).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    let litPixels = 0;
-    const colourBuckets = new Set();
-    for (let offset = 0; offset < scannerPixels.data.length; offset += scannerPixels.info.channels * 17) {
-      const red = scannerPixels.data[offset]; const green = scannerPixels.data[offset + 1]; const blue = scannerPixels.data[offset + 2];
-      if (red + green + blue > 70) litPixels++;
-      colourBuckets.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
-    }
-    assert.ok(scannerPixels.info.width > 260 && scannerPixels.info.height > 170, "Signal Hunt should render a usable scanner scene.");
-    assert.ok(litPixels > 60, "Signal Hunt should retain visible scanner telemetry, not a blank canvas.");
-    assert.ok(colourBuckets.size > 14, "Signal Hunt should retain meaningful scanner-scene detail.");
+    const scannerPixels = await scannerCanvas.evaluate(canvas => {
+      const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+      if (!context) return null;
+      const width = context.drawingBufferWidth;
+      const height = context.drawingBufferHeight;
+      const pixels = new Uint8Array(width * height * 4);
+      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+      let litPixels = 0;
+      const colourBuckets = new Set();
+      for (let offset = 0; offset < pixels.length; offset += 4 * 17) {
+        const red = pixels[offset]; const green = pixels[offset + 1]; const blue = pixels[offset + 2]; const alpha = pixels[offset + 3];
+        if (alpha > 5 && red + green + blue > 70) litPixels++;
+        if (alpha > 5) colourBuckets.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
+      }
+      return { width, height, litPixels, colourBucketCount: colourBuckets.size };
+    });
+    assert.ok(scannerPixels && scannerPixels.width > 260 && scannerPixels.height > 170, "Signal Hunt should render a usable scanner scene.");
+    assert.ok(scannerPixels.litPixels > 60, "Signal Hunt should retain visible scanner telemetry, not a blank canvas.");
+    assert.ok(scannerPixels.colourBucketCount > 14, "Signal Hunt should retain meaningful scanner-scene detail.");
     assert.equal(await scene.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
     assert.equal(await page.locator('[class*="hideSeekTarget"]').count(), 0, "Unrecovered target markers must not be emitted into the DOM.");
     assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0, "No recovered marker should exist before a server-confirmed scan.");
