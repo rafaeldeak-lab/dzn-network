@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 const output = path.resolve("artifacts/games-signal-shift");
 await mkdir(output, { recursive: true });
@@ -26,7 +27,7 @@ try {
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     const [loadResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/signal-shift") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /Signal Shift/ }).click(),
+      page.locator('[data-game="signal-shift"]').click(),
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Signal Shift" }).waitFor();
@@ -49,8 +50,25 @@ try {
     }
     await page.getByRole("grid", { name: "Signal Shift tactical grid" }).waitFor({ state: index === 0 ? "visible" : "attached" });
     assert.equal(await page.locator('[role="gridcell"]').count(), 16);
-    await page.locator('[data-dzn-signal-shift-canvas="true"]').waitFor({ state: "visible" });
+    const signalCanvas = page.locator('[data-dzn-signal-shift-canvas="true"]');
+    await signalCanvas.waitFor({ state: "visible" });
     assert.equal(await page.locator('[data-dzn-signal-shift-intensity]').getAttribute("data-dzn-signal-shift-intensity"), "calibration");
+    const canvasBounds = await signalCanvas.evaluate(canvas => {
+      const bounds = canvas.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height, pixels: canvas.width * canvas.height };
+    });
+    assert.ok(canvasBounds.width >= 250 && canvasBounds.height >= 180, "The relay chamber must retain a usable desktop and mobile visual footprint.");
+    assert.ok(canvasBounds.pixels > 40_000, "The relay chamber must retain a real WebGL render buffer.");
+    const signalImage = await sharp(await signalCanvas.screenshot()).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let litPixels = 0;
+    const sampledColours = new Set();
+    for (let offset = 0; offset < signalImage.data.length; offset += signalImage.info.channels * 17) {
+      const red = signalImage.data[offset]; const green = signalImage.data[offset + 1]; const blue = signalImage.data[offset + 2];
+      if (red + green + blue > 90) litPixels++;
+      sampledColours.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
+    }
+    assert.ok(litPixels > 100, "The relay chamber must contain visible signal lighting, not a flat or black canvas.");
+    assert.ok(sampledColours.size > 20, "The relay chamber must retain distinct industrial detail, not a flat placeholder.");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
     assert.deepEqual(errors, []);

@@ -74,11 +74,11 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
 
     const palette = INTENSITY_COLORS[intensity];
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050713);
-    scene.fog = new THREE.FogExp2(0x050713, 0.062);
-    const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 100);
-    camera.position.set(7.4, 7.9, 10.6);
-    camera.lookAt(0, 0.55, 0);
+    scene.background = new THREE.Color(0x070914);
+    scene.fog = new THREE.FogExp2(0x070914, 0.044);
+    const camera = new THREE.PerspectiveCamera(37, 1, 0.1, 100);
+    camera.position.set(6.2, 6.8, 8.1);
+    camera.lookAt(0, 0.38, 0);
     let renderer: any;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
@@ -89,7 +89,7 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.55;
     renderer.domElement.dataset.dznSignalShiftCanvas = "true";
     renderer.domElement.dataset.dznSignalShiftIntensity = intensity;
     renderer.domElement.setAttribute("aria-hidden", "true");
@@ -105,14 +105,14 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       renderer.dispose();
     };
 
-    scene.add(new THREE.HemisphereLight(0xc8edff, 0x090713, 2.2));
-    const keyLight = new THREE.DirectionalLight(0x91e7ff, 3.5);
+    scene.add(new THREE.HemisphereLight(0xc8edff, 0x090713, 2.65));
+    const keyLight = new THREE.DirectionalLight(0x91e7ff, 4.2);
     keyLight.position.set(-4, 9, 5);
     scene.add(keyLight);
-    const primaryLight = new THREE.PointLight(palette.primary, 18, 17, 1.8);
+    const primaryLight = new THREE.PointLight(palette.primary, 26, 17, 1.8);
     primaryLight.position.set(-4.6, 3.3, 2.2);
     scene.add(primaryLight);
-    const alertLight = new THREE.PointLight(palette.alert, 14, 19, 1.7);
+    const alertLight = new THREE.PointLight(palette.alert, 21, 19, 1.7);
     alertLight.position.set(4.2, 2.6, -3.6);
     scene.add(alertLight);
 
@@ -120,14 +120,14 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
     chamber.rotation.y = -0.08;
     scene.add(chamber);
 
-    const floorGeometry = new THREE.CylinderGeometry(5.65, 5.95, 0.36, 8);
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x0b1020, emissive: 0x071226, emissiveIntensity: 0.8, metalness: 0.72, roughness: 0.38 });
+    const floorGeometry = new THREE.CylinderGeometry(4.78, 5.08, 0.4, 12);
+    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x101a32, emissive: 0x0a1732, emissiveIntensity: 1.12, metalness: 0.72, roughness: 0.38 });
     geometries.push(floorGeometry); materials.push(floorMaterial);
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.position.y = -0.45;
     chamber.add(floor);
-    const rimGeometry = new THREE.TorusGeometry(5.2, 0.045, 8, 64);
-    const rimMaterial = new THREE.MeshBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.64 });
+    const rimGeometry = new THREE.TorusGeometry(4.45, 0.055, 8, 72);
+    const rimMaterial = new THREE.MeshBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.78 });
     geometries.push(rimGeometry); materials.push(rimMaterial);
     const rim = new THREE.Mesh(rimGeometry, rimMaterial);
     rim.rotation.x = Math.PI / 2;
@@ -135,26 +135,33 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
     chamber.add(rim);
 
     const gridGroup = new THREE.Group();
-    const tileGeometry = new THREE.BoxGeometry(1.13, 0.28, 1.13);
-    const topGeometry = new THREE.PlaneGeometry(0.92, 0.92);
+    const tileGeometry = new THREE.BoxGeometry(1.12, 0.34, 1.12);
+    const topGeometry = new THREE.PlaneGeometry(0.84, 0.84);
     const edgeGeometry = new THREE.EdgesGeometry(tileGeometry);
-    geometries.push(tileGeometry, topGeometry, edgeGeometry);
+    const clampGeometry = new THREE.BoxGeometry(0.14, 0.05, 0.14);
+    const coreGeometry = new THREE.CylinderGeometry(0.14, 0.14, 0.08, 12);
+    const emptyCoreGeometry = new THREE.CylinderGeometry(0.22, 0.3, 0.62, 16);
+    const emptyCoreRingGeometry = new THREE.TorusGeometry(0.31, 0.026, 6, 32);
+    geometries.push(tileGeometry, topGeometry, edgeGeometry, clampGeometry, coreGeometry, emptyCoreGeometry, emptyCoreRingGeometry);
     const hitboxes: any[] = [];
     const glowRings: any[] = [];
+    const moduleCores: any[] = [];
+    const coreRings: any[] = [];
+    const activeModules: any[] = [];
     const half = (gridSize - 1) / 2;
     for (let index = 0; index < tiles.length; index++) {
       const tile = tiles[index];
       const row = Math.floor(index / gridSize);
       const column = index % gridSize;
-      const x = (column - half) * 1.34;
-      const z = (row - half) * 1.34;
+      const x = (column - half) * 1.23;
+      const z = (row - half) * 1.23;
       const movable = active && tile !== 0 && movableTiles.includes(tile);
       const group = new THREE.Group();
       group.position.set(x, tile === 0 ? -0.05 : 0, z);
       const baseMaterial = new THREE.MeshStandardMaterial({
-        color: tile === 0 ? 0x091c28 : movable ? palette.primary : 0x192343,
-        emissive: tile === 0 ? palette.primary : movable ? palette.primary : 0x071127,
-        emissiveIntensity: tile === 0 ? 1.15 : movable ? 0.8 : 0.38,
+        color: tile === 0 ? 0x0b2635 : movable ? palette.primary : 0x263358,
+        emissive: tile === 0 ? palette.primary : movable ? palette.primary : 0x112455,
+        emissiveIntensity: tile === 0 ? 1.45 : movable ? 1.02 : 0.62,
         metalness: 0.75,
         roughness: 0.28,
       });
@@ -166,22 +173,37 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
       group.add(edges);
       if (tile === 0) {
-        const ringGeometry = new THREE.RingGeometry(0.25, 0.39, 40);
-        const ringMaterial = new THREE.MeshBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false });
-        geometries.push(ringGeometry); materials.push(ringMaterial);
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        const coreMaterial = new THREE.MeshStandardMaterial({ color: palette.primary, emissive: palette.primary, emissiveIntensity: 2.15, transparent: true, opacity: 0.88, metalness: 0.22, roughness: 0.14 });
+        const ringMaterial = new THREE.MeshBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false });
+        materials.push(coreMaterial, ringMaterial);
+        const core = new THREE.Mesh(emptyCoreGeometry, coreMaterial);
+        core.position.y = 0.24;
+        const ring = new THREE.Mesh(emptyCoreRingGeometry, ringMaterial);
         ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.16;
-        group.add(ring);
-        glowRings.push(ring);
+        ring.position.y = 0.3;
+        group.add(core, ring);
+        moduleCores.push(core); coreRings.push(ring); glowRings.push(ring);
       } else {
+        const clampMaterial = new THREE.MeshStandardMaterial({ color: 0x627298, emissive: movable ? palette.primary : 0x162344, emissiveIntensity: movable ? 0.75 : 0.3, metalness: 0.82, roughness: 0.31 });
+        const coreMaterial = new THREE.MeshStandardMaterial({ color: movable ? 0xd7fff8 : 0x7195d4, emissive: movable ? palette.primary : 0x254a9d, emissiveIntensity: movable ? 1.8 : 0.86, metalness: 0.64, roughness: 0.18 });
+        materials.push(clampMaterial, coreMaterial);
+        for (const [cornerX, cornerZ] of [[-0.43, -0.43], [0.43, -0.43], [-0.43, 0.43], [0.43, 0.43]]) {
+          const clamp = new THREE.Mesh(clampGeometry, clampMaterial);
+          clamp.position.set(cornerX, 0.19, cornerZ);
+          group.add(clamp);
+        }
+        const core = new THREE.Mesh(coreGeometry, coreMaterial);
+        core.position.y = 0.205;
+        group.add(core);
+        moduleCores.push(core);
+        if (movable) activeModules.push(group);
         const texture = labelTexture(String(tile).padStart(2, "0"), movable ? "#b7fff2" : "#91b8ff");
         textures.push(texture);
         const labelMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: movable ? 1 : 0.87, depthWrite: false });
         materials.push(labelMaterial);
         const label = new THREE.Mesh(topGeometry, labelMaterial);
         label.rotation.x = -Math.PI / 2;
-        label.position.y = 0.16;
+        label.position.y = 0.215;
         group.add(label);
       }
       const hitboxGeometry = new THREE.BoxGeometry(1.25, 0.76, 1.25);
@@ -206,26 +228,50 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       const row = Math.floor(index / gridSize); const column = index % gridSize;
       const nextRow = Math.floor(next / gridSize); const nextColumn = next % gridSize;
       if (Math.abs(row - nextRow) + Math.abs(column - nextColumn) !== 1) continue;
-      tracePoints.push((column - half) * 1.34, 0.23, (row - half) * 1.34, (nextColumn - half) * 1.34, 0.23, (nextRow - half) * 1.34);
+      tracePoints.push((column - half) * 1.23, 0.25, (row - half) * 1.23, (nextColumn - half) * 1.23, 0.25, (nextRow - half) * 1.23);
     }
     traceGeometry.setAttribute("position", new THREE.Float32BufferAttribute(tracePoints, 3));
-    const traceMaterial = new THREE.LineBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.52 });
+    const traceMaterial = new THREE.LineBasicMaterial({ color: palette.primary, transparent: true, opacity: 0.78 });
     geometries.push(traceGeometry); materials.push(traceMaterial);
     chamber.add(new THREE.LineSegments(traceGeometry, traceMaterial));
 
-    const beaconGeometry = new THREE.CylinderGeometry(0.11, 0.19, 1.38, 8);
-    const beaconMaterial = new THREE.MeshStandardMaterial({ color: palette.primary, emissive: palette.primary, emissiveIntensity: 1.5, metalness: 0.66, roughness: 0.24 });
-    geometries.push(beaconGeometry); materials.push(beaconMaterial);
+    const beaconGeometry = new THREE.CylinderGeometry(0.13, 0.22, 1.5, 8);
+    const beaconBaseGeometry = new THREE.CylinderGeometry(0.32, 0.38, 0.18, 10);
+    const beaconRingGeometry = new THREE.TorusGeometry(0.22, 0.025, 6, 24);
+    const beaconMaterial = new THREE.MeshStandardMaterial({ color: palette.primary, emissive: palette.primary, emissiveIntensity: 1.8, metalness: 0.66, roughness: 0.24 });
+    const beaconBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x22345a, emissive: 0x0b1d43, emissiveIntensity: 0.7, metalness: 0.78, roughness: 0.3 });
+    const beaconRingMaterial = new THREE.MeshBasicMaterial({ color: palette.alert, transparent: true, opacity: 0.82, depthWrite: false });
+    geometries.push(beaconGeometry, beaconBaseGeometry, beaconRingGeometry); materials.push(beaconMaterial, beaconBaseMaterial, beaconRingMaterial);
     const beacons: any[] = [];
-    for (const [index, position] of [[-4.55, -4.55], [4.55, -4.55], [4.55, 4.55], [-4.55, 4.55]].entries()) {
+    const beaconRings: any[] = [];
+    for (const [index, position] of [[-3.92, -3.92], [3.92, -3.92], [3.92, 3.92], [-3.92, 3.92]].entries()) {
+      const base = new THREE.Mesh(beaconBaseGeometry, beaconBaseMaterial);
+      base.position.set(position[0], -0.13, position[1]);
       const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
       beacon.position.set(position[0], 0.32, position[1]);
       beacon.rotation.y = index * Math.PI / 4;
-      chamber.add(beacon);
+      const ring = new THREE.Mesh(beaconRingGeometry, beaconRingMaterial);
+      ring.position.set(position[0], 0.88, position[1]);
+      ring.rotation.x = Math.PI / 2;
+      chamber.add(base, beacon, ring);
       const glow = new THREE.PointLight(index % 2 ? palette.alert : palette.primary, 3.2, 5.5, 2);
       glow.position.set(position[0], 0.85, position[1]);
       chamber.add(glow);
-      beacons.push(beacon);
+      beacons.push(beacon); beaconRings.push(ring);
+    }
+
+    const gantryGeometry = new THREE.BoxGeometry(0.22, 1.75, 0.22);
+    const gantryBraceGeometry = new THREE.BoxGeometry(1.42, 0.08, 0.12);
+    const gantryMaterial = new THREE.MeshStandardMaterial({ color: 0x273153, emissive: 0x0d1733, emissiveIntensity: 0.68, metalness: 0.8, roughness: 0.32 });
+    geometries.push(gantryGeometry, gantryBraceGeometry); materials.push(gantryMaterial);
+    for (const [x, z, rotation] of [[0, -4.35, 0], [4.35, 0, Math.PI / 2], [0, 4.35, 0], [-4.35, 0, Math.PI / 2]] as const) {
+      const gantry = new THREE.Group();
+      const left = new THREE.Mesh(gantryGeometry, gantryMaterial);
+      const right = new THREE.Mesh(gantryGeometry, gantryMaterial);
+      const brace = new THREE.Mesh(gantryBraceGeometry, gantryMaterial);
+      left.position.x = -0.74; right.position.x = 0.74; brace.position.y = 0.76;
+      gantry.add(left, right, brace); gantry.position.set(x, 0.25, z); gantry.rotation.y = rotation;
+      chamber.add(gantry);
     }
 
     const particleGeometry = new THREE.BufferGeometry();
@@ -327,7 +373,11 @@ export function SignalShift3D({ tiles, gridSize, intensity, active, disabled, mo
       primaryLight.intensity = 15 + Math.sin(elapsed * 2.5) * 2.6;
       alertLight.intensity = 11 + Math.sin(elapsed * 2.1 + 1.6) * 2.1;
       glowRings.forEach((ring, index) => { ring.rotation.z = elapsed * 1.45 + index; ring.material.opacity = 0.52 + Math.sin(elapsed * 3.4) * 0.22; });
+      coreRings.forEach((ring, index) => { ring.rotation.z = elapsed * (1.2 + index * 0.1); ring.scale.setScalar(1 + Math.sin(elapsed * 2.4 + index) * 0.08); });
+      moduleCores.forEach((core, index) => { core.scale.y = 1 + Math.sin(elapsed * 2.2 + index * 0.7) * 0.13; });
+      activeModules.forEach((module, index) => { module.position.y = Math.sin(elapsed * 2.6 + index) * 0.045; });
       beacons.forEach((beacon, index) => { beacon.position.y = 0.32 + Math.sin(elapsed * 2 + index) * 0.06; });
+      beaconRings.forEach((ring, index) => { ring.rotation.z = elapsed * (0.8 + index * 0.12); });
       particles.rotation.y = elapsed * 0.048;
       renderer.render(scene, camera);
       frame = window.requestAnimationFrame(render);
