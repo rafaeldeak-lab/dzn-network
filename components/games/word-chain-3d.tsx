@@ -13,8 +13,13 @@ type WordChain3DProps = {
 export function WordChain3D({ active, turn, motionRunning, onUnavailable }: WordChain3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const gameStateRef = useRef({ active, turn });
+  const unavailableRef = useRef(onUnavailable);
   const applyStateRef = useRef<((state: { active: boolean; turn: number }) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    unavailableRef.current = onUnavailable;
+  }, [onUnavailable]);
 
   useEffect(() => {
     gameStateRef.current = { active, turn };
@@ -26,7 +31,7 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
     const mount = mountRef.current;
     if (!mount) return;
     if (typeof WebGLRenderingContext === "undefined") {
-      onUnavailable();
+      unavailableRef.current();
       return;
     }
 
@@ -40,7 +45,7 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
     } catch {
-      onUnavailable();
+      unavailableRef.current();
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -220,7 +225,7 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
       mount.removeChild(renderer.domElement);
       dispose();
     };
-  }, [motionRunning, onUnavailable]);
+  }, [motionRunning]);
 
   return <div ref={mountRef} className="dzn-word-chain-3d" aria-hidden="true" />;
 }
