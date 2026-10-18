@@ -571,9 +571,14 @@
 .circuitForgeReadout > strong { color: #fff7dc; font-size: clamp(18px, 3vw, 26px); }
 .circuitForgeConsole { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(214px, .65fr); gap: 16px; align-items: stretch; }
 .circuitForgeConsoleFallback { grid-template-columns: minmax(0, 1fr); }
-.circuitForgeConsoleFallback :global(.dzn-circuit-forge-3d) { display: none; }
-.circuitForgeConsole :global(.dzn-circuit-forge-3d) { min-width: 0; min-height: 380px; border: 1px solid #796b3f; border-radius: 5px; overflow: hidden; background: #090907; box-shadow: inset 0 0 0 1px #fff1c40d, 0 16px 34px #00000055; }
-.circuitForgeConsole :global(.dzn-circuit-forge-3d) canvas { display: block; width: 100%; height: 100%; touch-action: manipulation; }
+.circuitForgeConsoleFallback .circuitForgeSceneFrame { display: none; }
+.circuitForgeSceneFrame { position: relative; min-width: 0; min-height: 380px; overflow: hidden; border: 1px solid #796b3f; border-radius: 5px; background: #090907; box-shadow: inset 0 0 0 1px #fff1c40d, 0 16px 34px #00000055; }
+.circuitForgeSceneHud { position: absolute; z-index: 2; top: 16px; left: 16px; display: grid; gap: 3px; max-width: calc(100% - 32px); padding: 7px 9px; border: 1px solid #e8ce794d; border-left: 3px solid #ffe38a; border-radius: 3px; color: #f6e3a5; background: #0c0b08c9; box-shadow: 0 8px 22px #0000004a; font-family: var(--font-geist-mono), monospace; pointer-events: none; }
+.circuitForgeSceneHud span { color: #cfbb78; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
+.circuitForgeSceneHud strong { overflow: hidden; color: #fff5cf; font-size: 11px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.circuitForgeSceneHud small { overflow: hidden; color: #a5e7dc; font-size: 8px; font-weight: 800; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.circuitForgeSceneFrame :global(.dzn-circuit-forge-3d) { min-width: 0; min-height: 380px; }
+.circuitForgeSceneFrame :global(.dzn-circuit-forge-3d) canvas { display: block; width: 100%; height: 100%; touch-action: manipulation; }
 .circuitForgeControlDeck { display: grid; align-content: start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid #665d3b; border-radius: 5px; background: #100f0ae8; box-shadow: inset 0 1px #fff0ba0b; }
 .circuitForgeDeckHeading { display: grid; gap: 5px; }
 .circuitForgeDeckHeading span { color: #f0d671; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .13em; }
