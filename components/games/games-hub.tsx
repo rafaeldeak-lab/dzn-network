@@ -34,6 +34,7 @@ const SignalShift3D = dynamic(() => import("./signal-shift-3d").then(module => m
 const CircuitForge3D = dynamic(() => import("./circuit-forge-3d").then(module => module.CircuitForge3D), { ssr: false });
 const RelayRush3D = dynamic(() => import("./relay-rush-3d").then(module => module.RelayRush3D), { ssr: false });
 const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => module.EchoArray3D), { ssr: false });
+const CipherGrid3D = dynamic(() => import("./cipher-grid-3d").then(module => module.CipherGrid3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -311,7 +312,7 @@ export function GamesHub() {
           {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -1524,11 +1525,12 @@ function cipherGridObjective(difficulty: CipherGridDifficulty | undefined) {
     : { label: "FIELD CIPHER", briefing: "A five-letter encrypted field term. Five attempts available.", protocol: "Standard protocol" };
 }
 
-function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function CipherGridPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<CipherGridPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [entry, setEntry] = useState("");
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
 
   const load = useCallback(async () => {
@@ -1566,6 +1568,7 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const answerLength = game?.answerLength ?? CIPHER_GRID_WORD_LENGTH;
   const objective = cipherGridObjective(game?.difficulty);
+  const solvedGlyphs = game?.attempts.reduce((total, attempt) => total + attempt.marks.filter(mark => mark === "correct").length, 0) ?? 0;
   const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, answerLength));
   const submit = useCallback(() => {
     if (!game || !active || busy || entry.length !== answerLength) return;
@@ -1584,6 +1587,8 @@ function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => v
     {game ? <>
       <div className={styles.cipherGridMeta}><span><KeyRound size={14} />{game.attempts.length} / {game.maxAttempts}</span><span><Target size={14} />{game.answerLength} letters</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <form className={styles.cipherGridStage} aria-label="Cipher Grid field-word puzzle" onSubmit={event => { event.preventDefault(); submit(); }}>
+        <div className={styles.cipherGridScene}>{!threeUnavailable && <CipherGrid3D difficulty={game.difficulty} attempts={game.attempts.length} solvedGlyphs={solvedGlyphs} active={active} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}</div>
+        <div className={styles.cipherGridSceneHud} aria-hidden="true"><span>CRYPT DECK // 06</span><strong>{active ? "SIGNAL INTERCEPT" : game.status === "won" ? "CIPHER SECURED" : "STANDBY"}</strong><small>{solvedGlyphs} VERIFIED GLYPHS</small></div>
         <div className={styles.cipherGridReadout} aria-live="polite"><span>{active ? objective.label : game.status === "won" ? "CIPHER RESOLVED" : "CIPHER CLOSED"}</span><strong>{active ? `Reconstruct the ${game.answerLength}-character field term` : game.status === "won" ? "Signal decoded" : game.status === "failed" ? "No attempts remain" : "Decode window expired"}</strong></div>
         <div className={styles.cipherGridMission} data-difficulty={game.difficulty}>
           <span><Radio size={14} />{objective.protocol}</span>
