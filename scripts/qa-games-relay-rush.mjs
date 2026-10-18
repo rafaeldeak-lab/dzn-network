@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 const output = path.resolve("artifacts/games-relay-rush");
 await mkdir(output, { recursive: true });
@@ -48,7 +49,7 @@ try {
       await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
       const [loadResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "GET"),
-        page.getByRole("button", { name: /Relay Rush/ }).click(),
+        page.locator('[data-game="relay-rush"]').click(),
       ]);
       assert.equal(loadResponse.status(), 200, await loadResponse.text());
       await page.getByRole("heading", { name: "DZN Relay Rush" }).waitFor();
@@ -64,6 +65,23 @@ try {
         assert.equal(startResponse.status(), 200, JSON.stringify(started));
         const relayPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "DZN Relay Rush" }) });
         const relayStage = relayPanel.locator('div[data-status][data-intensity]');
+        const chamberCanvas = relayPanel.locator('canvas[data-dzn-relay-rush-canvas="true"]');
+        await chamberCanvas.waitFor({ state: "visible" });
+        const chamberImage = await sharp(await chamberCanvas.screenshot()).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        let litPixels = 0;
+        const sampledColours = new Set();
+        for (let offset = 0; offset < chamberImage.data.length; offset += chamberImage.info.channels * 17) {
+          const red = chamberImage.data[offset]; const green = chamberImage.data[offset + 1]; const blue = chamberImage.data[offset + 2];
+          if (red + green + blue > 80) litPixels++;
+          sampledColours.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
+        }
+        assert.ok(chamberImage.info.width > 250 && chamberImage.info.height > 180, "Relay Rush should render a usable relay chamber scene");
+        assert.ok(litPixels > 80, "Relay Rush should retain visible relay lighting, not a black canvas");
+        assert.ok(sampledColours.size > 18, "Relay Rush should retain meaningful rendered scene detail");
+        if (viewport.name === "phone") {
+          const chamberHeight = await relayPanel.locator('[class*="relayRushChamber"]').evaluate(element => element.getBoundingClientRect().height);
+          assert.ok(chamberHeight <= 390, `Relay Rush mobile relay chamber should stay compact (received ${chamberHeight}px)`);
+        }
         await relayStage.evaluate(element => element.setAttribute("data-intensity", "storm"));
         assert.match(await relayStage.evaluate(element => getComputedStyle(element).backgroundImage), /relay-rush-chamber-v2/,
           "Relay Rush storm phase must retain the chamber artwork.");
