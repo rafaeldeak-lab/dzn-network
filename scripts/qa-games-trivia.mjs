@@ -21,7 +21,7 @@ try {
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /DZN Trivia/ }).click();
+    await page.locator('button[data-game="trivia"]').click();
     await page.getByRole("heading", { name: "DZN Trivia" }).waitFor();
     const start = page.getByRole("button", { name: "Start round" });
     const answers = page.locator('div[class*="triviaChoices"] button');
@@ -34,18 +34,43 @@ try {
     await answers.first().waitFor();
     const briefing = page.locator('div[class*="triviaQuestion"]');
     assert.match(await briefing.evaluate(element => getComputedStyle(element).backgroundImage), /trivia-command-table-v1/);
+    const triviaCanvas = page.locator('canvas[data-dzn-trivia-canvas="true"]');
+    await triviaCanvas.waitFor({ state: "visible" });
+    const telemetry = await triviaCanvas.evaluate(canvas => {
+      const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+      if (!context) return null;
+      const width = context.drawingBufferWidth;
+      const height = context.drawingBufferHeight;
+      const pixels = new Uint8Array(width * height * 4);
+      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+      let litPixels = 0;
+      const colourBuckets = new Set();
+      for (let offset = 0; offset < pixels.length; offset += 4 * 19) {
+        const red = pixels[offset]; const green = pixels[offset + 1]; const blue = pixels[offset + 2]; const alpha = pixels[offset + 3];
+        if (alpha > 5 && red + green + blue > 70) litPixels++;
+        if (alpha > 5) colourBuckets.add(`${Math.floor(red / 24)}:${Math.floor(green / 24)}:${Math.floor(blue / 24)}`);
+      }
+      return { width, height, litPixels, colourBucketCount: colourBuckets.size };
+    });
+    assert.ok(telemetry && telemetry.width > 260 && telemetry.height > 170, "Trivia should render a usable command scene.");
+    assert.ok(telemetry.litPixels > 60, "Trivia command telemetry should not render a blank canvas.");
+    assert.ok(telemetry.colourBucketCount > 14, "Trivia command telemetry should retain meaningful visual detail.");
     assert.equal(await answers.count(), 4);
     assert.equal(await page.getByRole("group", { name: "Field response pads" }).count(), 1);
     await page.reload({ waitUntil: "networkidle" });
     const [resumeResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /DZN Trivia/ }).click(),
+      page.locator('button[data-game="trivia"]').click(),
     ]);
     const resumed = await resumeResponse.json();
     await answers.first().waitFor();
     assert.ok(resumed.game?.difficulty);
     assert.equal(await page.getByLabel("Trivia difficulty").inputValue(), resumed.game.difficulty);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+    if (viewport.name === "phone") {
+      const sceneHeight = await briefing.evaluate(element => element.getBoundingClientRect().height);
+      assert.ok(sceneHeight <= 560, `Trivia phone scene should remain compact (received ${sceneHeight}px).`);
+    }
     const [answerResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "POST"),
       answers.first().click(),

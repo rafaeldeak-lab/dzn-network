@@ -47,7 +47,13 @@ async function answerRound(fixture: Fixture, correctCount = 5) {
 
 async function run() {
   const releaseGuide = readFileSync("docs/DZN_GAMES_TRIVIA_RELEASE.md", "utf8");
+  const hubSource = readFileSync("components/games/games-hub.tsx", "utf8");
+  const sceneSource = readFileSync("components/games/trivia-3d.tsx", "utf8");
   assert.match(releaseGuide, /Recruit and Operator require at least four correct answers\. Specialist requires five correct answers\./);
+  assert.match(hubSource, /const Trivia3D = dynamic/);
+  assert.match(hubSource, /questionNumber=\{game\.question\.number\}/);
+  assert.match(sceneSource, /const unavailableRef = useRef\(onUnavailable\);/);
+  assert.doesNotMatch(sceneSource, /prompt|choices|answer|question_ids_json/);
   await test("authentication, origin, method and feature switches fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start", difficulty: "recruit" }, { origin: "https://foreign.test" })).status, 403);

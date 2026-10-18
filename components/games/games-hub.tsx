@@ -37,6 +37,7 @@ const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => modul
 const CipherGrid3D = dynamic(() => import("./cipher-grid-3d").then(module => module.CipherGrid3D), { ssr: false });
 const WordChain3D = dynamic(() => import("./word-chain-3d").then(module => module.WordChain3D), { ssr: false });
 const SignalHunt3D = dynamic(() => import("./signal-hunt-3d").then(module => module.SignalHunt3D), { ssr: false });
+const Trivia3D = dynamic(() => import("./trivia-3d").then(module => module.Trivia3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -310,7 +311,7 @@ export function GamesHub() {
               </div>
             </div>}
           </section>}
-          {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -381,11 +382,12 @@ function EquipmentIcon({ item }: { item: HubEquipment }) {
   return <Sparkles size={21} />;
 }
 
-function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function TriviaPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<TriviaPayload | null>(null);
   const [difficulty, setDifficulty] = useState<TriviaDifficulty>("recruit");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -427,7 +429,8 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
         <label>Difficulty<select aria-label="Trivia difficulty" value={difficulty} disabled={busy || active} onChange={event => setDifficulty(event.target.value as TriviaDifficulty)}>{(Object.keys(TRIVIA_DIFFICULTIES) as TriviaDifficulty[]).map(key => <option key={key} value={key}>{TRIVIA_DIFFICULTIES[key].label}</option>)}</select></label>
         <button className={styles.primary} disabled={busy || active} onClick={() => void mutate({ action: "start", difficulty })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Round in progress" : game ? "New round" : "Start round"}</button>
       </div>
-      {game?.question && active ? <div className={styles.triviaQuestion}>
+      {game?.question && active ? <div className={styles.triviaQuestion} data-renderer={threeUnavailable ? "fallback" : "three"}>
+        {!threeUnavailable && <div className={styles.triviaScene}><Trivia3D active={active} questionNumber={game.question.number} correct={game.correct} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} /></div>}
         <div className={styles.triviaCommandOverlay}>
           <div className={styles.triviaBriefing}>
             <div><span>FIELD BRIEF / {TRIVIA_DIFFICULTIES[game.difficulty].label.toUpperCase()}</span><strong>Survival intelligence</strong></div>

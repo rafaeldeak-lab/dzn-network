@@ -263,9 +263,12 @@
 .triviaReady svg { color: var(--cyan); }
 .triviaReady p { max-width: 480px; }
 .triviaQuestion { position: relative; isolation: isolate; overflow: hidden; min-height: 522px; border: 1px solid #3c5d5c; border-top: 3px solid #64e2d2; border-radius: 6px; background: #071010 url('/images/games/trivia-command-table-v1.png') center / cover no-repeat; box-shadow: inset 0 0 0 1px #071011, 0 18px 38px #00000045; }
-.triviaQuestion::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(180deg, #030b0ddd 0%, #06111291 30%, #060c0bb5 72%, #020707ec 100%); }
-.triviaQuestion::after { content: ""; position: absolute; inset: 9px; z-index: -1; pointer-events: none; border: 1px solid #d7fff630; box-shadow: inset 0 0 80px #020909bf; }
-.triviaCommandOverlay { min-height: 522px; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 14px; padding: 20px; }
+.triviaQuestion::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(180deg, #030b0dee 0%, #0611128a 30%, #060c0bbd 72%, #020707f2 100%); }
+.triviaQuestion::after { content: ""; position: absolute; inset: 9px; z-index: 2; pointer-events: none; border: 1px solid #d7fff630; box-shadow: inset 0 0 80px #020909bf; }
+.triviaScene { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .82; mix-blend-mode: screen; }
+.triviaScene :global(.dzn-trivia-3d), .triviaScene :global(.dzn-trivia-3d) canvas { display: block; width: 100%; height: 100%; }
+.triviaQuestion[data-renderer=fallback] .triviaScene { display: none; }
+.triviaCommandOverlay { position: relative; z-index: 3; min-height: 522px; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 14px; padding: 20px; }
 .triviaBriefing { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding-bottom: 14px; border-bottom: 1px solid #5dd9cc52; }
 .triviaBriefing > div:first-child { display: grid; gap: 5px; }
 .triviaBriefing > div:first-child > span, .triviaProgress > span, .triviaChoices small { color: #8dded6; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .12em; text-transform: uppercase; }
@@ -842,9 +845,18 @@
 
 @media (max-width: 560px) {
   .triviaQuestion { min-height: 0; padding: 0; }
-  .triviaCommandOverlay { min-height: 0; gap: 12px; padding: 14px; }
-  .triviaPromptRail { padding: 14px; }
-  .triviaChoices button { min-height: 74px; }
+  .triviaCommandOverlay { min-height: 0; gap: 8px; padding: 12px; }
+  .triviaBriefing { align-items: start; flex-direction: column; gap: 7px; padding-bottom: 8px; }
+  .triviaProgress { width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .triviaMeta { gap: 8px; font-size: 10px; }
+  .triviaMeta span:last-child { margin-left: 0; }
+  .triviaPromptRail { gap: 7px; padding: 10px 12px; }
+  .triviaPromptRail h3 { font-size: 18px; line-height: 1.28; }
+  .triviaChoices { gap: 7px; }
+  .triviaChoices button { min-height: 64px; gap: 8px; padding: 8px; }
+  .triviaChoices button > span { width: 28px; height: 28px; }
+  .triviaChoices small { font-size: 8px; }
+  .triviaChoices button strong { font-size: 12px; line-height: 1.27; }
 }
 @media (prefers-reduced-motion: reduce) {
   .triviaChoices button { transition: none; }
