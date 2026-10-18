@@ -7,6 +7,7 @@ import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesOutpostRun } from "../functions/_lib/games-outpost-run";
 import type { Env } from "../functions/_lib/types";
 import { OUTPOST_RUN_MAX_ENERGY, OUTPOST_RUN_MAX_MOVES, OUTPOST_RUN_REWARD, OUTPOST_RUN_TTL_MS, type OutpostRunDirection, type OutpostRunPayload } from "../lib/games-outpost-run";
+import { scanVector } from "../components/games/outpost-run-3d";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof outpostFixture>>;
@@ -90,6 +91,13 @@ async function completeRun(fixture: Fixture, initial: OutpostRunPayload, stopBef
 }
 
 async function run() {
+  await test("terrain scanner preserves both axes of a server-issued diagonal bearing", async () => {
+    const northEast = scanVector("north-east");
+    const southWest = scanVector("south-west");
+    assert.ok(northEast.x > 0.7 && northEast.z < -0.7);
+    assert.ok(southWest.x < -0.7 && southWest.z > 0.7);
+  });
+
   await test("authentication, origin, method and feature switches fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start" }, { origin: "https://foreign.test" })).status, 403);

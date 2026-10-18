@@ -943,7 +943,8 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
       <div className={styles.outpostRunStage} data-status={game.status} data-intensity={game.intensity} data-objective={game.objective}>
         <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / ${game.objective === "beacon" ? "FIELD BEACON" : "EMERGENCY RELAY"}` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? game.objective === "beacon" ? "Secure the field beacon before extraction" : game.intensity === "calibration" ? "Trace the emergency relay" : game.intensity === "pressure" ? "Commit to the surviving route" : "Break through the blackout" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
         <div className={styles.outpostRunTerrain}>
-          <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} scanHint={game.scanHint}
+          <div className={styles.outpostRunTerrainHud} data-intensity={game.intensity} aria-hidden="true"><span>SCOUT ROVER // T-05</span><strong>{game.objective === "beacon" ? "BEACON LOCK" : "RELAY UPLINK"}</strong><small>{game.scanHint ? `BEARING ${game.scanHint.replace("-", " / ").toUpperCase()}` : "SCANNER STANDBY"}</small></div>
+          <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} intensity={game.intensity} scanHint={game.scanHint}
             active={active} disabled={busy || cooldown} motionRunning={motionRunning} onMove={sendMove} />
           <span className={styles.outpostRunTerrainLabel}>LIVE TERRAIN // CLICK AN ADJACENT TILE OR USE THE COMMAND PAD</span>
         </div>
