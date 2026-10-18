@@ -14,6 +14,7 @@ import { handleGamesCircuitForge } from "../functions/_lib/games-circuit-forge";
 import { handleGamesRangerRange } from "../functions/_lib/games-ranger-range";
 import { handleGamesNightRun } from "../functions/_lib/games-night-run";
 import { handleCommandCentre } from "../functions/_lib/command-centre";
+import { handleSurvivalCommand } from "../functions/_lib/survival-command";
 import { gamesFixture } from "./lib/games-hub-local";
 
 // Loopback-only, disposable synthetic account. Never use production bindings or credentials.
@@ -33,6 +34,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0104_games_hub_night_run.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0107_dzn_command_centre.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
@@ -47,6 +49,7 @@ async function main() {
   fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_RECON_ENABLED = "true";
   fixture.env.DZN_COMMAND_CENTRE_ENABLED = "true";
+  fixture.env.DZN_SURVIVAL_COMMAND_ENABLED = "true";
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
@@ -62,6 +65,9 @@ async function main() {
       if (url.pathname === "/__local-command-centre") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/command-centre", "Cache-Control": "no-store" }); res.end(); return;
       }
+      if (url.pathname === "/__local-survival-command") {
+        res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/survival-command", "Cache-Control": "no-store" }); res.end(); return;
+      }
       if (url.pathname === "/api/auth/me") {
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ authenticated: true, navigation: { plan_tier: "free", can_link_more_servers: true, primary_action: { label: "Owner Plans", href: "/pricing", tone: "trial" } } })); return;
@@ -70,10 +76,11 @@ async function main() {
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ ok: true, dznPulseEnabled: false, discordNotificationsEnabled: false })); return;
       }
-      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek", "/api/games/relay-rush", "/api/games/cipher-grid", "/api/games/echo-array", "/api/games/outpost-run", "/api/games/signal-shift", "/api/games/circuit-forge", "/api/games/ranger-range", "/api/games/night-run", "/api/player/command-centre"].includes(url.pathname)) {
+      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek", "/api/games/relay-rush", "/api/games/cipher-grid", "/api/games/echo-array", "/api/games/outpost-run", "/api/games/signal-shift", "/api/games/circuit-forge", "/api/games/ranger-range", "/api/games/night-run", "/api/player/command-centre", "/api/player/survival-command"].includes(url.pathname)) {
         const chunks: Buffer[] = []; let bytes = 0;
         for await (const chunk of req) { bytes += chunk.length; if (bytes > 4096) { res.writeHead(413); res.end(); return; } chunks.push(chunk); }
-        const handler = url.pathname.endsWith("/command-centre") ? handleCommandCentre
+        const handler = url.pathname.endsWith("/survival-command") ? handleSurvivalCommand
+          : url.pathname.endsWith("/command-centre") ? handleCommandCentre
           : url.pathname.endsWith("/trivia") ? handleGamesTrivia
           : url.pathname.endsWith("/word-chain") ? handleGamesWordChain
             : url.pathname.endsWith("/hide-seek") ? handleGamesHideSeek
@@ -111,7 +118,7 @@ async function main() {
     const address = server.address();
     if (!address || typeof address === "string") return;
     origin = `http://127.0.0.1:${address.port}`;
-    console.log(`Local-only synthetic Games Hub: ${origin}/__local-login or ${origin}/__local-command-centre`);
+    console.log(`Local-only synthetic Games Hub: ${origin}/__local-login, ${origin}/__local-command-centre or ${origin}/__local-survival-command`);
   });
 }
 void main();

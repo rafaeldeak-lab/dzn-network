@@ -22,6 +22,7 @@ interface D1Database {
 interface CloudflareEnv {
   DZN_GAMES_HUB_ENABLED?: string;
   DZN_COMMAND_CENTRE_ENABLED?: string;
+  DZN_SURVIVAL_COMMAND_ENABLED?: string;
   DZN_GAMES_TRIVIA_ENABLED?: string;
   DZN_GAMES_WORD_CHAIN_ENABLED?: string;
   DZN_GAMES_HIDE_SEEK_ENABLED?: string;
