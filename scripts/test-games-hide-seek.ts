@@ -156,6 +156,8 @@ async function run() {
     assert.match(visualSource, /new THREE\.OrthographicCamera/);
     assert.match(visualSource, /state\.scanPoint\.x \/ 1000 \* 2 - 1/);
     assert.match(visualSource, /1 - state\.scanPoint\.y \/ 1000 \* 2/);
+    assert.match(visualSource, /geometries\.push\(horizon\.geometry\)/);
+    assert.match(visualSource, /materials\.push\(horizon\.material\)/);
     assert.doesNotMatch(visualSource, /recoveredSignals|target_ids_json|HIDE_SEEK_TARGET_BY_ID/);
   });
   await test("Hub preserves Signal Hunt rewards after the play flag is disabled", async fixture => {

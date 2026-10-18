@@ -73,7 +73,10 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
 
     const horizon = new THREE.GridHelper(14, 14, 0x67e4d5, 0x1a6663);
     horizon.position.y = -1.05;
-    const horizonMaterial = horizon.material as THREE.LineBasicMaterial;
+    geometries.push(horizon.geometry);
+    if (Array.isArray(horizon.material)) materials.push(...horizon.material);
+    else materials.push(horizon.material);
+    const horizonMaterial = (Array.isArray(horizon.material) ? horizon.material[0] : horizon.material) as THREE.LineBasicMaterial;
     horizonMaterial.transparent = true;
     horizonMaterial.opacity = 0.28;
     scene.add(horizon);
