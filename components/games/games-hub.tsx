@@ -32,6 +32,7 @@ const RangerRange3D = dynamic(() => import("./ranger-range-3d").then(module => m
 const OutpostRun3D = dynamic(() => import("./outpost-run-3d").then(module => module.OutpostRun3D), { ssr: false });
 const SignalShift3D = dynamic(() => import("./signal-shift-3d").then(module => module.SignalShift3D), { ssr: false });
 const CircuitForge3D = dynamic(() => import("./circuit-forge-3d").then(module => module.CircuitForge3D), { ssr: false });
+const RelayRush3D = dynamic(() => import("./relay-rush-3d").then(module => module.RelayRush3D), { ssr: false });
 const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => module.EchoArray3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
@@ -309,7 +310,7 @@ export function GamesHub() {
           {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -608,10 +609,11 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   </section>;
 }
 
-function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
+function RelayRushPanel({ motionRunning, onProgress }: { motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<RelayRushPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
   const serverClock = useRef({ time: 0, measuredAt: 0 });
   const [relayNow, setRelayNow] = useState(0);
@@ -705,11 +707,14 @@ function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
       <div className={styles.relayRushMeta}><span><Zap size={14} />{game.pulsesCleared} / {game.totalPulses}</span><span><Target size={14} />{game.misses} misses</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.relayRushStage} data-ready={targetOpen} data-status={game.status} data-intensity={game.intensity} aria-live="polite">
         <div className={styles.relayRushReadout}><span>{active ? targetOpen ? `${game.intensity} / PULSE LIVE` : `${game.intensity} / SYNCING RELAY` : game.status === "won" ? "RUN COMPLETE" : "RUN CLOSED"}</span><strong>{active ? targetOpen ? "Choose the lit lane" : "Stand by for the next signal" : game.status === "won" ? "Signal restored" : game.status === "failed" ? "Signal lost" : "Window expired"}</strong></div>
+        <div className={`${styles.relayRushChamber} ${threeUnavailable ? styles.relayRushChamberFallback : ""}`} data-renderer={threeUnavailable ? "fallback" : "webgl"}>
+          <div className={styles.relayRushSceneHud} aria-hidden="true"><span>RELAY ARRAY // C-03</span><strong>{targetOpen ? "INCOMING PULSE" : active ? "SYNCHRONISING" : game.status === "won" ? "LINK STABLE" : "STANDBY"}</strong><small>{game.pulsesCleared} / {game.totalPulses} VERIFIED</small></div>
+          {!threeUnavailable && <RelayRush3D intensity={game.intensity} targetLane={targetOpen ? game.nextLane : null} active={active} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
         <div className={styles.relayRushLanes} role="group" aria-label="Relay Rush signal lanes">
           {RELAY_RUSH_LANES.map(lane => { const meta = RELAY_RUSH_LANE_META[lane]; const lit = targetOpen && game.nextLane === lane; return <button type="button" key={lane} className={styles.relayRushLane}
             data-lane={lane} data-target={lit} disabled={busy || !active || !targetOpen} onClick={() => submitPulse(lane)}
             aria-label={`${meta.label} signal lane (${meta.key})${lit ? ", live" : ""}`}><span>{meta.key}</span><strong>{meta.label}</strong><small>{lit ? "Pulse live" : active ? "Await signal" : "Stand down"}</small></button>; })}
-        </div>
+        </div></div>
         <p className={styles.relayRushHint}>Keyboard: A / S / D or arrow keys. The server verifies pulse order and progressively tighter timing windows.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
