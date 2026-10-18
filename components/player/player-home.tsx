@@ -100,6 +100,9 @@ type PlayerHubPayload = {
   command_centre: {
     available: boolean;
   };
+  survival_command: {
+    available: boolean;
+  };
   owner_setup: {
     href: string;
     gated: true;
@@ -275,6 +278,13 @@ const playerActionCards: PlayerActionCard[] = [
     description: "Build a private DZN settlement with verified Games Hub parts and server-timed construction.",
     icon: <Hammer aria-hidden="true" className="h-5 w-5" />,
     tone: "emerald",
+  },
+  {
+    href: "/survival-command",
+    title: "Survival Command",
+    description: "Deploy private field teams through a server-backed DZN sector operation.",
+    icon: <Activity aria-hidden="true" className="h-5 w-5" />,
+    tone: "cyan",
   },
   {
     href: "/player/profile",
@@ -509,7 +519,11 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const headerNavigation = authState.status === "logged_in" ? authState.navigation : null;
   const hubData = hubState.status === "ready" ? hubState.data : null;
   const ownerSetupHref = hubData?.owner_setup.href ?? ownerSetupFallbackHref;
-  const visiblePlayerActionCards = playerActionCards.filter((card) => card.href !== "/command-centre" || hubData?.command_centre?.available === true);
+  const visiblePlayerActionCards = playerActionCards.filter((card) => {
+    if (card.href === "/command-centre") return hubData?.command_centre?.available === true;
+    if (card.href === "/survival-command") return hubData?.survival_command?.available === true;
+    return true;
+  });
 
   return (
     <main className="relative min-h-screen overflow-x-clip bg-[#02030a] text-white">

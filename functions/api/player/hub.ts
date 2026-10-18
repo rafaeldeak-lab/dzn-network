@@ -228,6 +228,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       command_centre: {
         available: env.DZN_COMMAND_CENTRE_ENABLED === "true",
       },
+      survival_command: {
+        available: env.DZN_COMMAND_CENTRE_ENABLED === "true" && env.DZN_SURVIVAL_COMMAND_ENABLED === "true",
+      },
       owner_setup: {
         href: ownerSetupHref,
         gated: true,
