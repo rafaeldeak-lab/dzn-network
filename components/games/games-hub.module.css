@@ -293,6 +293,27 @@
 .wordChainPanel { position: relative; isolation: isolate; overflow: hidden; padding: 18px; border: 1px solid #364948; border-radius: 6px; background: #0d1414; }
 .wordChainPanel::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: linear-gradient(90deg, #071010ef 0%, #0b1514e8 44%, #07100ee0 100%), url("/images/games/word-chain-relay-v2.png"); background-position: center; background-size: cover; opacity: .82; }
 .wordChainPanel > * { position: relative; z-index: 1; }
+.wordChainCommandDeck { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 28%); align-items: end; min-height: 300px; overflow: hidden; border: 1px solid #49756f; border-radius: 6px; background: linear-gradient(135deg, #061617e8, #0b2320ca); box-shadow: inset 0 0 0 1px #0a2c2a80, 0 16px 30px #0207088c; }
+.wordChainCommandDeck::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #02101216 40%, #020607db), linear-gradient(90deg, #041314d9, transparent 65%); z-index: 1; }
+.wordChainCommandDeck[data-active=true]::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1; background: repeating-linear-gradient(0deg, transparent 0 3px, #8dfff210 3px 4px); mix-blend-mode: screen; animation: word-chain-sweep 5.4s linear infinite; }
+.wordChainScene { position: absolute; inset: 0; z-index: 0; opacity: .94; }
+.wordChainScene :global(.dzn-word-chain-3d) { width: 100%; height: 100%; min-height: 300px; }
+.wordChainScene :global(.dzn-word-chain-3d) canvas { display: block; width: 100%; height: 100%; }
+.wordChainCommandDeckFallback .wordChainScene { display: none; }
+.wordChainDeckHud { position: absolute; z-index: 2; top: 14px; left: 15px; display: grid; gap: 2px; padding: 8px 10px; border: 1px solid #3e7771; border-radius: 4px; background: #061415cf; box-shadow: 0 8px 20px #02070899; }
+.wordChainDeckHud span, .wordChainDeckHud small { color: #a6d8d0; font: 700 8px var(--font-geist-mono), monospace; letter-spacing: .12em; }
+.wordChainDeckHud strong { color: #e7fff9; font: 900 13px var(--font-geist-mono), monospace; letter-spacing: .1em; }
+.wordChainWordRail { position: relative; z-index: 2; display: grid; gap: 10px; align-self: end; padding: 24px; }
+.wordChainWordRail > span { color: #b4dfd8; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .15em; text-transform: uppercase; }
+.wordChainTiles { display: flex; flex-wrap: wrap; gap: 7px; }
+.wordChainTiles b { display: grid; width: clamp(34px, 5vw, 48px); height: clamp(40px, 6vw, 56px); place-items: center; border: 1px solid #71e5d5; border-radius: 4px; color: #ecfffb; background: linear-gradient(145deg, #235b59, #0a2325); box-shadow: inset 0 1px #c5fff855, 0 8px 16px #02070880; font: 900 clamp(18px, 3vw, 25px) var(--font-geist-mono), monospace; text-shadow: 0 0 14px #76f9e6; }
+.wordChainWordRail p { margin: 0; color: #a8c4c1; font-size: 12px; }
+.wordChainWordRail p b { display: inline-grid; width: 25px; height: 25px; place-items: center; margin-left: 4px; border: 1px solid #e9b86a; border-radius: 3px; color: #fff4d2; background: #5c431f; font-family: var(--font-geist-mono), monospace; }
+.wordChainTurnPanel { position: relative; z-index: 2; display: grid; align-self: stretch; align-content: end; gap: 7px; padding: 24px 18px; border-left: 1px solid #4e746e; background: linear-gradient(180deg, #0617178c, #071415ef); }
+.wordChainTurnPanel span { color: #91cac1; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .1em; text-transform: uppercase; }
+.wordChainTurnPanel strong { color: #effffc; font-size: 16px; line-height: 1.1; }
+.wordChainTurnPanel small { color: #b2c6c4; font-size: 11px; line-height: 1.5; }
+@keyframes word-chain-sweep { from { transform: translateY(-8%); } to { transform: translateY(8%); } }
 .chainCurrent { display: grid; justify-items: center; gap: 9px; padding: 24px 16px; border: 1px solid #49605e; border-radius: 5px; background: #071110c9; text-align: center; }
 .chainReadout { display: flex; justify-content: space-between; align-items: center; width: min(100%, 430px); gap: 12px; }
 .chainCurrent > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; text-transform: uppercase; }
@@ -728,7 +749,9 @@
 @media (max-width: 360px) { .hubNav { align-items: flex-start; } .hubNav .navActions { width: 100%; justify-content: space-between; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after, .hideSeekScene::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
-@media (max-width: 560px) { .wordChainPanel { padding: 13px; } .chainReadout { align-items: flex-start; flex-direction: column; gap: 4px; } }
+@media (max-width: 560px) { .wordChainPanel { padding: 13px; } .chainReadout { align-items: flex-start; flex-direction: column; gap: 4px; } .wordChainCommandDeck { grid-template-columns: 1fr; min-height: 0; } .wordChainScene, .wordChainScene :global(.dzn-word-chain-3d) { min-height: 258px; } .wordChainDeckHud { top: 11px; left: 11px; } .wordChainWordRail { min-height: 258px; align-content: end; padding: 16px; } .wordChainTiles { gap: 5px; } .wordChainTiles b { width: 33px; height: 39px; font-size: 18px; } .wordChainTurnPanel { min-height: 112px; padding: 14px 16px; border-top: 1px solid #4e746e; border-left: 0; } }
+.hub[data-motion=paused] .wordChainCommandDeck[data-active=true]::after { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .wordChainCommandDeck[data-active=true]::after { animation: none; } }
 
 .rangerRangeTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .rangerRangeTools > div { display: grid; gap: 4px; }
