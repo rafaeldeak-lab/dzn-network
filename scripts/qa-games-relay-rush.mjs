@@ -25,12 +25,18 @@ try {
     { name: "desktop-delayed-link", width: 1440, height: 1000, requestDelay: 360, exercisePulse: true },
     { name: "desktop-latency-downshift", width: 1440, height: 1000, initialStartDelay: 360, exercisePulse: true },
     { name: "phone", width: 390, height: 844, exercisePulse: true },
+    { name: "renderer-unavailable", width: 1440, height: 1000, forceNoWebGl: true },
   ]) {
     const { preview, readLog } = startPreview();
     let context;
     try {
       const origin = await waitForOrigin(preview, readLog);
       context = await browser.newContext({ viewport, reducedMotion: "reduce" });
+      if (viewport.forceNoWebGl) {
+        await context.addInitScript(() => {
+          Object.defineProperty(HTMLCanvasElement.prototype, "getContext", { configurable: true, value: () => null });
+        });
+      }
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", error => errors.push(error.message));
@@ -47,12 +53,39 @@ try {
         });
       }
       await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+      if (viewport.forceNoWebGl) {
+        assert.equal(await page.evaluate(() => document.createElement("canvas").getContext("webgl")), null,
+          "Renderer-failure QA must block WebGL context construction.");
+      }
       const [loadResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "GET"),
         page.locator('[data-game="relay-rush"]').click(),
       ]);
       assert.equal(loadResponse.status(), 200, await loadResponse.text());
       await page.getByRole("heading", { name: "DZN Relay Rush" }).waitFor();
+      if (viewport.forceNoWebGl) {
+        const startRun = page.getByRole("button", { name: "Start run" });
+        const [startResponse] = await Promise.all([
+          page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "POST"),
+          startRun.click(),
+        ]);
+        assert.equal(startResponse.status(), 200, await startResponse.text());
+        const relayPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "DZN Relay Rush" }) });
+        await page.waitForTimeout(300);
+        const rendererStates = await relayPanel.locator("[data-renderer]").evaluateAll(elements => elements.map(element => element.getAttribute("data-renderer")));
+        assert.deepEqual(rendererStates, ["fallback"], `Renderer-failure QA must enter the visible fallback state (received ${JSON.stringify(rendererStates)}; panel ${JSON.stringify((await relayPanel.innerText()).slice(0, 420))}).`);
+        const chamber = relayPanel.locator('[data-renderer="fallback"]');
+        assert.equal(await chamber.locator('canvas[data-dzn-relay-rush-canvas="true"]').count(), 0, "Renderer fallback must not retain an unusable WebGL canvas.");
+        assert.match(await chamber.evaluate(element => getComputedStyle(element).backgroundImage), /relay-rush-chamber-v2/,
+          "Relay Rush renderer fallback must retain the chamber artwork.");
+        const fallbackImage = await sharp(await chamber.screenshot()).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        let visiblePixels = 0;
+        for (let offset = 0; offset < fallbackImage.data.length; offset += fallbackImage.info.channels * 19) {
+          const red = fallbackImage.data[offset]; const green = fallbackImage.data[offset + 1]; const blue = fallbackImage.data[offset + 2];
+          if (red + green + blue > 75) visiblePixels++;
+        }
+        assert.ok(visiblePixels > 100, "Relay Rush renderer fallback must remain visibly rendered, not blank.");
+      }
       if (viewport.exercisePulse) {
         const startRun = page.getByRole("button", { name: "Start run" });
         for (let attempt = 0; attempt < 20 && !(await startRun.isEnabled()); attempt++) await page.waitForTimeout(50);
@@ -106,7 +139,8 @@ try {
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
       await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
-      assert.deepEqual(errors, []);
+      const unexpectedErrors = errors.filter(error => !(viewport.forceNoWebGl && error.includes("THREE.WebGLRenderer: Error creating WebGL context.")));
+      assert.deepEqual(unexpectedErrors, []);
     } finally {
       await context?.close();
       preview.kill();
