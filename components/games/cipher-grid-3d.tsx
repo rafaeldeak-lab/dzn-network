@@ -147,7 +147,7 @@ export function CipherGrid3D({ difficulty, attempts, solvedGlyphs, active, motio
       const angle = (index / 5) * Math.PI * 2 + 0.18;
       card.position.set(Math.sin(angle) * 2.7, 1.0 + (index % 2) * 0.45, Math.cos(angle) * 2.7);
       card.lookAt(0, 1, 0);
-      card.userData = { angle, offset: index * 0.8, material };
+      card.userData = { angle, offset: index * 0.8, material, baseY: card.position.y, baseRotationY: card.rotation.y };
       cards.push(card);
       deck.add(card);
     }
@@ -201,7 +201,7 @@ export function CipherGrid3D({ difficulty, attempts, solvedGlyphs, active, motio
       ring.rotation.z = elapsed * 0.14;
       coreBody.rotation.y = elapsed * 0.75;
       coreHalos.forEach((halo, index) => { halo.rotation.z = elapsed * (index ? -0.85 : 0.64); });
-      cards.forEach(card => { card.position.y = 1.0 + Math.sin(elapsed * 1.35 + card.userData.offset) * 0.12 + (card.userData.offset % 1 ? 0.45 : 0); card.rotation.y = Math.sin(elapsed * 0.65 + card.userData.offset) * 0.24; });
+      cards.forEach(card => { card.position.y = card.userData.baseY + Math.sin(elapsed * 1.35 + card.userData.offset) * 0.12; card.rotation.y = card.userData.baseRotationY + Math.sin(elapsed * 0.65 + card.userData.offset) * 0.24; });
       pylons.forEach(({ cap }, index) => { cap.position.y = 1.45 + Math.sin(elapsed * 1.7 + index) * 0.07; });
       particles.rotation.y = elapsed * 0.045;
       render();
