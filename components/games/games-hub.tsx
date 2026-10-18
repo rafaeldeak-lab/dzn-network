@@ -35,6 +35,7 @@ const CircuitForge3D = dynamic(() => import("./circuit-forge-3d").then(module =>
 const RelayRush3D = dynamic(() => import("./relay-rush-3d").then(module => module.RelayRush3D), { ssr: false });
 const EchoArray3D = dynamic(() => import("./echo-array-3d").then(module => module.EchoArray3D), { ssr: false });
 const CipherGrid3D = dynamic(() => import("./cipher-grid-3d").then(module => module.CipherGrid3D), { ssr: false });
+const WordChain3D = dynamic(() => import("./word-chain-3d").then(module => module.WordChain3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -309,7 +310,7 @@ export function GamesHub() {
             </div>}
           </section>}
           {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
@@ -443,11 +444,12 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
   </section>;
 }
 
-function WordChainPanel({ onProgress }: { onProgress: () => void }) {
+function WordChainPanel({ motionRunning, onProgress }: { motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<WordChainPayload | null>(null);
   const [word, setWord] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
   const submitting = useRef(false);
 
@@ -492,7 +494,26 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>03 / NETWORK RELAY</span><h2 id="word-chain-title">DZN Word Chain</h2></div><Radio size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Word Chain" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     {payload && <>
-      <div className={styles.chainCurrent}><div className={styles.chainReadout}><span>Current signal</span><small>{`${relayPhase} // TURN ${payload.round.version.toString().padStart(2, "0")}`}</small></div><strong>{payload.round.currentWord}</strong><div>Next word starts with <b>{required}</b></div></div>
+      <div className={`${styles.wordChainCommandDeck} ${threeUnavailable ? styles.wordChainCommandDeckFallback : ""}`} data-active={payload.round.canPlay && !payload.round.completed} data-renderer={threeUnavailable ? "fallback" : "webgl"}>
+        <div className={styles.wordChainScene} aria-hidden="true">
+          {!threeUnavailable && <WordChain3D active={payload.round.canPlay && !payload.round.completed} turn={payload.round.version} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
+        </div>
+        <div className={styles.wordChainDeckHud}>
+          <span>DAILY RELAY / C-17</span><strong>{relayPhase}</strong><small>{`TURN ${payload.round.version.toString().padStart(2, "0")}`}</small>
+        </div>
+        <div className={styles.wordChainWordRail}>
+          <span>Current relay word</span>
+          <div className={styles.wordChainTiles} aria-label={`Current relay word ${payload.round.currentWord}`}>
+            {payload.round.currentWord.toUpperCase().split("").map((letter, index) => <b key={`${letter}-${index}`}>{letter}</b>)}
+          </div>
+          <p>Next verified word begins with <b>{required}</b></p>
+        </div>
+        <div className={styles.wordChainTurnPanel}>
+          <span>{payload.round.completed ? "Daily chain complete" : payload.round.canPlay ? "Your relay window is live" : "Awaiting another operator"}</span>
+          <strong>{payload.round.completed ? "LINK SEALED" : payload.round.canPlay ? "TRANSMIT NEXT WORD" : "CHAIN IN TRANSIT"}</strong>
+          <small>{payload.round.completed ? "A new shared chain opens tomorrow." : payload.round.canPlay ? "One accepted word advances the public relay." : "Turns alternate between different players."}</small>
+        </div>
+      </div>
       <form className={styles.chainForm} onSubmit={event => { event.preventDefault(); void play(); }}>
         <label htmlFor="word-chain-entry">Your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
           placeholder={`${required.toLowerCase()}...`} disabled={busy || !payload.round.canPlay} onChange={event => setWord(event.target.value.replace(/[^a-zA-Z]/g, "").slice(0, 18))} />

@@ -116,6 +116,8 @@ async function run() {
     assert.match(source, /if \(submitting\.current\) return;/);
     assert.match(source, /submitting\.current = true;\s*generation\.current\+\+;/);
     assert.match(source, /finally \{ submitting\.current = false; setBusy\(false\); if \(refreshAfter\) void load\(\); \}/);
+    assert.match(source, /const WordChain3D = dynamic/);
+    assert.match(source, /wordChainCommandDeck/);
   });
   await test("shared turns alternate players and mint one bounded daily reward", async fixture => {
     let state = await payload(await call(fixture));
