@@ -279,6 +279,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     const pursuerCabinMaterial = new THREE.MeshStandardMaterial({ color: 0x16071f, emissive: 0x9d2e9a, emissiveIntensity: 1.2, metalness: 0.76, roughness: 0.14 });
     disposables.push(pursuerGeometry, pursuerCabinGeometry); materials.push(pursuerMaterial, pursuerCabinMaterial);
     const pursuers: any[] = [];
+    const pursuitPressure = intensity === "lockdown" ? 1 : intensity === "pursuit" ? 0.64 : 0.28;
     for (let index = 0; index < 3; index++) {
       const pursuer = new THREE.Group();
       const body = new THREE.Mesh(pursuerGeometry, pursuerMaterial);
@@ -291,7 +292,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       interceptorLight.position.set(0, 0.35, -0.74);
       pursuer.add(interceptorLight);
       pursuer.userData = { index, x: [-4.6, 4.5, 0][index], z: -2.1 - index * 3.2 };
-      pursuer.position.set(pursuer.userData.x, 0.02, pursuer.userData.z);
+      pursuer.position.set(pursuer.userData.x, 0.02, pursuer.userData.z + pursuitPressure * 4.4);
       pursuers.push(pursuer);
       environment.add(pursuer);
     }
@@ -426,10 +427,9 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
           light.material.opacity = intensity === "lockdown" ? 0.58 + Math.sin(elapsed * 10 + index) * 0.34 : 0.92;
         });
         pursuers.forEach((pursuer) => {
-          const pressure = intensity === "lockdown" ? 1 : intensity === "pursuit" ? 0.64 : 0.28;
-          const targetZ = pursuer.userData.z + pressure * 4.4;
+          const targetZ = pursuer.userData.z + pursuitPressure * 4.4;
           pursuer.position.z = targetZ + Math.sin(elapsed * 1.7 + pursuer.userData.index) * 0.38;
-          pursuer.position.x = pursuer.userData.x + Math.sin(elapsed * 1.28 + pursuer.userData.index * 2.1) * (0.25 + pressure * 0.3);
+          pursuer.position.x = pursuer.userData.x + Math.sin(elapsed * 1.28 + pursuer.userData.index * 2.1) * (0.25 + pursuitPressure * 0.3);
           pursuer.position.y = 0.06 + Math.sin(elapsed * 2.1 + pursuer.userData.index) * 0.07;
           pursuer.rotation.z = Math.sin(elapsed * 1.28 + pursuer.userData.index * 2.1) * -0.08;
         });

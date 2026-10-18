@@ -284,6 +284,7 @@ async function run() {
   assert.match(nightRunScene, /dznNightRunIntensity/, "The renderer must expose the server-issued intensity for visual QA.");
   assert.match(nightRunScene, /Math\.min\(totalGates, gatesCleared \+ 1\)/, "Canvas diagnostics must clamp a completed route to its server-issued total.");
   assert.match(nightRunScene, /const pursuers/, "The escape scene must render the pursuit convoy rather than a static empty route.");
+  assert.match(nightRunScene, /const pursuitPressure/, "The pursuit formation must be derived before any motion loop runs.");
   assert.match(nightRunScene, /mastBeacon/, "The player convoy must retain its live signal-beacon model.");
   assert.match(nightRunScene, /scannerRing\.visible = requiresRecon \|\| scannerAvailable/, "The scanner ring must not appear on ordinary reduced-motion gates.");
   assert.match(nightRunPanel, /action: "scan"/, "The accessible Night Run controls must dispatch the same authoritative scan action.");
