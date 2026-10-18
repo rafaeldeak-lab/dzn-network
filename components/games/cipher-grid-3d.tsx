@@ -156,7 +156,7 @@ export function CipherGrid3D({ difficulty, attempts, solvedGlyphs, active, motio
     const particlePositions = new Float32Array(72 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
       const sample = index / 3;
-      particlePositions[index] = ((sample * 17) % 17) * 0.45 - 3.6;
+      particlePositions[index] = ((sample * 13) % 17) * 0.45 - 3.6;
       particlePositions[index + 1] = ((sample * 7) % 19) * 0.12 + 0.1;
       particlePositions[index + 2] = ((sample * 29) % 17) * 0.45 - 3.6;
     }

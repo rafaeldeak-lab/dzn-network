@@ -59,6 +59,11 @@ function guess(state: CipherGridPayload, word: string) {
 }
 
 async function run() {
+  const commandDeckSource = readFileSync("components/games/cipher-grid-3d.tsx", "utf8");
+  assert.match(commandDeckSource, /\(\(sample \* 13\) % 17\)/);
+  assert.doesNotMatch(commandDeckSource, /\(\(sample \* 17\) % 17\)/);
+  console.log("PASS Cipher Grid particle field cycles across the command deck");
+
   await test("authentication, origin, method and feature switches fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(fixture, { action: "start" }, { origin: "https://foreign.test" })).status, 403);
