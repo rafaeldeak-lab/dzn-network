@@ -225,6 +225,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       profile_summary: profileProgression.profileSummary,
       progression_summary: profileProgression.progressionSummary,
       profile_entries: profileProgression.profileEntries,
+      command_centre: {
+        available: env.DZN_COMMAND_CENTRE_ENABLED === "true",
+      },
       owner_setup: {
         href: ownerSetupHref,
         gated: true,

@@ -68,12 +68,17 @@ async function run() {
   const source = readFileSync("functions/_lib/command-centre.ts", "utf8");
   const migration = readFileSync("migrations/0107_dzn_command_centre.sql", "utf8");
   const page = readFileSync("components/command-centre/command-centre.tsx", "utf8");
+  const playerHubRoute = readFileSync("functions/api/player/hub.ts", "utf8");
+  const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
   assert.match(source, /DZN_COMMAND_CENTRE_ENABLED !== "true"/);
   assert.match(source, /dzn_command_centre_spend_ledger/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
   assert.match(page, /does not affect competitive standings/);
   assert.match(page, /setClientNow\(Date\.now\(\)\)/);
   assert.match(page, /clientNow - receivedAt/);
+  assert.match(page, /mutationActiveRef\.current/);
+  assert.match(playerHubRoute, /DZN_COMMAND_CENTRE_ENABLED === "true"/);
+  assert.match(playerHome, /hubData\?\.command_centre\?\.available === true/);
 
   await test("authentication, origin, method and switch checks fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);

@@ -97,6 +97,9 @@ type PlayerHubPayload = {
   profile_entries: PlayerHubProfileEntry[];
   profile_summary: PlayerHubProfileSummary;
   progression_summary: PlayerHubProgressionSummary;
+  command_centre: {
+    available: boolean;
+  };
   owner_setup: {
     href: string;
     gated: true;
@@ -506,6 +509,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const headerNavigation = authState.status === "logged_in" ? authState.navigation : null;
   const hubData = hubState.status === "ready" ? hubState.data : null;
   const ownerSetupHref = hubData?.owner_setup.href ?? ownerSetupFallbackHref;
+  const visiblePlayerActionCards = playerActionCards.filter((card) => card.href !== "/command-centre" || hubData?.command_centre?.available === true);
 
   return (
     <main className="relative min-h-screen overflow-x-clip bg-[#02030a] text-white">
@@ -627,7 +631,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         {mode === "home" ? (
           <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              {playerActionCards.map((card) => (
+              {visiblePlayerActionCards.map((card) => (
                 <Link
                   key={card.href}
                   href={card.href}

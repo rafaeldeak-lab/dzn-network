@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Boxes, ChevronLeft, Clock3, Hammer, Radio, ShieldCheck, TowerControl, Wrench } from "lucide-react";
 import Link from "next/link";
 import {
@@ -36,6 +36,7 @@ export function CommandCentre() {
   const [clientNow, setClientNow] = useState(() => Date.now());
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [motionRunning, setMotionRunning] = useState(true);
+  const mutationActiveRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/player/command-centre", { cache: "no-store" });
@@ -70,6 +71,8 @@ export function CommandCentre() {
 
   const serverNow = useMemo(() => payload ? payload.serverTime + Math.max(0, clientNow - receivedAt) : 0, [clientNow, payload, receivedAt]);
   const run = async (key: string, body: Record<string, unknown>) => {
+    if (mutationActiveRef.current) return;
+    mutationActiveRef.current = true;
     setBusy(key); setError(null);
     try {
       const response = await fetch("/api/player/command-centre", {
@@ -85,7 +88,7 @@ export function CommandCentre() {
       setClientNow(nextReceivedAt);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Command Centre update failed.");
-    } finally { setBusy(null); }
+    } finally { mutationActiveRef.current = false; setBusy(null); }
   };
   const byBuilding = new Map(payload?.buildings.map(building => [building.building, building]));
   const active = Boolean(payload?.profile);
@@ -153,10 +156,10 @@ function BuildingCard({ building, value, serverNow, xp, parts, active, busy, onS
     <p className={styles.buildingCopy}>{copy.short}</p>
     {!active ? <p className={styles.locked}>Establish the Command Centre to create authoritative building records.</p>
       : construction ? <div className={styles.construction}><span><Clock3 size={15} /> {ready ? "Ready to finalize" : `Completes in ${formatRemaining((value?.completesAt ?? serverNow) - serverNow)}`}</span>
-        <button className={styles.secondaryAction} disabled={!ready || busy === completeKey} onClick={() => onComplete(building)}>{busy === completeKey ? "Finalizing..." : "Finalize upgrade"}</button></div>
+        <button className={styles.secondaryAction} disabled={!ready || busy !== null} onClick={() => onComplete(building)}>{busy === completeKey ? "Finalizing..." : "Finalize upgrade"}</button></div>
       : next ? <div className={styles.upgrade}><div><span>Next level</span><strong>+{next.parts} parts · {next.requiredXp} XP</strong><small>{formatRemaining(next.durationMs)} construction time</small></div>
         {value?.blockedByHeadquarters ? <p className={styles.locked}>Headquarters must reach Level {value.level + 1} first.</p>
-          : <button className={styles.secondaryAction} disabled={!canAfford || busy === startKey} onClick={() => onStart(building)}>{busy === startKey ? "Reserving..." : "Begin construction"}</button>}
+          : <button className={styles.secondaryAction} disabled={!canAfford || busy !== null} onClick={() => onStart(building)}>{busy === startKey ? "Reserving..." : "Begin construction"}</button>}
       </div>
       : <p className={styles.complete}>Maximum construction level reached.</p>}
   </article>;
