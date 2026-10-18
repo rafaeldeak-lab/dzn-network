@@ -51,6 +51,8 @@ try {
       assert.ok(commandDeck.info.width > 260 && commandDeck.info.height > 180, "Cipher Grid should render a usable command-deck scene.");
       assert.ok(litPixels > 70, "Cipher Grid should retain visible command-deck lighting, not a black canvas.");
       assert.ok(colourBuckets.size > 18, "Cipher Grid should retain meaningful rendered scene detail.");
+      const sceneHud = page.locator('[class*="cipherGridSceneHud"]');
+      assert.equal(await sceneHud.evaluate(element => getComputedStyle(element).position), "absolute", "Cipher Grid telemetry must remain an overlay, not consume board height.");
       await page.locator("#cipher-grid-entry").fill("aaaaa");
       assert.equal(await page.locator("#cipher-grid-entry").inputValue(), "AAAAA");
       const [guessResponse] = await Promise.all([

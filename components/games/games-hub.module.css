@@ -624,7 +624,7 @@
 .cipherGridMeta span:last-child { margin-left: auto; }
 .cipherGridStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #486269; border-radius: 6px; background-color: #080e10; background-image: linear-gradient(#041015d2, #071015e8), url("/images/games/cipher-grid-terminal-v2.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 92px #020506c9, 0 18px 42px #00000042; }
 .cipherGridStage::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: .75; background-image: repeating-linear-gradient(0deg, transparent 0 31px, #61c8be13 32px 33px), repeating-linear-gradient(90deg, transparent 0 31px, #61c8be10 32px 33px); }
-.cipherGridStage > *:not(.cipherGridScene) { position: relative; z-index: 2; }
+.cipherGridStage > *:not(.cipherGridScene):not(.cipherGridSceneHud) { position: relative; z-index: 2; }
 .cipherGridScene { position: absolute; z-index: 1; inset: 24px 14%; min-height: 260px; pointer-events: none; opacity: .9; }
 .cipherGridScene :global(.dzn-cipher-grid-3d), .cipherGridScene :global(.dzn-cipher-grid-3d) canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .cipherGridSceneHud { position: absolute; z-index: 3; top: 14px; left: 14px; display: grid; gap: 3px; max-width: calc(100% - 28px); padding: 7px 9px; border: 1px solid #6de6d44a; border-left: 3px solid #a9fff2; border-radius: 3px; color: #b1f9ef; background: #061416c7; box-shadow: 0 8px 22px #0000004a; font-family: var(--font-geist-mono), monospace; pointer-events: none; }

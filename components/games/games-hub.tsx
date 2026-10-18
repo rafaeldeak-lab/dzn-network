@@ -1568,7 +1568,7 @@ function CipherGridPanel({ now, motionRunning, onProgress }: { now: number; moti
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const answerLength = game?.answerLength ?? CIPHER_GRID_WORD_LENGTH;
   const objective = cipherGridObjective(game?.difficulty);
-  const solvedGlyphs = game?.attempts.reduce((total, attempt) => total + attempt.marks.filter(mark => mark === "correct").length, 0) ?? 0;
+  const solvedGlyphs = new Set((game?.attempts ?? []).flatMap(attempt => attempt.marks.flatMap((mark, index) => mark === "correct" ? [index] : []))).size;
   const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, answerLength));
   const submit = useCallback(() => {
     if (!game || !active || busy || entry.length !== answerLength) return;
