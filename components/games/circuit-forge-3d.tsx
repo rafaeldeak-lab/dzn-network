@@ -67,7 +67,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18;
+    renderer.toneMappingExposure = 1.36;
     renderer.domElement.dataset.dznCircuitForgeCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
@@ -80,14 +80,14 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       renderer.dispose();
     };
 
-    scene.add(new THREE.HemisphereLight(0xfff1c3, 0x060807, 2.4));
+    scene.add(new THREE.HemisphereLight(0xfff1c3, 0x060807, 2.7));
     const keyLight = new THREE.DirectionalLight(0xffe5a1, 3.6);
     keyLight.position.set(-3, 8, 5);
     scene.add(keyLight);
-    const cyanLight = new THREE.PointLight(0x58e6d1, 18, 14, 1.8);
+    const cyanLight = new THREE.PointLight(0x58e6d1, 21, 14, 1.8);
     cyanLight.position.set(-3.7, 3.2, 3.7);
     scene.add(cyanLight);
-    const amberLight = new THREE.PointLight(0xffbf58, 15, 14, 1.8);
+    const amberLight = new THREE.PointLight(0xffbf58, 18, 14, 1.8);
     amberLight.position.set(3.6, 2.6, -3.1);
     scene.add(amberLight);
 
@@ -96,10 +96,17 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     scene.add(table);
     const floorGeometry = new THREE.CylinderGeometry(5.3, 5.65, 0.38, 8);
     const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x16150e, emissive: 0x0c100c, emissiveIntensity: 0.85, metalness: 0.76, roughness: 0.3 });
-    geometries.push(floorGeometry); materials.push(floorMaterial);
+    const deckGeometry = new THREE.CylinderGeometry(4.95, 5.18, 0.14, 12);
+    const deckMaterial = new THREE.MeshStandardMaterial({ color: 0x232017, emissive: 0x0a0b08, emissiveIntensity: 0.55, metalness: 0.88, roughness: 0.24 });
+    const conduitGeometry = new THREE.TorusGeometry(3.92, 0.026, 6, 72);
+    const conduitMaterial = new THREE.MeshBasicMaterial({ color: 0x76e4d4, transparent: true, opacity: 0.48, blending: THREE.AdditiveBlending, depthWrite: false });
+    geometries.push(floorGeometry, deckGeometry, conduitGeometry); materials.push(floorMaterial, deckMaterial, conduitMaterial);
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.position.y = -0.43;
     table.add(floor);
+    const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+    deck.position.y = -0.17;
+    table.add(deck);
     const rimGeometry = new THREE.TorusGeometry(4.72, 0.05, 8, 72);
     const rimMaterial = new THREE.MeshBasicMaterial({ color: 0xe8c867, transparent: true, opacity: 0.72 });
     geometries.push(rimGeometry); materials.push(rimMaterial);
@@ -107,17 +114,48 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     rim.rotation.x = Math.PI / 2;
     rim.position.y = -0.22;
     table.add(rim);
+    const conduit = new THREE.Mesh(conduitGeometry, conduitMaterial);
+    conduit.rotation.x = Math.PI / 2;
+    conduit.position.y = -0.085;
+    table.add(conduit);
+
+    const gantryMaterial = new THREE.MeshStandardMaterial({ color: 0x3b3421, emissive: 0x151208, emissiveIntensity: 0.42, metalness: 0.84, roughness: 0.25 });
+    const gantryBeamGeometry = new THREE.BoxGeometry(0.2, 0.2, 2.15);
+    const gantryBraceGeometry = new THREE.BoxGeometry(0.11, 1.22, 0.11);
+    const warningGeometry = new THREE.BoxGeometry(0.17, 0.035, 1.44);
+    const warningMaterial = new THREE.MeshBasicMaterial({ color: 0xffc65f, transparent: true, opacity: 0.53, blending: THREE.AdditiveBlending, depthWrite: false });
+    geometries.push(gantryBeamGeometry, gantryBraceGeometry, warningGeometry); materials.push(gantryMaterial, warningMaterial);
+    for (const [x, z, rotation] of [[-4.1, 0, 0], [4.1, 0, 0], [0, -4.1, Math.PI / 2], [0, 4.1, Math.PI / 2]] as const) {
+      const gantry = new THREE.Group();
+      gantry.position.set(x, 0.04, z);
+      gantry.rotation.y = rotation;
+      const beam = new THREE.Mesh(gantryBeamGeometry, gantryMaterial);
+      gantry.add(beam);
+      for (const offset of [-0.87, 0.87]) {
+        const brace = new THREE.Mesh(gantryBraceGeometry, gantryMaterial);
+        brace.position.set(0, 0.52, offset);
+        gantry.add(brace);
+      }
+      const warning = new THREE.Mesh(warningGeometry, warningMaterial);
+      warning.position.y = 0.13;
+      gantry.add(warning);
+      table.add(gantry);
+    }
 
     const tileGeometry = new THREE.BoxGeometry(0.99, 0.2, 0.99);
     const edgeGeometry = new THREE.EdgesGeometry(tileGeometry);
+    const socketGeometry = new THREE.CylinderGeometry(0.43, 0.48, 0.17, 8);
+    const socketRingGeometry = new THREE.TorusGeometry(0.37, 0.026, 6, 32);
     const horizontalGeometry = new THREE.BoxGeometry(0.54, 0.075, 0.1);
     const verticalGeometry = new THREE.BoxGeometry(0.1, 0.075, 0.54);
     const nodeGeometry = new THREE.SphereGeometry(0.13, 14, 10);
-    geometries.push(tileGeometry, edgeGeometry, horizontalGeometry, verticalGeometry, nodeGeometry);
+    const pulseGeometry = new THREE.SphereGeometry(0.052, 10, 8);
+    geometries.push(tileGeometry, edgeGeometry, socketGeometry, socketRingGeometry, horizontalGeometry, verticalGeometry, nodeGeometry, pulseGeometry);
     const tileVisuals: any[] = [];
     const hitboxes: any[] = [];
-    const poweredNodes: any[] = [];
+    const relayNodes: any[] = [];
     const coreRings: any[] = [];
+    const energyPulses: any[] = [];
     const half = (gridSize - 1) / 2;
     const gap = 1.12;
     const initialTiles = tilesRef.current;
@@ -137,6 +175,17 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
         roughness: 0.3,
       });
       materials.push(tileMaterial);
+      const socketMaterial = new THREE.MeshStandardMaterial({ color: isCore ? 0x644b18 : 0x1e281f, emissive: isCore ? 0x4d3309 : 0x071a17, emissiveIntensity: isCore ? 1.18 : 0.5, metalness: 0.9, roughness: 0.18 });
+      materials.push(socketMaterial);
+      const socket = new THREE.Mesh(socketGeometry, socketMaterial);
+      socket.position.y = 0.02;
+      group.add(socket);
+      const socketRingMaterial = new THREE.MeshBasicMaterial({ color: isCore ? 0xffd667 : 0x4ec9b7, transparent: true, opacity: isCore ? 0.9 : 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
+      materials.push(socketRingMaterial);
+      const socketRing = new THREE.Mesh(socketRingGeometry, socketRingMaterial);
+      socketRing.rotation.x = Math.PI / 2;
+      socketRing.position.y = 0.115;
+      group.add(socketRing);
       group.add(new THREE.Mesh(tileGeometry, tileMaterial));
       const edgeMaterial = new THREE.LineBasicMaterial({ color: isCore ? 0xffdc72 : lit ? 0x71eedb : 0x706743, transparent: true, opacity: lit || isCore ? 0.96 : 0.53 });
       materials.push(edgeMaterial);
@@ -161,7 +210,21 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
       node.position.y = 0.17;
       group.add(node);
-      if (lit || isCore) poweredNodes.push(node);
+      relayNodes.push({ node, socketMaterial, socketRingMaterial, lit: lit || isCore, core: isCore, index });
+      const pulseMaterial = new THREE.MeshBasicMaterial({ color: isCore ? 0xffe17e : 0x85ffee, transparent: true, opacity: lit || isCore ? 0.92 : 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      materials.push(pulseMaterial);
+      const pulses = [
+        { mesh: new THREE.Mesh(pulseGeometry, pulseMaterial), axis: "z", direction: -1, wire: 0 },
+        { mesh: new THREE.Mesh(pulseGeometry, pulseMaterial), axis: "x", direction: 1, wire: 1 },
+        { mesh: new THREE.Mesh(pulseGeometry, pulseMaterial), axis: "z", direction: 1, wire: 2 },
+        { mesh: new THREE.Mesh(pulseGeometry, pulseMaterial), axis: "x", direction: -1, wire: 3 },
+      ];
+      pulses.forEach((pulse, pulseIndex) => {
+        pulse.mesh.position.y = 0.22;
+        pulse.mesh.visible = Boolean((lit || isCore) && [NORTH, EAST, SOUTH, WEST][pulseIndex] & tile.mask);
+        group.add(pulse.mesh);
+        energyPulses.push({ ...pulse, tileIndex: index, phase: index * 0.37 + pulseIndex * 0.19 });
+      });
       if (isCore) {
         const ringGeometry = new THREE.TorusGeometry(0.31, 0.03, 6, 34);
         const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffdb69, transparent: true, opacity: 0.86 });
@@ -180,7 +243,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       hitbox.userData = { index, rotatable: activeRef.current && !isCore, group };
       group.add(hitbox);
       hitboxes.push(hitbox);
-      tileVisuals.push({ tileMaterial, edgeMaterial, cableMaterial, nodeMaterial, hitbox, wires });
+      tileVisuals.push({ tileMaterial, socketMaterial, socketRingMaterial, edgeMaterial, cableMaterial, nodeMaterial, pulseMaterial, hitbox, wires, pulses });
       table.add(group);
     }
 
@@ -201,11 +264,18 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
         visual.nodeMaterial.color.setHex(isCore ? 0xffecae : lit ? 0xc9fff5 : 0x908869);
         visual.nodeMaterial.emissive.setHex(isCore ? 0xffc34d : lit ? 0x4bf0d7 : 0x272519);
         visual.nodeMaterial.emissiveIntensity = isCore ? 1.9 : lit ? 1.25 : 0.12;
+        visual.socketMaterial.color.setHex(isCore ? 0x644b18 : lit ? 0x17483e : 0x1e281f);
+        visual.socketMaterial.emissive.setHex(isCore ? 0x4d3309 : lit ? 0x0a5044 : 0x071a17);
+        visual.socketMaterial.emissiveIntensity = isCore ? 1.18 : lit ? 0.98 : 0.5;
+        visual.socketRingMaterial.color.setHex(isCore ? 0xffd667 : lit ? 0x74f5df : 0x4ec9b7);
+        visual.socketRingMaterial.opacity = isCore ? 0.9 : lit ? 0.78 : 0.22;
+        visual.pulseMaterial.color.setHex(isCore ? 0xffe17e : 0x85ffee);
+        visual.pulseMaterial.opacity = lit || isCore ? 0.92 : 0;
         visual.hitbox.userData.rotatable = playing && !isCore;
-        visual.wires[0].visible = Boolean(tile.mask & NORTH);
-        visual.wires[1].visible = Boolean(tile.mask & EAST);
-        visual.wires[2].visible = Boolean(tile.mask & SOUTH);
-        visual.wires[3].visible = Boolean(tile.mask & WEST);
+        visual.wires.forEach((wire: any, wireIndex: number) => { wire.visible = Boolean(tile.mask & [NORTH, EAST, SOUTH, WEST][wireIndex]); });
+        visual.pulses.forEach((pulse: any, pulseIndex: number) => { pulse.mesh.visible = Boolean((lit || isCore) && (tile.mask & [NORTH, EAST, SOUTH, WEST][pulseIndex])); });
+        const relay = relayNodes[index];
+        if (relay) relay.lit = lit || isCore;
       });
     };
     updateVisualsRef.current = applyTileState;
@@ -224,6 +294,28 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       const glow = new THREE.PointLight(index % 2 ? 0x58e6d1 : 0xffbf58, 2.5, 4.5, 2);
       glow.position.set(position[0], 0.75, position[1]);
       table.add(glow);
+    }
+    const towerBaseGeometry = new THREE.CylinderGeometry(0.33, 0.42, 0.2, 8);
+    const towerStrutGeometry = new THREE.CylinderGeometry(0.045, 0.065, 1.38, 6);
+    const towerRingGeometry = new THREE.TorusGeometry(0.2, 0.022, 6, 24);
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x4f482e, emissive: 0x161408, emissiveIntensity: 0.68, metalness: 0.86, roughness: 0.22 });
+    const towerRingMaterial = new THREE.MeshBasicMaterial({ color: 0xffca61, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false });
+    geometries.push(towerBaseGeometry, towerStrutGeometry, towerRingGeometry); materials.push(towerMaterial, towerRingMaterial);
+    const towers: any[] = [];
+    for (const [x, z] of [[-3.75, -3.75], [3.75, 3.75]] as const) {
+      const tower = new THREE.Group();
+      tower.position.set(x, 0, z);
+      const base = new THREE.Mesh(towerBaseGeometry, towerMaterial);
+      tower.add(base);
+      const strut = new THREE.Mesh(towerStrutGeometry, towerMaterial);
+      strut.position.y = 0.74;
+      tower.add(strut);
+      const ring = new THREE.Mesh(towerRingGeometry, towerRingMaterial);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 1.32;
+      tower.add(ring);
+      table.add(tower);
+      towers.push({ tower, ring });
     }
 
     const particleGeometry = new THREE.BufferGeometry();
@@ -328,11 +420,24 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       table.rotation.y += ((-0.11 + pointerX * 0.1) - table.rotation.y) * 0.03;
       table.rotation.x += ((pointerY * -0.04) - table.rotation.x) * 0.025;
       rim.rotation.z = elapsed * 0.13;
+      conduit.material.opacity = 0.38 + Math.sin(elapsed * 1.8) * 0.13;
       cyanLight.intensity = 15 + Math.sin(elapsed * 2.4) * 2;
       amberLight.intensity = 12 + Math.sin(elapsed * 2 + 1.4) * 1.8;
-      poweredNodes.forEach((node, index) => { node.scale.setScalar(1 + Math.sin(elapsed * 2.8 + index * 0.45) * 0.06); });
+      relayNodes.forEach((relay, index) => {
+        const scale = relay.lit ? 1 + Math.sin(elapsed * 2.8 + index * 0.45) * 0.08 : 1;
+        relay.node.scale.setScalar(scale);
+        relay.socketRingMaterial.opacity = relay.core ? 0.76 + Math.sin(elapsed * 2.7) * 0.16 : relay.lit ? 0.52 + Math.sin(elapsed * 2.4 + index * 0.2) * 0.22 : 0.22;
+      });
       coreRings.forEach(ring => { ring.rotation.z = elapsed * 1.15; ring.material.opacity = 0.68 + Math.sin(elapsed * 3.2) * 0.18; });
       beacons.forEach((beacon, index) => { beacon.position.y = 0.22 + Math.sin(elapsed * 2.1 + index) * 0.05; });
+      towers.forEach(({ tower, ring }, index) => { tower.rotation.y = elapsed * 0.12 * (index ? -1 : 1); ring.material.opacity = 0.55 + Math.sin(elapsed * 2.2 + index) * 0.18; });
+      energyPulses.forEach((pulse: any) => {
+        const relay = relayNodes[pulse.tileIndex];
+        if (!relay?.lit || !pulse.mesh.visible) return;
+        const travel = ((elapsed * 0.72 + pulse.phase) % 1) * 0.44 + 0.04;
+        pulse.mesh.position[pulse.axis] = travel * pulse.direction;
+        pulse.mesh.scale.setScalar(0.72 + Math.sin(elapsed * 4 + pulse.phase) * 0.18);
+      });
       particles.rotation.y = elapsed * 0.05;
       renderer.render(scene, camera);
       frame = window.requestAnimationFrame(render);

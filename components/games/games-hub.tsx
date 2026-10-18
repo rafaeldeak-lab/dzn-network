@@ -1157,7 +1157,10 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
       <div className={styles.circuitForgeStage} data-status={game.status}>
         <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
         <div className={`${styles.circuitForgeConsole} ${threeUnavailable ? styles.circuitForgeConsoleFallback : ""}`}>
-          {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+          <div className={styles.circuitForgeSceneFrame}>
+            <div className={styles.circuitForgeSceneHud} aria-hidden="true"><span>REACTOR BAY // 07</span><strong>{game.poweredCount} / {game.tiles.length} RELAYS</strong><small>{active ? "LIVE CONDUIT TRACE" : game.status === "won" ? "RELAY NET STABLE" : "AWAITING RESTART"}</small></div>
+            {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+          </div>
           <div className={styles.circuitForgeControlDeck}>
             <div className={styles.circuitForgeDeckHeading}><span>MANUAL RELAY DECK</span><strong>Direct conduit control</strong><small>Use the tactile grid when you need a precise clockwise relay turn.</small></div>
             <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
