@@ -40,6 +40,12 @@ function hubCall(fixture: Fixture, body: unknown) {
   }), fixture.env);
 }
 
+function readHub(fixture: Fixture) {
+  return handleGamesHub(new Request("https://local.test/api/games/hub", {
+    headers: { cookie: fixture.cookie },
+  }), fixture.env);
+}
+
 async function payload(response: Response) {
   assert.equal(response.status, 200, await response.clone().text());
   return response.json() as Promise<CommandCentrePayload>;
@@ -66,6 +72,8 @@ async function run() {
   assert.match(source, /dzn_command_centre_spend_ledger/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
   assert.match(page, /does not affect competitive standings/);
+  assert.match(page, /setClientNow\(Date\.now\(\)\)/);
+  assert.match(page, /clientNow - receivedAt/);
 
   await test("authentication, origin, method and switch checks fail closed", async fixture => {
     assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
@@ -110,6 +118,9 @@ async function run() {
     assert.equal(updated.version, headquarters.version + 1);
     assert.equal(upgraded.resources.partsAvailable, 4);
     assert.equal(fixture.db.sqlite.prepare("SELECT parts_spent FROM dzn_command_centre_spend_ledger").get()?.parts_spent, 8);
+    const hubState = await readHub(fixture);
+    assert.equal(hubState.status, 200);
+    assert.equal((await hubState.json() as { summary: { parts: number } }).summary.parts, 4);
     assert.equal((await hubCall(fixture, { action: "assemble", requestId: randomUUID() })).status, 409);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_game_reward_ledger WHERE kind = 'workshop'").get()?.count, 0);
     const replay = await payload(await call(fixture, { action: "start-upgrade", building: "headquarters", version: headquarters.version, requestId }));

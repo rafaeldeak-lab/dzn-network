@@ -286,8 +286,13 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   }
   const oldestActiveWeeklyReward = weeklyOldest.filter((value): value is number => value !== null)
     .reduce<number | null>((oldest, value) => oldest === null || value < oldest ? value : oldest, null);
+  const commandCentreCommittedParts = extraLedgers.commandCentreSpending
+    ? (await db.prepare("SELECT COALESCE(SUM(parts_spent), 0) AS parts FROM dzn_command_centre_spend_ledger WHERE user_id = ?")
+      .bind(user.id).first<{ parts: number }>())?.parts ?? 0
+    : 0;
   const row = await readGame(db, user.id);
-  return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp, parts: (totals?.parts ?? 0) + extraTotals.parts,
+  return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp,
+    parts: Math.max(0, (totals?.parts ?? 0) + extraTotals.parts - commandCentreCommittedParts),
     assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
     challenges: { ...challengeTotals, streak, weeklyExpiresAt: oldestActiveWeeklyReward === null ? null : oldestActiveWeeklyReward + 7 * DAY },
     resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory },

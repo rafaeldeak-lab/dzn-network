@@ -32,7 +32,8 @@ export function CommandCentre() {
   const [payload, setPayload] = useState<CommandCentrePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [receivedAt, setReceivedAt] = useState(0);
+  const [clientNow, setClientNow] = useState(() => Date.now());
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [motionRunning, setMotionRunning] = useState(true);
 
@@ -40,8 +41,10 @@ export function CommandCentre() {
     const response = await fetch("/api/player/command-centre", { cache: "no-store" });
     const body = await response.json() as CommandCentrePayload & { error?: string };
     if (!response.ok) throw new Error(body.error ?? "Command Centre is unavailable.");
+    const nextReceivedAt = Date.now();
     setPayload(body);
-    setElapsed(0);
+    setReceivedAt(nextReceivedAt);
+    setClientNow(nextReceivedAt);
     setError(null);
   }, []);
 
@@ -59,11 +62,13 @@ export function CommandCentre() {
   }, [refresh]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setElapsed(value => value + 1000), 1000);
+    const updateClock = () => setClientNow(Date.now());
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const serverNow = useMemo(() => (payload?.serverTime ?? 0) + elapsed, [elapsed, payload]);
+  const serverNow = useMemo(() => payload ? payload.serverTime + Math.max(0, clientNow - receivedAt) : 0, [clientNow, payload, receivedAt]);
   const run = async (key: string, body: Record<string, unknown>) => {
     setBusy(key); setError(null);
     try {
@@ -74,8 +79,10 @@ export function CommandCentre() {
       });
       const next = await response.json() as CommandCentrePayload & { error?: string };
       if (!response.ok) throw new Error(next.error ?? "Command Centre update failed.");
+      const nextReceivedAt = Date.now();
       setPayload(next);
-      setElapsed(0);
+      setReceivedAt(nextReceivedAt);
+      setClientNow(nextReceivedAt);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Command Centre update failed.");
     } finally { setBusy(null); }
