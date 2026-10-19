@@ -26,10 +26,10 @@ type StatePreservationPlan = {
   sourceHash: string;
   beforeSqlFragments: string[];
   afterSqlFragments: string[];
-  addedColumn: {
+  addedColumns: Array<{
     name: string;
     expectedValue: string;
-  };
+  }>;
 };
 
 type MigrationPlan = {
@@ -175,7 +175,33 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       sourceHash: "80cbe71073858d889f617c423b6b0f0a43cb89d1d52788ed4fcc519e2a20ad43",
       beforeSqlFragments: ["CHECK (SECTOR IN ('PERIMETER', 'RAIL_YARD', 'RADIO_RIDGE', 'BLACKSITE'))", "CHECK (APPROACH IN ('SCOUT', 'BALANCED', 'BREACH'))", "UNIQUE (USER_ID, REQUEST_ID)"],
       afterSqlFragments: ["LOADOUT TEXT NOT NULL DEFAULT 'FIELD_KIT'", "CHECK (LOADOUT IN ('FIELD_KIT', 'SIGNAL_SCANNER', 'RECOVERY_KIT', 'CONVOY_PLATING'))"],
-      addedColumn: { name: "loadout", expectedValue: "field_kit" },
+      addedColumns: [{ name: "loadout", expectedValue: "field_kit" }],
+    },
+  },
+  "0110_games_hub_night_run_route_control.sql": {
+    migration: "0110_games_hub_night_run_route_control.sql",
+    predecessor: "0109_dzn_survival_command_loadouts.sql",
+    tables: [],
+    indexes: ["idx_dzn_night_run_route_control"],
+    statePreservation: {
+      table: playerOwnedTable("dzn_night_run_sessions", ["user_id", "id", "lane_sequence_json", "gate_index", "collisions", "status", "version", "gate_started_at", "started_at", "updated_at"]),
+      beforeColumns: ["user_id", "id", "lane_sequence_json", "gate_index", "collisions", "status", "version", "gate_started_at", "started_at", "updated_at"],
+      afterColumns: ["user_id", "id", "lane_sequence_json", "gate_index", "collisions", "status", "version", "gate_started_at", "started_at", "updated_at", "decoy_armed", "decoy_used", "burst_used", "gate_extension_ms"],
+      rowColumns: ["user_id", "id", "lane_sequence_json", "gate_index", "collisions", "status", "version", "gate_started_at", "started_at", "updated_at"],
+      sourceHash: "97c632a2d541eaeb480b9a4f455678abf139de69df0aedc9bdb47b9376126f22",
+      beforeSqlFragments: ["CHECK (JSON_VALID(LANE_SEQUENCE_JSON) AND JSON_TYPE(LANE_SEQUENCE_JSON) = 'ARRAY')", "CHECK (GATE_INDEX BETWEEN 0 AND 9)", "CHECK (COLLISIONS BETWEEN 0 AND 2)", "ID TEXT NOT NULL UNIQUE"],
+      afterSqlFragments: [
+        "DECOY_ARMED INTEGER NOT NULL DEFAULT 0 CHECK (DECOY_ARMED IN (0, 1))",
+        "DECOY_USED INTEGER NOT NULL DEFAULT 0 CHECK (DECOY_USED IN (0, 1))",
+        "BURST_USED INTEGER NOT NULL DEFAULT 0 CHECK (BURST_USED IN (0, 1))",
+        "GATE_EXTENSION_MS INTEGER NOT NULL DEFAULT 0 CHECK (GATE_EXTENSION_MS IN (0, 900))",
+      ],
+      addedColumns: [
+        { name: "decoy_armed", expectedValue: "0" },
+        { name: "decoy_used", expectedValue: "0" },
+        { name: "burst_used", expectedValue: "0" },
+        { name: "gate_extension_ms", expectedValue: "0" },
+      ],
     },
   },
 };
@@ -219,8 +245,8 @@ switch (command) {
   case "print-state-preservation-rows-query":
     printStatePreservationRowsQuery(required("--migration"));
     break;
-  case "print-state-preservation-loadouts-query":
-    printStatePreservationLoadoutsQuery(required("--migration"));
+  case "print-state-preservation-defaults-query":
+    printStatePreservationDefaultsQuery(required("--migration"));
     break;
   case "verify-state-preservation-before":
     verifyStatePreservationBefore(required("--migration"), required("--objects"), required("--table-info"), required("--foreign-keys"), required("--foreign-key-check"));
@@ -236,7 +262,7 @@ switch (command) {
       required("--after-row-count"),
       required("--before-fingerprint"),
       required("--after-fingerprint"),
-      required("--loadouts"),
+      required("--defaults"),
     );
     break;
   case "fingerprint":
@@ -249,7 +275,7 @@ switch (command) {
     verifyAccountDeletionOperations(required("--operations"));
     break;
   default:
-    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables, print-state-preservation-table, print-state-preservation-objects-query, print-state-preservation-rows-query, print-state-preservation-loadouts-query, verify-state-preservation-before, verify-state-preservation-after, fingerprint, print-account-deletion-operation-query, verify-account-deletion-operations.");
+    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables, print-state-preservation-table, print-state-preservation-objects-query, print-state-preservation-rows-query, print-state-preservation-defaults-query, verify-state-preservation-before, verify-state-preservation-after, fingerprint, print-account-deletion-operation-query, verify-account-deletion-operations.");
 }
 
 function required(name: string) {
@@ -325,8 +351,14 @@ function sourceStatements(plan: MigrationPlan) {
     throw new Error("Single-migration rollout targets must be additive schema-only SQL.");
   }
   if (plan.statePreservation) {
-    if (alterStatements.length !== 1 || !new RegExp(`^ALTER\\s+TABLE\\s+${plan.statePreservation.table.name}\\s+ADD\\s+COLUMN\\s+${plan.statePreservation.addedColumn.name}\\b`, "i").test(alterStatements[0])) {
-      throw new Error(`${plan.migration} does not contain the approved state-preserving column addition.`);
+    if (alterStatements.length !== plan.statePreservation.addedColumns.length) {
+      throw new Error(`${plan.migration} does not contain exactly the approved state-preserving column additions.`);
+    }
+    for (const addedColumn of plan.statePreservation.addedColumns) {
+      const matchingStatements = alterStatements.filter((statement) => new RegExp(`^ALTER\\s+TABLE\\s+${plan.statePreservation?.table.name}\\s+ADD\\s+COLUMN\\s+${addedColumn.name}\\b`, "i").test(statement));
+      if (matchingStatements.length !== 1) {
+        throw new Error(`${plan.migration} does not contain the approved state-preserving column addition ${addedColumn.name}.`);
+      }
     }
   }
   return statements;
@@ -335,6 +367,7 @@ function sourceStatements(plan: MigrationPlan) {
 function expectedObjectSql(plan: MigrationPlan) {
   const statements = sourceStatements(plan);
   const expectedTableNames = new Set(plan.tables.map((table) => table.name));
+  const permittedIndexTableNames = new Set([...expectedTableNames, ...(plan.statePreservation ? [plan.statePreservation.table.name] : [])]);
   const expectedIndexNames = new Set(plan.indexes);
   const objects: Record<string, string> = {};
 
@@ -357,7 +390,7 @@ function expectedObjectSql(plan: MigrationPlan) {
     if (indexMatch) {
       const name = indexMatch[1];
       const tableName = indexMatch[2];
-      if (!expectedIndexNames.has(name) || objects[name] || !expectedTableNames.has(tableName)) {
+      if (!expectedIndexNames.has(name) || objects[name] || !permittedIndexTableNames.has(tableName)) {
         throw new Error(`Migration ${plan.migration} contains an unsupported index statement for ${name}.`);
       }
       objects[name] = normalizeSql(statement);
@@ -623,7 +656,7 @@ function verifyStatePreservationAfter(
   afterRowCountPath: string,
   beforeFingerprintPath: string,
   afterFingerprintPath: string,
-  loadoutsPath: string,
+  defaultsPath: string,
 ) {
   const state = statePreservationFor(migrationName);
   const sql = stateTableSql(state, objectsPath);
@@ -640,11 +673,16 @@ function verifyStatePreservationAfter(
   if (readFingerprint(beforeFingerprintPath) !== readFingerprint(afterFingerprintPath)) {
     throw new Error(`${state.table.name} fingerprint changed during the state-preserving migration.`);
   }
-  const loadouts = readRows(loadoutsPath);
-  if (loadouts.length !== afterCount || loadouts.some((row) => String(row[state.addedColumn.name] ?? "") !== state.addedColumn.expectedValue)) {
-    throw new Error(`${state.table.name}.${state.addedColumn.name} was not initialized to ${state.addedColumn.expectedValue} for every preserved row.`);
+  const initializedDefaults = readRows(defaultsPath);
+  if (initializedDefaults.length !== afterCount) {
+    throw new Error(`${state.table.name} default-initialization query returned ${initializedDefaults.length} rows for ${afterCount} preserved rows.`);
   }
-  console.log(`Production state preservation, default initialization, constraints, and foreign keys passed for ${migrationName}; ${beforeCount} expedition rows retained.`);
+  for (const addedColumn of state.addedColumns) {
+    if (initializedDefaults.some((row) => String(row[addedColumn.name] ?? "") !== addedColumn.expectedValue)) {
+      throw new Error(`${state.table.name}.${addedColumn.name} was not initialized to ${addedColumn.expectedValue} for every preserved row.`);
+    }
+  }
+  console.log(`Production state preservation, default initialization, constraints, and foreign keys passed for ${migrationName}; ${beforeCount} ${state.table.name} rows retained.`);
 }
 
 function quoteSql(value: string) {
@@ -676,7 +714,7 @@ function printStatePreservationRowsQuery(migrationName: string) {
   console.log(`SELECT ${state.rowColumns.join(", ")} FROM ${state.table.name} ORDER BY id ASC;`);
 }
 
-function printStatePreservationLoadoutsQuery(migrationName: string) {
+function printStatePreservationDefaultsQuery(migrationName: string) {
   const state = statePreservationFor(migrationName);
-  console.log(`SELECT id, ${state.addedColumn.name} FROM ${state.table.name} ORDER BY id ASC;`);
+  console.log(`SELECT id, ${state.addedColumns.map((column) => column.name).join(", ")} FROM ${state.table.name} ORDER BY id ASC;`);
 }

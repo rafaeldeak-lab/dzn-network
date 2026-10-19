@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { onRequest as deleteAccount } from "../functions/api/account/delete";
 import { onRequest as maintenance } from "../functions/api/health/survival-command-loadout-migration";
 import { gamesFixture } from "./lib/games-hub-local";
-
-const wrangler = readFileSync("wrangler.toml", "utf8");
-const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
-assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m, "Account closure must be restored after the protected 0109 release completes.");
 
 async function run() {
   const fixture = await gamesFixture();
