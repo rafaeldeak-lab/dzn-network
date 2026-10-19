@@ -941,7 +941,7 @@ function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motio
           <div><span>{phaseBrief.label}</span><strong>{revealing ? "Cue buffer is live" : inputOpen ? "Cue buffer is locked" : "Array on standby"}</strong><small>{phaseBrief.detail}</small></div>
           <div className={styles.echoArrayCueBuffer} aria-label={revealing ? "Live server cue buffer" : "Locked cue buffer"}>
             {Array.from({ length: game.sequenceLength }, (_, index) => {
-              const node = revealing ? game.cue?.[index] : null;
+              const node = revealing && index <= cuePulseIndex ? game.cue?.[index] : null;
               const state = revealing ? index === cuePulseIndex ? "live" : index < cuePulseIndex ? "seen" : "queued" : "locked";
               return <span key={index} data-state={state} aria-label={node ? `${ECHO_ARRAY_NODE_META[node].label} cue` : `Cue slot ${index + 1}`}><b>{node ? ECHO_ARRAY_NODE_META[node].key : String(index + 1).padStart(2, "0")}</b></span>;
             })}
