@@ -44,6 +44,18 @@ try {
       ]);
       assert.equal(scanResponse.status(), 200, await scanResponse.text());
       await page.waitForTimeout(260);
+      await page.getByText("FIELD SUPPORT").waitFor();
+      const [reconResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Deploy recon drone" }).click(),
+      ]);
+      assert.equal(reconResponse.status(), 200, await reconResponse.text());
+      await page.waitForTimeout(260);
+      const [shieldResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Arm storm shield" }).click(),
+      ]);
+      assert.equal(shieldResponse.status(), 200, await shieldResponse.text());
       const [moveResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
         page.getByRole("button", { name: "Move north" }).click(),
@@ -54,6 +66,10 @@ try {
     const terrainCanvas = page.locator('[data-dzn-outpost-run-canvas="true"]');
     await terrainCanvas.waitFor();
     assert.equal(await terrainCanvas.count(), 1, "Outpost Run should render exactly one tactical terrain canvas.");
+    if (index === 0) {
+      assert.equal(await terrainCanvas.getAttribute("data-dzn-outpost-run-shield"), "armed");
+      assert.match(await page.getByRole("button", { name: "Recon sweep complete" }).textContent() ?? "", /nearby sectors mapped/);
+    }
     const terrainBounds = await terrainCanvas.evaluate(canvas => {
       const bounds = canvas.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height, pixels: canvas.width * canvas.height };

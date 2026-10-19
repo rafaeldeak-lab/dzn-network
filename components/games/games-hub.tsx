@@ -5,7 +5,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
-  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, ScanSearch, Search, Settings2, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
+  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Satellite, ScanSearch, Search, Settings2, Shield, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
@@ -16,7 +16,7 @@ import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridDifficulty, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
-import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
+import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload, type OutpostRunSupport } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_SIGHTS, RANGER_RANGE_TARGETS, RANGER_RANGE_WIND_META, type RangerRangePayload, type RangerRangeSight, type RangerRangeTarget } from "@/lib/games-ranger-range";
@@ -956,6 +956,10 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
     if (!game || !active || busy || cooldown) return;
     void mutate({ action: "move", gameId: game.id, version: game.version, direction });
   }, [active, busy, cooldown, game, mutate]);
+  const deploySupport = useCallback((support: OutpostRunSupport) => {
+    if (!game || !active || busy || cooldown) return;
+    void mutate({ action: "support", gameId: game.id, version: game.version, support });
+  }, [active, busy, cooldown, game, mutate]);
   const moveDisabled = (direction: OutpostRunDirection) => {
     if (!game || !active || busy || cooldown) return true;
     if (direction === "north") return game.row === 0;
@@ -979,7 +983,7 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
         <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / ${game.objective === "beacon" ? "FIELD BEACON" : "EMERGENCY RELAY"}` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? game.objective === "beacon" ? "Secure the field beacon before extraction" : game.intensity === "calibration" ? "Trace the emergency relay" : game.intensity === "pressure" ? "Commit to the surviving route" : "Break through the blackout" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
         <div className={styles.outpostRunTerrain}>
           <div className={styles.outpostRunTerrainHud} data-intensity={game.intensity} aria-hidden="true"><span>SCOUT ROVER // T-05</span><strong>{game.objective === "beacon" ? "BEACON LOCK" : "RELAY UPLINK"}</strong><small>{game.scanHint ? `BEARING ${game.scanHint.replace("-", " / ").toUpperCase()}` : "SCANNER STANDBY"}</small></div>
-          <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} intensity={game.intensity} scanHint={game.scanHint}
+          <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} intensity={game.intensity} scanHint={game.scanHint} shieldArmed={game.shieldArmed}
             active={active} disabled={busy || cooldown} motionRunning={motionRunning} onMove={sendMove} />
           <span className={styles.outpostRunTerrainLabel}>LIVE TERRAIN // CLICK AN ADJACENT TILE OR USE THE COMMAND PAD</span>
         </div>
@@ -1008,7 +1012,14 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
               className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}
           </div>
         </div>
-        <p className={styles.outpostRunHint}>Every run has a fresh server-owned two-stage route. Secure the visible field beacon first; only ground you enter becomes visible, hazards drain stamina, and the scanner provides one coarse bearing.</p>
+        <div className={styles.outpostRunSupportDeck} aria-label="Outpost Run field support">
+          <div className={styles.outpostRunSupportHeading}><span>FIELD SUPPORT</span><strong>Spend support where the route turns hostile.</strong><small>These tools are issued once per run and resolved by DZN before the map updates.</small></div>
+          <button type="button" className={styles.outpostRunSupport} data-support="recon" disabled={busy || cooldown || !active || !game.reconAvailable}
+            onClick={() => deploySupport("recon")}><Satellite size={18} /><span><strong>{game.reconAvailable ? "Deploy recon drone" : "Recon sweep complete"}</strong><small>{game.reconAvailable ? "Reveal the four adjacent sectors before you commit." : `${game.reconCells} nearby sectors mapped.`}</small></span></button>
+          <button type="button" className={styles.outpostRunSupport} data-support="shield" data-armed={game.shieldArmed} disabled={busy || cooldown || !active || !game.shieldAvailable}
+            onClick={() => deploySupport("shield")}><Shield size={18} /><span><strong>{game.shieldArmed ? "Storm shield armed" : game.shieldAvailable ? "Arm storm shield" : "Storm shield spent"}</strong><small>{game.shieldArmed ? "The next hazard will not drain stamina." : game.shieldAvailable ? "Absorb one hazard strike when the route breaks." : "The field pack has no further shielding."}</small></span></button>
+        </div>
+        <p className={styles.outpostRunHint}>Every run has a fresh server-owned two-stage route. Secure the field beacon first, use your drone to read a tight perimeter, reserve the shield for a known hazard, and take the relay before the signal closes.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay secured</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${OUTPOST_RUN_REWARD.xp} XP and +${OUTPOST_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Outpost Run complete."}</span></div></>

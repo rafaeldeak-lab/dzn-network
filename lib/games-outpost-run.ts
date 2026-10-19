@@ -11,6 +11,7 @@ export type OutpostRunDirection = (typeof OUTPOST_RUN_DIRECTIONS)[number];
 export type OutpostRunCellKind = "start" | "clear" | "hazard" | "beacon" | "relay";
 export type OutpostRunStatus = "playing" | "won" | "failed" | "expired";
 export type OutpostRunIntensity = "calibration" | "pressure" | "blackout";
+export type OutpostRunSupport = "recon" | "shield";
 
 export function outpostRunIntensity(moves: number): OutpostRunIntensity {
   if (moves >= 7) return "blackout";
@@ -40,6 +41,10 @@ export type OutpostRunGame = {
   beaconSecured: boolean;
   scanHint: string | null;
   scanAvailable: boolean;
+  reconAvailable: boolean;
+  shieldAvailable: boolean;
+  shieldArmed: boolean;
+  reconCells: number;
   visibleCells: OutpostRunCell[];
   startedAt: number;
   expiresAt: number;
