@@ -38,11 +38,23 @@ try {
     const rangeCommandArt = await page.locator('[aria-labelledby="ranger-range-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
     assert.match(rangeCommandArt, /ranger-range-command-v2\.webp/);
     if (index === 0) {
+      const operations = page.getByRole("group", { name: "Ranger Range operations" });
+      const operationCount = await operations.getByRole("button").count();
+      let expectedCourse = null;
+      if (operationCount) {
+        assert.equal(operationCount, 3, "Ranger Range must present three distinct field operations before a run starts.");
+        const galeTraverse = operations.getByRole("button", { name: /Gale traverse/i });
+        await galeTraverse.click();
+        assert.equal(await galeTraverse.getAttribute("aria-pressed"), "true");
+        expectedCourse = "gale";
+      }
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "POST"),
         page.getByRole("button", { name: "Start range" }).click(),
       ]);
-      assert.equal(startResponse.status(), 200, await startResponse.text());
+      const startText = await startResponse.text();
+      assert.equal(startResponse.status(), 200, startText);
+      if (expectedCourse) assert.equal(JSON.parse(startText).game?.course, expectedCourse);
     }
     const rangeCanvas = page.locator('canvas[data-dzn-ranger-range-canvas="true"]');
     await rangeCanvas.waitFor({ state: "visible" });

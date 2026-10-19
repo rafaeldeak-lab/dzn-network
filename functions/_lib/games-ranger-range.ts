@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
   RANGER_RANGE_MAX_MISSES,
+  RANGER_RANGE_COURSES,
   RANGER_RANGE_MIN_ACTION_INTERVAL_MS,
   RANGER_RANGE_MIN_REACTION_MS,
   RANGER_RANGE_REWARD,
@@ -14,7 +15,9 @@ import {
   rangerRangeSightForWind,
   RANGER_RANGE_TTL_MS,
   rangerRangeIntensity,
+  rangerRangeTargetRevealDelayMs,
   rangerRangeTargetWindowMs,
+  type RangerRangeCourse,
   type RangerRangeGame,
   type RangerRangePayload,
   type RangerRangeSight,
@@ -29,6 +32,7 @@ const isId = (value: unknown): value is string => typeof value === "string" && /
 const isTarget = (value: unknown): value is RangerRangeTarget => typeof value === "string" && (RANGER_RANGE_TARGETS as readonly string[]).includes(value);
 const isWind = (value: unknown): value is RangerRangeWind => typeof value === "string" && (RANGER_RANGE_WINDS as readonly string[]).includes(value);
 const isSight = (value: unknown): value is RangerRangeSight => typeof value === "string" && ["left", "centre", "right"].includes(value);
+const isCourse = (value: unknown): value is RangerRangeCourse => typeof value === "string" && (RANGER_RANGE_COURSES as readonly string[]).includes(value);
 
 type RangerRangeRow = {
   user_id: string;
@@ -50,7 +54,7 @@ function randomIndex(length: number) {
   return bytes[0] % length;
 }
 
-type RangerRangeShot = { target: RangerRangeTarget; wind: RangerRangeWind };
+type RangerRangeShot = { target: RangerRangeTarget; wind: RangerRangeWind; course: RangerRangeCourse | "legacy" };
 
 function createTargetSequence(): Array<[RangerRangeTarget, RangerRangeWind]> {
   const sequence: Array<[RangerRangeTarget, RangerRangeWind]> = [];
@@ -62,6 +66,21 @@ function createTargetSequence(): Array<[RangerRangeTarget, RangerRangeWind]> {
       ? (randomIndex(2) === 0 ? "left" : "right")
       : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)];
     sequence.push([candidates[randomIndex(candidates.length)], wind]);
+  }
+  return sequence;
+}
+
+function createCourseTargetSequence(course: RangerRangeCourse): Array<[RangerRangeTarget, RangerRangeWind, RangerRangeCourse]> {
+  const sequence: Array<[RangerRangeTarget, RangerRangeWind, RangerRangeCourse]> = [];
+  while (sequence.length < RANGER_RANGE_TOTAL_SHOTS) {
+    const previous = sequence.at(-1)?.[0];
+    const candidates = previous ? RANGER_RANGE_TARGETS.filter(target => target !== previous) : RANGER_RANGE_TARGETS;
+    const wind = course === "wayfinder"
+      ? (sequence.length < 2 ? "calm" : sequence.length === 2 ? (randomIndex(2) === 0 ? "left" : "right") : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)])
+      : course === "gale"
+        ? (randomIndex(2) === 0 ? "left" : "right")
+        : (sequence.length === 0 ? "calm" : RANGER_RANGE_WINDS[randomIndex(RANGER_RANGE_WINDS.length)]);
+    sequence.push([candidates[randomIndex(candidates.length)], wind, course]);
   }
   return sequence;
 }
@@ -81,12 +100,15 @@ function parseTargetSequence(value: string): RangerRangeShot[] {
   if (!Array.isArray(parsed) || parsed.length !== RANGER_RANGE_TOTAL_SHOTS) {
     throw new Error("Invalid stored Ranger Range target sequence");
   }
-  return parsed.map((shot): RangerRangeShot => {
+  const sequence = parsed.map((shot): RangerRangeShot => {
     // Existing active runs stored only targets. Keep those rows playable with still-air shots.
-    if (isTarget(shot)) return { target: shot, wind: "calm" };
-    if (Array.isArray(shot) && shot.length === 2 && isTarget(shot[0]) && isWind(shot[1])) return { target: shot[0], wind: shot[1] };
+    if (isTarget(shot)) return { target: shot, wind: "calm", course: "legacy" };
+    if (Array.isArray(shot) && shot.length === 2 && isTarget(shot[0]) && isWind(shot[1])) return { target: shot[0], wind: shot[1], course: "legacy" };
+    if (Array.isArray(shot) && shot.length === 3 && isTarget(shot[0]) && isWind(shot[1]) && isCourse(shot[2])) return { target: shot[0], wind: shot[1], course: shot[2] };
     throw new Error("Invalid stored Ranger Range target sequence");
   });
+  if (!sequence.every(shot => shot.course === sequence[0]?.course)) throw new Error("Invalid stored Ranger Range target sequence");
+  return sequence;
 }
 
 function isLegacyTargetOnlySequence(value: string) {
@@ -94,8 +116,8 @@ function isLegacyTargetOnlySequence(value: string) {
   return Array.isArray(parsed) && parsed.length === RANGER_RANGE_TOTAL_SHOTS && parsed.every(isTarget);
 }
 
-function targetEndsAt(row: RangerRangeRow) {
-  return row.target_started_at + rangerRangeTargetWindowMs(row.shot_index);
+function targetEndsAt(row: RangerRangeRow, sequence = parseTargetSequence(row.target_sequence_json)) {
+  return row.target_started_at + rangerRangeTargetWindowMs(row.shot_index, sequence.length, sequence[0]?.course ?? "legacy");
 }
 
 function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
@@ -104,24 +126,28 @@ function gameView(row: RangerRangeRow, now: number): RangerRangeGame {
     !Number.isInteger(row.misses) || row.misses < 0 || row.misses > RANGER_RANGE_MAX_MISSES) {
     throw new Error("Invalid stored Ranger Range progress");
   }
-  const targetEnds = targetEndsAt(row);
+  const course = sequence[0]?.course ?? "legacy";
+  const targetEnds = targetEndsAt(row, sequence);
+  const targetRevealsAt = row.target_started_at + rangerRangeTargetRevealDelayMs(course, row.shot_index);
   const status = row.status === "playing" && (now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEnds) ? "expired" : row.status;
   const active = status === "playing";
-  const targetOpen = active && now >= row.target_started_at && now < targetEnds;
+  const targetOpen = active && now >= targetRevealsAt && now < targetEnds;
   const shot = sequence[row.shot_index];
   return {
     id: row.id,
     version: row.version,
     status,
     shotsCleared: row.shot_index,
-    totalShots: RANGER_RANGE_TOTAL_SHOTS,
+    totalShots: sequence.length,
     misses: row.misses,
     maxMisses: RANGER_RANGE_MAX_MISSES,
     target: targetOpen ? shot?.target ?? null : null,
     wind: targetOpen ? shot?.wind ?? null : null,
+    course,
     targetStartsAt: row.target_started_at,
+    targetRevealsAt,
     targetEndsAt: targetEnds,
-    intensity: rangerRangeIntensity(row.shot_index),
+    intensity: rangerRangeIntensity(row.shot_index, sequence.length),
     startedAt: row.started_at,
     expiresAt: row.started_at + RANGER_RANGE_TTL_MS,
   };
@@ -159,9 +185,11 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
     let rewardGranted = false;
     if (body.action === "start") {
       const keys = Object.keys(body);
+      const fieldV2Start = keys.length === 3 && keys.every(key => ["action", "protocol", "course"].includes(key)) && body.protocol === "field-v2" && isCourse(body.course);
       const windScoredStart = keys.length === 2 && keys.every(key => ["action", "protocol"].includes(key)) && body.protocol === "wind-v1";
       const legacyStart = keys.length === 1;
-      if (!windScoredStart && !legacyStart) return reply({ error: "Invalid Ranger Range request." }, 400);
+      if (!fieldV2Start && !windScoredStart && !legacyStart) return reply({ error: "Invalid Ranger Range request." }, 400);
+      const course = isCourse(body.course) ? body.course : "wayfinder";
       const targetStartsAt = now + RANGER_RANGE_TARGET_LEAD_MS;
       const result = await db.prepare(`INSERT INTO dzn_ranger_range_sessions
         (user_id, id, target_sequence_json, shot_index, misses, status, version, target_started_at, started_at, updated_at)
@@ -170,7 +198,7 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
         shot_index = 0, misses = 0, status = 'playing', version = 0, target_started_at = excluded.target_started_at,
         started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_ranger_range_sessions.started_at <= ?`)
-        .bind(user.id, crypto.randomUUID(), JSON.stringify(windScoredStart ? createTargetSequence() : createLegacyTargetSequence()), targetStartsAt, now, now, now - RANGER_RANGE_START_COOLDOWN_MS).run();
+        .bind(user.id, crypto.randomUUID(), JSON.stringify(fieldV2Start ? createCourseTargetSequence(course) : windScoredStart ? createTargetSequence() : createLegacyTargetSequence()), targetStartsAt, now, now, now - RANGER_RANGE_START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before beginning another range run." }, 429);
     } else if (body.action === "fire") {
       const keys = Object.keys(body);
@@ -187,10 +215,12 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
         return reply({ error: "Choose a valid range target." }, 400);
       }
       if (row.status !== "playing" || row.version !== body.version || row.shot_index >= sequence.length ||
-        now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEndsAt(row)) {
+        now >= row.started_at + RANGER_RANGE_TTL_MS || now >= targetEndsAt(row, sequence)) {
         return reply({ error: "This range run changed or ended. Refresh to continue." }, 409);
       }
-      if (now < row.target_started_at + RANGER_RANGE_MIN_REACTION_MS) return reply({ error: "Let the target settle before releasing an arrow." }, 429);
+      const course = sequence[0]?.course ?? "legacy";
+      const targetRevealsAt = row.target_started_at + rangerRangeTargetRevealDelayMs(course, row.shot_index);
+      if (now < targetRevealsAt + RANGER_RANGE_MIN_REACTION_MS) return reply({ error: "Let the target settle before releasing an arrow." }, 429);
       if (now < row.updated_at + RANGER_RANGE_MIN_ACTION_INTERVAL_MS) return reply({ error: "Release one arrow at a time." }, 429);
 
       const shot = sequence[row.shot_index];
@@ -198,7 +228,7 @@ export async function handleGamesRangerRange(request: Request, env: Env): Promis
       const correct = shot?.target === body.target && rangerRangeSightForWind(shot.wind) === sight;
       const nextShot = correct ? row.shot_index + 1 : row.shot_index;
       const misses = correct ? row.misses : row.misses + 1;
-      const status: RangerRangeRow["status"] = nextShot === RANGER_RANGE_TOTAL_SHOTS ? "won" : misses >= RANGER_RANGE_MAX_MISSES ? "failed" : "playing";
+      const status: RangerRangeRow["status"] = nextShot === sequence.length ? "won" : misses >= RANGER_RANGE_MAX_MISSES ? "failed" : "playing";
       const nextTargetStartsAt = status === "playing" ? now + RANGER_RANGE_TARGET_LEAD_MS : row.target_started_at;
       const update = db.prepare(`UPDATE dzn_ranger_range_sessions
         SET shot_index = ?, misses = ?, status = ?, version = version + 1, target_started_at = ?, updated_at = ?
