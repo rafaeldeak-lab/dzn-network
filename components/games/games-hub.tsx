@@ -875,6 +875,13 @@ function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motio
   const revealing = Boolean(active && game && clockNow < game.cueEndsAt);
   const inputOpen = active && !revealing;
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const cueIntervalMs = game?.cueIntervalMs ?? ECHO_ARRAY_CUE_INTERVAL_MS;
+  const cuePulseIndex = revealing && game ? Math.floor((clockNow - game.cueStartedAt - ECHO_ARRAY_CUE_LEAD_MS) / cueIntervalMs) : -1;
+  const phaseBrief = game?.intensity === "blackout"
+    ? { label: "Blackout protocol", detail: "The final array has the fastest server-issued cue window. Hold the full pattern before the input pad opens." }
+    : game?.intensity === "echo"
+      ? { label: "Echo protocol", detail: "The signal cadence has increased. Observe each active relay before committing your replay." }
+      : { label: "Scan protocol", detail: "Watch the complete relay sequence once. The response pad unlocks only after the DZN cue closes." };
   const submitNode = useCallback((node: EchoArrayNode) => {
     if (!game || !inputOpen || busy || cooldown) return;
     void mutate({ action: "tap", gameId: game.id, version: game.version, node });
@@ -889,13 +896,13 @@ function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motio
     }
     const update = () => {
       const serverNow = Math.max(now, serverClock.current.time + performance.now() - serverClock.current.measuredAt);
-      const index = Math.floor((serverNow - cueStartedAt - ECHO_ARRAY_CUE_LEAD_MS) / ECHO_ARRAY_CUE_INTERVAL_MS);
+      const index = Math.floor((serverNow - cueStartedAt - ECHO_ARRAY_CUE_LEAD_MS) / cueIntervalMs);
       setLitNode(index >= 0 && index < cue.length ? cue[index] : null);
     };
     update();
     const timer = window.setInterval(update, 60);
     return () => window.clearInterval(timer);
-  }, [game?.cue, game?.cueStartedAt, now, revealing]);
+  }, [cueIntervalMs, game?.cue, game?.cueStartedAt, now, revealing]);
 
   useEffect(() => {
     if (!game || !revealing) return;
@@ -930,6 +937,16 @@ function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motio
       <div className={styles.echoArrayMeta}><span><Microchip size={14} />Stage {game.stage} / {game.totalStages}</span><span><Target size={14} />{game.inputIndex} / {game.sequenceLength} nodes</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.echoArrayStage} data-revealing={revealing} data-status={game.status} data-intensity={game.intensity} aria-live="polite">
         <div className={styles.echoArrayReadout}><span>{active ? revealing ? `${game.intensity} / WATCH THE ARRAY` : `${game.intensity} / REPLAY THE ARRAY` : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
+        <div className={styles.echoArrayProtocol} data-intensity={game.intensity}>
+          <div><span>{phaseBrief.label}</span><strong>{revealing ? "Cue buffer is live" : inputOpen ? "Cue buffer is locked" : "Array on standby"}</strong><small>{phaseBrief.detail}</small></div>
+          <div className={styles.echoArrayCueBuffer} aria-label={revealing ? "Live server cue buffer" : "Locked cue buffer"}>
+            {Array.from({ length: game.sequenceLength }, (_, index) => {
+              const node = revealing && index === cuePulseIndex ? game.cue?.[index] : null;
+              const state = revealing ? index === cuePulseIndex ? "live" : index < cuePulseIndex ? "seen" : "queued" : "locked";
+              return <span key={index} data-state={state} aria-label={node ? `${ECHO_ARRAY_NODE_META[node].label} cue` : `Cue slot ${index + 1}`}><b>{node ? ECHO_ARRAY_NODE_META[node].key : String(index + 1).padStart(2, "0")}</b></span>;
+            })}
+          </div>
+        </div>
         <div className={`${styles.echoArrayConsole} ${threeUnavailable ? styles.echoArrayConsoleFallback : ""}`}>
           {!threeUnavailable && <EchoArray3D intensity={game.intensity} litNode={revealing ? litNode : null} inputOpen={inputOpen} disabled={busy || cooldown || !inputOpen} motionRunning={motionRunning} onSelect={submitNode} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
           <div className={styles.echoArrayControlDeck}>
