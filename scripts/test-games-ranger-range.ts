@@ -133,14 +133,14 @@ async function run() {
   });
 
   await test("Gale begins with a live crosswind and Blackout withholds later plates until the server reveal", async fixture => {
-    const gale = await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "gale" }));
+    await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "gale" }));
     openTarget(fixture);
     const galeLive = await visibleTarget(fixture);
     assert.ok(galeLive.game?.wind === "left" || galeLive.game?.wind === "right");
     assert.equal((galeLive.game?.targetEndsAt ?? 0) - (galeLive.game?.targetStartsAt ?? 0), rangerRangeTargetWindowMs(0, RANGER_RANGE_TOTAL_SHOTS, "gale"));
     fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
 
-    const blackout = await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "blackout" }));
+    await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "blackout" }));
     const delay = rangerRangeTargetRevealDelayMs("blackout", 1);
     fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET shot_index = 1, target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
       .run(Date.now() - Math.max(1, delay - 100), Date.now() - 1_000);
