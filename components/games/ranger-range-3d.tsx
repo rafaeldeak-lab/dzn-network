@@ -2,11 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { RangerRangeTarget, RangerRangeWind } from "@/lib/games-ranger-range";
+import type { RangerRangeCourse, RangerRangeTarget, RangerRangeWind } from "@/lib/games-ranger-range";
 
 type RangerRange3DProps = {
   safeTarget: RangerRangeTarget | null;
   wind: RangerRangeWind | null;
+  course: RangerRangeCourse | "legacy";
   active: boolean;
   sightReady: boolean;
   disabled: boolean;
@@ -23,18 +24,20 @@ const TARGETS: Array<{ id: RangerRangeTarget; x: number; z: number; distance: nu
   { id: "ravine", x: 1.4, z: -5.8, distance: 0.72 },
 ];
 
-export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, motionRunning, onFire }: RangerRange3DProps) {
+export function RangerRange3D({ safeTarget, wind, course, active, sightReady, disabled, motionRunning, onFire }: RangerRange3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const fireRef = useRef(onFire);
   const disabledRef = useRef(disabled);
   const liveTargetRef = useRef<RangerRangeTarget | null>(safeTarget);
   const windRef = useRef<RangerRangeWind | null>(wind);
+  const courseRef = useRef<RangerRangeCourse | "legacy">(course);
   const sightReadyRef = useRef(sightReady);
 
   useEffect(() => { fireRef.current = onFire; }, [onFire]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
   useEffect(() => { liveTargetRef.current = active ? safeTarget : null; }, [active, safeTarget]);
   useEffect(() => { windRef.current = active ? wind : null; }, [active, wind]);
+  useEffect(() => { courseRef.current = course; }, [course]);
   useEffect(() => { sightReadyRef.current = sightReady; }, [sightReady]);
 
   useEffect(() => {
@@ -89,6 +92,61 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
     ground.position.set(0, -0.02, -9);
     scene.add(ground);
 
+    // Readable landmarks and foreground depth keep the range spatially legible.
+    const ridgeGeometry = new THREE.DodecahedronGeometry(1, 1);
+    const ridgeMaterial = new THREE.MeshStandardMaterial({ color: 0x17291f, roughness: 0.92, metalness: 0.04 });
+    const ridgeLocations = [
+      [-8.8, 1.7, -14.8, 2.6, 1.8, 2.2], [-5.5, 1.15, -16.1, 1.8, 1.3, 1.6], [5.8, 1.5, -15.5, 2.1, 1.7, 1.9], [9.2, 1.8, -13.8, 2.8, 2.1, 2.2],
+    ] as const;
+    for (const [x, y, z, scaleX, scaleY, scaleZ] of ridgeLocations) {
+      const ridge = new THREE.Mesh(ridgeGeometry, ridgeMaterial);
+      ridge.position.set(x, y, z);
+      ridge.scale.set(scaleX, scaleY, scaleZ);
+      scene.add(ridge);
+    }
+    const road = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.1, 18),
+      new THREE.MeshStandardMaterial({ color: 0x2b3029, roughness: 0.94, metalness: 0.03, transparent: true, opacity: 0.82 }),
+    );
+    road.rotation.x = -Math.PI / 2;
+    road.rotation.z = 0.07;
+    road.position.set(0.35, 0.012, -8.8);
+    scene.add(road);
+    const treeTrunkGeometry = new THREE.CylinderGeometry(0.045, 0.085, 0.82, 6);
+    const treeFoliageGeometry = new THREE.ConeGeometry(0.34, 1.35, 7);
+    const treeTrunkMaterial = new THREE.MeshStandardMaterial({ color: 0x312115, roughness: 0.95 });
+    const treeFoliageMaterial = new THREE.MeshStandardMaterial({ color: 0x123123, roughness: 0.88, metalness: 0.01 });
+    const pineLocations = [
+      [-8.6, -4.6, 0.95], [-7.4, -7.8, 1.24], [-6.2, -12.6, 1.54], [-5.3, -9.3, 0.82], [-3.8, -14.2, 1.35], [-2.5, -11.4, 0.9],
+      [2.8, -14.4, 1.48], [4.2, -8.5, 0.88], [5.9, -12.4, 1.52], [7.3, -7.6, 1.12], [8.5, -13.2, 1.62], [9.4, -5.5, 1.04],
+    ] as const;
+    for (const [x, z, scale] of pineLocations) {
+      const tree = new THREE.Group();
+      const trunk = new THREE.Mesh(treeTrunkGeometry, treeTrunkMaterial);
+      trunk.position.y = 0.41;
+      const foliage = new THREE.Mesh(treeFoliageGeometry, treeFoliageMaterial);
+      foliage.position.y = 1.08;
+      tree.add(trunk, foliage);
+      tree.position.set(x, 0, z);
+      tree.scale.setScalar(scale);
+      scene.add(tree);
+    }
+    const towerGroup = new THREE.Group();
+    towerGroup.position.set(-6.65, 0, -10.6);
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x3d3227, roughness: 0.82, metalness: 0.18 });
+    for (const x of [-0.45, 0.45]) for (const z of [-0.45, 0.45]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 2.45, 6), towerMaterial);
+      leg.position.set(x, 1.22, z);
+      towerGroup.add(leg);
+    }
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.54, 1.14), new THREE.MeshStandardMaterial({ color: 0x28342d, roughness: 0.68, metalness: 0.24 }));
+    cabin.position.y = 2.55;
+    towerGroup.add(cabin);
+    const towerLamp = new THREE.PointLight(0xe6a84c, 2.4, 7.5, 2);
+    towerLamp.position.set(0, 2.55, 0.52);
+    towerGroup.add(towerLamp);
+    scene.add(towerGroup);
+
     const bowGroup = new THREE.Group();
     bowGroup.position.set(-1.2, 0.65, 3.05);
     bowGroup.rotation.set(-0.08, 0.2, -0.06);
@@ -130,6 +188,15 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
     const windMaterial = new THREE.LineBasicMaterial({ color: 0x72d9db, transparent: true, opacity: 0 });
     const windRibbon = new THREE.Line(windGeometry, windMaterial);
     scene.add(windRibbon);
+    const windTrails = [-0.42, 0.32].map(offset => {
+      const geometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-1.8, 1.15 + offset, -3.9), new THREE.Vector3(-0.35, 1.3 + offset, -5.45), new THREE.Vector3(1.55, 1.08 + offset, -6.35),
+      ]);
+      const material = new THREE.LineBasicMaterial({ color: 0x9bcfd8, transparent: true, opacity: 0 });
+      const line = new THREE.Line(geometry, material);
+      scene.add(line);
+      return { line, material };
+    });
 
     const disposables: Array<{ dispose: () => void }> = [];
     const materials: Array<{ dispose: () => void }> = [];
@@ -219,6 +286,7 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
     let frame = 0;
     const render = (time: number) => {
       const seconds = (time - started) / 1000;
+      const activeCourse = courseRef.current;
       for (const target of TARGETS) {
         const group = targetGroups.get(target.id);
         const material = targetMaterials.get(target.id);
@@ -226,7 +294,8 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
         const light = targetLights.get(target.id);
         if (!group || !material || !ringMaterial || !light) continue;
         const live = target.id === liveTargetRef.current;
-        group.position.y = 1.1 * target.distance + (motionRunning ? Math.sin(seconds * 1.5 + target.x) * (live ? 0.13 : 0.035) : 0);
+        const movement = activeCourse === "gale" ? 2.3 : activeCourse === "blackout" ? 1.95 : 1.5;
+        group.position.y = 1.1 * target.distance + (motionRunning ? Math.sin(seconds * movement + target.x) * (live ? 0.13 : 0.035) : 0);
         material.color.setHex(live ? 0xe8c76e : 0x425b4a);
         material.emissive.setHex(live ? 0x8a5214 : 0x07160e);
         material.emissiveIntensity = live ? 1.35 : 0.5;
@@ -240,6 +309,12 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
       windRibbon.visible = Boolean(activeWind);
       windMaterial.opacity = activeWind === "calm" ? 0.18 : 0.52;
       windMaterial.color.setHex(activeWind === "left" ? 0x76aaf1 : activeWind === "right" ? 0xebc36f : 0x8ab8ae);
+      windTrails.forEach(({ line, material }, index) => {
+        line.visible = Boolean(activeWind && activeWind !== "calm");
+        material.opacity = activeWind && activeWind !== "calm" ? 0.16 + index * 0.08 : 0;
+        material.color.setHex(activeWind === "left" ? 0x76aaf1 : 0xebc36f);
+        line.position.x = motionRunning && activeWind !== "calm" ? Math.sin(seconds * (2.1 + index * 0.35) + index) * 0.22 * direction : 0;
+      });
       if (motionRunning && activeWind !== "calm") {
         windRibbon.position.x = Math.sin(seconds * 2.4) * 0.15 * direction;
         windRibbon.rotation.z = Math.sin(seconds * 2.8) * 0.07 * direction;
@@ -260,7 +335,7 @@ export function RangerRange3D({ safeTarget, wind, active, sightReady, disabled, 
       }
       if (motionRunning) {
         reticle.rotation.z = seconds * 0.7;
-        reticleMaterial.opacity = 0.5 + Math.sin(seconds * 2.4) * 0.18;
+        reticleMaterial.opacity = activeCourse === "blackout" ? 0.36 + Math.sin(seconds * 4.2) * 0.16 : 0.5 + Math.sin(seconds * 2.4) * 0.18;
       }
       renderer.render(scene, camera);
       if (motionRunning) frame = requestAnimationFrame(render);

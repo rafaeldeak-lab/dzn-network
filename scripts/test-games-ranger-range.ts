@@ -5,11 +5,13 @@ import { handleGamesRangerRange } from "../functions/_lib/games-ranger-range";
 import type { Env } from "../functions/_lib/types";
 import {
   RANGER_RANGE_MAX_MISSES,
+  RANGER_RANGE_COURSES,
   RANGER_RANGE_MIN_REACTION_MS,
   RANGER_RANGE_REWARD,
   RANGER_RANGE_TOTAL_SHOTS,
   RANGER_RANGE_TTL_MS,
   rangerRangeSightForWind,
+  rangerRangeTargetRevealDelayMs,
   rangerRangeTargetWindowMs,
   type RangerRangePayload,
   type RangerRangeSight,
@@ -94,7 +96,7 @@ async function run() {
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "false";
     assert.equal((await call(fixture)).status, 404);
     fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
-    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge", sight: "centre" }]) {
+    for (const body of [null, [], { action: "start", reward: 160 }, { action: "start", protocol: "field-v2", course: "unknown" }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge", sight: "centre" }]) {
       assert.equal((await call(fixture, body)).status, 400);
     }
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_sessions").get()?.count, 0);
@@ -119,6 +121,38 @@ async function run() {
     assert.ok(visible.game?.wind);
     assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("field operations use server-owned course profiles without changing their bounded reward", async fixture => {
+    for (const course of RANGER_RANGE_COURSES) {
+      const started = await payload(await call(fixture, { action: "start", protocol: "field-v2", course }));
+      assert.equal(started.game?.course, course);
+      assert.equal(started.game?.totalShots, RANGER_RANGE_TOTAL_SHOTS);
+      fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
+    }
+  });
+
+  await test("Gale begins with a live crosswind and Blackout withholds later plates until the server reveal", async fixture => {
+    const gale = await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "gale" }));
+    openTarget(fixture);
+    const galeLive = await visibleTarget(fixture);
+    assert.ok(galeLive.game?.wind === "left" || galeLive.game?.wind === "right");
+    assert.equal((galeLive.game?.targetEndsAt ?? 0) - (galeLive.game?.targetStartsAt ?? 0), rangerRangeTargetWindowMs(0, RANGER_RANGE_TOTAL_SHOTS, "gale"));
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
+
+    const blackout = await payload(await call(fixture, { action: "start", protocol: "field-v2", course: "blackout" }));
+    const delay = rangerRangeTargetRevealDelayMs("blackout", 1);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET shot_index = 1, target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - Math.max(1, delay - 100), Date.now() - 1_000);
+    const hidden = await payload(await call(fixture));
+    assert.equal(hidden.game?.course, "blackout");
+    assert.equal(hidden.game?.target, null);
+    assert.ok((hidden.game?.targetRevealsAt ?? 0) > hidden.serverTime);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - delay - RANGER_RANGE_MIN_REACTION_MS - 80, Date.now() - 1_000);
+    const revealed = await visibleTarget(fixture);
+    assert.equal(revealed.game?.course, "blackout");
+    assert.ok(revealed.game?.target);
   });
 
   await test("old pages receive a still-air sequence when they start a fresh range", async fixture => {
@@ -269,6 +303,8 @@ async function run() {
   assert.match(rangerScene, /const showFallback = \(\) =>/, "The WebGL fallback must retain a dedicated art state.");
   assert.doesNotMatch(rangerScene, /mount\.style\.display = "none"/, "The WebGL fallback must not hide the cinematic backdrop or the accessible target deck.");
   assert.match(rangerPanel, /RANGER_RANGE_WIND_META/, "The accessible range controls must present the server-issued wind condition without exposing server storage.");
+  assert.match(rangerPanel, /RANGER_RANGE_COURSE_META/, "The range must expose distinct field operations rather than a single fixed drill.");
+  assert.match(rangerPanel, /protocol: "field-v2", course/, "The selected field operation must be passed to the authoritative start action.");
   assert.match(rangerPanel, /<RangerRange3D safeTarget=\{targetOpen \? game\.target : null\} wind=\{targetOpen \? game\.wind : null\}/, "The tactical 3D range must render from the same server-issued target and wind condition as the accessible controls.");
 
   console.log(`Ranger Range tests passed: ${passed}`);
