@@ -24,6 +24,10 @@ assert.match(workflow, /https:\/\/dayz-network\.com\/api\/health\/state-preservi
 assert.match(workflow, /Accept: application\/json/);
 assert.match(workflow, /protected-migration-maintenance/);
 assert.match(workflow, /did not return the expected JSON signal/);
+assert.match(workflow, /Object\.keys\(response\)/);
+assert.match(workflow, /keys\.length !== 1/);
+assert.match(workflow, /LEASES_FILE="\$\{MIGRATION_STAGE\}\/account-deletion-leases\.json"/);
+assert.doesNotMatch(workflow, /RUNNER_TEMP.*account-deletion-leases/);
 assert.match(workflow, /test:account-deletion-maintenance/);
 assert.match(workflow, /Drain in-flight account-deletion leases before the preservation baseline/);
 assert.match(workflow, /DRAIN_ATTEMPTS=30/);

@@ -116,7 +116,8 @@ jobs:
           } catch {
             throw new Error("Protected migration maintenance did not return the expected JSON signal.");
           }
-          if (response?.status !== "protected-migration-maintenance") {
+          const keys = response && Object.prototype.toString.call(response) === "[object Object]" ? Object.keys(response) : [];
+          if (keys.length !== 1 || keys[0] !== "status" || response.status !== "protected-migration-maintenance") {
             throw new Error("Protected migration maintenance is not active in production.");
           }
           console.log("Protected migration maintenance JSON signal verified in production.");
@@ -158,7 +159,7 @@ jobs:
           # account-closure lease may legitimately be renewed while Discord cleanup completes.
           sleep 90
           LEASE_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-account-deletion-lease-query)"
-          LEASES_FILE="${RUNNER_TEMP}/dzn-account-deletion-leases.json"
+          LEASES_FILE="${MIGRATION_STAGE}/account-deletion-leases.json"
           DRAIN_ATTEMPTS=30
           REQUIRED_CONSECUTIVE_EMPTY_READS=2
           consecutive_empty_reads=0
