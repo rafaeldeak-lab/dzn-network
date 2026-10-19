@@ -125,8 +125,10 @@ async function run() {
   assert.match(ui, /method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error"/);
   assert.match(ui, /if \(active\.current\) return/);
   assert.match(ui, /setResult\(null\)/);
-  assert.match(ui, /function nextStep\(checks: Result\["checks"\]\)/);
+  assert.match(ui, /function nextStep\(result: Result\)/);
+  assert.match(ui, /The live Stripe account connection needs review before customer checkout can continue\./);
   assert.match(ui, /Stripe has outstanding account requirements\. Resolve them in Stripe, then run this check again\./);
+  assert.match(ui, /The webhook signing-secret fingerprint is missing or does not match\./);
   assert.doesNotMatch(ui, /localStorage|sessionStorage|document\.cookie|dangerouslySetInnerHTML|STRIPE_WEBHOOK_SECRET|whsec_/);
   console.log("Provider readiness: auth, mock isolation, GET-only provider access, exact Price contract, account/portal/webhook failure handling, redaction, no-store and zero-write checks passed.");
 }

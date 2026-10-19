@@ -159,15 +159,19 @@ async function run() {
   live.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS = DZN_PUBLISHED_SELLER.addressLines.join(" | ");
   const liveBeforeReads = reads.length, liveBeforePosts = posts.length;
   liveAccount = { ...liveAccount, charges_enabled: false };
+  const restrictedStatements = live.db.statements.length;
   assert.equal((await request(live, "starter", 503)).errorCode, "LIVE_ACCOUNT_UNAVAILABLE");
   assert.equal(reads.length, liveBeforeReads, "A restricted live account must fail before Price verification");
   assert.equal(posts.length, liveBeforePosts, "A restricted live account must fail before Stripe Checkout creation");
+  assert.ok(live.db.statements.slice(restrictedStatements).every(sql => /^\s*SELECT\s/i.test(sql)), "A restricted live account must fail before any billing or schema write");
   assert.deepEqual(ledgerRows(live), [[], []], "A restricted live account must not reserve a checkout or trial");
   liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
     requirements: { disabled_reason: null, currently_due: ["verification"], past_due: [] } };
+  const requirementsStatements = live.db.statements.length;
   assert.equal((await request(live, "pro", 503)).errorCode, "LIVE_ACCOUNT_UNAVAILABLE");
   assert.equal(reads.length, liveBeforeReads, "Outstanding live account requirements must fail before Price verification");
   assert.equal(posts.length, liveBeforePosts, "Outstanding live account requirements must fail before Stripe Checkout creation");
+  assert.ok(live.db.statements.slice(requirementsStatements).every(sql => /^\s*SELECT\s/i.test(sql)), "Outstanding requirements must fail before any billing or schema write");
   assert.deepEqual(ledgerRows(live), [[], []], "Outstanding live account requirements must not reserve a checkout or trial");
   liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
     requirements: { disabled_reason: null, currently_due: [], past_due: [] } };

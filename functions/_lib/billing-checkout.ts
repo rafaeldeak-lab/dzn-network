@@ -33,6 +33,9 @@ const now = () => Math.floor(Date.now() / 1000);
 export async function createOrResumeCheckout(env: Env, request: Request, input: {
   discordUserId: string; planKey: PurchasablePlanKey; priceId: string; returnTo: string; acceptedOffer?: unknown;
 }) {
+  const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
+  // A restricted live account must stop before this route touches the billing ledger.
+  await verifyLiveCheckoutAccount(env, mode);
   const db = requireDb(env);
   // No runtime schema creation for this ledger: missing migration must fail before Stripe.
   let attempt = await db.prepare("SELECT * FROM billing_checkout_attempts WHERE discord_user_id = ? AND state != 'closed' LIMIT 1")
@@ -44,8 +47,6 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
     throw new CheckoutRecoveryError("You already have a subscription. Use Manage billing to update payment details or change your plan.", "SUBSCRIPTION_EXISTS");
   }
   const fingerprint = await keyFingerprint(env.STRIPE_SECRET_KEY!);
-  const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
-  await verifyLiveCheckoutAccount(env, mode);
   const verifiedPrices = new Set<string>();
   async function checkPrice(planKey: PurchasablePlanKey, priceId: unknown) {
     if (typeof priceId !== "string" || !/^price_[a-zA-Z0-9_]+$/.test(priceId)) throw priceError();
