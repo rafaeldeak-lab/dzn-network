@@ -109,6 +109,48 @@ export const SURVIVAL_COMMAND_LOADOUTS = {
 export type SurvivalCommandLoadout = keyof typeof SURVIVAL_COMMAND_LOADOUTS;
 export const SURVIVAL_COMMAND_LOADOUT_KEYS = Object.keys(SURVIVAL_COMMAND_LOADOUTS) as SurvivalCommandLoadout[];
 
+// The directive is calculated from the player and server deployment day. It
+// gives a focused route objective without altering DayZ data or standings.
+export const SURVIVAL_COMMAND_DAILY_DIRECTIVES = {
+  quiet_trace: {
+    name: "Quiet trace",
+    detail: "Run a perimeter scout route and bring a clean signal picture back to command.",
+    sector: "perimeter",
+    approach: "scout",
+    bonus: { salvage: 0, intel: 2 },
+  },
+  rail_recovery: {
+    name: "Chainbreaker recovery",
+    detail: "Hold the balanced route through the rail yard while the recovery window is open.",
+    sector: "rail_yard",
+    approach: "balanced",
+    bonus: { salvage: 3, intel: 1 },
+  },
+  relay_ghost: {
+    name: "Ghost relay",
+    detail: "Take a scout route to Radio Ridge and secure fresh relay intelligence.",
+    sector: "radio_ridge",
+    approach: "scout",
+    bonus: { salvage: 1, intel: 4 },
+  },
+  blacksite_window: {
+    name: "Blacksite window",
+    detail: "Commit a breach route into the Cold Blacksite before the window closes.",
+    sector: "blacksite",
+    approach: "breach",
+    bonus: { salvage: 5, intel: 2 },
+  },
+} as const;
+export type SurvivalCommandDailyDirectiveKey = keyof typeof SURVIVAL_COMMAND_DAILY_DIRECTIVES;
+export type SurvivalCommandDailyDirective = {
+  key: SurvivalCommandDailyDirectiveKey;
+  name: string;
+  detail: string;
+  sector: SurvivalCommandSector;
+  approach: SurvivalCommandApproach;
+  bonus: { salvage: number; intel: number };
+};
+
 export const SURVIVAL_COMMAND_INCIDENTS = {
   signal: {
     title: "Unmarked transmission",
@@ -231,6 +273,11 @@ export type SurvivalCommandPayload = {
     effect: string;
   }>;
   sectors: SurvivalCommandSectorView[];
+  dailyDirective: SurvivalCommandDailyDirective & {
+    dayKey: string;
+    sectorUnlocked: boolean;
+    completed: boolean;
+  };
   fieldOrdersAvailable: boolean;
   expedition: SurvivalCommandExpedition | null;
   history: SurvivalCommandHistory[];
@@ -298,6 +345,24 @@ function hash(value: string) {
   return output >>> 0;
 }
 
+export function survivalCommandDailyDirectiveFor(userId: string, deploymentDay: string): SurvivalCommandDailyDirective {
+  const keys = Object.keys(SURVIVAL_COMMAND_DAILY_DIRECTIVES) as SurvivalCommandDailyDirectiveKey[];
+  const key = keys[hash(`${userId}:${deploymentDay}:daily-directive`) % keys.length]!;
+  const directive = SURVIVAL_COMMAND_DAILY_DIRECTIVES[key];
+  return {
+    key,
+    name: directive.name,
+    detail: directive.detail,
+    sector: directive.sector,
+    approach: directive.approach,
+    bonus: { salvage: directive.bonus.salvage, intel: directive.bonus.intel },
+  };
+}
+
+export function survivalCommandDirectiveMatches(directive: SurvivalCommandDailyDirective, sector: SurvivalCommandSector, approach: SurvivalCommandApproach) {
+  return directive.sector === sector && directive.approach === approach;
+}
+
 export function incidentForSeed(seed: string): SurvivalCommandIncident {
   const keys = Object.keys(SURVIVAL_COMMAND_INCIDENTS) as SurvivalCommandIncident[];
   return keys[hash(`${seed}:incident`) % keys.length];
@@ -315,6 +380,7 @@ export function resolveSurvivalCommandOutcome(input: {
   action: SurvivalCommandAction;
   buildings: SurvivalCommandBuildingLevels;
   fieldOrder?: SurvivalCommandFieldOrder | null;
+  dailyDirective?: SurvivalCommandDailyDirective | null;
 }) {
   const sector = SURVIVAL_COMMAND_SECTORS[input.sector];
   const loadout = SURVIVAL_COMMAND_LOADOUTS[input.loadout];
@@ -334,12 +400,13 @@ export function resolveSurvivalCommandOutcome(input: {
   const salvageBase = sector.reward.salvage[0] + hash(`${input.seed}:salvage`) % (sector.reward.salvage[1] - sector.reward.salvage[0] + 1);
   const intelBase = sector.reward.intel[0] + hash(`${input.seed}:intel`) % (sector.reward.intel[1] - sector.reward.intel[0] + 1);
   const multiplier = outcome === "breakthrough" ? 1.45 : outcome === "strained" ? 0.55 : 1;
-  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus + loadout.salvageBonus + loadoutActionEdge + (fieldOrder?.salvageShift ?? 0)) * multiplier));
-  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus + loadout.intelBonus + loadoutActionEdge + (fieldOrder?.intelShift ?? 0)) * multiplier));
+  const directive = input.dailyDirective && survivalCommandDirectiveMatches(input.dailyDirective, input.sector, input.approach) ? input.dailyDirective : null;
+  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus + loadout.salvageBonus + loadoutActionEdge + (fieldOrder?.salvageShift ?? 0)) * multiplier) + (directive?.bonus.salvage ?? 0));
+  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus + loadout.intelBonus + loadoutActionEdge + (fieldOrder?.intelShift ?? 0)) * multiplier) + (directive?.bonus.intel ?? 0));
   const detail = outcome === "breakthrough"
     ? "The field decision opened a secondary route. The return team brought back more than the original brief predicted."
     : outcome === "strained"
       ? "The team returned under pressure. The recovery was reduced, but the operation was not lost."
       : "The team completed the recovery plan and returned with a clean operational record.";
-  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.loadout}:${input.fieldOrder ?? "base"}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
+  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.loadout}:${input.fieldOrder ?? "base"}:${directive?.key ?? "standard"}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
 }

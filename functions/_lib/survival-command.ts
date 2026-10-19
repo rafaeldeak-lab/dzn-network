@@ -12,6 +12,8 @@ import {
   isSurvivalCommandSector,
   resolveSurvivalCommandOutcome,
   sectorLockReason,
+  survivalCommandDailyDirectiveFor,
+  survivalCommandDirectiveMatches,
   survivalCommandLoadoutEffect,
   validIncidentAction,
   type SurvivalCommandBuildingLevels,
@@ -156,12 +158,14 @@ function visibleExpedition(row: ExpeditionRow, now: number, fieldOrdersAvailable
 }
 
 async function readPayload(db: D1Database, user: SessionUser, now: number, fieldOrdersAvailable: boolean, fieldOrdersSchemaReady: boolean): Promise<SurvivalCommandPayload> {
-  const [profile, buildings, resources, used, active, history, unlocked] = await Promise.all([
+  const currentDay = dayKey(now);
+  const dailyDirective = survivalCommandDailyDirectiveFor(user.id, currentDay);
+  const [profile, buildings, resources, used, active, history, unlocked, directiveCompletion] = await Promise.all([
     db.prepare("SELECT established_at FROM dzn_survival_command_profiles WHERE user_id = ?").bind(user.id).first<ProfileRow>(),
     readBuildingLevels(db, user.id),
     readResources(db, user.id),
     db.prepare("SELECT COALESCE(SUM(deployment_cost), 0) AS count FROM dzn_survival_command_expeditions WHERE user_id = ? AND deployment_day = ?")
-      .bind(user.id, dayKey(now)).first<{ count: number }>(),
+      .bind(user.id, currentDay).first<{ count: number }>(),
     db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version${fieldOrdersSchemaReady ? ", field_order, field_order_request_id, field_order_at" : ""}
       FROM dzn_survival_command_expeditions WHERE user_id = ? AND status = 'deployed' ORDER BY started_at DESC LIMIT 1`).bind(user.id).first<ExpeditionRow>(),
     db.prepare(`SELECT expedition.id, expedition.sector, expedition.approach, expedition.loadout, ledger.outcome, ledger.action, ledger.salvage, ledger.intel, ledger.resolved_at${fieldOrdersSchemaReady ? ", expedition.field_order" : ""}
@@ -169,6 +173,10 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
       JOIN dzn_survival_command_resolution_ledger AS ledger ON ledger.expedition_id = expedition.id
       WHERE expedition.user_id = ? ORDER BY ledger.resolved_at DESC, ledger.id DESC LIMIT 5`).bind(user.id).all<HistoryRow>(),
     db.prepare("SELECT loadout FROM dzn_survival_command_loadout_unlocks WHERE user_id = ?").bind(user.id).all<{ loadout: SurvivalCommandLoadout }>(),
+    db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
+      JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
+      WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
+      LIMIT 1`).bind(user.id, currentDay, dailyDirective.sector, dailyDirective.approach).first<{ id: string }>(),
   ]);
   const sectors = SURVIVAL_COMMAND_SECTOR_KEYS.map(key => {
     const sector = SURVIVAL_COMMAND_SECTORS[key];
@@ -189,7 +197,7 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
     serverTime: now,
     profile: profile ? { establishedAt: profile.established_at } : null,
     resources,
-    deployment: { used: used?.count ?? 0, capacity: deploymentCapacity(buildings), dayKey: dayKey(now) },
+    deployment: { used: used?.count ?? 0, capacity: deploymentCapacity(buildings), dayKey: currentDay },
     buildings,
     loadouts: SURVIVAL_COMMAND_LOADOUT_KEYS.map(key => {
       const config = SURVIVAL_COMMAND_LOADOUTS[key];
@@ -204,6 +212,12 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
       };
     }),
     sectors,
+    dailyDirective: {
+      ...dailyDirective,
+      dayKey: currentDay,
+      sectorUnlocked: !sectorLockReason(dailyDirective.sector, buildings),
+      completed: Boolean(directiveCompletion),
+    },
     fieldOrdersAvailable,
     expedition: active ? visibleExpedition(active, now, fieldOrdersAvailable, fieldOrdersSchemaReady) : null,
     history: (history.results ?? []).map(row => ({
@@ -362,6 +376,12 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
   const buildings = await readBuildingLevels(db, user.id);
   if (!buildings) return { error: "Command Centre records are unavailable. The expedition has not been changed.", status: 409 } as const;
   if (!isSurvivalCommandLoadout(row.loadout)) return { error: "This operation has an invalid field loadout. It has not been resolved.", status: 409 } as const;
+  const dailyDirective = survivalCommandDailyDirectiveFor(user.id, row.deployment_day);
+  const directiveMatched = survivalCommandDirectiveMatches(dailyDirective, row.sector, row.approach);
+  const directiveAlreadyCompleted = directiveMatched ? await db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
+    JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
+    WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
+    LIMIT 1`).bind(user.id, row.deployment_day, dailyDirective.sector, dailyDirective.approach).first<{ id: string }>() : null;
   const outcome = resolveSurvivalCommandOutcome({
     seed: row.seed,
     sector: row.sector,
@@ -370,6 +390,7 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
     action: body.decision,
     buildings,
     fieldOrder: fieldOrdersSchemaReady && isSurvivalCommandFieldOrder(row.field_order) ? row.field_order : null,
+    dailyDirective: directiveMatched && !directiveAlreadyCompleted ? dailyDirective : null,
   });
   const ledgerId = crypto.randomUUID();
   const results = await db.batch([

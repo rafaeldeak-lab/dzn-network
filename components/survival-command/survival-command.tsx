@@ -9,6 +9,7 @@ import {
   SURVIVAL_COMMAND_FIELD_ORDERS,
   SURVIVAL_COMMAND_LOADOUTS,
   SURVIVAL_COMMAND_SECTOR_KEYS,
+  survivalCommandDirectiveMatches,
   survivalCommandFieldOrderEffect,
   type SurvivalCommandApproach,
   type SurvivalCommandFieldOrder,
@@ -118,6 +119,8 @@ export function SurvivalCommand() {
   };
 
   const activeSector = expedition ? payload?.sectors.find(sector => sector.key === expedition.sector) ?? null : null;
+  const directiveTarget = expedition ? { sector: expedition.sector, approach: expedition.approach } : { sector: selectedSector, approach };
+  const directiveMatch = payload ? survivalCommandDirectiveMatches(payload.dailyDirective, directiveTarget.sector, directiveTarget.approach) : false;
   return <main className={styles.page} data-motion={motionRunning ? "running" : "paused"}>
     <SiteHeaderAuthState authenticated={Boolean(payload)} checkingAccount={!payload && !error} returnTo="/survival-command" />
     <div className={styles.shell}>
@@ -146,11 +149,18 @@ export function SurvivalCommand() {
               <div><dt>Day cycle</dt><dd>{payload?.deployment.dayKey ?? "--"}</dd></div>
               <div><dt>HQ level</dt><dd>{payload?.buildings?.headquarters ?? "--"}</dd></div>
             </dl>
+            {payload && <div className={styles.dailyDirective} data-completed={payload.dailyDirective.completed} data-locked={!payload.dailyDirective.sectorUnlocked}>
+              <div className={styles.directiveHeading}><span><Zap size={14} />Daily directive</span><em>{payload.dailyDirective.completed ? "Secured" : payload.dailyDirective.sectorUnlocked ? "Live" : "Locked"}</em></div>
+              <strong>{payload.dailyDirective.name}</strong>
+              <p>{payload.dailyDirective.detail}</p>
+              <div className={styles.directiveMeta}><span>{payload.sectors.find(sector => sector.key === payload.dailyDirective.sector)?.name ?? payload.dailyDirective.sector}</span><span>{SURVIVAL_COMMAND_APPROACHES[payload.dailyDirective.approach].name}</span></div>
+              <small>{payload.dailyDirective.completed ? "Directive recovery logged for this cycle." : payload.dailyDirective.sectorUnlocked ? <>First matching recovery: +{payload.dailyDirective.bonus.salvage} salvage / +{payload.dailyDirective.bonus.intel} intel</> : "Raise Command Centre buildings to open this directive."}</small>
+            </div>}
             <div className={styles.protocol}><ShieldCheck size={17} /><p><strong>Authoritative operations</strong>Route unlocks, timing, incidents and recovered resources are recorded by DZN, not the browser.</p></div>
           </aside>
 
           <div className={styles.scenePanel}>
-            <SurvivalCommandScene selectedSector={expedition?.sector ?? selectedSector} selectedLoadout={expedition?.loadout ?? loadout} expedition={expedition} motionRunning={motionRunning} onUnavailable={() => setWebglUnavailable(true)} />
+            <SurvivalCommandScene selectedSector={expedition?.sector ?? selectedSector} selectedLoadout={expedition?.loadout ?? loadout} expedition={expedition} dailyDirective={payload?.dailyDirective ?? null} motionRunning={motionRunning} onUnavailable={() => setWebglUnavailable(true)} />
             <div className={styles.sceneLabel}><MapPinned size={15} /><span>{expedition ? activeSector?.coordinate : selected?.coordinate ?? "GRID -- / --"}</span></div>
             {webglUnavailable && <div className={styles.sceneFallback}><MapPinned size={28} /><span>The 3D sector board is unavailable on this device. Mission decisions remain accessible.</span></div>}
           </div>
@@ -162,7 +172,7 @@ export function SurvivalCommand() {
                 : payload.fieldOrdersAvailable && !expedition.fieldOrder
                   ? <FieldOrderDossier expedition={expedition} sector={activeSector} busy={busy} onSetOrder={order => void mutate(`field-order:${order}`, { action: "set-field-order", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), order })} />
                   : <DecisionDossier expedition={expedition} sector={activeSector} busy={busy} onResolve={decision => void mutate(`resolve:${decision}`, { action: "resolve", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), decision })} />
-                : <DeployDossier selected={selected} approach={approach} loadout={loadout} loadouts={payload.loadouts} resources={payload.resources} buildings={payload.buildings} busy={busy} deployment={payload.deployment}
+                : <DeployDossier selected={selected} approach={approach} loadout={loadout} loadouts={payload.loadouts} resources={payload.resources} buildings={payload.buildings} busy={busy} deployment={payload.deployment} dailyDirective={payload.dailyDirective} directiveMatch={directiveMatch}
                   onApproach={setApproach} onLoadout={setLoadout} onUnlock={key => void mutate(`unlock:${key}`, { action: "unlock-loadout", loadout: key, requestId: crypto.randomUUID() })}
                   onDeploy={() => selected && void mutate("deploy", { action: "deploy", sector: selected.key, approach, loadout, requestId: crypto.randomUUID() })} />}
           </section>
@@ -206,7 +216,7 @@ function DecisionDossier({ expedition, sector, busy, onResolve }: { expedition: 
   return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span>{order && <span>{order.name}</span>}</div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected route{order ? ", locked field order," : ""} loadout and final recovery are calculated server-side.</p></>;
 }
 
-function DeployDossier({ selected, approach, loadout, loadouts, resources, buildings, busy, deployment, onApproach, onLoadout, onUnlock, onDeploy }: {
+function DeployDossier({ selected, approach, loadout, loadouts, resources, buildings, busy, deployment, dailyDirective, directiveMatch, onApproach, onLoadout, onUnlock, onDeploy }: {
   selected: SurvivalCommandPayload["sectors"][number] | null;
   approach: SurvivalCommandApproach;
   loadout: SurvivalCommandLoadout;
@@ -215,6 +225,8 @@ function DeployDossier({ selected, approach, loadout, loadouts, resources, build
   buildings: SurvivalCommandPayload["buildings"];
   busy: string | null;
   deployment: SurvivalCommandPayload["deployment"];
+  dailyDirective: SurvivalCommandPayload["dailyDirective"];
+  directiveMatch: boolean;
   onApproach: (approach: SurvivalCommandApproach) => void;
   onLoadout: (loadout: SurvivalCommandLoadout) => void;
   onUnlock: (loadout: SurvivalCommandLoadout) => void;
@@ -222,7 +234,7 @@ function DeployDossier({ selected, approach, loadout, loadouts, resources, build
 }) {
   const locked = !selected?.unlocked;
   const capacityExceeded = !selected || deployment.used + selected.deploymentCost > deployment.capacity;
-  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />Base {selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />Base {selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div><p className={styles.returnTime}>Base recovery estimates only. Route choice, field decision, settlement readiness and the final operation outcome determine the recorded return.</p><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><fieldset className={styles.loadouts}><legend>Field loadout</legend><p className={styles.loadoutBalance}><Boxes size={13} />{resources.salvage} salvage <Radio size={13} />{resources.intel} intel</p>{loadouts.map(entry => { const Icon = LOADOUT_ICONS[entry.key]; const affordable = resources.salvage >= entry.cost.salvage && resources.intel >= entry.cost.intel; const workshopReady = entry.workshopLevel <= (buildings?.workshop ?? 0);
+  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />Base {selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />Base {selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div>{directiveMatch && !dailyDirective.completed && <div className={styles.directiveMatch}><Zap size={16} /><span><strong>Directive route matched</strong><small>{dailyDirective.name}: first return adds +{dailyDirective.bonus.salvage} salvage / +{dailyDirective.bonus.intel} intel.</small></span></div>}<p className={styles.returnTime}>Base recovery estimates only. Route choice, field decision, settlement readiness and the final operation outcome determine the recorded return.</p><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><fieldset className={styles.loadouts}><legend>Field loadout</legend><p className={styles.loadoutBalance}><Boxes size={13} />{resources.salvage} salvage <Radio size={13} />{resources.intel} intel</p>{loadouts.map(entry => { const Icon = LOADOUT_ICONS[entry.key]; const affordable = resources.salvage >= entry.cost.salvage && resources.intel >= entry.cost.intel; const workshopReady = entry.workshopLevel <= (buildings?.workshop ?? 0);
     const canUnlock = !entry.unlocked && affordable && workshopReady;
     const status = entry.unlocked ? (loadout === entry.key ? "Selected" : "Select")
       : !workshopReady ? `Workshop Level ${entry.workshopLevel} required`

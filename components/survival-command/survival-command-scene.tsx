@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { SurvivalCommandExpedition, SurvivalCommandFieldOrder, SurvivalCommandLoadout, SurvivalCommandSector } from "../../lib/survival-command";
+import type { SurvivalCommandDailyDirective, SurvivalCommandExpedition, SurvivalCommandFieldOrder, SurvivalCommandLoadout, SurvivalCommandSector } from "../../lib/survival-command";
 
-type SceneState = { selectedSector: SurvivalCommandSector; selectedLoadout: SurvivalCommandLoadout; expedition: SurvivalCommandExpedition | null };
+type SceneState = { selectedSector: SurvivalCommandSector; selectedLoadout: SurvivalCommandLoadout; expedition: SurvivalCommandExpedition | null; dailyDirective: (SurvivalCommandDailyDirective & { completed: boolean }) | null };
 type Props = SceneState & { motionRunning: boolean; onUnavailable: () => void };
 
 const sectorLayout: Record<SurvivalCommandSector, { x: number; z: number; colour: number }> = {
@@ -14,20 +14,20 @@ const sectorLayout: Record<SurvivalCommandSector, { x: number; z: number; colour
   blacksite: { x: 2.35, z: -1.85, colour: 0xec71a8 },
 };
 
-export function SurvivalCommandScene({ selectedSector, selectedLoadout, expedition, motionRunning, onUnavailable }: Props) {
+export function SurvivalCommandScene({ selectedSector, selectedLoadout, expedition, dailyDirective, motionRunning, onUnavailable }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<SceneState>({ selectedSector, selectedLoadout, expedition });
+  const stateRef = useRef<SceneState>({ selectedSector, selectedLoadout, expedition, dailyDirective });
   const applyStateRef = useRef<((state: SceneState) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
   const unavailableRef = useRef(onUnavailable);
 
   useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
   useEffect(() => {
-    const next = { selectedSector, selectedLoadout, expedition };
+    const next = { selectedSector, selectedLoadout, expedition, dailyDirective };
     stateRef.current = next;
     applyStateRef.current?.(next);
     renderRef.current?.();
-  }, [expedition, selectedLoadout, selectedSector]);
+  }, [dailyDirective, expedition, selectedLoadout, selectedSector]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -145,6 +145,27 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       node.add(light);
       sectorNodes.push({ key: keyName, node, core, beacon, light });
     }
+
+    const dailyMarker = new THREE.Group();
+    const dailyMarkerBaseGeometry = new THREE.CylinderGeometry(0.34, 0.42, 0.05, 6);
+    const dailyMarkerCoreGeometry = new THREE.OctahedronGeometry(0.13, 0);
+    const dailyMarkerRingGeometry = new THREE.TorusGeometry(0.34, 0.018, 8, 20);
+    const dailyMarkerBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x322746, emissive: 0x171127, emissiveIntensity: 1.4, metalness: 0.84, roughness: 0.2 });
+    const dailyMarkerCoreMaterial = new THREE.MeshStandardMaterial({ color: 0xe1b8ff, emissive: 0x9347e6, emissiveIntensity: 2.4, metalness: 0.8, roughness: 0.12 });
+    const dailyMarkerRingMaterial = new THREE.MeshBasicMaterial({ color: 0xe2b9ff, transparent: true, opacity: 0.86, depthWrite: false });
+    geometries.push(dailyMarkerBaseGeometry, dailyMarkerCoreGeometry, dailyMarkerRingGeometry);
+    materials.push(dailyMarkerBaseMaterial, dailyMarkerCoreMaterial, dailyMarkerRingMaterial);
+    const dailyMarkerBase = new THREE.Mesh(dailyMarkerBaseGeometry, dailyMarkerBaseMaterial);
+    const dailyMarkerCore = new THREE.Mesh(dailyMarkerCoreGeometry, dailyMarkerCoreMaterial);
+    const dailyMarkerRing = new THREE.Mesh(dailyMarkerRingGeometry, dailyMarkerRingMaterial);
+    dailyMarkerCore.position.y = 0.38;
+    dailyMarkerRing.position.y = 0.34;
+    dailyMarkerRing.rotation.x = Math.PI / 2;
+    dailyMarker.add(dailyMarkerBase, dailyMarkerCore, dailyMarkerRing);
+    dailyMarker.visible = false;
+    root.add(dailyMarker);
+    const dailyMarkerLight = new THREE.PointLight(0xd890ff, 0, 2.8, 2);
+    root.add(dailyMarkerLight);
 
     const convoy = new THREE.Group();
     const chassisGeometry = new THREE.BoxGeometry(0.42, 0.16, 0.65);
@@ -285,6 +306,20 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
         entry.light.intensity = selected ? 2.8 : active ? 2.2 : 0.52;
         routeLines.get(entry.key)!.material = selected || active ? selectedRouteMaterial : routeMaterial;
       }
+      const dailyTarget = state.dailyDirective ? sectorLayout[state.dailyDirective.sector] : null;
+      dailyMarker.visible = Boolean(dailyTarget);
+      if (dailyTarget) {
+        dailyMarker.position.set(dailyTarget.x, 0.14, dailyTarget.z);
+        dailyMarkerLight.position.set(dailyTarget.x, 0.8, dailyTarget.z);
+        const completed = state.dailyDirective?.completed;
+        dailyMarkerCoreMaterial.color.setHex(completed ? 0x81f2cf : 0xe1b8ff);
+        dailyMarkerCoreMaterial.emissive.setHex(completed ? 0x32ba8b : 0x9347e6);
+        dailyMarkerRingMaterial.color.setHex(completed ? 0x8af6d5 : 0xe2b9ff);
+        dailyMarkerLight.color.setHex(completed ? 0x72ead6 : 0xd890ff);
+        dailyMarkerLight.intensity = completed ? 1.2 : 1.9;
+      } else {
+        dailyMarkerLight.intensity = 0;
+      }
       const end = travel ? sectorLayout[travel.sector] : null;
       convoy.visible = Boolean(end);
       if (end) convoy.userData.route = end;
@@ -333,6 +368,12 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       for (const entry of sectorNodes) {
         entry.beacon.rotation.y = elapsed * 0.8;
         entry.beacon.position.y = 0.75 + Math.sin(elapsed * 1.35 + entry.node.position.x) * 0.035;
+      }
+      if (dailyMarker.visible) {
+        dailyMarkerRing.rotation.z = elapsed * 0.92;
+        const pulse = 1 + Math.sin(elapsed * 2.2) * 0.09;
+        dailyMarkerCore.scale.setScalar(pulse);
+        dailyMarkerLight.intensity = stateRef.current.dailyDirective?.completed ? 1.05 + Math.sin(elapsed * 1.7) * 0.16 : 1.72 + Math.sin(elapsed * 2.2) * 0.38;
       }
       if (convoy.visible && convoy.userData.route) {
         const target = convoy.userData.route as { x: number; z: number };
