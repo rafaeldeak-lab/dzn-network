@@ -6,7 +6,7 @@ import { gamesFixture } from "./lib/games-hub-local";
 
 const wrangler = readFileSync("wrangler.toml", "utf8");
 const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
-assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "false"$/m, "The protected 0109 release must quiesce account closure before baseline capture.");
+assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m, "Account closure must be restored after the protected 0109 release completes.");
 
 async function run() {
   const fixture = await gamesFixture();

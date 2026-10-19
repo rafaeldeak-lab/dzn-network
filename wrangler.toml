@@ -7,9 +7,8 @@ binding = "DB"
 database_name = "dzn_network_db"
 database_id = "37515c66-2787-49e4-8568-a461517e975e"
 
-# Account closure is paused only while the isolated 0109 rollout captures and
-# verifies its Survival Command expedition preservation baseline. The release
-# immediately following that verified migration restores the normal path.
+# Account closure remains available. The completed isolated 0109 rollout used a
+# temporary maintenance flag only while it preserved existing expedition rows.
 [env.production.vars]
 DZN_GAMES_HUB_ENABLED = "true"
 DZN_GAMES_TRIVIA_ENABLED = "true"
@@ -17,7 +16,7 @@ DZN_GAMES_WORD_CHAIN_ENABLED = "true"
 DZN_GAMES_HIDE_SEEK_ENABLED = "true"
 DZN_GAMES_RELAY_RUSH_ENABLED = "true"
 DZN_GAMES_CIPHER_GRID_ENABLED = "true"
-DZN_ACCOUNT_DELETE_ENABLED = "false"
+DZN_ACCOUNT_DELETE_ENABLED = "true"
 DZN_GAMES_ECHO_ARRAY_ENABLED = "true"
 DZN_GAMES_OUTPOST_RUN_ENABLED = "true"
 DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true"
