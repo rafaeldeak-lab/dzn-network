@@ -70,7 +70,7 @@ async function run() {
     assert.equal((await call(fixture, undefined, { method: "DELETE" })).status, 405);
     fixture.env.DZN_GAMES_CIPHER_GRID_ENABLED = "false";
     assert.equal((await call(fixture)).status, 404);
-    assert.equal((await call(fixture, undefined, { cookie: "" })).status, 404);
+    assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_cipher_grid_sessions").get()?.count, 0);
   });
 

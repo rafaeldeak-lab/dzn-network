@@ -100,21 +100,22 @@ jobs:
           npm run lint
           npm run test:production-migration-queue
           npm run test:state-preserving-migration-production-rollout
+          npm run test:account-deletion-maintenance
           npm run test:games-hub
           git diff --check
 
-      - name: Verify Cipher Grid writes are quiesced in source and production
+      - name: Verify protected maintenance in source and production
         run: |
           set -euo pipefail
           npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-write-quiesce --config wrangler.toml
-          CIPHER_GRID_STATUS="$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" --max-time 20 https://dayz-network.com/api/games/cipher-grid)"
-          if [ "${CIPHER_GRID_STATUS}" != "404" ]; then
-            echo "::error::Cipher Grid is not quiesced in production; expected public route status 404, received ${CIPHER_GRID_STATUS}."
+          MAINTENANCE_STATUS="$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" --max-time 20 https://dayz-network.com/api/health/state-preserving-migration)"
+          if [ "${MAINTENANCE_STATUS}" != "200" ]; then
+            echo "::error::Protected migration maintenance is not active in production; expected signal status 200, received ${MAINTENANCE_STATUS}."
             exit 1
           fi
-          # Gives any request started before the maintenance deployment time to finish before the state baseline is captured.
+          # Gives requests started before the maintenance deployment time to finish before the state baseline is captured.
           sleep 90
-          echo "Cipher Grid production write path verified as quiesced."
+          echo "Cipher Grid and account-deletion production write paths verified as quiesced."
 
       - name: Build isolated migration stage
         run: |
