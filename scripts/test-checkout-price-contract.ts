@@ -3,15 +3,23 @@ import { createSession } from "../functions/_lib/db";
 import { ensureBillingSchema, ensureStarterTrialClaimSchema, upsertBillingAccount } from "../functions/_lib/plans";
 import { onRequest } from "../functions/api/billing/create-checkout-session";
 import { checkoutPriceFixture, checkoutResponseFromRequest, createCheckoutFixture } from "./fixtures/billing-checkout";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
 
 const originalFetch = globalThis.fetch;
 const fixtures: ReturnType<typeof createCheckoutFixture>[] = [];
 const expectedProtected = new Map<ReturnType<typeof createCheckoutFixture>["db"], unknown>();
 const sessions = new Map<string, { body: string; session: ReturnType<typeof checkoutResponseFromRequest> }>();
 const reads: string[] = [], posts: string[] = [];
+let accountRequests = 0;
 let override: Record<string, unknown> = {};
 let priceFailure: number | "throw" | "invalid-json" | "null" | null = null;
 let loseResponse = false;
+let liveAccount: Record<string, unknown> = {
+  charges_enabled: true,
+  payouts_enabled: true,
+  details_submitted: true,
+  requirements: { disabled_reason: null, currently_due: [], past_due: [] },
+};
 async function fixture() {
   const f = createCheckoutFixture(); fixtures.push(f);
   await ensureBillingSchema(f.env); await ensureStarterTrialClaimSchema(f.env);
@@ -39,13 +47,19 @@ async function run() {
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input)); assert.equal(url.origin, "https://api.stripe.com");
     const method = init?.method ?? "GET";
+    if (url.pathname === "/v1/account") {
+      assert.equal(method, "GET");
+      accountRequests++;
+      return Response.json(liveAccount);
+    }
     if (url.pathname.startsWith("/v1/prices/")) {
       assert.equal(method, "GET"); reads.push(url.pathname);
       if (priceFailure === "throw") throw new Error("private-provider-error");
       if (typeof priceFailure === "number") return Response.json({ error: { message: "private-provider-error" } }, { status: priceFailure });
       if (priceFailure === "invalid-json") return new Response("not json");
       if (priceFailure === "null") return Response.json(null);
-      return Response.json({ ...checkoutPriceFixture(url.pathname.split("/").at(-1)!), ...override });
+      const live = String(new Headers(init?.headers).get("authorization")).includes("sk_live_");
+      return Response.json({ ...checkoutPriceFixture(url.pathname.split("/").at(-1)!, live), ...override });
     }
     if (method === "GET") {
       assert.match(url.pathname, /^\/v1\/checkout\/sessions\/cs_price_\d+$/);
@@ -139,6 +153,44 @@ async function run() {
   paused.env.STRIPE_SECRET_KEY = "sk_live_blocked";
   await request(paused, "starter", 403); await request(paused, "pro", 403);
   assert.equal(reads.length + posts.length, callsBefore); assert.deepEqual(ledgerRows(paused), [[], []]);
+  const live = await fixture();
+  live.env.STRIPE_SECRET_KEY = "sk_live_fixture";
+  live.env.DZN_LIVE_CHECKOUT_ENABLED = "true";
+  live.env.DZN_APP_URL = "https://dayz-network.com";
+  live.env.DZN_PUBLIC_LEGAL_SELLER_NAME = DZN_PUBLISHED_SELLER.name;
+  live.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS = DZN_PUBLISHED_SELLER.addressLines.join(" | ");
+  const liveBeforeReads = reads.length, liveBeforePosts = posts.length;
+  liveAccount = { ...liveAccount, charges_enabled: false };
+  const restrictedStatements = live.db.statements.length;
+  assert.equal((await request(live, "starter", 503)).errorCode, "LIVE_ACCOUNT_UNAVAILABLE");
+  assert.equal(reads.length, liveBeforeReads, "A restricted live account must fail before Price verification");
+  assert.equal(posts.length, liveBeforePosts, "A restricted live account must fail before Stripe Checkout creation");
+  assert.ok(live.db.statements.slice(restrictedStatements).every(sql => /^\s*SELECT\s/i.test(sql)), "A restricted live account must fail before any billing or schema write");
+  assert.deepEqual(ledgerRows(live), [[], []], "A restricted live account must not reserve a checkout or trial");
+  liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
+    requirements: { disabled_reason: null, currently_due: ["verification"], past_due: [] } };
+  const requirementsStatements = live.db.statements.length;
+  assert.equal((await request(live, "pro", 503)).errorCode, "LIVE_ACCOUNT_UNAVAILABLE");
+  assert.equal(reads.length, liveBeforeReads, "Outstanding live account requirements must fail before Price verification");
+  assert.equal(posts.length, liveBeforePosts, "Outstanding live account requirements must fail before Stripe Checkout creation");
+  assert.ok(live.db.statements.slice(requirementsStatements).every(sql => /^\s*SELECT\s/i.test(sql)), "Outstanding requirements must fail before any billing or schema write");
+  assert.deepEqual(ledgerRows(live), [[], []], "Outstanding live account requirements must not reserve a checkout or trial");
+  liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
+    requirements: { disabled_reason: null, currently_due: [], past_due: [] } };
+  await request(live, "pro", 200);
+  assert.equal(posts.length, liveBeforePosts + 1, "A healthy live account may continue to the exact verified Checkout request");
+  const missingLiveBase = createCheckoutFixture({ migration: false });
+  missingLiveBase.db.sqlite.exec("INSERT INTO users(id, discord_id) VALUES ('owner', 'discord-owner')");
+  const missingLive: Fixture = { ...missingLiveBase, token: (await createSession(missingLiveBase.env, "owner")).token };
+  missingLive.env.STRIPE_SECRET_KEY = "sk_live_fixture";
+  missingLive.env.DZN_LIVE_CHECKOUT_ENABLED = "true";
+  missingLive.env.DZN_APP_URL = "https://dayz-network.com";
+  missingLive.env.DZN_PUBLIC_LEGAL_SELLER_NAME = DZN_PUBLISHED_SELLER.name;
+  missingLive.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS = DZN_PUBLISHED_SELLER.addressLines.join(" | ");
+  const missingLiveAccountRequests = accountRequests;
+  assert.equal((await request(missingLive, "pro", 503)).errorCode, "CHECKOUT_UNAVAILABLE");
+  assert.equal(accountRequests, missingLiveAccountRequests, "A missing live checkout migration must fail before Stripe account verification");
+  console.log("PASS live provider capability is checked after read-only migration preflight and before any checkout/trial write");
   for (const f of fixtures) {
     assert.deepEqual(f.db.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
     assert.deepEqual(protectedRows({ ...f, token: "" }), expectedProtected.get(f.db) ?? [[], []]);
