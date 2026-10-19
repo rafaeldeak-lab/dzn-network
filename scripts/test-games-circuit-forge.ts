@@ -13,15 +13,22 @@ import { gamesFixture } from "./lib/games-hub-local";
 type Fixture = Awaited<ReturnType<typeof circuitForgeFixture>>;
 let passed = 0;
 
-async function circuitForgeFixture(migrate = true) {
+async function circuitForgeFixture(migrate = true, gridControlSchema = false, gridControlEnabled = gridControlSchema) {
   const fixture = await gamesFixture();
   if (migrate) fixture.db.sqlite.exec(readFileSync("migrations/0101_games_hub_circuit_forge.sql", "utf8"));
+  if (gridControlSchema) fixture.db.sqlite.exec(readFileSync("migrations/0111_games_hub_circuit_forge_grid_control.sql", "utf8"));
   (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_ENABLED = "true";
+  (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = gridControlEnabled ? "true" : "false";
   return fixture;
 }
 
 async function test(name: string, action: (fixture: Fixture) => Promise<void>, migrate = true) {
   const fixture = await circuitForgeFixture(migrate);
+  try { await action(fixture); passed++; console.log(`PASS ${name}`); } finally { fixture.db.sqlite.close(); }
+}
+
+async function gridControlTest(name: string, action: (fixture: Fixture) => Promise<void>, enabled = true) {
+  const fixture = await circuitForgeFixture(true, true, enabled);
   try { await action(fixture); passed++; console.log(`PASS ${name}`); } finally { fixture.db.sqlite.close(); }
 }
 
@@ -112,6 +119,64 @@ async function run() {
     assert.equal((await call(fixture, command(state))).status, 200);
   });
 
+  await gridControlTest("grid controls remain hidden and reject requests while their release flag is off", async fixture => {
+    const state = await start(fixture);
+    assert.equal(state.game?.gridControlAvailable, false);
+    assert.equal((await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version })).status, 400);
+    assert.equal((await call(fixture, { action: "phase", gameId: state.game?.id, version: state.game?.version, index: 0 })).status, 400);
+    const stored = fixture.db.sqlite.prepare("SELECT diagnostic_used, phase_used, diagnostic_index FROM dzn_circuit_forge_sessions WHERE user_id = 'local-player'").get() as { diagnostic_used: number; phase_used: number; diagnostic_index: number | null };
+    assert.equal(stored.diagnostic_used, 0);
+    assert.equal(stored.phase_used, 0);
+    assert.equal(stored.diagnostic_index, null);
+  }, false);
+
+  await gridControlTest("the server issues one diagnostic target and one authoritative phase rotation", async fixture => {
+    await start(fixture);
+    setBoard(fixture, [3, ...Array(24).fill(0)]);
+    const state = await payload(await call(fixture));
+    assert.equal(state.game?.gridControlAvailable, true);
+    assert.equal(state.game?.diagnosticAvailable, true);
+    const diagnosed = await payload(await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version }));
+    assert.equal(diagnosed.game?.diagnosticUsed, true);
+    assert.equal(diagnosed.game?.diagnosticIndex, 0);
+    assert.equal(diagnosed.game?.phaseAvailable, true);
+    assert.equal((await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version })).status, 409);
+    settle(fixture);
+    const phased = await payload(await call(fixture, { action: "phase", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: 0 }));
+    assert.equal(phased.game?.phaseUsed, true);
+    assert.equal(phased.game?.phaseAvailable, false);
+    assert.equal(phased.game?.diagnosticIndex, null);
+    assert.equal(phased.game?.rotations, 1);
+    assert.equal((await call(fixture, { action: "phase", gameId: phased.game?.id, version: phased.game?.version, index: 0 })).status, 409);
+    assert.equal((await call(fixture, { action: "phase", gameId: phased.game?.id, version: phased.game?.version, index: 12 })).status, 400);
+  });
+
+  await gridControlTest("a new board clears installed control state before a later re-enable", async fixture => {
+    (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "false";
+    await start(fixture);
+    fixture.db.sqlite.prepare(`UPDATE dzn_circuit_forge_sessions
+      SET diagnostic_used = 1, phase_used = 1, diagnostic_index = 0, started_at = started_at - 6000
+      WHERE user_id = 'local-player'`).run();
+    await start(fixture);
+    (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "true";
+    const refreshed = await payload(await call(fixture));
+    assert.equal(refreshed.game?.diagnosticUsed, false);
+    assert.equal(refreshed.game?.phaseUsed, false);
+    assert.equal(refreshed.game?.diagnosticIndex, null);
+  });
+
+  await gridControlTest("a phase rotation can complete a board and uses the normal daily reward ledger", async fixture => {
+    await start(fixture);
+    setBoard(fixture, [2, ...Array(24).fill(0)]);
+    const state = await payload(await call(fixture));
+    settle(fixture);
+    const completed = await payload(await call(fixture, { action: "phase", gameId: state.game?.id, version: state.game?.version, index: 0 }));
+    assert.equal(completed.game?.status, "won");
+    assert.equal(completed.game?.phaseUsed, true);
+    assert.equal(completed.rewardGranted, true);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_circuit_forge_reward_ledger").get()?.count, 1);
+  });
+
   await test("server-validated rotations, complete state and daily reward cap apply exactly", async fixture => {
     await start(fixture);
     const won = await winFromNearSolution(fixture);
@@ -196,12 +261,22 @@ async function run() {
   try {
     const db = await miniflare.getD1Database("DB");
     await db.exec("CREATE TABLE users (id TEXT PRIMARY KEY); INSERT INTO users VALUES ('local-player');");
-    const migration = readFileSync("migrations/0101_games_hub_circuit_forge.sql", "utf8").replace(/^--.*$/gm, "");
-    for (const statement of migration.split(";").map(value => value.trim()).filter(Boolean)) await db.prepare(statement).run();
+    const migrations = ["migrations/0101_games_hub_circuit_forge.sql", "migrations/0111_games_hub_circuit_forge_grid_control.sql"];
+    for (const path of migrations) {
+      const migration = readFileSync(path, "utf8").replace(/^--.*$/gm, "");
+      for (const statement of migration.split(";").map(value => value.trim()).filter(Boolean)) await db.prepare(statement).run();
+    }
     const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'dzn_circuit_forge_%' ORDER BY name").all<{ name: string }>();
     assert.deepEqual(tables.results.map((row: { name: string }) => row.name), ["dzn_circuit_forge_reward_ledger", "dzn_circuit_forge_sessions"]);
     const indexes = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dzn_circuit_forge_rewards_history'").all<{ name: string }>();
     assert.equal(indexes.results.length, 1);
+    const controlIndex = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dzn_circuit_forge_grid_control'").all<{ name: string }>();
+    assert.equal(controlIndex.results.length, 1);
+    const columns = await db.prepare("PRAGMA table_info(dzn_circuit_forge_sessions)").all<{ name: string }>();
+    const controlColumns = (columns.results as Array<{ name: string }>)
+      .filter((row: { name: string }) => ["diagnostic_used", "phase_used", "diagnostic_index"].includes(row.name))
+      .map((row: { name: string }) => row.name);
+    assert.deepEqual(controlColumns, ["diagnostic_used", "phase_used", "diagnostic_index"]);
     assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
     assert.equal((await db.prepare("SELECT COUNT(*) count FROM dzn_circuit_forge_sessions").first<{ count: number }>())?.count, 0);
     assert.equal((await db.prepare("SELECT COUNT(*) count FROM dzn_circuit_forge_reward_ledger").first<{ count: number }>())?.count, 0);

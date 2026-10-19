@@ -280,7 +280,8 @@ export function GamesHub() {
               </button>)}
             </div>
           </>}
-          {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
+          {view === "play" && <div className={styles.activeGamePanel}>
+          {availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
             <div className={styles.gameTools}>
               <label>Difficulty<select aria-label="Difficulty" value={mode} disabled={busy} onChange={event => setMode(event.target.value as GameMode)}>{modes.map(key => <option value={key} key={key}>{GAME_MODES[key].label} / {GAME_MODES[key].size} x {GAME_MODES[key].size}</option>)}</select></label>
@@ -322,6 +323,7 @@ export function GamesHub() {
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
+          </div>}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -1188,6 +1190,14 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
     if (!game || !active || busy || cooldown || game.tiles[index]?.core) return;
     void mutate({ action: "rotate", gameId: game.id, version: game.version, index });
   }, [active, busy, cooldown, game, mutate]);
+  const diagnose = useCallback(() => {
+    if (!game || !active || busy || cooldown || !game.diagnosticAvailable) return;
+    void mutate({ action: "diagnose", gameId: game.id, version: game.version });
+  }, [active, busy, cooldown, game, mutate]);
+  const phase = useCallback(() => {
+    if (!game || !active || busy || cooldown || !game.phaseAvailable || game.diagnosticIndex === null) return;
+    void mutate({ action: "phase", gameId: game.id, version: game.version, index: game.diagnosticIndex });
+  }, [active, busy, cooldown, game, mutate]);
 
   return <section aria-labelledby="circuit-forge-title" className={styles.circuitForgePanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>10 / RELAY WORKSHOP</span><h2 id="circuit-forge-title">DZN Circuit Forge</h2></div><Settings2 size={24} /></div>
@@ -1199,23 +1209,31 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Grid online" : game ? "New grid" : "Start rebuild"}</button>
     </div>
     {game ? <>
-      <div className={styles.circuitForgeMeta}><span><Settings2 size={14} />{game.poweredCount} / {game.tiles.length} powered</span><span><Target size={14} />{game.rotations} / {game.maxRotations} rotations</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.circuitForgeMeta}><span><Settings2 size={14} />{game.poweredCount} / {game.tiles.length} powered</span><span><Target size={14} />{game.rotations} / {game.maxRotations} rotations</span>{game.gridControlAvailable && <span><ScanSearch size={14} />{game.diagnosticUsed ? "scan spent" : "scan ready"}</span>}<span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.circuitForgeStage} data-status={game.status}>
         <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
         <div className={`${styles.circuitForgeConsole} ${threeUnavailable ? styles.circuitForgeConsoleFallback : ""}`}>
           <div className={styles.circuitForgeSceneFrame}>
-            <div className={styles.circuitForgeSceneHud} aria-hidden="true"><span>REACTOR BAY // 07</span><strong>{game.poweredCount} / {game.tiles.length} RELAYS</strong><small>{active ? "LIVE CONDUIT TRACE" : game.status === "won" ? "RELAY NET STABLE" : "AWAITING RESTART"}</small></div>
-            {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
+            <div className={styles.circuitForgeSceneHud} aria-hidden="true"><span>REACTOR BAY // 07</span><strong>{game.poweredCount} / {game.tiles.length} RELAYS</strong><small>{game.diagnosticIndex !== null ? `FAULT TRACE // RELAY ${String(game.diagnosticIndex + 1).padStart(2, "0")}` : active ? "LIVE CONDUIT TRACE" : game.status === "won" ? "RELAY NET STABLE" : "AWAITING RESTART"}</small></div>
+            {!threeUnavailable && <CircuitForge3D tiles={game.tiles} gridSize={game.gridSize} active={active} disabled={busy || cooldown} motionRunning={motionRunning} diagnosticIndex={game.diagnosticIndex} onRotate={rotate} onUnavailable={() => setThreeUnavailableGameId(game.id)} />}
           </div>
           <div className={styles.circuitForgeControlDeck}>
             <div className={styles.circuitForgeDeckHeading}><span>MANUAL RELAY DECK</span><strong>Direct conduit control</strong><small>Use the tactile grid when you need a precise clockwise relay turn.</small></div>
+            {game.gridControlAvailable && <div className={styles.circuitForgeControlRack} aria-label="Circuit Forge grid controls">
+              <button type="button" className={styles.circuitForgeControl} data-grid-control="diagnose" disabled={!active || busy || cooldown || !game.diagnosticAvailable} onClick={diagnose}>
+                <ScanSearch size={15} /><span><strong>{game.diagnosticUsed ? "Topology scan spent" : "Run topology scan"}</strong><small>{game.diagnosticUsed ? game.diagnosticIndex !== null ? `Relay ${String(game.diagnosticIndex + 1).padStart(2, "0")} requires alignment.` : "Fault trace consumed." : "Reveal one relay that still needs a turn."}</small></span>
+              </button>
+              <button type="button" className={styles.circuitForgeControl} data-grid-control="phase" disabled={!active || busy || cooldown || !game.phaseAvailable || game.diagnosticIndex === null} onClick={phase}>
+                <Zap size={15} /><span><strong>{game.phaseUsed ? "Phase lock spent" : "Deploy phase lock"}</strong><small>{game.phaseUsed ? "One phase control is issued per grid." : game.diagnosticIndex !== null ? `Turn relay ${String(game.diagnosticIndex + 1).padStart(2, "0")} through 180 degrees.` : "Run the diagnostic to select a relay."}</small></span>
+              </button>
+            </div>}
             <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
               {game.tiles.map((tile, index) => {
                 const rotatable = active && !tile.core;
                 return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
-                  data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy || cooldown}
+                  data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} data-diagnostic={game.diagnosticIndex === index} disabled={!rotatable || busy || cooldown}
                   title={tile.core ? "Command core" : "Rotate relay clockwise"}
-                  aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
+                  aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}${game.diagnosticIndex === index ? ", diagnostic alignment required" : ""}, rotate clockwise`}
                   onClick={() => rotate(index)}>
                   {tile.mask & 1 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireNorth}`} aria-hidden="true" /> : null}
                   {tile.mask & 2 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireEast}`} aria-hidden="true" /> : null}
@@ -1227,7 +1245,7 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
             </div>
           </div>
         </div>
-        <p className={styles.circuitForgeHint}>Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core.</p>
+        <p className={styles.circuitForgeHint}>{game.gridControlAvailable ? "Run one topology scan to isolate a live fault, then decide whether to use the single 180 degree phase lock or preserve it. The server validates every relay action." : "Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core."}</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay network restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIRCUIT_FORGE_REWARD.xp} XP and +${CIRCUIT_FORGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice rebuild complete. Today's reward was already recorded." : "Circuit Forge complete."}</span></div></>

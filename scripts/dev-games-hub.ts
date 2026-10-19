@@ -30,6 +30,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0099_games_hub_outpost_run.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0100_games_hub_signal_shift.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0101_games_hub_circuit_forge.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0111_games_hub_circuit_forge_grid_control.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0102_games_hub_ranger_range.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0104_games_hub_night_run.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
@@ -47,6 +48,7 @@ async function main() {
   fixture.env.DZN_GAMES_OUTPOST_RUN_ENABLED = "true";
   fixture.env.DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true";
   fixture.env.DZN_GAMES_CIRCUIT_FORGE_ENABLED = "true";
+  fixture.env.DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "true";
   fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_RECON_ENABLED = "true";

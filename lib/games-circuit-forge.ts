@@ -25,6 +25,12 @@ export type CircuitForgeGame = {
   maxRotations: number;
   startedAt: number;
   expiresAt: number;
+  gridControlAvailable: boolean;
+  diagnosticAvailable: boolean;
+  diagnosticUsed: boolean;
+  diagnosticIndex: number | null;
+  phaseAvailable: boolean;
+  phaseUsed: boolean;
 };
 
 export type CircuitForgePayload = {

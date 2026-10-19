@@ -32,6 +32,14 @@ try {
     if (viewport.name === "desktop") {
       await page.getByRole("button", { name: "Start rebuild" }).click();
       await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: "visible" });
+      const diagnostic = page.locator('[data-grid-control="diagnose"]');
+      await diagnostic.waitFor({ state: "visible" });
+      await diagnostic.click();
+      await page.locator('[data-diagnostic="true"]').waitFor({ state: "visible" });
+      await page.waitForTimeout(180);
+      const phase = page.locator('[data-grid-control="phase"]');
+      await phase.click();
+      await page.getByText("Phase lock spent", { exact: true }).waitFor({ state: "visible" });
     }
     await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: viewport.name === "desktop" ? "visible" : "attached" });
     const canvas = page.locator('canvas[data-dzn-circuit-forge-canvas="true"]');

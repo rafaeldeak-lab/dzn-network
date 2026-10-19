@@ -10,6 +10,7 @@ Generated specifically for the DZN Network Games Hub with the built-in image-gen
 - `public/images/games/relay-rush-chamber-v2.png`: 1536 x 864 original storm relay chamber backdrop for Relay Rush, 2765873 bytes. Original generation: `exec-4e9c56ed-5213-4d5e-a276-78a8fb3941b3.png` on 16 October 2026.
 - `public/images/games/outpost-run-expanse-v2.png`: 1672 x 941 original rain-soaked mountain extraction backdrop for Outpost Run, 2588511 bytes. Original generation: `exec-accdd11a-3a27-44c3-9e86-a63e8ea3d27b.png` on 17 October 2026.
 - `public/images/games/circuit-forge-workshop-v2.png`: 1672 x 941 original storm relay workshop backdrop for Circuit Forge, 2338096 bytes. Original generation: `exec-863cda21-f764-44fd-8318-faabcba69629.png` on 16 October 2026.
+- `public/images/games/circuit-forge-reactor-bay-v3.png`: original reactor-bay command-deck backdrop for Circuit Forge Grid Control. Original generation: `exec-b97373db-9fca-4394-8c36-2576a934c6c4.png` on 19 October 2026.
 - `public/images/games/cipher-grid-terminal-v2.png`: 1672 x 940 original storm field-cryptography terminal backdrop for Cipher Grid, 2584991 bytes. Original generation: `exec-359678a7-ddc6-49c8-a3dd-83f76c212a24.png` on 17 October 2026.
 - `public/images/games/signal-hunt-recon-v2.png`: 1536 x 1024 original storm reconnaissance station backdrop for Signal Hunt, 2952435 bytes. Original generation: `exec-1ed30d34-97fb-4ab6-839f-6168327e2d1a.png` on 17 October 2026.
 - `public/images/games/word-chain-relay-v2.png`: 1536 x 1024 original relay command-room backdrop for Word Chain, 2424935 bytes. Original generation: `exec-e305b297-2aef-461d-b671-132172497b0d.png` on 17 October 2026.
@@ -56,6 +57,10 @@ Use case: stylized-concept. Asset type: original 16:9 browser-game background fo
 ## Circuit Forge Workshop Prompt
 
 Use case: stylized-concept. Asset type: original 16:9 environment backdrop for an in-browser DZN Network logic game named Circuit Forge. Primary request: a premium near-future survival relay workshop during a nighttime storm, viewed straight-on. A believable five-by-five industrial power-routing wall fills the scene, with rugged conduit frames, ceramic insulators, live teal energy through a few cables, warm amber maintenance lights, rain traces on a broken outer window, and realistic worn metal surfaces. Reserve a calm, darker, high-contrast central square area large enough for an accessible five-by-five interactive circuit grid overlay. Surround that central overlay area with detail at the edges only. Style/medium: cinematic real-time 3D game environment art, physically grounded, sharp, elegant, premium. Composition/framing: wide 16:9, central puzzle space uncluttered and dark, technical scene detail at top and side edges. Lighting/mood: tense restoration mission, teal power light, restrained amber warning lights, no excessive glow. Constraints: original scene, no characters, no weapons, no brand logos, no readable words or letters, no UI, no watermark, no copied game location, no copyrighted characters.
+
+## Circuit Forge Reactor Bay Prompt
+
+Use case: original environment art for Circuit Forge Grid Control. Asset type: wide cinematic reactor command chamber, seen from a high three-quarter angle. Scene: a circular industrial power platform with a five-by-five relay field in the centre, large copper transformer housings, cyan energy conduits, restrained amber hazard lights, deep charcoal metal, distant machinery and light atmospheric mist. The central platform must remain dark and readable for a real interactive route grid. Style/medium: premium grounded hard-surface 3D game render, no people, brands, words, letters, logos, UI, watermark, copied locations, or copyrighted characters.
 
 ## Cipher Grid Terminal Prompt
 

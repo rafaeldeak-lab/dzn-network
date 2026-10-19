@@ -65,6 +65,8 @@
 .balances small { font-size: 9px; font-weight: 650; color: var(--muted); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 38px; align-items: start; }
 .mainColumn, .sidebar { min-width: 0; }
+.mainColumn { display: flex; flex-direction: column; }
+.activeGamePanel { order: -1; width: 100%; margin-bottom: 26px; }
 .operationsCommand { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(260px, .82fr); gap: 22px; min-height: 262px; overflow: hidden; margin-bottom: 16px; padding: 23px; border: 1px solid #435256; border-radius: 6px; background: #071011; box-shadow: inset 0 0 0 1px #d0fff008, 0 18px 40px #0007; }
 .operationsCommandArt { z-index: -3; object-fit: cover; object-position: center; }
 .operationsCommandScrim { position: absolute; inset: 0; z-index: -2; pointer-events: none; background: linear-gradient(90deg, #050c0ff4 0%, #071114e6 42%, #061014ad 67%, #07101288 100%); }
@@ -621,7 +623,7 @@
 .circuitForgeMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
 .circuitForgeMeta span { display: inline-flex; align-items: center; gap: 5px; }
 .circuitForgeMeta span:last-child { margin-left: auto; }
-.circuitForgeStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #5e5840; border-radius: 6px; background-color: #15140f; background-image: linear-gradient(180deg, #090c0ee0 0%, #10110ddd 42%, #12120feb 100%), url("/images/games/circuit-forge-workshop-v2.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 86px #030403d9; }
+.circuitForgeStage { position: relative; isolation: isolate; display: grid; gap: 18px; overflow: hidden; padding: 22px; border: 1px solid #5e5840; border-radius: 6px; background-color: #15140f; background-image: linear-gradient(180deg, #080a0ce8 0%, #10110dda 42%, #10120eed 100%), url("/images/games/circuit-forge-reactor-bay-v3.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 86px #030403d9; }
 .circuitForgeStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .6; background-image: linear-gradient(90deg, transparent 49%, #ab934022 50%, transparent 51%), linear-gradient(0deg, transparent 49%, #ab93401c 50%, transparent 51%); background-size: 32px 32px; }
 .circuitForgeReadout { display: grid; gap: 5px; text-align: center; }
 .circuitForgeReadout > span { color: #bcae7a; font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
@@ -629,7 +631,7 @@
 .circuitForgeConsole { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(214px, .65fr); gap: 16px; align-items: stretch; }
 .circuitForgeConsoleFallback { grid-template-columns: minmax(0, 1fr); }
 .circuitForgeConsoleFallback .circuitForgeSceneFrame { display: none; }
-.circuitForgeSceneFrame { position: relative; min-width: 0; min-height: 380px; overflow: hidden; border: 1px solid #796b3f; border-radius: 5px; background: #090907; box-shadow: inset 0 0 0 1px #fff1c40d, 0 16px 34px #00000055; }
+.circuitForgeSceneFrame { position: relative; min-width: 0; min-height: 380px; overflow: hidden; border: 1px solid #796b3f; border-radius: 5px; background-color: #090907; background-image: linear-gradient(180deg, #0608075f, #070908a6), url("/images/games/circuit-forge-reactor-bay-v3.png"); background-position: center; background-size: cover; box-shadow: inset 0 0 0 1px #fff1c40d, 0 16px 34px #00000055; }
 .circuitForgeSceneHud { position: absolute; z-index: 2; top: 16px; left: 16px; display: grid; gap: 3px; max-width: calc(100% - 32px); padding: 7px 9px; border: 1px solid #e8ce794d; border-left: 3px solid #ffe38a; border-radius: 3px; color: #f6e3a5; background: #0c0b08c9; box-shadow: 0 8px 22px #0000004a; font-family: var(--font-geist-mono), monospace; pointer-events: none; }
 .circuitForgeSceneHud span { color: #cfbb78; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
 .circuitForgeSceneHud strong { overflow: hidden; color: #fff5cf; font-size: 11px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
@@ -641,12 +643,21 @@
 .circuitForgeDeckHeading span { color: #f0d671; font: 800 9px var(--font-geist-mono), monospace; letter-spacing: .13em; }
 .circuitForgeDeckHeading strong { color: #fff7dc; font-size: 14px; }
 .circuitForgeDeckHeading small { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.circuitForgeControlRack { display: grid; gap: 7px; padding-block: 2px; }
+.circuitForgeControl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; padding: 9px; border: 1px solid #5a543a; border-radius: 4px; color: #e7d58c; background: #17150edb; text-align: left; transition: border-color 130ms ease, background-color 130ms ease, transform 130ms ease; }
+.circuitForgeControl > svg { margin-top: 2px; color: #74e9dc; }
+.circuitForgeControl span { display: grid; gap: 2px; min-width: 0; }
+.circuitForgeControl strong { color: #fff4ca; font-size: 11px; }
+.circuitForgeControl small { color: #aaa58f; font-size: 10px; line-height: 1.35; }
+.circuitForgeControl:not(:disabled):hover, .circuitForgeControl:not(:disabled):focus-visible { border-color: #92f5e6; background: #193630e8; outline: 2px solid #ffffff; outline-offset: 2px; transform: translateY(-1px); }
+.circuitForgeControl:disabled { opacity: .56; cursor: not-allowed; }
 .circuitForgeGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; width: 100%; aspect-ratio: 1; margin: 0 auto; padding: 6px; border: 1px solid #796b3f; border-radius: 5px; background: #0d0d09; }
 .circuitForgeTile { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; padding: 0; border: 1px solid #413d2c; border-radius: 3px; color: #817962; background: #1d1b14; transition: border-color 130ms ease, color 130ms ease, background-color 130ms ease, transform 130ms ease; }
 .circuitForgeTile[data-rotatable=true] { cursor: pointer; }
 .circuitForgeTile[data-rotatable=true]:hover, .circuitForgeTile[data-rotatable=true]:focus-visible { border-color: #ffe697; color: #fff4ca; background: #373017; outline: 2px solid #ffffff; outline-offset: 2px; transform: rotate(2deg); }
 .circuitForgeTile[data-powered=true] { border-color: #61e2cc; color: #d5fff5; background: #123530; }
 .circuitForgeTile[data-core=true] { border-color: #f2d56b; color: #fff4c7; background: #4b3e17; }
+.circuitForgeTile[data-diagnostic=true] { border-color: #ff8067; color: #fff1d0; background: #54291f; box-shadow: inset 0 0 0 1px #ffb17080, 0 0 16px #ff6f4a55; animation: circuitForgeDiagnosticPulse 1.2s ease-in-out infinite; }
 .circuitForgeTile:disabled { cursor: not-allowed; }
 .circuitForgeWire { position: absolute; z-index: 0; display: block; background: currentColor; box-shadow: 0 0 5px currentColor; opacity: .8; }
 .circuitForgeTile[data-powered=true] .circuitForgeWire { box-shadow: 0 0 8px #64ebd7; }
@@ -658,6 +669,7 @@
 .circuitForgeNode { position: relative; z-index: 1; display: grid; place-items: center; min-width: 26px; min-height: 21px; padding: 2px 4px; border: 1px solid currentColor; border-radius: 3px; background: #10110c; font: 800 clamp(8px, 1.8vw, 11px) var(--font-geist-mono), monospace; letter-spacing: .04em; }
 .circuitForgeTile[data-powered=true] .circuitForgeNode { background: #123a33; }
 .circuitForgeTile[data-core=true] .circuitForgeNode { background: #5b4919; }
+@keyframes circuitForgeDiagnosticPulse { 50% { border-color: #fff1b0; box-shadow: inset 0 0 0 1px #ffd097c9, 0 0 22px #ff6f4a88; } }
 .circuitForgeHint { margin: 0; color: var(--muted); font-size: 11px !important; line-height: 1.6; text-align: center; }
 .circuitForgeReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
 .circuitForgeReady svg { color: #efd76c; }

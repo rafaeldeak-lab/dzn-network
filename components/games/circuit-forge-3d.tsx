@@ -14,6 +14,7 @@ type CircuitForge3DProps = {
   active: boolean;
   disabled: boolean;
   motionRunning: boolean;
+  diagnosticIndex: number | null;
   onRotate: (index: number) => void;
   onUnavailable: () => void;
 };
@@ -23,14 +24,15 @@ const EAST = 2;
 const SOUTH = 4;
 const WEST = 8;
 
-export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunning, onRotate, onUnavailable }: CircuitForge3DProps) {
+export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunning, diagnosticIndex, onRotate, onUnavailable }: CircuitForge3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rotateRef = useRef(onRotate);
   const disabledRef = useRef(disabled);
   const unavailableRef = useRef(onUnavailable);
   const tilesRef = useRef(tiles);
   const activeRef = useRef(active);
-  const updateVisualsRef = useRef<((nextTiles: CircuitForgeTile[], playing: boolean) => void) | null>(null);
+  const diagnosticRef = useRef(diagnosticIndex);
+  const updateVisualsRef = useRef<((nextTiles: CircuitForgeTile[], playing: boolean, diagnostic: number | null) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => { rotateRef.current = onRotate; }, [onRotate]);
@@ -39,9 +41,10 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
   useEffect(() => {
     tilesRef.current = tiles;
     activeRef.current = active;
-    updateVisualsRef.current?.(tiles, active);
+    diagnosticRef.current = diagnosticIndex;
+    updateVisualsRef.current?.(tiles, active, diagnosticIndex);
     renderRef.current?.();
-  }, [active, tiles]);
+  }, [active, diagnosticIndex, tiles]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -52,14 +55,14 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     }
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x090907);
+    scene.background = null;
     scene.fog = new THREE.FogExp2(0x090907, 0.075);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
     camera.position.set(6.7, 7.6, 8.8);
     camera.lookAt(0, 0.15, 0);
     let renderer: any;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     } catch {
       unavailableRef.current();
       return;
@@ -67,7 +70,8 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.36;
+    renderer.toneMappingExposure = 1.5;
+    renderer.setClearColor(0x000000, 0);
     renderer.domElement.dataset.dznCircuitForgeCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
@@ -150,7 +154,8 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     const verticalGeometry = new THREE.BoxGeometry(0.1, 0.075, 0.54);
     const nodeGeometry = new THREE.SphereGeometry(0.13, 14, 10);
     const pulseGeometry = new THREE.SphereGeometry(0.052, 10, 8);
-    geometries.push(tileGeometry, edgeGeometry, socketGeometry, socketRingGeometry, horizontalGeometry, verticalGeometry, nodeGeometry, pulseGeometry);
+    const diagnosticGeometry = new THREE.BoxGeometry(1.06, 0.022, 1.06);
+    geometries.push(tileGeometry, edgeGeometry, socketGeometry, socketRingGeometry, horizontalGeometry, verticalGeometry, nodeGeometry, pulseGeometry, diagnosticGeometry);
     const tileVisuals: any[] = [];
     const hitboxes: any[] = [];
     const relayNodes: any[] = [];
@@ -210,6 +215,12 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
       node.position.y = 0.17;
       group.add(node);
+      const diagnosticMaterial = new THREE.MeshBasicMaterial({ color: 0xff6f53, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      materials.push(diagnosticMaterial);
+      const diagnostic = new THREE.Mesh(diagnosticGeometry, diagnosticMaterial);
+      diagnostic.position.y = 0.135;
+      diagnostic.visible = false;
+      group.add(diagnostic);
       relayNodes.push({ node, socketMaterial, socketRingMaterial, lit: lit || isCore, core: isCore, index });
       const pulseMaterial = new THREE.MeshBasicMaterial({ color: isCore ? 0xffe17e : 0x85ffee, transparent: true, opacity: lit || isCore ? 0.92 : 0, blending: THREE.AdditiveBlending, depthWrite: false });
       materials.push(pulseMaterial);
@@ -243,11 +254,11 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
       hitbox.userData = { index, rotatable: activeRef.current && !isCore, group };
       group.add(hitbox);
       hitboxes.push(hitbox);
-      tileVisuals.push({ tileMaterial, socketMaterial, socketRingMaterial, edgeMaterial, cableMaterial, nodeMaterial, pulseMaterial, hitbox, wires, pulses });
+      tileVisuals.push({ tileMaterial, socketMaterial, socketRingMaterial, edgeMaterial, cableMaterial, nodeMaterial, pulseMaterial, diagnosticMaterial, diagnostic, hitbox, wires, pulses });
       table.add(group);
     }
 
-    const applyTileState = (nextTiles: CircuitForgeTile[], playing: boolean) => {
+    const applyTileState = (nextTiles: CircuitForgeTile[], playing: boolean, diagnostic: number | null) => {
       nextTiles.forEach((tile, index) => {
         const visual = tileVisuals[index];
         if (!visual) return;
@@ -271,6 +282,8 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
         visual.socketRingMaterial.opacity = isCore ? 0.9 : lit ? 0.78 : 0.22;
         visual.pulseMaterial.color.setHex(isCore ? 0xffe17e : 0x85ffee);
         visual.pulseMaterial.opacity = lit || isCore ? 0.92 : 0;
+        visual.diagnostic.visible = playing && diagnostic === index;
+        visual.diagnosticMaterial.opacity = playing && diagnostic === index ? 0.72 : 0;
         visual.hitbox.userData.rotatable = playing && !isCore;
         visual.wires.forEach((wire: any, wireIndex: number) => { wire.visible = Boolean(tile.mask & [NORTH, EAST, SOUTH, WEST][wireIndex]); });
         visual.pulses.forEach((pulse: any, pulseIndex: number) => { pulse.mesh.visible = Boolean((lit || isCore) && (tile.mask & [NORTH, EAST, SOUTH, WEST][pulseIndex])); });
@@ -280,7 +293,7 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
     };
     updateVisualsRef.current = applyTileState;
     renderRef.current = () => renderer.render(scene, camera);
-    applyTileState(initialTiles, activeRef.current);
+    applyTileState(initialTiles, activeRef.current, diagnosticRef.current);
 
     const beaconGeometry = new THREE.CylinderGeometry(0.08, 0.15, 1.1, 8);
     const beaconMaterial = new THREE.MeshStandardMaterial({ color: 0xf5ce6b, emissive: 0xe8a73d, emissiveIntensity: 1.45, metalness: 0.63, roughness: 0.2 });
@@ -437,6 +450,10 @@ export function CircuitForge3D({ tiles, gridSize, active, disabled, motionRunnin
         const travel = ((elapsed * 0.72 + pulse.phase) % 1) * 0.44 + 0.04;
         pulse.mesh.position[pulse.axis] = travel * pulse.direction;
         pulse.mesh.scale.setScalar(0.72 + Math.sin(elapsed * 4 + pulse.phase) * 0.18);
+      });
+      tileVisuals.forEach((visual, index) => {
+        if (!visual.diagnostic.visible) return;
+        visual.diagnosticMaterial.opacity = 0.46 + Math.sin(elapsed * 4.2 + index) * 0.22;
       });
       particles.rotation.y = elapsed * 0.05;
       renderer.render(scene, camera);
