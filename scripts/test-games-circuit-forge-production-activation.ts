@@ -7,5 +7,6 @@ assert.equal(unstable_readConfig({ config: "wrangler.toml", env: "preview" }).va
 assert.equal(production.vars.DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED, "true");
 assert.equal(unstable_readConfig({ config: "wrangler.toml", env: "preview" }).vars.DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED, undefined);
 assert.equal(production.vars.DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE, undefined);
-assert.equal(production.vars.DZN_ACCOUNT_DELETE_ENABLED, "true");
+assert.equal(production.vars.DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE, "true");
+assert.equal(production.vars.DZN_ACCOUNT_DELETE_ENABLED, "false");
 console.log("PASS Circuit Forge grid controls are enabled in production only after isolated migration verification and maintenance cleanup.");
