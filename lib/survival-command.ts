@@ -129,6 +129,37 @@ export const SURVIVAL_COMMAND_INCIDENTS = {
 export type SurvivalCommandIncident = keyof typeof SURVIVAL_COMMAND_INCIDENTS;
 export type SurvivalCommandAction = (typeof SURVIVAL_COMMAND_INCIDENTS)[SurvivalCommandIncident]["actions"][number];
 
+// These orders are chosen after arrival. They are deliberately a trade-off, rather
+// than a hidden reward multiplier, so a player owns the tactical call they make.
+export const SURVIVAL_COMMAND_FIELD_ORDERS = {
+  overwatch: {
+    name: "Overwatch protocol",
+    detail: "Place the return corridor under watch. It protects the team, but leaves less time for recovery.",
+    salvageShift: -2,
+    intelShift: 1,
+    breakthroughBonus: 1,
+    strainReduction: 8,
+  },
+  intercept: {
+    name: "Signal intercept",
+    detail: "Commit the field unit to the live transmission. It favors intelligence and rare breakthroughs.",
+    salvageShift: -1,
+    intelShift: 3,
+    breakthroughBonus: 6,
+    strainReduction: 0,
+  },
+  recovery: {
+    name: "Recovery priority",
+    detail: "Secure the material first. It raises salvage potential, but makes the extraction less forgiving.",
+    salvageShift: 4,
+    intelShift: -1,
+    breakthroughBonus: -3,
+    strainReduction: -4,
+  },
+} as const;
+export type SurvivalCommandFieldOrder = keyof typeof SURVIVAL_COMMAND_FIELD_ORDERS;
+export const SURVIVAL_COMMAND_FIELD_ORDER_KEYS = Object.keys(SURVIVAL_COMMAND_FIELD_ORDERS) as SurvivalCommandFieldOrder[];
+
 export type SurvivalCommandBuildingLevels = {
   headquarters: number;
   workshop: number;
@@ -159,6 +190,7 @@ export type SurvivalCommandExpedition = {
   readyAt: number;
   version: number;
   state: "in-transit" | "ready";
+  fieldOrder: SurvivalCommandFieldOrder | null;
   incident: { key: SurvivalCommandIncident; title: string; detail: string; actions: readonly string[] } | null;
 };
 
@@ -168,6 +200,7 @@ export type SurvivalCommandHistory = {
   approach: SurvivalCommandApproach;
   loadout: SurvivalCommandLoadout;
   outcome: SurvivalCommandOutcome;
+  fieldOrder: SurvivalCommandFieldOrder | null;
   action: string;
   salvage: number;
   intel: number;
@@ -198,6 +231,7 @@ export type SurvivalCommandPayload = {
     effect: string;
   }>;
   sectors: SurvivalCommandSectorView[];
+  fieldOrdersAvailable: boolean;
   expedition: SurvivalCommandExpedition | null;
   history: SurvivalCommandHistory[];
 };
@@ -214,6 +248,10 @@ export function isSurvivalCommandLoadout(value: unknown): value is SurvivalComma
   return typeof value === "string" && SURVIVAL_COMMAND_LOADOUT_KEYS.includes(value as SurvivalCommandLoadout);
 }
 
+export function isSurvivalCommandFieldOrder(value: unknown): value is SurvivalCommandFieldOrder {
+  return typeof value === "string" && SURVIVAL_COMMAND_FIELD_ORDER_KEYS.includes(value as SurvivalCommandFieldOrder);
+}
+
 export function survivalCommandLoadoutEffect(loadout: SurvivalCommandLoadout) {
   const config = SURVIVAL_COMMAND_LOADOUTS[loadout];
   const effects = [];
@@ -223,6 +261,16 @@ export function survivalCommandLoadoutEffect(loadout: SurvivalCommandLoadout) {
   if (config.strainReduction) effects.push(`${config.strainReduction}% less strain`);
   if (config.preferredActions.length) effects.push(`field edge on ${config.preferredActions.join(" / ")}`);
   return effects.length ? effects.join(" • ") : "standard recovery profile";
+}
+
+export function survivalCommandFieldOrderEffect(order: SurvivalCommandFieldOrder) {
+  const config = SURVIVAL_COMMAND_FIELD_ORDERS[order];
+  const effects = [];
+  if (config.salvageShift) effects.push(`${config.salvageShift > 0 ? "+" : ""}${config.salvageShift} salvage`);
+  if (config.intelShift) effects.push(`${config.intelShift > 0 ? "+" : ""}${config.intelShift} intel`);
+  if (config.breakthroughBonus) effects.push(`${config.breakthroughBonus > 0 ? "+" : ""}${config.breakthroughBonus}% breakthrough`);
+  if (config.strainReduction) effects.push(`${config.strainReduction > 0 ? `${config.strainReduction}% less strain` : `${Math.abs(config.strainReduction)}% more strain`}`);
+  return effects.join(" • ");
 }
 
 export function sectorLockReason(sector: SurvivalCommandSector, buildings: SurvivalCommandBuildingLevels | null) {
@@ -266,9 +314,11 @@ export function resolveSurvivalCommandOutcome(input: {
   loadout: SurvivalCommandLoadout;
   action: SurvivalCommandAction;
   buildings: SurvivalCommandBuildingLevels;
+  fieldOrder?: SurvivalCommandFieldOrder | null;
 }) {
   const sector = SURVIVAL_COMMAND_SECTORS[input.sector];
   const loadout = SURVIVAL_COMMAND_LOADOUTS[input.loadout];
+  const fieldOrder = input.fieldOrder ? SURVIVAL_COMMAND_FIELD_ORDERS[input.fieldOrder] : null;
   const roll = hash(`${input.seed}:${input.approach}:${input.action}:outcome`) % 100;
   const approachShift = input.approach === "scout" ? { salvage: -1, intel: 2, threshold: 16 }
     : input.approach === "breach" ? { salvage: 3, intel: -1, threshold: 30 }
@@ -278,18 +328,18 @@ export function resolveSurvivalCommandOutcome(input: {
   const watchtowerBonus = Math.max(0, input.buildings.watchtower - 1);
   const preferredActions: readonly string[] = loadout.preferredActions;
   const loadoutActionEdge = preferredActions.includes(input.action) ? 1 : 0;
-  const strainThreshold = Math.max(4, 14 - loadout.strainReduction);
-  const breakthroughThreshold = approachShift.threshold + workshopBonus * 2 + loadout.breakthroughBonus + loadoutActionEdge * 2;
+  const strainThreshold = Math.max(4, 14 - loadout.strainReduction - (fieldOrder?.strainReduction ?? 0));
+  const breakthroughThreshold = approachShift.threshold + workshopBonus * 2 + loadout.breakthroughBonus + loadoutActionEdge * 2 + (fieldOrder?.breakthroughBonus ?? 0);
   const outcome: SurvivalCommandOutcome = roll < strainThreshold ? "strained" : roll < breakthroughThreshold ? "breakthrough" : "clean";
   const salvageBase = sector.reward.salvage[0] + hash(`${input.seed}:salvage`) % (sector.reward.salvage[1] - sector.reward.salvage[0] + 1);
   const intelBase = sector.reward.intel[0] + hash(`${input.seed}:intel`) % (sector.reward.intel[1] - sector.reward.intel[0] + 1);
   const multiplier = outcome === "breakthrough" ? 1.45 : outcome === "strained" ? 0.55 : 1;
-  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus + loadout.salvageBonus + loadoutActionEdge) * multiplier));
-  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus + loadout.intelBonus + loadoutActionEdge) * multiplier));
+  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus + loadout.salvageBonus + loadoutActionEdge + (fieldOrder?.salvageShift ?? 0)) * multiplier));
+  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus + loadout.intelBonus + loadoutActionEdge + (fieldOrder?.intelShift ?? 0)) * multiplier));
   const detail = outcome === "breakthrough"
     ? "The field decision opened a secondary route. The return team brought back more than the original brief predicted."
     : outcome === "strained"
       ? "The team returned under pressure. The recovery was reduced, but the operation was not lost."
       : "The team completed the recovery plan and returned with a clean operational record.";
-  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.loadout}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
+  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.loadout}:${input.fieldOrder ?? "base"}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
 }

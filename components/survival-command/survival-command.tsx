@@ -2,13 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowLeft, ArrowRight, Backpack, BadgeAlert, Binoculars, Boxes, Check, ChevronRight, Clock3, Crosshair, LockKeyhole, MapPinned, Radar, Radio, Shield, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Backpack, BadgeAlert, Binoculars, Boxes, Check, ChevronRight, Clock3, Crosshair, Eye, LockKeyhole, MapPinned, PackageCheck, Radar, Radio, Shield, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "../site-header";
 import {
   SURVIVAL_COMMAND_APPROACHES,
+  SURVIVAL_COMMAND_FIELD_ORDERS,
   SURVIVAL_COMMAND_LOADOUTS,
   SURVIVAL_COMMAND_SECTOR_KEYS,
+  survivalCommandFieldOrderEffect,
   type SurvivalCommandApproach,
+  type SurvivalCommandFieldOrder,
   type SurvivalCommandLoadout,
   type SurvivalCommandPayload,
   type SurvivalCommandSector,
@@ -18,6 +21,7 @@ import styles from "./survival-command.module.css";
 
 const APPROACH_ICONS: Record<SurvivalCommandApproach, typeof Radio> = { scout: Binoculars, balanced: ShieldCheck, breach: Crosshair };
 const LOADOUT_ICONS: Record<SurvivalCommandLoadout, typeof Radio> = { field_kit: Backpack, signal_scanner: Radar, recovery_kit: Wrench, convoy_plating: Shield };
+const FIELD_ORDER_ICONS: Record<SurvivalCommandFieldOrder, typeof Radio> = { overwatch: Eye, intercept: Radar, recovery: PackageCheck };
 
 function duration(value: number) {
   const seconds = Math.max(0, Math.ceil(value / 1000));
@@ -124,7 +128,7 @@ export function SurvivalCommand() {
       </nav>
 
       <header className={styles.header}>
-        <div><p className={styles.eyebrow}>DZN // SURVIVAL COMMAND</p><h1>Sector Operations</h1><p className={styles.intro}>Deploy from your private Command Centre, make a field decision when the team arrives, and build an enduring record of each recovery.</p></div>
+        <div><p className={styles.eyebrow}>DZN // SURVIVAL COMMAND</p><h1>Sector Operations</h1><p className={styles.intro}>Build a route, send a team, lock a tactical protocol at field contact, then decide how the recovery ends. Every return becomes part of your private command record.</p></div>
         <div className={styles.accountState} aria-label="Survival Command resources">
           <span><Boxes size={17} />{payload?.resources.salvage ?? 0}<small>salvage</small></span>
           <span><Radio size={17} />{payload?.resources.intel ?? 0}<small>intel</small></span>
@@ -155,7 +159,9 @@ export function SurvivalCommand() {
             {!payload?.profile ? <EstablishDossier busy={busy} onEstablish={() => void mutate("initialize", { action: "initialize" })} />
               : expedition ? expedition.state === "in-transit"
                 ? <TransitDossier sector={activeSector} remaining={activeRemaining} readyAt={expedition.readyAt} />
-                : <DecisionDossier expedition={expedition} sector={activeSector} busy={busy} onResolve={decision => void mutate(`resolve:${decision}`, { action: "resolve", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), decision })} />
+                : payload.fieldOrdersAvailable && !expedition.fieldOrder
+                  ? <FieldOrderDossier expedition={expedition} sector={activeSector} busy={busy} onSetOrder={order => void mutate(`field-order:${order}`, { action: "set-field-order", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), order })} />
+                  : <DecisionDossier expedition={expedition} sector={activeSector} busy={busy} onResolve={decision => void mutate(`resolve:${decision}`, { action: "resolve", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), decision })} />
                 : <DeployDossier selected={selected} approach={approach} loadout={loadout} loadouts={payload.loadouts} resources={payload.resources} buildings={payload.buildings} busy={busy} deployment={payload.deployment}
                   onApproach={setApproach} onLoadout={setLoadout} onUnlock={key => void mutate(`unlock:${key}`, { action: "unlock-loadout", loadout: key, requestId: crypto.randomUUID() })}
                   onDeploy={() => selected && void mutate("deploy", { action: "deploy", sector: selected.key, approach, loadout, requestId: crypto.randomUUID() })} />}
@@ -174,7 +180,7 @@ export function SurvivalCommand() {
 
         <section className={styles.history} aria-labelledby="history-heading">
           <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>Operation record</p><h2 id="history-heading">Recent returns</h2></div><p>Completion history is private to this player account and never alters DayZ server outcomes, rankings or locations.</p></div>
-          {payload?.history.length ? <ol className={styles.historyList}>{payload.history.map(row => <li key={row.id}><span className={styles.historyMarker} data-outcome={row.outcome} /><div><strong>{payload.sectors.find(sector => sector.key === row.sector)?.name ?? row.sector}</strong><small>{row.outcome} resolution via {row.action} using {SURVIVAL_COMMAND_LOADOUTS[row.loadout].name}</small></div><span className={styles.historyRewards}><b>+{row.salvage}</b> salvage <b>+{row.intel}</b> intel<time>{time(row.resolvedAt)}</time></span></li>)}</ol>
+          {payload?.history.length ? <ol className={styles.historyList}>{payload.history.map(row => <li key={row.id}><span className={styles.historyMarker} data-outcome={row.outcome} /><div><strong>{payload.sectors.find(sector => sector.key === row.sector)?.name ?? row.sector}</strong><small>{row.outcome} resolution via {row.action} using {SURVIVAL_COMMAND_LOADOUTS[row.loadout].name}{row.fieldOrder ? ` with ${SURVIVAL_COMMAND_FIELD_ORDERS[row.fieldOrder].name}` : ""}</small></div><span className={styles.historyRewards}><b>+{row.salvage}</b> salvage <b>+{row.intel}</b> intel<time>{time(row.resolvedAt)}</time></span></li>)}</ol>
             : <div className={styles.emptyHistory}><Truck size={23} /><span>Your first recovered operation will appear here.</span></div>}
         </section>
       </>}
@@ -190,9 +196,14 @@ function TransitDossier({ sector, remaining, readyAt }: { sector: SurvivalComman
   return <><p className={styles.dossierKicker}>Team in transit</p><h2>{sector?.name ?? "Active operation"}</h2><p>{sector?.briefing}</p><div className={styles.timer}><Clock3 size={20} /><div><strong>{duration(remaining)}</strong><span>{remaining ? "until field decision" : "field decision ready"}</span></div></div><div className={styles.timeline}><span /><span /><span data-active="true" /><span /></div><p className={styles.returnTime}>Expected field contact {time(readyAt)}. You can leave this page; the clock is measured by the server.</p></>;
 }
 
+function FieldOrderDossier({ expedition, sector, busy, onSetOrder }: { expedition: NonNullable<SurvivalCommandPayload["expedition"]>; sector: SurvivalCommandPayload["sectors"][number] | null; busy: string | null; onSetOrder: (order: SurvivalCommandFieldOrder) => void }) {
+  return <><p className={styles.dossierKicker}>Tactical command window</p><h2>Set the field order</h2><p>{sector?.briefing ?? "The team is awaiting a command protocol before taking the next field action."}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{SURVIVAL_COMMAND_LOADOUTS[expedition.loadout].name}</span></div><div className={styles.fieldOrderList}>{(Object.keys(SURVIVAL_COMMAND_FIELD_ORDERS) as SurvivalCommandFieldOrder[]).map(order => { const protocol = SURVIVAL_COMMAND_FIELD_ORDERS[order]; const Icon = FIELD_ORDER_ICONS[order]; return <button key={order} type="button" disabled={busy !== null} onClick={() => onSetOrder(order)}><Icon size={18} /><span><strong>{protocol.name}</strong><small>{protocol.detail}</small><em>{survivalCommandFieldOrderEffect(order)}</em></span><ArrowRight size={17} /></button>; })}</div><p className={styles.returnTime}>One protocol is locked for this operation. Its risk and recovery trade-off is calculated by DZN, then the incident decision follows.</p></>;
+}
+
 function DecisionDossier({ expedition, sector, busy, onResolve }: { expedition: NonNullable<SurvivalCommandPayload["expedition"]>; sector: SurvivalCommandPayload["sectors"][number] | null; busy: string | null; onResolve: (action: string) => void }) {
   const loadout = SURVIVAL_COMMAND_LOADOUTS[expedition.loadout];
-  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span></div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected loadout and final recovery are calculated server-side.</p></>;
+  const order = expedition.fieldOrder ? SURVIVAL_COMMAND_FIELD_ORDERS[expedition.fieldOrder] : null;
+  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span>{order && <span>{order.name}</span>}</div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected route, locked field order, loadout and final recovery are calculated server-side.</p></>;
 }
 
 function DeployDossier({ selected, approach, loadout, loadouts, resources, buildings, busy, deployment, onApproach, onLoadout, onUnlock, onDeploy }: {

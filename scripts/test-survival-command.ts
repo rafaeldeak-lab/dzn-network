@@ -12,20 +12,22 @@ import { gamesFixture } from "./lib/games-hub-local";
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 let passed = 0;
 
-async function fixture(migrate = true) {
+async function fixture(migrate = true, fieldOrders = false) {
   const value = await gamesFixture();
   value.db.sqlite.exec(readFileSync("migrations/0107_dzn_command_centre.sql", "utf8"));
   if (migrate) {
     value.db.sqlite.exec(readFileSync("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
     value.db.sqlite.exec(readFileSync("migrations/0109_dzn_survival_command_loadouts.sql", "utf8"));
+    if (fieldOrders) value.db.sqlite.exec(readFileSync("migrations/0112_dzn_survival_command_field_orders.sql", "utf8"));
   }
   (value.env as Env).DZN_COMMAND_CENTRE_ENABLED = "true";
   (value.env as Env).DZN_SURVIVAL_COMMAND_ENABLED = "true";
+  (value.env as Env).DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED = fieldOrders ? "true" : "false";
   return value;
 }
 
-async function test(name: string, action: (value: Fixture) => Promise<void>, migrate = true) {
-  const value = await fixture(migrate);
+async function test(name: string, action: (value: Fixture) => Promise<void>, migrate = true, fieldOrders = false) {
+  const value = await fixture(migrate, fieldOrders);
   try { await action(value); passed++; console.log(`PASS ${name}`); } finally { value.db.sqlite.close(); }
 }
 
@@ -72,6 +74,7 @@ async function run() {
   const source = readFileSync("functions/_lib/survival-command.ts", "utf8");
   const migration = readFileSync("migrations/0108_dzn_survival_command_expeditions.sql", "utf8");
   const loadoutMigration = readFileSync("migrations/0109_dzn_survival_command_loadouts.sql", "utf8");
+  const fieldOrdersMigration = readFileSync("migrations/0112_dzn_survival_command_field_orders.sql", "utf8");
   const client = readFileSync("components/survival-command/survival-command.tsx", "utf8");
   const scene = readFileSync("components/survival-command/survival-command-scene.tsx", "utf8");
   const styles = readFileSync("components/survival-command/survival-command.module.css", "utf8");
@@ -83,11 +86,15 @@ async function run() {
   assert.match(source, /SUM\(deployment_cost\)/);
   assert.match(source, /unlock-loadout/);
   assert.match(source, /dzn_survival_command_spend_ledger/);
+  assert.match(source, /set-field-order/);
+  assert.match(source, /DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED/);
   assert.match(source, /request\.headers\.get\("origin"\)/);
   assert.match(migration, /idx_dzn_survival_command_one_active_expedition/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
   assert.match(loadoutMigration, /ALTER TABLE dzn_survival_command_expeditions/);
   assert.match(loadoutMigration, /dzn_survival_command_loadout_unlocks/);
+  assert.match(fieldOrdersMigration, /field_order_request_id/);
+  assert.match(fieldOrdersMigration, /idx_dzn_survival_command_field_order_request/);
   assert.match(client, /Route plan/);
   assert.match(client, /readyRefreshRef/);
   assert.match(client, /activeRemaining > 0/);
@@ -97,7 +104,10 @@ async function run() {
   assert.match(client, /Base recovery estimates only/);
   assert.match(client, /Field loadout/);
   assert.match(scene, /dznSurvivalCommandCanvas/);
-  assert.match(styles, /survival-command-operations-v1\.png/);
+  assert.match(client, /Set the field order/);
+  assert.match(client, /Tactical command window/);
+  assert.match(scene, /fieldOrderColours/);
+  assert.match(styles, /survival-command-field-command-v2\.png/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
   assert.match(deletion, /dzn_survival_command_spend_ledger/);
   assert.match(playerHubRoute, /DZN_SURVIVAL_COMMAND_ENABLED === "true"/);
@@ -164,6 +174,42 @@ async function run() {
     assert.equal(value.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_survival_command_resolution_ledger").get()?.count, 1);
   });
 
+  await test("field-order controls stay hidden and reject writes until their separate flag is enabled", async value => {
+    value.db.sqlite.exec(readFileSync("migrations/0112_dzn_survival_command_field_orders.sql", "utf8"));
+    await establish(value);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE id = ?").run(started.expedition!.id);
+    const ready = await payload(await request(value));
+    assert.equal(ready.fieldOrdersAvailable, false);
+    assert.ok(ready.expedition?.incident?.actions.length);
+    assert.equal((await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ready.expedition!.version, order: "intercept", requestId: randomUUID() })).status, 409);
+  });
+
+  await test("field orders create an authoritative tactical phase before the final incident resolution", async value => {
+    await establish(value);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE id = ?").run(started.expedition!.id);
+    const ready = await payload(await request(value));
+    assert.equal(ready.fieldOrdersAvailable, true);
+    assert.equal(ready.expedition?.fieldOrder, null);
+    assert.equal(ready.expedition?.incident, null);
+    assert.equal((await request(value, { action: "resolve", expeditionId: started.expedition!.id, version: ready.expedition!.version, requestId: randomUUID(), decision: "secure" })).status, 409);
+    const orderRequestId = randomUUID();
+    const ordered = await payload(await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ready.expedition!.version, order: "intercept", requestId: orderRequestId }));
+    assert.equal(ordered.expedition?.fieldOrder, "intercept");
+    assert.equal(ordered.expedition?.version, ready.expedition!.version + 1);
+    assert.ok(ordered.expedition?.incident?.actions.length);
+    const replay = await payload(await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ready.expedition!.version, order: "intercept", requestId: orderRequestId }));
+    assert.equal(replay.expedition?.fieldOrder, "intercept");
+    assert.equal((await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ordered.expedition!.version, order: "recovery", requestId: orderRequestId })).status, 409);
+    assert.equal((await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ordered.expedition!.version, order: "recovery", requestId: randomUUID() }, { cookie: value.otherCookie })).status, 404);
+    const decision = ordered.expedition!.incident!.actions[0]!;
+    const resolved = await payload(await request(value, { action: "resolve", expeditionId: started.expedition!.id, version: ordered.expedition!.version, requestId: randomUUID(), decision }));
+    assert.equal(resolved.expedition, null);
+    assert.equal(resolved.history[0]?.fieldOrder, "intercept");
+    assert.equal(value.db.sqlite.prepare("SELECT field_order FROM dzn_survival_command_expeditions WHERE id = ?").get(started.expedition!.id)?.field_order, "intercept");
+  }, true, true);
+
   await test("expeditions and dossiers remain scoped to their initiating player", async value => {
     await establish(value);
     const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
@@ -213,6 +259,21 @@ async function run() {
     assert.ok(protectedSeed, "Convoy plating should reduce the deterministic strained-return range.");
   });
 
+  await test("field orders alter deterministic recovery and risk rather than only changing presentation", async () => {
+    const buildings = { headquarters: 4, workshop: 3, watchtower: 3, communications: 3 };
+    const base = resolveSurvivalCommandOutcome({ seed: "field-order-proof", sector: "radio_ridge", approach: "balanced", loadout: "field_kit", action: "triangulate", buildings });
+    const intercept = resolveSurvivalCommandOutcome({ seed: "field-order-proof", sector: "radio_ridge", approach: "balanced", loadout: "field_kit", action: "triangulate", buildings, fieldOrder: "intercept" });
+    const recovery = resolveSurvivalCommandOutcome({ seed: "field-order-proof", sector: "radio_ridge", approach: "balanced", loadout: "field_kit", action: "triangulate", buildings, fieldOrder: "recovery" });
+    assert.ok(intercept.intel > base.intel);
+    assert.ok(recovery.salvage > base.salvage);
+    const protectedSeed = Array.from({ length: 500 }, (_, index) => `overwatch-proof-${index}`).find(seed => {
+      const unprotected = resolveSurvivalCommandOutcome({ seed, sector: "blacksite", approach: "breach", loadout: "field_kit", action: "bridge", buildings });
+      const overwatch = resolveSurvivalCommandOutcome({ seed, sector: "blacksite", approach: "breach", loadout: "field_kit", action: "bridge", buildings, fieldOrder: "overwatch" });
+      return unprotected.outcome === "strained" && overwatch.outcome !== "strained";
+    });
+    assert.ok(protectedSeed, "Overwatch should reduce the deterministic strained-return range.");
+  });
+
   await test("retained Store accounts erase every private Survival Command record", async value => {
     await establish(value);
     creditRecoveredResources(value, 70, 40);
@@ -235,7 +296,7 @@ async function run() {
   try {
     const db = await miniflare.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (id TEXT PRIMARY KEY); INSERT INTO users VALUES ('local-player');");
-    for (const file of ["migrations/0107_dzn_command_centre.sql", "migrations/0108_dzn_survival_command_expeditions.sql", "migrations/0109_dzn_survival_command_loadouts.sql"]) {
+    for (const file of ["migrations/0107_dzn_command_centre.sql", "migrations/0108_dzn_survival_command_expeditions.sql", "migrations/0109_dzn_survival_command_loadouts.sql", "migrations/0112_dzn_survival_command_field_orders.sql"]) {
       const statements = readFileSync(file, "utf8").replace(/^--.*$/gm, "").split(";").map(value => value.trim()).filter(Boolean);
       for (const statement of statements) await db.prepare(statement).run();
     }
@@ -247,6 +308,11 @@ async function run() {
     assert.ok((activeIndexes.results ?? []).some((index: { name: string }) => index.name === "idx_dzn_survival_command_one_active_expedition"));
     const loadoutIndexes = await db.prepare("PRAGMA index_list('dzn_survival_command_spend_ledger')").all<{ name: string }>();
     assert.ok((loadoutIndexes.results ?? []).some((index: { name: string }) => index.name === "idx_dzn_survival_command_loadout_history"));
+    const fieldOrderColumns = await db.prepare("PRAGMA table_info('dzn_survival_command_expeditions')").all<{ name: string }>();
+    assert.deepEqual(["field_order", "field_order_request_id", "field_order_at"].every(column => (fieldOrderColumns.results ?? []).some((value: { name: string }) => value.name === column)), true);
+    const fieldOrderIndexes = await db.prepare("PRAGMA index_list('dzn_survival_command_expeditions')").all<{ name: string }>();
+    assert.ok((fieldOrderIndexes.results ?? []).some((index: { name: string }) => index.name === "idx_dzn_survival_command_field_order_request"));
+    await assert.rejects(db.prepare("INSERT INTO dzn_survival_command_expeditions (id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, field_order) VALUES ('field-order-invalid', 'local-player', 'field-order-invalid', 'perimeter', 'scout', 'field_kit', 'deployed', '1234567890123456', '2026-10-18', 1, 1, 2, 'invalid')").run());
     await assert.rejects(db.prepare("INSERT INTO dzn_survival_command_expeditions (id, user_id, request_id, sector, approach, status, seed, deployment_day, deployment_cost, started_at, ready_at) VALUES ('x', 'missing', 'request', 'perimeter', 'scout', 'deployed', '1234567890123456', '2026-10-18', 1, 1, 2)").run());
     passed++; console.log("PASS local D1 migration constraints, indexes, foreign keys and zero-row baseline");
   } finally { await miniflare.dispose(); }

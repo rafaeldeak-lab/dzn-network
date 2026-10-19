@@ -16,16 +16,16 @@ preview.stdout.on("data", chunk => { previewLog += chunk; }); preview.stderr.on(
 const origin = await waitForOrigin();
 const browser = await chromium.launch({ headless: true });
 try {
-  const backdrop = await fetch(`${origin}/images/games/survival-command-operations-v1.png`);
-  assert.equal(backdrop.status, 200, "The original Survival Command environment art must be included in the production export.");
+  const backdrop = await fetch(`${origin}/images/games/survival-command-field-command-v2.png`);
+  assert.equal(backdrop.status, 200, "The original Survival Command field-command art must be included in the production export.");
   assert.match(backdrop.headers.get("content-type") ?? "", /^image\/png/);
-  for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "phone", width: 390, height: 844 }]) {
+  for (const viewport of [{ name: "desktop", width: 1440, height: 1000, fixture: "" }, { name: "phone", width: 390, height: 844, fixture: "-other" }]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-    await page.goto(`${origin}/__local-survival-command`, { waitUntil: "networkidle" });
+    await page.goto(`${origin}/__local-survival-command${viewport.fixture}`, { waitUntil: "networkidle" });
     await page.evaluate(async () => {
       const post = (url, body) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       await post("/api/player/command-centre", { action: "initialize" });
@@ -34,6 +34,15 @@ try {
     await page.reload({ waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Sector Operations" }).waitFor();
     await page.getByText("Field loadout", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /Dispatch team/ }).click();
+    await page.goto(`${origin}/__local-survival-command-ready${viewport.fixture}`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "Set the field order" }).waitFor();
+    assert.equal(await page.getByText("Tactical command window", { exact: true }).count(), 1);
+    assert.equal(await page.locator("button", { hasText: "Overwatch protocol" }).count(), 1);
+    assert.equal(await page.locator("button", { hasText: "Signal intercept" }).count(), 1);
+    assert.equal(await page.locator("button", { hasText: "Recovery priority" }).count(), 1);
+    await page.getByRole("button", { name: /Signal intercept/ }).click();
+    await page.getByText("Field decision required", { exact: true }).waitFor();
     const canvas = page.locator('canvas[data-dzn-survival-command-canvas="true"]');
     await canvas.waitFor({ state: "visible" });
     const telemetry = await canvas.evaluate(element => {
@@ -58,8 +67,8 @@ try {
     assert.ok(telemetry.colourCount > 20, "Survival Command scene should render distinct sector lighting.");
     assert.equal(await page.getByText("Perimeter sweep", { exact: true }).count(), 2);
     assert.equal(await page.getByText("Rail-yard recovery", { exact: true }).count(), 1);
-    assert.equal(await page.getByText("Signal scanner", { exact: true }).count(), 1);
-    assert.equal(await page.locator("button", { hasText: "Dispatch team" }).count(), 1);
+    assert.equal(await page.getByText("Signal intercept", { exact: true }).count(), 1);
+    assert.equal(await page.locator("button", { hasText: "Dispatch team" }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {
       const height = await canvas.evaluate(element => element.parentElement?.getBoundingClientRect().height ?? 0);
