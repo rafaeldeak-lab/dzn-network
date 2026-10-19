@@ -108,11 +108,19 @@ jobs:
         run: |
           set -euo pipefail
           npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-write-quiesce --config wrangler.toml
-          MAINTENANCE_STATUS="$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" --max-time 20 https://dayz-network.com/api/health/state-preserving-migration)"
-          if [ "${MAINTENANCE_STATUS}" != "200" ]; then
-            echo "::error::Protected migration maintenance is not active in production; expected signal status 200, received ${MAINTENANCE_STATUS}."
-            exit 1
-          fi
+          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/state-preserving-migration)"
+          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
+          let response;
+          try {
+            response = JSON.parse(process.env.MAINTENANCE_RESPONSE || "");
+          } catch {
+            throw new Error("Protected migration maintenance did not return the expected JSON signal.");
+          }
+          if (response?.status !== "protected-migration-maintenance") {
+            throw new Error("Protected migration maintenance is not active in production.");
+          }
+          console.log("Protected migration maintenance JSON signal verified in production.");
+          NODE
           echo "Cipher Grid and account-deletion production write paths verified as quiesced."
 
       - name: Build isolated migration stage
