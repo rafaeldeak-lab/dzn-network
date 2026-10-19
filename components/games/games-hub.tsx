@@ -298,6 +298,12 @@ export function GamesHub() {
                 onMove={minefieldMove}
                 onUnsupported={() => setBoardView("grid")} />
                 : <MineBoard game={game} tool={tool} disabled={busy || !active} onMove={minefieldMove} />}
+              <section className={styles.scanIntel} aria-labelledby="sector-scan-intel">
+                <div><span>DRONE INTELLIGENCE</span><strong id="sector-scan-intel">Local 3 x 3 threat density</strong></div>
+                {game.scans.length ? <ol aria-live="polite">{game.scans.map((scan, index) => <li key={`${scan.x}-${scan.y}`} data-threat-level={scan.threats >= 5 ? "high" : scan.threats >= 2 ? "elevated" : "clear"}>
+                  <span>SCAN {String(index + 1).padStart(2, "0")}</span><strong>R{scan.y + 1} / C{scan.x + 1}</strong><b>{scan.threats} {scan.threats === 1 ? "threat" : "threats"}</b>
+                </li>)}</ol> : <p>No scan telemetry recorded. Clear one safe sector before deploying the local drone scanner.</p>}
+              </section>
               <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
                 {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Sector secured</strong><span>{summary?.today.includes(game.mode) ? `${GAME_MODES[game.mode].label} reward recorded for today. Further wins today are practice.` : "Daily rewards have reset. Start a new mission for today's reward."}</span></div></> : game.status === "lost" ? <><Target size={22} /><div><strong>Mine triggered</strong><span>Mission ended. Your earned XP and parts are unchanged.</span></div></> : !active ? <><Clock3 size={22} /><div><strong>Mission expired</strong><span>Start a new board when you are ready.</span></div></> : <><Radio size={20} /><div><strong>{tool === "scan" ? "Scanner staged" : "Sector sweep in progress"}</strong><span>{tool === "scan" ? "Select one hidden sector to return a local 3 x 3 threat count. Scan results reveal density, never exact mine locations." : `${MINEFIELD_PHASE_META[game.phase].label} phase / ${game.safeCleared} of ${game.safeTotal} safe sectors cleared / ${game.scanCharges - game.scans.length} scanner charges remaining.`}</span></div></>}
               </div>
@@ -1777,14 +1783,22 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: Min
   const [focus, setFocus] = useState(0);
   const grid = useRef<HTMLDivElement>(null);
   const size = GAME_MODES[game.mode].size;
+  const canScan = (x: number, y: number, cell: GameCell) => !disabled
+    && game.safeCleared > 0
+    && game.scans.length < game.scanCharges
+    && cell === "hidden"
+    && !game.scans.some(scan => scan.x === x && scan.y === y);
   function key(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const x = index % size;
+    const y = Math.floor(index / size);
+    const cell = game.cells[y][x];
     let target = index;
     if (event.key === "ArrowRight") target = Math.min(size * size - 1, index + 1);
     else if (event.key === "ArrowLeft") target = Math.max(0, index - 1);
     else if (event.key === "ArrowDown") target = Math.min(size * size - 1, index + size);
     else if (event.key === "ArrowUp") target = Math.max(0, index - size);
-    else if (event.key.toLowerCase() === "f") { event.preventDefault(); if (!disabled) onMove(index % size, Math.floor(index / size), "flag"); return; }
-    else if (event.key.toLowerCase() === "s") { event.preventDefault(); if (!disabled) onMove(index % size, Math.floor(index / size), "scan"); return; }
+    else if (event.key.toLowerCase() === "f") { event.preventDefault(); if (!disabled) onMove(x, y, "flag"); return; }
+    else if (event.key.toLowerCase() === "s") { event.preventDefault(); if (canScan(x, y, cell)) onMove(x, y, "scan"); return; }
     else return;
     event.preventDefault(); setFocus(target); grid.current?.querySelector<HTMLButtonElement>(`[data-index="${target}"]`)?.focus();
   }
@@ -1792,10 +1806,10 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: Min
     <div className={styles.boardPlate}><Image src="/media/dzn-logo.png" alt="DZN Network" width={610} height={445} /><div><strong>FIELD OPERATIONS</strong><span>{GAME_MODES[game.mode].label.toUpperCase()} / {size} x {size}</span></div><Target size={20} aria-hidden="true" /></div>
     <div className={styles.board} ref={grid} role="group" aria-label={`${GAME_MODES[game.mode].label} Sector Sweep board. Press F to place a containment marker or S to scan an unrevealed sector.`} aria-busy={disabled && game.status === "playing"}
     style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
-    {game.cells.flatMap((line, y) => line.map((cell, x) => { const index = y * size + x; const label = cell === "hidden" ? "Unrevealed" : cell === "flag" ? "Flagged" : cell === "mine" ? "Mine" : `${cell} nearby mines`;
+    {game.cells.flatMap((line, y) => line.map((cell, x) => { const index = y * size + x; const scan = game.scans.find(result => result.x === x && result.y === y); const label = cell === "hidden" ? "Unrevealed" : cell === "flag" ? "Flagged" : cell === "mine" ? "Mine" : `${cell} nearby mines`; const scanLabel = scan ? ` Scan result: ${scan.threats} ${scan.threats === 1 ? "threat" : "threats"} in the local 3 by 3 sector.` : "";
       return <button key={index} className={styles.cell} data-state={typeof cell === "number" ? "open" : cell} data-number={cell} data-index={index}
-        aria-label={`Row ${y + 1}, column ${x + 1}: ${label}`} aria-disabled={disabled} tabIndex={Math.min(focus, size * size - 1) === index ? 0 : -1}
-        onFocus={() => setFocus(index)} onKeyDown={event => key(event, index)} onClick={() => { if (!disabled) onMove(x, y, tool); }}
+        aria-label={`Row ${y + 1}, column ${x + 1}: ${label}.${scanLabel}`} aria-disabled={disabled} tabIndex={Math.min(focus, size * size - 1) === index ? 0 : -1}
+        onFocus={() => setFocus(index)} onKeyDown={event => key(event, index)} onClick={() => { if (!disabled && (tool !== "scan" || canScan(x, y, cell))) onMove(x, y, tool); }}
         onContextMenu={event => { event.preventDefault(); if (!disabled) onMove(x, y, "flag"); }}>
         {cell === "flag" ? <Flag size={15} /> : cell === "mine" ? <Target size={17} /> : typeof cell === "number" && cell > 0 ? cell : null}
       </button>;

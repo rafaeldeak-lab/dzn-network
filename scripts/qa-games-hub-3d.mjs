@@ -145,6 +145,9 @@ try {
       assert.ok(scannedAt);
       const scan = writes.map(entry => entry.body).find(body => body?.action === "scan");
       assert.deepEqual(Object.keys(scan).sort(), ["action", "gameId", "version", "x", "y"], "3D scanner must use its bounded server scan contract");
+      const scanIntel = page.getByRole("region", { name: "Local 3 x 3 threat density", exact: true });
+      await scanIntel.locator("li").waitFor();
+      assert.match(await scanIntel.textContent(), /\d+ threats?/, "Scanner intelligence must render the server threat count outside the decorative canvas");
       const flagVersion = await page.locator(".dzn-minefield-3d").getAttribute("data-game-version");
       await canvas.click({ button: "right", position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * scannedAt.x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * scannedAt.y) } });
       await page.waitForFunction(previous => document.querySelector(".dzn-minefield-3d")?.getAttribute("data-game-version") !== previous, flagVersion);
@@ -152,6 +155,13 @@ try {
       assert.equal(flagMove.tool, "flag", "3D right-click must place a containment marker even while the scanner is selected");
       await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
       await page.getByRole("group", { name: /Sector Sweep board/i }).waitFor();
+      const scannedCell = page.locator(`button[data-index="${scan.y * 10 + scan.x}"]`);
+      assert.match(await scannedCell.getAttribute("aria-label"), /Scan result: \d+ threats? in the local 3 by 3 sector/, "Tactical grid must expose the exact scan result to assistive technology");
+      await scannedCell.focus();
+      const writeCount = writes.length;
+      await page.keyboard.press("s");
+      await page.waitForTimeout(150);
+      assert.equal(writes.length, writeCount, "Scanner shortcut must not submit a duplicate scan for an already scanned sector");
     }
 
     assert.deepEqual(errors, []);
