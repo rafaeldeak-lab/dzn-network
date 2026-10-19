@@ -43,10 +43,10 @@ try {
       let expectedCourse = null;
       if (operationCount) {
         assert.equal(operationCount, 3, "Ranger Range must present three distinct field operations before a run starts.");
-        const blackoutWatch = operations.getByRole("button", { name: /Blackout watch/i });
-        await blackoutWatch.click();
-        assert.equal(await blackoutWatch.getAttribute("aria-pressed"), "true");
-        expectedCourse = "blackout";
+        const galeTraverse = operations.getByRole("button", { name: /Gale traverse/i });
+        await galeTraverse.click();
+        assert.equal(await galeTraverse.getAttribute("aria-pressed"), "true");
+        expectedCourse = "gale";
       }
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/ranger-range") && response.request().method() === "POST"),

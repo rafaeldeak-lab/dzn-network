@@ -1355,7 +1355,7 @@ function RangerRangePanel({ now, motionRunning, onProgress }: { now: number; mot
     if (!game || game.status !== "playing") return;
     // The server withholds the next plate until its window begins. Refresh at that edge
     // while it is still hidden, then refresh again only after the visible window closes.
-    const nextRefreshAt = game.target ? game.targetEndsAt + 45 : game.targetStartsAt + 45;
+    const nextRefreshAt = game.target ? game.targetEndsAt + 45 : game.targetRevealsAt + 45;
     const clock = serverClock.current;
     const serverNow = clock.time + performance.now() - clock.measuredAt;
     const timer = window.setTimeout(() => void load(), Math.max(45, nextRefreshAt - serverNow));
