@@ -1245,7 +1245,7 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
             </div>
           </div>
         </div>
-        <p className={styles.circuitForgeHint}>{game.gridControlAvailable ? "Run one topology scan to isolate a live fault, then decide whether to use the single 180 degree phase lock or preserve it. The server validates every relay action." : "Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core."}</p>
+        <p className={styles.circuitForgeHint}>{game.gridControlAvailable ? "Run one topology scan to isolate a live fault, then decide whether to use the single verified-alignment phase lock or preserve it. The server validates every relay action." : "Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core."}</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay network restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIRCUIT_FORGE_REWARD.xp} XP and +${CIRCUIT_FORGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice rebuild complete. Today's reward was already recorded." : "Circuit Forge complete."}</span></div></>

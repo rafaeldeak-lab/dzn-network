@@ -1,6 +1,6 @@
 # DZN Circuit Forge Grid Control activation
 
-The Grid Control extension adds one server-authoritative topology diagnostic and one server-authoritative 180 degree phase action to each Circuit Forge board. It does not change rewards, XP, parts, DayZ statistics, competition eligibility, entitlements, billing, Discord access, or player identity data.
+The Grid Control extension adds one server-authoritative topology diagnostic and one server-authoritative phase alignment to each Circuit Forge board. It does not change rewards, XP, parts, DayZ statistics, competition eligibility, entitlements, billing, Discord access, or player identity data.
 
 ## Source release boundary
 

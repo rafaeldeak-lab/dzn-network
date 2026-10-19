@@ -167,6 +167,21 @@ async function run() {
     assert.equal(stored.diagnostic_index, null);
   });
 
+  await gridControlTest("an unrelated manual rotation preserves the scanned relay for the phase lock", async fixture => {
+    await start(fixture);
+    setBoard(fixture, [3, ...Array(24).fill(0)]);
+    const state = await payload(await call(fixture));
+    const diagnosed = await payload(await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version }));
+    assert.equal(diagnosed.game?.diagnosticIndex, 0);
+    settle(fixture);
+    const rotatedElsewhere = await payload(await call(fixture, { action: "rotate", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: 1 }));
+    assert.equal(rotatedElsewhere.game?.diagnosticIndex, 0);
+    assert.equal(rotatedElsewhere.game?.phaseAvailable, true);
+    settle(fixture);
+    const phased = await payload(await call(fixture, { action: "phase", gameId: rotatedElsewhere.game?.id, version: rotatedElsewhere.game?.version, index: 0 }));
+    assert.equal(phased.game?.phaseUsed, true);
+  });
+
   await gridControlTest("a new board clears installed control state before a later re-enable", async fixture => {
     (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "false";
     await start(fixture);

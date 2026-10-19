@@ -233,7 +233,8 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
       const complete = isCompleteCircuit(circuitMasks(rotations));
       const status: CircuitForgeRow["status"] = complete ? "won" : rotationCount >= CIRCUIT_FORGE_MAX_ROTATIONS ? "failed" : "playing";
       const gridControlSchemaPresent = gridControlEnabled || await hasGridControlSchema(db);
-      const diagnosticReset = gridControlSchemaPresent ? ", diagnostic_index = NULL" : "";
+      // Keep a live scan target through other relay turns; only a disabled rollout clears latent control state.
+      const diagnosticReset = gridControlSchemaPresent && !gridControlEnabled ? ", diagnostic_index = NULL" : "";
       const update = db.prepare(`UPDATE dzn_circuit_forge_sessions
         SET rotations_json = ?, rotations = ?, status = ?${diagnosticReset}, version = version + 1, updated_at = ?
         WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ? AND rotations < ?`)
