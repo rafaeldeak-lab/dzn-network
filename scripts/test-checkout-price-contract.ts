@@ -164,6 +164,12 @@ async function run() {
   assert.equal(posts.length, liveBeforePosts, "A restricted live account must fail before Stripe Checkout creation");
   assert.deepEqual(ledgerRows(live), [[], []], "A restricted live account must not reserve a checkout or trial");
   liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
+    requirements: { disabled_reason: null, currently_due: ["verification"], past_due: [] } };
+  assert.equal((await request(live, "pro", 503)).errorCode, "LIVE_ACCOUNT_UNAVAILABLE");
+  assert.equal(reads.length, liveBeforeReads, "Outstanding live account requirements must fail before Price verification");
+  assert.equal(posts.length, liveBeforePosts, "Outstanding live account requirements must fail before Stripe Checkout creation");
+  assert.deepEqual(ledgerRows(live), [[], []], "Outstanding live account requirements must not reserve a checkout or trial");
+  liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
     requirements: { disabled_reason: null, currently_due: [], past_due: [] } };
   await request(live, "pro", 200);
   assert.equal(posts.length, liveBeforePosts + 1, "A healthy live account may continue to the exact verified Checkout request");
