@@ -55,12 +55,14 @@ function readGameState(serialized: string): GameState {
   const scans = Array.isArray(modern?.scans) ? modern.scans.flatMap((value): GameScan[] => {
     if (!value || typeof value !== "object") return [];
     const scan = value as Partial<GameScan>;
-    if (!Number.isInteger(scan.x) || !Number.isInteger(scan.y) || !Number.isInteger(scan.threats)
-      || scan.x < 0 || scan.y < 0 || scan.x >= cells.length || scan.y >= cells.length || scan.threats < 0 || scan.threats > 9) return [];
-    const key = `${scan.x}:${scan.y}`;
+    const { x, y, threats } = scan;
+    if (typeof x !== "number" || typeof y !== "number" || typeof threats !== "number"
+      || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(threats)
+      || x < 0 || y < 0 || x >= cells.length || y >= cells.length || threats < 0 || threats > 9) return [];
+    const key = `${x}:${y}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ x: scan.x, y: scan.y, threats: scan.threats }];
+    return [{ x, y, threats }];
   }) : [];
   return { version: 1, cells, scans };
 }

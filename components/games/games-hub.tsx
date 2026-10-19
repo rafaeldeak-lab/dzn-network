@@ -8,7 +8,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, Circ
   LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Satellite, ScanSearch, Search, Settings2, Shield, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
-  hubEquipmentUnlocked, type GameMode, type GamePhase, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
+  hubEquipmentUnlocked, type GameCell, type GameMode, type GamePhase, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
 import { HUB_OPERATIONS, buildOperationsRecord, operationForGame } from "@/lib/games-operations";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
