@@ -6,8 +6,8 @@ const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n
 
 assert.match(productionBlock, /^DZN_GAMES_HUB_ENABLED = "true"$/m);
 assert.match(productionBlock, /^DZN_GAMES_CIPHER_GRID_ENABLED = "true"$/m);
-assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "false"$/m, "Account closure must remain paused during the isolated 0110 preservation rollout.");
-assert.match(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = "true"$/m, "Night Run writes must remain paused during the isolated 0110 preservation rollout.");
+assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m, "Account closure must be restored after the isolated 0110 preservation rollout.");
+assert.doesNotMatch(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = /m, "Night Run maintenance must be removed after the isolated 0110 preservation rollout.");
 assert.doesNotMatch(productionBlock, /^DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_COMMS_PRESENCE_(?:READ|WRITE|RETENTION)_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_STORE_ENABLED = "true"$/m);
