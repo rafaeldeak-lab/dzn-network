@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -17,11 +18,26 @@ type TablePlan = {
   foreignKeys: ForeignKey[];
 };
 
+type StatePreservationPlan = {
+  table: TablePlan;
+  beforeColumns: string[];
+  afterColumns: string[];
+  rowColumns: string[];
+  sourceHash: string;
+  beforeSqlFragments: string[];
+  afterSqlFragments: string[];
+  addedColumn: {
+    name: string;
+    expectedValue: string;
+  };
+};
+
 type MigrationPlan = {
   migration: string;
   predecessor: string;
   tables: TablePlan[];
   indexes: string[];
+  statePreservation?: StatePreservationPlan;
 };
 
 type PreparedPlan = {
@@ -143,6 +159,25 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       "idx_dzn_survival_command_resolution_history",
     ],
   },
+  "0109_dzn_survival_command_loadouts.sql": {
+    migration: "0109_dzn_survival_command_loadouts.sql",
+    predecessor: "0108_dzn_survival_command_expeditions.sql",
+    tables: [
+      playerOwnedTable("dzn_survival_command_loadout_unlocks", ["user_id", "loadout", "unlocked_at"]),
+      playerOwnedTable("dzn_survival_command_spend_ledger", ["id", "user_id", "request_id", "loadout", "salvage_spent", "intel_spent", "created_at"]),
+    ],
+    indexes: ["idx_dzn_survival_command_loadout_history"],
+    statePreservation: {
+      table: playerOwnedTable("dzn_survival_command_expeditions", ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version"]),
+      beforeColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version"],
+      afterColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout"],
+      rowColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version"],
+      sourceHash: "80cbe71073858d889f617c423b6b0f0a43cb89d1d52788ed4fcc519e2a20ad43",
+      beforeSqlFragments: ["CHECK (SECTOR IN ('PERIMETER', 'RAIL_YARD', 'RADIO_RIDGE', 'BLACKSITE'))", "CHECK (APPROACH IN ('SCOUT', 'BALANCED', 'BREACH'))", "UNIQUE (USER_ID, REQUEST_ID)"],
+      afterSqlFragments: ["LOADOUT TEXT NOT NULL DEFAULT 'FIELD_KIT'", "CHECK (LOADOUT IN ('FIELD_KIT', 'SIGNAL_SCANNER', 'RECOVERY_KIT', 'CONVOY_PLATING'))"],
+      addedColumn: { name: "loadout", expectedValue: "field_kit" },
+    },
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
@@ -175,8 +210,46 @@ switch (command) {
   case "print-target-tables":
     printTargetTables(required("--migration"));
     break;
+  case "print-state-preservation-table":
+    printStatePreservationTable(required("--migration"));
+    break;
+  case "print-state-preservation-objects-query":
+    printStatePreservationObjectsQuery(required("--migration"));
+    break;
+  case "print-state-preservation-rows-query":
+    printStatePreservationRowsQuery(required("--migration"));
+    break;
+  case "print-state-preservation-loadouts-query":
+    printStatePreservationLoadoutsQuery(required("--migration"));
+    break;
+  case "verify-state-preservation-before":
+    verifyStatePreservationBefore(required("--migration"), required("--objects"), required("--table-info"), required("--foreign-keys"), required("--foreign-key-check"));
+    break;
+  case "verify-state-preservation-after":
+    verifyStatePreservationAfter(
+      required("--migration"),
+      required("--objects"),
+      required("--table-info"),
+      required("--foreign-keys"),
+      required("--foreign-key-check"),
+      required("--before-row-count"),
+      required("--after-row-count"),
+      required("--before-fingerprint"),
+      required("--after-fingerprint"),
+      required("--loadouts"),
+    );
+    break;
+  case "fingerprint":
+    fingerprint(required("--rows"));
+    break;
+  case "print-account-deletion-operation-query":
+    printAccountDeletionOperationQuery();
+    break;
+  case "verify-account-deletion-operations":
+    verifyAccountDeletionOperations(required("--operations"));
+    break;
   default:
-    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables.");
+    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables, print-state-preservation-table, print-state-preservation-objects-query, print-state-preservation-rows-query, print-state-preservation-loadouts-query, verify-state-preservation-before, verify-state-preservation-after, fingerprint, print-account-deletion-operation-query, verify-account-deletion-operations.");
 }
 
 function required(name: string) {
@@ -228,28 +301,48 @@ function normalizeSql(source: string) {
     .replace(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+/i, "CREATE INDEX ");
 }
 
-function sourceStatements(source: string) {
+function sourceStatements(plan: MigrationPlan) {
+  const source = readFileSync(join("migrations", plan.migration), "utf8");
+  if (plan.statePreservation) {
+    const sourceHash = createHash("sha256").update(source).digest("hex");
+    if (sourceHash !== plan.statePreservation.sourceHash) {
+      throw new Error(`${plan.migration} source hash does not match the approved state-preservation plan.`);
+    }
+  }
   const withoutComments = source
     .split(/\r?\n/)
     .filter((line) => !line.trim().startsWith("--"))
     .join("\n");
-  if (/\b(DROP|TRUNCATE|INSERT|UPDATE|ALTER|REPLACE|VACUUM|ATTACH|DETACH|PRAGMA)\b/i.test(withoutComments)) {
+  if (/\b(DROP|TRUNCATE|INSERT|UPDATE|REPLACE|VACUUM|ATTACH|DETACH|PRAGMA)\b/i.test(withoutComments)) {
     throw new Error("Single-migration rollout targets must be additive schema-only SQL.");
   }
-  return withoutComments
+  const statements = withoutComments
     .split(";")
     .map((statement) => statement.trim())
     .filter(Boolean);
+  const alterStatements = statements.filter((statement) => /^ALTER\s+TABLE\b/i.test(statement));
+  if (alterStatements.length > 0 && !plan.statePreservation) {
+    throw new Error("Single-migration rollout targets must be additive schema-only SQL.");
+  }
+  if (plan.statePreservation) {
+    if (alterStatements.length !== 1 || !new RegExp(`^ALTER\\s+TABLE\\s+${plan.statePreservation.table.name}\\s+ADD\\s+COLUMN\\s+${plan.statePreservation.addedColumn.name}\\b`, "i").test(alterStatements[0])) {
+      throw new Error(`${plan.migration} does not contain the approved state-preserving column addition.`);
+    }
+  }
+  return statements;
 }
 
 function expectedObjectSql(plan: MigrationPlan) {
-  const source = readFileSync(join("migrations", plan.migration), "utf8");
-  const statements = sourceStatements(source);
+  const statements = sourceStatements(plan);
   const expectedTableNames = new Set(plan.tables.map((table) => table.name));
   const expectedIndexNames = new Set(plan.indexes);
   const objects: Record<string, string> = {};
 
   for (const statement of statements) {
+    if (/^ALTER\s+TABLE\b/i.test(statement)) {
+      if (!plan.statePreservation) throw new Error(`Migration ${plan.migration} contains an unsupported ALTER TABLE statement.`);
+      continue;
+    }
     const tableMatch = statement.match(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (tableMatch) {
       const name = tableMatch[1];
@@ -338,6 +431,23 @@ function readRows(path: string) {
   const parsed = JSON.parse(raw.slice(start, end + 1));
   const entries = Array.isArray(parsed) ? parsed : [parsed];
   return entries.flatMap((entry) => entry?.results ?? entry?.result?.[0]?.results ?? []);
+}
+
+function printAccountDeletionOperationQuery() {
+  console.log("SELECT COUNT(*) AS active_account_deletion_operation_count FROM user_notifications WHERE type = 'internal_account_deletion_operation';");
+}
+
+function verifyAccountDeletionOperations(operationsPath: string) {
+  const rows = readRows(operationsPath);
+  if (rows.length !== 1) throw new Error("Expected exactly one aggregate account-deletion operation row.");
+  const activeOperationCount = Number(rows[0]?.active_account_deletion_operation_count ?? -1);
+  if (!Number.isInteger(activeOperationCount) || activeOperationCount < 0) {
+    throw new Error("Expected a non-negative active_account_deletion_operation_count.");
+  }
+  if (activeOperationCount !== 0) {
+    throw new Error(`Account-deletion operations are still active (${activeOperationCount}); refusing to capture the state-preservation baseline.`);
+  }
+  console.log("No active account-deletion operations remain.");
 }
 
 function verifyLedger(migrationName: string, ledgerPath: string, phase: string) {
@@ -436,6 +546,107 @@ function verifySchema(stageInput: string, objectsPath: string, foreignKeyCheckPa
   console.log(`Production schema, index, constraint, foreign-key, and zero-row verification passed for ${plan.migration}.`);
 }
 
+function statePreservationFor(migrationName: string) {
+  const statePreservation = planFor(migrationName).statePreservation;
+  if (!statePreservation) throw new Error(`Migration ${migrationName} is not an approved state-preserving rollout target.`);
+  return statePreservation;
+}
+
+function verifyStateColumns(tableName: string, actualRowsPath: string, expectedColumns: string[]) {
+  const actualColumns = readRows(actualRowsPath).map((row) => String(row.name ?? ""));
+  if (JSON.stringify(actualColumns) !== JSON.stringify(expectedColumns)) {
+    throw new Error(`Column verification failed for ${tableName}. Expected ${expectedColumns.join(", ")}; received ${actualColumns.join(", ")}.`);
+  }
+}
+
+function verifyStateForeignKeys(state: StatePreservationPlan, foreignKeysPath: string) {
+  const foreignKeys = readRows(foreignKeysPath);
+  if (foreignKeys.length !== state.table.foreignKeys.length) {
+    throw new Error(`Foreign-key count mismatch for ${state.table.name}.`);
+  }
+  for (const expected of state.table.foreignKeys) {
+    const actual = foreignKeys.find((row) =>
+      String(row.from ?? "") === expected.from &&
+      String(row.table ?? "") === expected.table &&
+      String(row.to ?? "") === expected.to &&
+      String(row.on_delete ?? "").toUpperCase() === expected.onDelete,
+    );
+    if (!actual) throw new Error(`Missing expected foreign key ${state.table.name}.${expected.from} -> ${expected.table}.${expected.to}.`);
+  }
+}
+
+function stateTableSql(state: StatePreservationPlan, objectsPath: string) {
+  const objects = readRows(objectsPath);
+  if (objects.length !== 1) throw new Error(`Expected exactly one source schema object for ${state.table.name}.`);
+  const table = objects[0];
+  if (String(table.type ?? "") !== "table" || String(table.name ?? "") !== state.table.name) {
+    throw new Error(`Missing source table ${state.table.name}.`);
+  }
+  return normalizeSql(String(table.sql ?? "")).toUpperCase();
+}
+
+function verifyStatePreservationBefore(migrationName: string, objectsPath: string, tableInfoPath: string, foreignKeysPath: string, foreignKeyCheckPath: string) {
+  const state = statePreservationFor(migrationName);
+  const sql = stateTableSql(state, objectsPath);
+  for (const fragment of state.beforeSqlFragments) {
+    if (!sql.includes(fragment)) throw new Error(`${state.table.name} is missing the required pre-migration constraint ${fragment}.`);
+  }
+  verifyStateColumns(state.table.name, tableInfoPath, state.beforeColumns);
+  verifyStateForeignKeys(state, foreignKeysPath);
+  if (readRows(foreignKeyCheckPath).length > 0) throw new Error("Production foreign_key_check returned violations before migration.");
+  console.log(`Production state-preservation baseline passed for ${migrationName}.`);
+}
+
+function fingerprint(rowsPath: string) {
+  console.log(createHash("sha256").update(JSON.stringify(readRows(rowsPath))).digest("hex"));
+}
+
+function readCount(path: string) {
+  const rowCount = Number(readRows(path)[0]?.row_count ?? -1);
+  if (!Number.isInteger(rowCount) || rowCount < 0) throw new Error(`Expected a non-negative row_count in ${path}.`);
+  return rowCount;
+}
+
+function readFingerprint(path: string) {
+  const value = readFileSync(resolveInsideRepository(path), "utf8").trim();
+  if (!/^[a-f0-9]{64}$/.test(value)) throw new Error(`Expected a SHA-256 fingerprint in ${path}.`);
+  return value;
+}
+
+function verifyStatePreservationAfter(
+  migrationName: string,
+  objectsPath: string,
+  tableInfoPath: string,
+  foreignKeysPath: string,
+  foreignKeyCheckPath: string,
+  beforeRowCountPath: string,
+  afterRowCountPath: string,
+  beforeFingerprintPath: string,
+  afterFingerprintPath: string,
+  loadoutsPath: string,
+) {
+  const state = statePreservationFor(migrationName);
+  const sql = stateTableSql(state, objectsPath);
+  for (const fragment of [...state.beforeSqlFragments, ...state.afterSqlFragments]) {
+    if (!sql.includes(fragment)) throw new Error(`${state.table.name} is missing the required post-migration constraint ${fragment}.`);
+  }
+  verifyStateColumns(state.table.name, tableInfoPath, state.afterColumns);
+  verifyStateForeignKeys(state, foreignKeysPath);
+  if (readRows(foreignKeyCheckPath).length > 0) throw new Error("Production foreign_key_check returned violations after migration.");
+
+  const beforeCount = readCount(beforeRowCountPath);
+  const afterCount = readCount(afterRowCountPath);
+  if (beforeCount !== afterCount) throw new Error(`${state.table.name} row count changed from ${beforeCount} to ${afterCount}.`);
+  if (readFingerprint(beforeFingerprintPath) !== readFingerprint(afterFingerprintPath)) {
+    throw new Error(`${state.table.name} fingerprint changed during the state-preserving migration.`);
+  }
+  const loadouts = readRows(loadoutsPath);
+  if (loadouts.length !== afterCount || loadouts.some((row) => String(row[state.addedColumn.name] ?? "") !== state.addedColumn.expectedValue)) {
+    throw new Error(`${state.table.name}.${state.addedColumn.name} was not initialized to ${state.addedColumn.expectedValue} for every preserved row.`);
+  }
+  console.log(`Production state preservation, default initialization, constraints, and foreign keys passed for ${migrationName}; ${beforeCount} expedition rows retained.`);
+}
+
 function quoteSql(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -448,4 +659,24 @@ function printObjectsQuery(migrationName: string) {
 
 function printTargetTables(migrationName: string) {
   for (const table of planFor(migrationName).tables) console.log(table.name);
+}
+
+function printStatePreservationTable(migrationName: string) {
+  const table = planFor(migrationName).statePreservation?.table.name;
+  if (table) console.log(table);
+}
+
+function printStatePreservationObjectsQuery(migrationName: string) {
+  const state = statePreservationFor(migrationName);
+  console.log(`SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name = ${quoteSql(state.table.name)};`);
+}
+
+function printStatePreservationRowsQuery(migrationName: string) {
+  const state = statePreservationFor(migrationName);
+  console.log(`SELECT ${state.rowColumns.join(", ")} FROM ${state.table.name} ORDER BY id ASC;`);
+}
+
+function printStatePreservationLoadoutsQuery(migrationName: string) {
+  const state = statePreservationFor(migrationName);
+  console.log(`SELECT id, ${state.addedColumn.name} FROM ${state.table.name} ORDER BY id ASC;`);
 }

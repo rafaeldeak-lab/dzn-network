@@ -195,6 +195,7 @@
     "check:production-migration-queue": "tsx scripts/check-production-migration-queue.ts",
     "test:production-migration-queue": "tsx scripts/test-production-migration-queue.ts",
     "test:single-migration-production-rollout": "tsx scripts/test-single-migration-production-rollout.ts",
+    "test:survival-command-loadout-migration-maintenance": "tsx scripts/test-survival-command-loadout-migration-maintenance.ts",
     "test:account-deletion-maintenance": "tsx scripts/test-account-deletion-maintenance.ts",
     "test:state-preserving-migration-production-rollout": "tsx scripts/test-state-preserving-migration-production-rollout.ts",
     "test:account-deletion-maintenance": "tsx scripts/test-account-deletion-maintenance.ts",

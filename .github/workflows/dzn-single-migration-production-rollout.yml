@@ -21,6 +21,7 @@ on:
           - 0105_games_hub_night_run_recon.sql
           - 0107_dzn_command_centre.sql
           - 0108_dzn_survival_command_expeditions.sql
+          - 0109_dzn_survival_command_loadouts.sql
       confirm_production_migration:
         description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
         required: true
@@ -81,7 +82,7 @@ jobs:
             exit 1
           fi
           case "${MIGRATION_NAME_INPUT}" in
-            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql) ;;
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql) ;;
             *)
               echo "::error::migration_name is not an approved single-migration target."
               exit 1
@@ -115,8 +116,27 @@ jobs:
           npm run lint
           npm run test:production-migration-queue
           npm run test:single-migration-production-rollout
+          npm run test:survival-command-loadout-migration-maintenance
           npm run test:games-hub
           git diff --check
+
+      - name: Verify protected account-closure maintenance in production
+        run: |
+          set -euo pipefail
+          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/survival-command-loadout-migration)"
+          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
+          let response;
+          try {
+            response = JSON.parse(process.env.MAINTENANCE_RESPONSE || "");
+          } catch {
+            throw new Error("Survival Command loadout maintenance did not return the expected JSON signal.");
+          }
+          const keys = response && Object.prototype.toString.call(response) === "[object Object]" ? Object.keys(response) : [];
+          if (keys.length !== 1 || keys[0] !== "status" || response.status !== "survival-command-loadout-maintenance") {
+            throw new Error("Survival Command loadout account-closure maintenance is not active in production.");
+          }
+          console.log("Survival Command loadout account-closure maintenance JSON signal verified in production.");
+          NODE
 
       - name: Build an isolated migration stage
         run: |
@@ -145,6 +165,39 @@ jobs:
           }
           console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
           NODE
+
+      - name: Drain in-flight account-deletion operations before the preservation baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          # New closures are blocked by the deployed maintenance flag. Wait for the
+          # previous runtime grace window, then require two empty read-only samples.
+          sleep 90
+          OPERATION_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-account-deletion-operation-query)"
+          OPERATIONS_FILE="${MIGRATION_STAGE}/account-deletion-operations.json"
+          DRAIN_ATTEMPTS=30
+          REQUIRED_CONSECUTIVE_EMPTY_READS=2
+          consecutive_empty_reads=0
+          for attempt in $(seq 1 "${DRAIN_ATTEMPTS}"); do
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${OPERATION_QUERY}" > "${OPERATIONS_FILE}"
+            if npx tsx scripts/dzn-single-migration-production-rollout.ts verify-account-deletion-operations \
+              --operations "${OPERATIONS_FILE}" >/dev/null 2>&1; then
+              consecutive_empty_reads=$((consecutive_empty_reads + 1))
+              if [ "${consecutive_empty_reads}" -ge "${REQUIRED_CONSECUTIVE_EMPTY_READS}" ]; then
+                rm -f "${OPERATIONS_FILE}"
+                echo "Account-deletion operations drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
+                exit 0
+              fi
+            else
+              consecutive_empty_reads=0
+            fi
+            sleep 15
+          done
+          echo "::error::Account-deletion operations did not drain before the preservation baseline. No migration was applied."
+          rm -f "${OPERATIONS_FILE}"
+          exit 1
 
       - name: Record D1 recovery bookmark
         env:
@@ -187,6 +240,34 @@ jobs:
             --objects "${MIGRATION_STAGE}/objects-before.json" \
             --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-before.json"
 
+          STATE_TABLE="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-table --migration "${MIGRATION_NAME}")"
+          if [ -n "${STATE_TABLE}" ]; then
+            cleanup_state_rows() { rm -f "${MIGRATION_STAGE}/state-rows-before.json" "${MIGRATION_STAGE}/state-rows-after.json"; }
+            trap cleanup_state_rows EXIT
+            STATE_OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-objects-query --migration "${MIGRATION_NAME}")"
+            STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${STATE_OBJECT_QUERY}" > "${MIGRATION_STAGE}/state-objects-before.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA table_info(${STATE_TABLE});" > "${MIGRATION_STAGE}/state-table-info-before.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA foreign_key_list(${STATE_TABLE});" > "${MIGRATION_STAGE}/state-foreign-keys-before.json"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts verify-state-preservation-before \
+              --migration "${MIGRATION_NAME}" \
+              --objects "${MIGRATION_STAGE}/state-objects-before.json" \
+              --table-info "${MIGRATION_STAGE}/state-table-info-before.json" \
+              --foreign-keys "${MIGRATION_STAGE}/state-foreign-keys-before.json" \
+              --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-before.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${STATE_ROWS_QUERY}" > "${MIGRATION_STAGE}/state-rows-before.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "SELECT COUNT(*) AS row_count FROM ${STATE_TABLE};" > "${MIGRATION_STAGE}/state-row-count-before.json"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint \
+              --rows "${MIGRATION_STAGE}/state-rows-before.json" > "${MIGRATION_STAGE}/state-fingerprint-before.sha256"
+            rm "${MIGRATION_STAGE}/state-rows-before.json"
+            echo "Private state-preservation baseline captured as a row count and SHA-256 fingerprint; source rows are not retained."
+          fi
+
       - name: Apply exactly one staged migration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
@@ -225,6 +306,41 @@ jobs:
             --stage-dir "${MIGRATION_STAGE}" \
             --objects "${MIGRATION_STAGE}/objects-after.json" \
             --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-after.json"
+
+          STATE_TABLE="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-table --migration "${MIGRATION_NAME}")"
+          if [ -n "${STATE_TABLE}" ]; then
+            cleanup_state_rows() { rm -f "${MIGRATION_STAGE}/state-rows-before.json" "${MIGRATION_STAGE}/state-rows-after.json"; }
+            trap cleanup_state_rows EXIT
+            STATE_OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-objects-query --migration "${MIGRATION_NAME}")"
+            STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
+            STATE_LOADOUTS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-loadouts-query --migration "${MIGRATION_NAME}")"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${STATE_OBJECT_QUERY}" > "${MIGRATION_STAGE}/state-objects-after.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA table_info(${STATE_TABLE});" > "${MIGRATION_STAGE}/state-table-info-after.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA foreign_key_list(${STATE_TABLE});" > "${MIGRATION_STAGE}/state-foreign-keys-after.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${STATE_ROWS_QUERY}" > "${MIGRATION_STAGE}/state-rows-after.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "SELECT COUNT(*) AS row_count FROM ${STATE_TABLE};" > "${MIGRATION_STAGE}/state-row-count-after.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${STATE_LOADOUTS_QUERY}" > "${MIGRATION_STAGE}/state-loadouts-after.json"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint \
+              --rows "${MIGRATION_STAGE}/state-rows-after.json" > "${MIGRATION_STAGE}/state-fingerprint-after.sha256"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts verify-state-preservation-after \
+              --migration "${MIGRATION_NAME}" \
+              --objects "${MIGRATION_STAGE}/state-objects-after.json" \
+              --table-info "${MIGRATION_STAGE}/state-table-info-after.json" \
+              --foreign-keys "${MIGRATION_STAGE}/state-foreign-keys-after.json" \
+              --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-after.json" \
+              --before-row-count "${MIGRATION_STAGE}/state-row-count-before.json" \
+              --after-row-count "${MIGRATION_STAGE}/state-row-count-after.json" \
+              --before-fingerprint "${MIGRATION_STAGE}/state-fingerprint-before.sha256" \
+              --after-fingerprint "${MIGRATION_STAGE}/state-fingerprint-after.sha256" \
+              --loadouts "${MIGRATION_STAGE}/state-loadouts-after.json"
+            rm "${MIGRATION_STAGE}/state-rows-after.json" "${MIGRATION_STAGE}/state-loadouts-after.json"
+          fi
 
           {
             echo "- Ledger/schema verification: passed"
