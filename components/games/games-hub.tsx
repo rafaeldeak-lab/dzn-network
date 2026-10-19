@@ -454,24 +454,39 @@ function TriviaPanel({ now, motionRunning, onProgress }: { now: number; motionRu
   const game = payload?.game;
   const active = game?.status === "playing" && game.expiresAt > now;
   const passMark = TRIVIA_DIFFICULTIES[(game?.difficulty ?? difficulty)].passMark;
-  return <section aria-labelledby="trivia-title" className={styles.triviaPanel}>
-    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>02 / SURVIVAL INTELLIGENCE</span><h2 id="trivia-title">DZN Trivia</h2></div><BookOpen size={24} /></div>
+  const clearanceTotal = game?.question?.total ?? 5;
+  const clearanceQuestionNumber = game?.question?.number ?? 0;
+  const briefingDifficulty = game?.difficulty ?? difficulty;
+  const briefingProtocol = {
+    recruit: "Observe, identify, commit.",
+    operator: "Assess the situation before contact.",
+    specialist: "Make the call with incomplete information.",
+  }[briefingDifficulty];
+  return <section aria-labelledby="trivia-title" className={styles.triviaPanel} data-difficulty={briefingDifficulty}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>02 / LIVE FIELD BRIEFING</span><h2 id="trivia-title">DZN Trivia</h2></div><BookOpen size={24} /></div>
     {error && <div className={styles.triviaUnavailable} role="status"><ShieldCheck size={20} /><div><strong>{payload ? "Round paused" : "Not open yet"}</strong><span>{error}</span></div>{payload && <button className={styles.iconButton} title="Retry trivia" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     {!error && <>
       <div className={styles.gameTools}>
         <label>Difficulty<select aria-label="Trivia difficulty" value={difficulty} disabled={busy || active} onChange={event => setDifficulty(event.target.value as TriviaDifficulty)}>{(Object.keys(TRIVIA_DIFFICULTIES) as TriviaDifficulty[]).map(key => <option key={key} value={key}>{TRIVIA_DIFFICULTIES[key].label}</option>)}</select></label>
         <button className={styles.primary} disabled={busy || active} onClick={() => void mutate({ action: "start", difficulty })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Round in progress" : game ? "New round" : "Start round"}</button>
       </div>
-      {game?.question && active ? <div className={styles.triviaQuestion} data-renderer={threeUnavailable ? "fallback" : "three"}>
-        {!threeUnavailable && <div className={styles.triviaScene}><Trivia3D active={active} questionNumber={game.question.number} correct={game.correct} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} /></div>}
+      {game?.question && active ? <div className={styles.triviaQuestion} data-renderer={threeUnavailable ? "fallback" : "three"} data-difficulty={game.difficulty}>
+        {!threeUnavailable && <div className={styles.triviaScene}><Trivia3D active={active} difficulty={game.difficulty} questionNumber={game.question.number} correct={game.correct} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} /></div>}
         <div className={styles.triviaCommandOverlay}>
           <div className={styles.triviaBriefing}>
-            <div><span>FIELD BRIEF / {TRIVIA_DIFFICULTIES[game.difficulty].label.toUpperCase()}</span><strong>Survival intelligence</strong></div>
+            <div><span>FIELD BRIEF / {TRIVIA_DIFFICULTIES[game.difficulty].label.toUpperCase()}</span><strong>Remote intelligence uplink</strong></div>
             <div className={styles.triviaProgress}><span>Round progress</span><progress value={game.question.number} max={game.question.total} aria-label={`Question ${game.question.number} of ${game.question.total}`} /><strong>{game.question.number} / {game.question.total}</strong></div>
           </div>
-          <div className={styles.triviaMeta}><span>Question {game.question.number} / {game.question.total}</span><span>Clearance {game.correct} / {passMark}</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
-          <div className={styles.triviaPromptRail}><span>LIVE INTELLIGENCE QUERY</span><h3>{game.question.prompt}</h3></div>
-          <div className={styles.triviaChoices} role="group" aria-label="Field response pads">{game.question.choices.map((choice, index) => <button key={choice} type="button" data-answer={String.fromCharCode(65 + index)} disabled={busy} onClick={() => void mutate({ action: "answer", gameId: game.id, version: game.version, answer: index })}><span aria-hidden="true">{String.fromCharCode(65 + index)}</span><div><small>Transmit response</small><strong>{choice}</strong></div></button>)}</div>
+          <div className={styles.triviaMissionRow}>
+            <div className={styles.triviaMissionProtocol}><span>BRIEFING PROTOCOL</span><strong>{briefingProtocol}</strong></div>
+            <div className={styles.triviaClearance}>
+              <span>VERIFIED CLEARANCE</span>
+              <div className={styles.triviaClearanceDots} role="img" aria-label={`${game.correct} verified clearances. ${passMark} are required to pass.`}>{Array.from({ length: clearanceTotal }, (_, index) => <i key={index} data-state={index < game.correct ? "secured" : index === clearanceQuestionNumber - 1 ? "live" : "pending"} />)}</div>
+            </div>
+          </div>
+          <div className={styles.triviaMeta}><span>Query {game.question.number} / {game.question.total}</span><span>Clearance {game.correct} / {passMark}</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
+          <div className={styles.triviaPromptRail}><span>SITUATION REPORT</span><h3>{game.question.prompt}</h3></div>
+          <div className={styles.triviaChoices} role="group" aria-label="Field response pads">{game.question.choices.map((choice, index) => <button key={choice} type="button" data-answer={String.fromCharCode(65 + index)} disabled={busy} aria-label={`Commit response ${String.fromCharCode(65 + index)}: ${choice}`} onClick={() => void mutate({ action: "answer", gameId: game.id, version: game.version, answer: index })}><span aria-hidden="true">{String.fromCharCode(65 + index)}</span><div><small>Commit response</small><strong>{choice}</strong></div></button>)}</div>
         </div>
       </div> : game && <div className={`${styles.result} ${game.status === "passed" ? styles.won : ""}`} role="status">
         {game.status === "passed" ? <><ShieldCheck size={22} /><div><strong>Briefing passed</strong><span>{payload.rewardedToday.includes(game.difficulty) ? `${TRIVIA_DIFFICULTIES[game.difficulty].label} reward recorded for today.` : "Round complete."}</span></div></> : game.status === "failed" ? <><Target size={22} /><div><strong>Briefing incomplete</strong><span>{game.correct} of 5 correct. {passMark} correct answers are required.</span></div></> : <><Clock3 size={22} /><div><strong>Briefing expired</strong><span>Start a new round when you are ready.</span></div></>}

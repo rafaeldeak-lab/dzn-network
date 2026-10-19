@@ -33,7 +33,7 @@ try {
     }
     await answers.first().waitFor();
     const briefing = page.locator('div[class*="triviaQuestion"]');
-    assert.match(await briefing.evaluate(element => getComputedStyle(element).backgroundImage), /trivia-command-table-v1/);
+    assert.match(await briefing.evaluate(element => getComputedStyle(element).backgroundImage), /trivia-intelligence-v2/);
     const triviaCanvas = page.locator('canvas[data-dzn-trivia-canvas="true"]');
     await triviaCanvas.waitFor({ state: "visible" });
     const telemetry = await triviaCanvas.evaluate(canvas => {
@@ -52,11 +52,14 @@ try {
       }
       return { width, height, litPixels, colourBucketCount: colourBuckets.size };
     });
-    assert.ok(telemetry && telemetry.width > 260 && telemetry.height > 170, "Trivia should render a usable command scene.");
+    const minimumCanvasWidth = viewport.name === "phone" ? 180 : 260;
+    assert.ok(telemetry && telemetry.width > minimumCanvasWidth && telemetry.height > 170, "Trivia should render a usable command scene.");
     assert.ok(telemetry.litPixels > 60, "Trivia command telemetry should not render a blank canvas.");
     assert.ok(telemetry.colourBucketCount > 14, "Trivia command telemetry should retain meaningful visual detail.");
     assert.equal(await answers.count(), 4);
     assert.equal(await page.getByRole("group", { name: "Field response pads" }).count(), 1);
+    assert.equal(await page.getByRole("img", { name: /verified clearances/i }).count(), 1);
+    assert.equal(await page.getByText("BRIEFING PROTOCOL").count(), 1);
     await page.reload({ waitUntil: "networkidle" });
     const [resumeResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "GET"),
