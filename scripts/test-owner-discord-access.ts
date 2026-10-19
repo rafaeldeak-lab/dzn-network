@@ -79,6 +79,32 @@ async function run() {
   const deliveryMigration = readFileSync("migrations/0095_dzn_owner_discord_delivery.sql", "utf8");
   assert.match(deliveryMigration, /dzn_owner_discord_access_delivery_attempts/);
   assert.match(deliveryMigration, /FOREIGN KEY\(request_id\) REFERENCES dzn_owner_discord_access_requests/);
+  const deletionSource = readFileSync("functions/_lib/deletion.ts", "utf8");
+  assert.match(
+    deletionSource,
+    /const accountDeletionOperation = existingOperation \?\? await reserveAccountDeletionOperation\(env, userId\);\s*if \(!accountDeletionOperation\)[\s\S]*?let discordRoleLease:[\s\S]*?try \{\s*const discordRoleReservation = await reserveOwnerDiscordAccountDeletionLease\(env, userId\);/,
+    "Every account closure must publish its internal operation marker before any awaited Discord role operation.",
+  );
+  assert.match(
+    deletionSource,
+    /INSERT INTO user_notifications \([\s\S]*?WHERE NOT EXISTS \([\s\S]*?WHERE user_id = \? AND type = \?/,
+    "Account closure marker admission must atomically reject a concurrent deletion request for the same account.",
+  );
+  assert.match(
+    deletionSource,
+    /DELETE FROM user_notifications WHERE user_id = \? AND type != \?/,
+    "Account cleanup must preserve every active internal deletion marker, not just the caller's marker.",
+  );
+  assert.doesNotMatch(
+    deletionSource,
+    /DELETE FROM user_notifications WHERE user_id = \? AND id != \?/,
+    "Account cleanup must not erase a concurrent account-deletion marker.",
+  );
+  assert.match(
+    deletionSource,
+    /finally \{\s*try \{\s*await releaseAccountDeletionOperation\(env, userId, accountDeletionOperation\);[\s\S]*?finally \{\s*await releaseOwnerDiscordRoleMutationLease\(env, discordRoleLease\);/,
+    "Discord role leases must be released even when clearing an internal account-deletion marker fails.",
+  );
   const accessSource = readFileSync("functions/_lib/owner-discord-access.ts", "utf8");
   assert.match(accessSource, /DZN_OWNER_DISCORD_ACCESS_ENABLED/);
   assert.match(accessSource, /linked_servers[\s\S]*user_id = \?/);
@@ -182,6 +208,18 @@ async function run() {
     ]) {
       for (const statement of splitSql(readFileSync(migrationPath, "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     }
+    await db.prepare(`CREATE TABLE user_notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      dedupe_key TEXT NOT NULL,
+      metadata TEXT,
+      read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
     for (const user of [owner, applicant, outsider]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     await db.prepare("INSERT INTO dzn_comms_channels (id, slug, kind, name, visibility) VALUES ('global', 'global-chat', 'public', 'Global Chat', 'public')").run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_owned', ?, 'guild_owned', 'Verified Owner Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
@@ -377,7 +415,22 @@ async function run() {
       id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, created_at, completed_at
     ) VALUES ('account-deletion-owner-delivery', ?, ?, ?, ?, ?, 'invite', 'succeeded', 1, 'account-deletion-delivery-nonce', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
       .bind(createdPayload.request.id, applicant.id, applicant.discord_id, applicant.id, applicant.discord_id).run();
+    await db.prepare(`INSERT INTO user_notifications (
+      id, user_id, type, title, body, priority, dedupe_key, metadata, read_at, created_at
+    ) VALUES ('active-account-delete-operation', ?, 'internal_account_deletion_operation', 'Internal', 'Internal', 0, 'internal-account-deletion-operation:test', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(applicant.id).run();
+    const concurrentAccountDeletion = await deleteOwnedAccountData(env, applicant.id);
+    assert.equal(concurrentAccountDeletion.ok, false, "A concurrent account closure must be rejected before it can change account data.");
+    if (!concurrentAccountDeletion.ok) assert.equal(concurrentAccountDeletion.status, 409);
+    assert.notEqual(await db.prepare("SELECT id FROM users WHERE id = ?").bind(applicant.id).first(), null, "A rejected concurrent account closure must retain the account.");
+    assert.notEqual(await db.prepare("SELECT id FROM user_notifications WHERE id = 'active-account-delete-operation'").first(), null, "A rejected concurrent account closure must preserve the active operation marker.");
+    await db.prepare("DELETE FROM user_notifications WHERE id = 'active-account-delete-operation'").run();
     assert.equal((await deleteOwnedAccountData(env, applicant.id)).ok, true);
+    const notificationTable = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_notifications' LIMIT 1").first<{ name: string }>();
+    if (notificationTable) {
+      const completedAccountDeletionOperations = await db.prepare("SELECT COUNT(*) AS count FROM user_notifications WHERE type = 'internal_account_deletion_operation'").first<{ count: number }>();
+      assert.equal(Number(completedAccountDeletionOperations?.count ?? 0), 0, "A completed account closure must clear its internal operation marker before it returns.");
+    }
     const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string | null; requester_username: string | null }>();
     assert.equal(accountDeletedRequest?.requester_user_id, null, "Applicant account deletion must retain the decision record without its user foreign key.");
     assert.equal(accountDeletedRequest?.requester_discord_id, null, "Applicant account deletion must remove the Discord identity snapshot.");

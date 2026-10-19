@@ -14,6 +14,7 @@ import type { Env } from "./types";
 export const OWNER_DELETE_FORBIDDEN_MESSAGE = "Only the original server owner who linked this server to DZN can permanently delete it.";
 const DELETION_RATE_LIMIT_WINDOW_MS = 60_000;
 const DELETION_RATE_LIMIT_ATTEMPTS = 8;
+const ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE = "internal_account_deletion_operation";
 const deletionAttempts = new Map<string, { count: number; resetAt: number }>();
 
 export type DeletionCounts = {
@@ -33,6 +34,10 @@ export type DeletionCounts = {
   serverSlugAliases: number;
   discordGuilds: number;
   users: number;
+};
+
+export type AccountDeletionOperation = {
+  operationId: string | null;
 };
 
 type LinkedServerForDeletion = {
@@ -192,22 +197,44 @@ export async function deleteOwnedLinkedServerData(
   }
 }
 
-export async function deleteOwnedAccountData(env: Env, userId: string) {
+export async function reserveAccountDeletionOperation(env: Env, userId: string): Promise<AccountDeletionOperation | null> {
   const db = requireDb(env);
-  const discordRoleReservation = await reserveOwnerDiscordAccountDeletionLease(env, userId);
-  if (discordRoleReservation.required && !discordRoleReservation.lease) {
-    return { ok: false as const, status: 409 as const, message: "DZN is still issuing or changing this account's Discord owner access. Retry account closure shortly." };
+  const deletionOperationId = await beginAccountDeletionOperation(db, userId);
+  if (deletionOperationId === "already_active") return null;
+  return { operationId: deletionOperationId };
+}
+
+export async function releaseAccountDeletionOperation(env: Env, userId: string, operation: AccountDeletionOperation) {
+  if (operation.operationId) await clearAccountDeletionOperation(requireDb(env), userId, operation.operationId);
+}
+
+export async function deleteOwnedAccountData(env: Env, userId: string, existingOperation?: AccountDeletionOperation) {
+  const accountDeletionOperation = existingOperation ?? await reserveAccountDeletionOperation(env, userId);
+  if (!accountDeletionOperation) {
+    return {
+      ok: false as const,
+      status: 409 as const,
+      message: "DZN is already closing this account. Retry shortly.",
+    };
   }
-  const renewDiscordRoleReservation = async () => {
-    if (await renewOwnerDiscordAccountDeletionLease(env, discordRoleReservation.lease)) return true;
-    return false;
-  };
-  const expiredDiscordRoleReservation = () => ({
-    ok: false as const,
-    status: 409 as const,
-    message: "DZN could not keep this account's Discord owner-access cleanup reservation. No further account data was removed; retry account closure shortly.",
-  });
+  const deletionOperationId = accountDeletionOperation.operationId;
+  const db = requireDb(env);
+  let discordRoleLease: OwnerDiscordRoleMutationLease | null = null;
   try {
+    const discordRoleReservation = await reserveOwnerDiscordAccountDeletionLease(env, userId);
+    discordRoleLease = discordRoleReservation.lease;
+    if (discordRoleReservation.required && !discordRoleReservation.lease) {
+      return { ok: false as const, status: 409 as const, message: "DZN is still issuing or changing this account's Discord owner access. Retry account closure shortly." };
+    }
+    const renewDiscordRoleReservation = async () => {
+      if (await renewOwnerDiscordAccountDeletionLease(env, discordRoleReservation.lease)) return true;
+      return false;
+    };
+    const expiredDiscordRoleReservation = () => ({
+      ok: false as const,
+      status: 409 as const,
+      message: "DZN could not keep this account's Discord owner-access cleanup reservation. No further account data was removed; retry account closure shortly.",
+    });
     if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
     const discordRoleCleanup = await revokeOwnerDiscordRoleForAccountDeletion(env, userId, fetch, discordRoleReservation.lease);
     if (!discordRoleCleanup.ok) return discordRoleCleanup;
@@ -259,24 +286,37 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
         );
       }
       if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
-      await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
+      await deleteRows(
+        db,
+        "DELETE FROM user_notifications WHERE user_id = ? AND type != ?",
+        [userId, ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE],
+      );
     }
     if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
-    deleted.users += await eraseOrRetainAccountUser(db, userId);
+    deleted.users += await eraseOrRetainAccountUser(db, userId, deletionOperationId);
 
     return { ok: true as const, deleted };
   } finally {
-    await releaseOwnerDiscordRoleMutationLease(env, discordRoleReservation.lease);
+    try {
+      await releaseAccountDeletionOperation(env, userId, accountDeletionOperation);
+    } finally {
+      await releaseOwnerDiscordRoleMutationLease(env, discordRoleLease);
+    }
   }
 }
 
-export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
+export async function eraseOrRetainAccountUser(db: D1Database, userId: string, deletionOperationId: string | null = null) {
   const retainForStoreLedger = await hasRetainedStoreLedgerReferences(db, userId);
   const cleanupStatements = await directUserCleanupStatements(db, userId);
+  const deletionOperationCleanup = deletionOperationId
+    ? [db.prepare("DELETE FROM user_notifications WHERE id = ? AND user_id = ? AND type = ?")
+      .bind(deletionOperationId, userId, ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE)]
+    : [];
 
   if (!retainForStoreLedger) {
     const results = await db.batch([
       ...cleanupStatements,
+      ...deletionOperationCleanup,
       db.prepare("DELETE FROM users WHERE id = ?").bind(userId),
     ]);
     return changes(results[results.length - 1]);
@@ -285,12 +325,46 @@ export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
   const touchesUpdatedAt = await tableHasColumn(db, "users", "updated_at");
   const results = await db.batch([
     ...cleanupStatements,
+    ...deletionOperationCleanup,
     db.prepare(`UPDATE users
       SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
       WHERE id = ?`)
       .bind(`deleted-${crypto.randomUUID()}`, userId),
   ]);
   return changes(results[results.length - 1]);
+}
+
+async function beginAccountDeletionOperation(db: D1Database, userId: string) {
+  if (!(await tableExists(db, "user_notifications"))) return null;
+  const operationId = crypto.randomUUID();
+  const result = await db.prepare(`INSERT INTO user_notifications (
+    id, user_id, type, title, body, priority, dedupe_key, metadata, read_at, created_at
+  ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    WHERE NOT EXISTS (
+      SELECT 1 FROM user_notifications
+      WHERE user_id = ? AND type = ?
+    )`)
+    .bind(
+      operationId,
+      userId,
+      ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE,
+      "Internal account operation",
+      "Internal account operation",
+      0,
+      `internal-account-deletion-operation:${operationId}`,
+      JSON.stringify({ internal: true, operation: "account_deletion" }),
+      userId,
+      ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE,
+    )
+    .run();
+  return changes(result) === 1 ? operationId : "already_active";
+}
+
+async function clearAccountDeletionOperation(db: D1Database, userId: string, operationId: string) {
+  if (!(await tableExists(db, "user_notifications"))) return;
+  await db.prepare("DELETE FROM user_notifications WHERE id = ? AND user_id = ? AND type = ?")
+    .bind(operationId, userId, ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE)
+    .run();
 }
 
 async function directUserCleanupStatements(db: D1Database, userId: string) {

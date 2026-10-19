@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
-import { getPulseSummary, listUserNotifications, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import { clearReadNotifications, countUnreadNotifications, getPulseSummary, listUserNotifications, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
 import type { Env, SessionUser } from "../functions/_lib/types";
 
 function read(path: string) {
@@ -88,6 +88,7 @@ for (const serviceContract of [
 assert.equal(service.includes("export const PULSE_NO_STORE_HEADERS"), true, "Missing no-store header export.");
 
 assert.equal(service.includes("INSERT OR IGNORE INTO user_notifications"), true, "Notifications must deduplicate by dedupe_key.");
+assert.equal(service.includes('INTERNAL_ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE'), true, "Internal account-deletion operation markers must never be shown as Pulse notifications.");
 assert.equal(service.includes("discord_notification_dispatcher_not_configured"), true, "Discord delivery must remain an explicit disabled adapter unless a dispatcher is configured.");
 assert.equal(service.includes("WHERE id = ? AND user_id = ? LIMIT 1"), true, "Popup dismissals must verify server ownership.");
 assert.equal(service.includes("notification_not_found"), true, "Notification mutations must not report success for guessed or cross-user IDs.");
@@ -234,8 +235,15 @@ async function testNotificationPaginationBoundary() {
       bind: (...values: unknown[]) => prepare(sql, values),
       all: async () => ({ results: sqlite.prepare(sql).all(...bindings) }),
       first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
+      run: async () => ({ meta: { changes: Number(sqlite.prepare(sql).run(...bindings).changes ?? 0) } }),
     });
-    const env = { DZN_PULSE_ENABLED: "true", DB: { prepare } } as unknown as Env;
+    const env = {
+      DZN_PULSE_ENABLED: "true",
+      DB: {
+        prepare,
+        batch: async (statements: Array<{ run(): Promise<{ meta: { changes: number } }> }>) => Promise.all(statements.map((statement) => statement.run())),
+      },
+    } as unknown as Env;
     const user = { id: "pulse-user", discord_id: "100", username: "Pulse User", avatar: null } satisfies SessionUser;
     const first = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20 });
     assert.equal(first.items.length, 20);
@@ -244,6 +252,15 @@ async function testNotificationPaginationBoundary() {
     const second = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20, cursor: first.nextCursor });
     assert.deepEqual(second.items.map((item) => item.id), ["decision-21"], "Pagination must not skip the lookahead boundary row.");
     assert.equal(second.nextCursor, null);
+
+    sqlite.prepare(`INSERT INTO user_notifications
+      (id,user_id,type,title,body,dedupe_key,created_at)
+      VALUES ('internal-delete-operation','pulse-user','internal_account_deletion_operation','Internal','Internal','internal-account-deletion-operation:test','2026-09-24T13:00:00.000Z')`).run();
+    const visible = await listUserNotifications(env, user, { limit: 50 });
+    assert.equal(visible.items.some((item) => item.id === "internal-delete-operation"), false, "Internal account-deletion operations must never appear in the player notification feed.");
+    assert.equal(await countUnreadNotifications(env, user), 21, "Internal account-deletion operations must not inflate unread counts.");
+    await clearReadNotifications(env, user);
+    assert.notEqual(sqlite.prepare("SELECT id FROM user_notifications WHERE id = 'internal-delete-operation'").get(), undefined, "Clearing a player inbox must not remove an active internal account-deletion operation marker.");
   } finally {
     sqlite.close();
   }

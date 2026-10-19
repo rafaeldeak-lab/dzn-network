@@ -9,6 +9,7 @@ import { currentTrialEndingNotice, TRIAL_ENDING_NOTIFICATION_TYPE } from "./bill
 export const PULSE_NO_STORE_HEADERS = {
   "cache-control": "private, no-store, no-cache, must-revalidate",
 };
+const INTERNAL_ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE = "internal_account_deletion_operation";
 
 export const PULSE_NOTIFICATION_TYPES = [
   "upcoming_event",
@@ -305,10 +306,12 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
   const bindings: unknown[] = [user.id];
   const conditions = [
     "user_notifications.user_id = ?",
+    "user_notifications.type != ?",
     "(user_notifications.expires_at IS NULL OR datetime(user_notifications.expires_at) > datetime('now'))",
     "(user_notifications.type != ? OR (? = 1 AND user_notifications.dedupe_key = ?))",
     "(user_notifications.type != ? OR (? != '' AND user_notifications.dedupe_key = ?))",
   ];
+  bindings.push(INTERNAL_ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE);
   bindings.push(PAYMENT_SETUP_NOTIFICATION_TYPE, Number(paymentNoticeVisible), PAYMENT_SETUP_DEDUPE_KEY);
   bindings.push(TRIAL_ENDING_NOTIFICATION_TYPE, trialNotice?.dedupeKey ?? "", trialNotice?.dedupeKey ?? "");
 
@@ -373,12 +376,13 @@ export async function countUnreadNotifications(env: Env, user: SessionUser) {
       `SELECT COUNT(*) AS count
        FROM user_notifications
        WHERE user_id = ?
+         AND type != ?
          AND read_at IS NULL
          AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
          AND (type != ? OR (? = 1 AND dedupe_key = ?))
          AND (type != ? OR (? != '' AND dedupe_key = ?))`,
     )
-    .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, Number(paymentNoticeVisible), PAYMENT_SETUP_DEDUPE_KEY,
+    .bind(user.id, INTERNAL_ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE, PAYMENT_SETUP_NOTIFICATION_TYPE, Number(paymentNoticeVisible), PAYMENT_SETUP_DEDUPE_KEY,
       TRIAL_ENDING_NOTIFICATION_TYPE, trialNotice?.dedupeKey ?? "", trialNotice?.dedupeKey ?? "")
     .first<{ count: number | null }>()
     .catch(() => ({ count: 0 }));
@@ -478,8 +482,9 @@ export async function clearReadNotifications(env: Env, user: SessionUser) {
       .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
     db.prepare(`DELETE FROM user_notifications
       WHERE user_id = ? AND read_at IS NOT NULL
+        AND type != ?
         AND NOT (type IN (?, ?) OR COALESCE(action_url, '') = ? OR dedupe_key LIKE '%-setup-recommendation-%')`)
-      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
+      .bind(user.id, INTERNAL_ACCOUNT_DELETION_OPERATION_NOTIFICATION_TYPE, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
   ]);
   return { ok: true, status: 200, cleared: results.reduce((sum, result) => sum + (Number(result.meta?.changes) || 0), 0), unreadCount: await countUnreadNotifications(env, user) };
 }
