@@ -5,28 +5,29 @@ import * as THREE from "three";
 
 type Trivia3DProps = {
   active: boolean;
+  difficulty: "recruit" | "operator" | "specialist";
   questionNumber: number;
   correct: number;
   motionRunning: boolean;
   onUnavailable: () => void;
 };
 
-type TriviaVisualState = Pick<Trivia3DProps, "active" | "questionNumber" | "correct">;
+type TriviaVisualState = Pick<Trivia3DProps, "active" | "difficulty" | "questionNumber" | "correct">;
 
-export function Trivia3D({ active, questionNumber, correct, motionRunning, onUnavailable }: Trivia3DProps) {
+export function Trivia3D({ active, difficulty, questionNumber, correct, motionRunning, onUnavailable }: Trivia3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<TriviaVisualState>({ active, questionNumber, correct });
+  const stateRef = useRef<TriviaVisualState>({ active, difficulty, questionNumber, correct });
   const unavailableRef = useRef(onUnavailable);
   const applyStateRef = useRef<((state: TriviaVisualState) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
   useEffect(() => {
-    const state = { active, questionNumber, correct };
+    const state = { active, difficulty, questionNumber, correct };
     stateRef.current = state;
     applyStateRef.current?.(state);
     renderRef.current?.();
-  }, [active, questionNumber, correct]);
+  }, [active, difficulty, questionNumber, correct]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -37,9 +38,9 @@ export function Trivia3D({ active, questionNumber, correct, motionRunning, onUna
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x041116, 0.06);
-    const camera = new THREE.PerspectiveCamera(39, 1, 0.1, 60);
-    camera.position.set(5.5, 4.3, 8.1);
-    camera.lookAt(0, 0.18, 0);
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 60);
+    camera.position.set(6.2, 4.65, 8.8);
+    camera.lookAt(0, -0.04, 0);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -155,6 +156,69 @@ export function Trivia3D({ active, questionNumber, correct, motionRunning, onUna
     grid.position.y = -0.44;
     deck.add(grid);
 
+    const terrainGeometry = new THREE.PlaneGeometry(7.1, 5.8, 28, 22);
+    const terrainPosition = terrainGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < terrainPosition.count; index++) {
+      const x = terrainPosition.getX(index);
+      const y = terrainPosition.getY(index);
+      const ridge = Math.sin(x * 1.28) * Math.cos(y * 1.08) * 0.18;
+      const escarpment = Math.sin(x * 2.5 + y * 1.4) * 0.07;
+      const bowl = -Math.min(0.12, (x * x + y * y) * 0.008);
+      terrainPosition.setZ(index, ridge + escarpment + bowl);
+    }
+    terrainGeometry.computeVertexNormals();
+    const terrainMaterial = new THREE.MeshStandardMaterial({ color: 0x12393d, emissive: 0x08242a, emissiveIntensity: 0.95, metalness: 0.34, roughness: 0.64, transparent: true, opacity: 0.87, side: THREE.DoubleSide });
+    geometries.push(terrainGeometry); materials.push(terrainMaterial);
+    const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+    terrain.rotation.x = -Math.PI / 2;
+    terrain.position.y = -0.4;
+    deck.add(terrain);
+
+    const contourGeometry = new THREE.PlaneGeometry(7.15, 5.85, 10, 8);
+    const contourMaterial = new THREE.MeshBasicMaterial({ color: 0x8ffff0, transparent: true, opacity: 0.17, wireframe: true, side: THREE.DoubleSide });
+    geometries.push(contourGeometry); materials.push(contourMaterial);
+    const contour = new THREE.Mesh(contourGeometry, contourMaterial);
+    contour.rotation.x = -Math.PI / 2;
+    contour.position.y = -0.33;
+    deck.add(contour);
+
+    const routeCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-3.2, -0.24, 1.62), new THREE.Vector3(-1.68, -0.14, 0.56), new THREE.Vector3(-0.54, -0.08, 0.88),
+      new THREE.Vector3(0.5, -0.12, -0.32), new THREE.Vector3(1.58, -0.1, -0.88), new THREE.Vector3(3.05, -0.2, -1.52),
+    ]);
+    const routeGeometry = new THREE.BufferGeometry().setFromPoints(routeCurve.getPoints(72));
+    const routeMaterial = new THREE.LineBasicMaterial({ color: 0x75fff0, transparent: true, opacity: 0.7 });
+    geometries.push(routeGeometry); materials.push(routeMaterial);
+    const route = new THREE.Line(routeGeometry, routeMaterial);
+    route.position.y = 0.05;
+    deck.add(route);
+
+    const relayGeometry = new THREE.CylinderGeometry(0.09, 0.13, 0.72, 6);
+    const relayMaterial = new THREE.MeshStandardMaterial({ color: 0x1d5960, emissive: 0x0c6e75, emissiveIntensity: 1.18, metalness: 0.76, roughness: 0.24 });
+    const relayCapGeometry = new THREE.OctahedronGeometry(0.145, 0);
+    const relayCapMaterial = new THREE.MeshStandardMaterial({ color: 0xc0fff6, emissive: 0x28d7c1, emissiveIntensity: 2, metalness: 0.7, roughness: 0.17 });
+    geometries.push(relayGeometry, relayCapGeometry); materials.push(relayMaterial, relayCapMaterial);
+    const relays: THREE.Mesh[] = [];
+    for (const [index, point] of [new THREE.Vector3(-2.7, 0, 1.35), new THREE.Vector3(-0.65, 0, 0.76), new THREE.Vector3(1.35, 0, -0.72), new THREE.Vector3(2.85, 0, -1.44)].entries()) {
+      const relay = new THREE.Mesh(relayGeometry, relayMaterial);
+      relay.position.set(point.x, 0.02, point.z);
+      relay.userData.offset = index * 0.72;
+      deck.add(relay);
+      const relayCap = new THREE.Mesh(relayCapGeometry, relayCapMaterial);
+      relayCap.position.set(point.x, 0.48, point.z);
+      relayCap.userData.offset = index * 0.72;
+      deck.add(relayCap);
+      relays.push(relayCap);
+    }
+
+    const sweepGeometry = new THREE.RingGeometry(0.38, 0.44, 48);
+    const sweepMaterial = new THREE.MeshBasicMaterial({ color: 0x99fff5, transparent: true, opacity: 0.52, side: THREE.DoubleSide });
+    geometries.push(sweepGeometry); materials.push(sweepMaterial);
+    const sweep = new THREE.Mesh(sweepGeometry, sweepMaterial);
+    sweep.rotation.x = -Math.PI / 2;
+    sweep.position.set(0.36, -0.28, -0.18);
+    deck.add(sweep);
+
     const particleGeometry = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(128 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
@@ -170,16 +234,33 @@ export function Trivia3D({ active, questionNumber, correct, motionRunning, onUna
     deck.add(particles);
 
     const applyState = (state: TriviaVisualState) => {
-      const colour = state.active ? 0x62f1df : 0x6a9898;
+      const palette = {
+        recruit: { primary: 0x62f1df, secondary: 0x0b887d, route: 0x75fff0 },
+        operator: { primary: 0xf1c56e, secondary: 0x986119, route: 0xffda83 },
+        specialist: { primary: 0xbe99ff, secondary: 0x663bb4, route: 0xd3b7ff },
+      }[state.difficulty];
+      const colour = state.active ? palette.primary : 0x6a9898;
       const highlightedPad = (Math.max(1, state.questionNumber) - 1) % pads.length;
       coreMaterial.color.setHex(colour);
-      coreMaterial.emissive.setHex(state.active ? 0x0b887d : 0x1d4b4e);
+      coreMaterial.emissive.setHex(state.active ? palette.secondary : 0x1d4b4e);
       coreMaterial.emissiveIntensity = state.active ? 1.62 + Math.min(state.correct, 4) * 0.12 : 0.62;
       ringMaterial.color.setHex(colour);
       ringMaterial.opacity = state.active ? 0.78 : 0.32;
       edgeMaterial.color.setHex(state.active ? 0x65f5e0 : 0x52827e);
       particleMaterial.color.setHex(colour);
       particleMaterial.opacity = state.active ? 0.52 + Math.min(state.correct, 4) * 0.04 : 0.18;
+      terrainMaterial.color.setHex(state.active ? 0x153f43 : 0x163136);
+      terrainMaterial.emissive.setHex(state.active ? palette.secondary : 0x173535);
+      terrainMaterial.emissiveIntensity = state.active ? 0.78 : 0.24;
+      contourMaterial.color.setHex(colour);
+      contourMaterial.opacity = state.active ? 0.21 : 0.06;
+      routeMaterial.color.setHex(state.active ? palette.route : 0x527d7b);
+      routeMaterial.opacity = state.active ? 0.84 : 0.2;
+      relayMaterial.emissive.setHex(state.active ? palette.secondary : 0x16474a);
+      relayCapMaterial.color.setHex(colour);
+      relayCapMaterial.emissive.setHex(state.active ? palette.secondary : 0x16474a);
+      sweepMaterial.color.setHex(colour);
+      sweepMaterial.opacity = state.active ? 0.52 : 0.12;
       commandLight.intensity = state.active ? 10 + state.questionNumber * 0.52 : 2.8;
       pads.forEach((pad, index) => {
         const material = pad.material as THREE.MeshStandardMaterial;
@@ -227,8 +308,12 @@ export function Trivia3D({ active, questionNumber, correct, motionRunning, onUna
       rings.forEach(ring => { ring.rotation.z += 0.008; });
       pads.forEach(pad => { pad.position.y = -0.32 + Math.sin(elapsed * 1.25 + pad.userData.offset) * 0.028; });
       beacons.forEach(beacon => { beacon.position.y = 0.82 + Math.sin(elapsed * 1.9 + beacon.userData.offset) * 0.08; });
+      relays.forEach(relay => { relay.position.y = 0.48 + Math.sin(elapsed * 1.58 + relay.userData.offset) * 0.06; });
       particles.rotation.y = elapsed * 0.048;
       grid.rotation.z = elapsed * 0.015;
+      contour.rotation.z = elapsed * -0.012;
+      sweep.scale.setScalar(1 + Math.sin(elapsed * 1.7) * 0.11);
+      sweep.material.opacity = 0.35 + Math.sin(elapsed * 1.7) * 0.12;
       render();
       frame = window.requestAnimationFrame(animate);
     };
