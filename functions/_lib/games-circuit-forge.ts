@@ -238,10 +238,13 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
         && row.diagnostic_index === index && rotations[index] === 0;
       const diagnosticReset = gridControlSchemaPresent && (!gridControlEnabled || diagnosedRelayAligned) ? ", diagnostic_index = NULL" : "";
       const phaseSpent = diagnosedRelayAligned ? ", phase_used = 1" : "";
+      // Diagnostics do not consume version capacity, so enabled rotations also compare their observed scan state.
+      const diagnosticGuard = gridControlEnabled ? " AND diagnostic_used = ?" : "";
       const update = db.prepare(`UPDATE dzn_circuit_forge_sessions
         SET rotations_json = ?, rotations = ?, status = ?${diagnosticReset}${phaseSpent}, version = version + 1, updated_at = ?
-        WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ? AND rotations < ?`)
-        .bind(JSON.stringify(rotations), rotationCount, status, now, user.id, row.id, row.version, now - CIRCUIT_FORGE_TTL_MS, CIRCUIT_FORGE_MAX_ROTATIONS);
+        WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ? AND rotations < ?${diagnosticGuard}`)
+        .bind(JSON.stringify(rotations), rotationCount, status, now, user.id, row.id, row.version, now - CIRCUIT_FORGE_TTL_MS, CIRCUIT_FORGE_MAX_ROTATIONS,
+          ...(gridControlEnabled ? [row.diagnostic_used] : []));
       const statements = [update];
       if (status === "won") {
         statements.push(db.prepare(`INSERT INTO dzn_circuit_forge_reward_ledger

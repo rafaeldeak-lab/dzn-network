@@ -196,6 +196,27 @@ async function run() {
     assert.equal(aligned.game?.phaseAvailable, false);
   });
 
+  await gridControlTest("a scan and concurrent rotation cannot leave a stale phase target", async fixture => {
+    await start(fixture);
+    setBoard(fixture, [3, 1, ...Array(23).fill(0)]);
+    const state = await payload(await call(fixture));
+    const diagnosticRequest = call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version });
+    const rotationRequest = call(fixture, { action: "rotate", gameId: state.game?.id, version: state.game?.version, index: 0 });
+    const [diagnostic, rotation] = await Promise.all([diagnosticRequest, rotationRequest]);
+    assert.equal([diagnostic.status, rotation.status].filter(status => status === 200).length, 1);
+    if (diagnostic.status === 200) {
+      assert.ok([409, 429].includes(rotation.status));
+      const scanned = await payload(await call(fixture));
+      assert.equal(scanned.game?.diagnosticIndex, 0);
+      assert.equal(scanned.game?.phaseAvailable, true);
+    } else {
+      assert.equal(rotation.status, 200);
+      const rotated = await payload(rotation);
+      assert.equal(rotated.game?.diagnosticIndex, null);
+      assert.equal(rotated.game?.phaseAvailable, false);
+    }
+  });
+
   await gridControlTest("a new board clears installed control state before a later re-enable", async fixture => {
     (fixture.env as Env).DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "false";
     await start(fixture);
