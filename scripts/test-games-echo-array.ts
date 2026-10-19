@@ -237,7 +237,7 @@ async function run() {
     const source = readFileSync("components/games/games-hub.tsx", "utf8");
     assert.match(source, /const cueIntervalMs = game\?\.cueIntervalMs/);
     assert.match(source, /echoArrayCueBuffer/);
-    assert.match(source, /revealing && index <= cuePulseIndex \? game\.cue\?\.\[index\] : null/);
+    assert.match(source, /revealing && index === cuePulseIndex \? game\.cue\?\.\[index\] : null/);
     assert.match(source, /Cue buffer is locked/);
     assert.doesNotMatch(source, /sequence_json/);
   });

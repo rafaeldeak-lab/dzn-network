@@ -46,6 +46,9 @@ try {
       await page.getByLabel("Live server cue buffer").waitFor();
       assert.ok(await page.locator('[aria-label$=" cue"]').count() <= 1,
         "Echo Array must not expose future sequence cues before their server-issued pulse.");
+      await page.waitForTimeout(1_600);
+      assert.ok(await page.locator('[aria-label$=" cue"]').count() <= 1,
+        "Echo Array must not retain prior cues after a later server-issued pulse begins.");
     }
     await page.getByRole("group", { name: "Echo Array signal nodes" }).waitFor();
     await page.getByText("Repeat the stored signal", { exact: true }).waitFor({ timeout: 8_000 });
