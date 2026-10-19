@@ -5,8 +5,9 @@ const production = unstable_readConfig({ config: "wrangler.toml", env: "producti
 assert.equal(production.vars.DZN_GAMES_NIGHT_RUN_ENABLED, "true");
 assert.equal(production.vars.DZN_GAMES_NIGHT_RUN_RECON_ENABLED, "true");
 assert.equal(production.vars.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED, "true");
-assert.equal(production.vars.DZN_ACCOUNT_DELETE_ENABLED, "true");
 assert.equal(production.vars.DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE, undefined);
+assert.equal(production.vars.DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE, "true");
+assert.equal(production.vars.DZN_ACCOUNT_DELETE_ENABLED, "false");
 assert.equal(unstable_readConfig({ config: "wrangler.toml", env: "preview" }).vars.DZN_GAMES_NIGHT_RUN_ENABLED, undefined);
 assert.equal(unstable_readConfig({ config: "wrangler.toml", env: "preview" }).vars.DZN_GAMES_NIGHT_RUN_RECON_ENABLED, undefined);
 assert.equal(unstable_readConfig({ config: "wrangler.toml", env: "preview" }).vars.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED, undefined);
