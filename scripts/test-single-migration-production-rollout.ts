@@ -79,6 +79,11 @@ assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
 assert.match(workflow, /survival-command-loadout-migration/);
 assert.match(workflow, /Drain in-flight account-deletion operations before the preservation baseline/);
+assert.equal(
+  (workflow.match(/MIGRATION_NAME.*0109_dzn_survival_command_loadouts\.sql/g) ?? []).length,
+  2,
+  "Account-closure maintenance and draining must run only for the 0109 state-preserving migration.",
+);
 assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
 assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
 assert.match(workflow, /migrations apply/);

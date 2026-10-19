@@ -123,6 +123,10 @@ jobs:
       - name: Verify protected account-closure maintenance in production
         run: |
           set -euo pipefail
+          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ]; then
+            echo "Account-closure maintenance is not required for ${MIGRATION_NAME}."
+            exit 0
+          fi
           MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/survival-command-loadout-migration)"
           MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
           let response;
@@ -171,6 +175,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
         run: |
           set -euo pipefail
+          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ]; then
+            echo "Account-deletion drain is not required for ${MIGRATION_NAME}."
+            exit 0
+          fi
           # New closures are blocked by the deployed maintenance flag. Wait for the
           # previous runtime grace window, then require two empty read-only samples.
           sleep 90
