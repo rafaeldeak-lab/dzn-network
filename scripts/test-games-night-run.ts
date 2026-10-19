@@ -9,11 +9,13 @@ import {
   NIGHT_RUN_MIN_REACTION_MS,
   NIGHT_RUN_RECON_SCAN_GRACE_MS,
   NIGHT_RUN_REWARD,
+  NIGHT_RUN_SIGNAL_BURST_MS,
   NIGHT_RUN_TOTAL_GATES,
   NIGHT_RUN_TTL_MS,
   nightRunGateWindowMs,
   type NightRunLane,
   type NightRunPayload,
+  type NightRunRouteSupport,
 } from "../lib/games-night-run";
 import { gamesFixture } from "./lib/games-hub-local";
 
@@ -25,9 +27,11 @@ async function nightRunFixture(migrate = true) {
   if (migrate) {
     fixture.db.sqlite.exec(readFileSync("migrations/0104_games_hub_night_run.sql", "utf8"));
     fixture.db.sqlite.exec(readFileSync("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
+    fixture.db.sqlite.exec(readFileSync("migrations/0110_games_hub_night_run_route_control.sql", "utf8"));
   }
   (fixture.env as Env).DZN_GAMES_NIGHT_RUN_ENABLED = "true";
   (fixture.env as Env).DZN_GAMES_NIGHT_RUN_RECON_ENABLED = "true";
+  (fixture.env as Env).DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "true";
   return fixture;
 }
 
@@ -73,6 +77,11 @@ function scan(state: NightRunPayload) {
   return { action: "scan", gameId: state.game.id, version: state.game.version };
 }
 
+function support(state: NightRunPayload, value: NightRunRouteSupport) {
+  assert.ok(state.game);
+  return { action: "support", gameId: state.game.id, version: state.game.version, support: value };
+}
+
 function wrongLane(lane: NightRunLane): NightRunLane { return lane === "left" ? "right" : "left"; }
 
 async function completeRun(fixture: Fixture, initial?: NightRunPayload) {
@@ -94,7 +103,7 @@ async function run() {
     fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "false";
     assert.equal((await call(fixture)).status, 404);
     fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "true";
-    for (const body of [null, [], { action: "start", reward: 180 }, { action: "scan" }, { action: "scan", gameId: "x", version: 0, lane: "left" }, { action: "drive" }, { action: "drive", gameId: "x", version: 0, lane: "left" }]) {
+    for (const body of [null, [], { action: "start", reward: 180 }, { action: "scan" }, { action: "scan", gameId: "x", version: 0, lane: "left" }, { action: "support" }, { action: "support", gameId: "x", version: 0, support: "decoy", lane: "left" }, { action: "drive" }, { action: "drive", gameId: "x", version: 0, lane: "left" }]) {
       assert.equal((await call(fixture, body)).status, 400);
     }
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_night_run_sessions").get()?.count, 0);
@@ -156,6 +165,55 @@ async function run() {
     assert.equal(scanned.game?.safeLane, "right");
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_night_run_gate_scans WHERE user_id = 'local-player'").get()?.count, 1);
     assert.equal((await call(fixture, scan(jammed))).status, 409);
+  });
+
+  await test("route control is feature-gated and remains unavailable without its isolated activation", async fixture => {
+    fixture.env.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "false";
+    await start(fixture);
+    openGate(fixture);
+    const state = await visibleGate(fixture);
+    assert.equal(state.game?.routeControlAvailable, false);
+    assert.equal(state.game?.decoyAvailable, false);
+    assert.equal(state.game?.burstAvailable, false);
+    assert.equal((await call(fixture, support(state, "decoy"))).status, 400);
+  });
+
+  await test("route control records one server-verified burst and one decoy-protected recovery", async fixture => {
+    let state = await start(fixture);
+    const route = JSON.parse(fixture.db.sqlite.prepare("SELECT lane_sequence_json FROM dzn_night_run_sessions WHERE user_id = 'local-player'").get()?.lane_sequence_json as string) as NightRunLane[];
+    route[0] = "centre";
+    const past = Date.now() - Math.max(NIGHT_RUN_MIN_REACTION_MS + 180, 700);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET lane_sequence_json = ?, gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify(route), past, past - 800);
+    state = await visibleGate(fixture);
+    assert.equal(state.game?.routeControlAvailable, true);
+    assert.equal(state.game?.decoyAvailable, true);
+    assert.equal(state.game?.burstAvailable, true);
+    const beforeBurst = state.game!.gateEndsAt;
+    state = await payload(await call(fixture, support(state, "burst")));
+    assert.equal(state.game?.burstActive, true);
+    assert.equal(state.game?.burstSpent, true);
+    assert.equal(state.game?.burstAvailable, false);
+    assert.equal(state.game!.gateEndsAt - beforeBurst, NIGHT_RUN_SIGNAL_BURST_MS);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET updated_at = ? WHERE user_id = 'local-player'").run(Date.now() - 500);
+    assert.equal((await call(fixture, support(state, "burst"))).status, 409);
+
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET started_at = started_at - 6000, updated_at = updated_at - 6000 WHERE user_id = 'local-player'").run();
+    state = await start(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET lane_sequence_json = ?, gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify(route), past, past - 800);
+    state = await visibleGate(fixture);
+    state = await payload(await call(fixture, support(state, "decoy")));
+    assert.equal(state.game?.decoyArmed, true);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET updated_at = ? WHERE user_id = 'local-player'").run(Date.now() - 500);
+    state = await payload(await call(fixture, drive(state, wrongLane(state.game!.safeLane!))));
+    assert.equal(state.game?.status, "playing");
+    assert.equal(state.game?.collisions, 0);
+    assert.equal(state.game?.decoyArmed, false);
+    assert.equal(state.game?.decoySpent, true);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - 700, Date.now() - 900);
+    assert.equal((await call(fixture, support(state, "decoy"))).status, 409);
   });
 
   await test("every fresh convoy includes at least two unpredictable jammer gates without exposing their routes", async fixture => {
@@ -263,19 +321,23 @@ async function run() {
   try {
     const db = await miniflare.getD1Database("DB");
     await db.exec("CREATE TABLE users (id TEXT PRIMARY KEY); INSERT INTO users VALUES ('local-player');");
-    for (const file of ["migrations/0104_games_hub_night_run.sql", "migrations/0105_games_hub_night_run_recon.sql"]) {
+    for (const file of ["migrations/0104_games_hub_night_run.sql", "migrations/0105_games_hub_night_run_recon.sql", "migrations/0110_games_hub_night_run_route_control.sql"]) {
       const migration = readFileSync(file, "utf8").replace(/^--.*$/gm, "");
       for (const statement of migration.split(";").map(value => value.trim()).filter(Boolean)) await db.prepare(statement).run();
     }
     const table = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dzn_night_run_gate_scans'").all<{ name: string }>();
     const index = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dzn_night_run_gate_scans_session'").all<{ name: string }>();
     const foreignKeys = await db.prepare("PRAGMA foreign_key_list(dzn_night_run_gate_scans)").all<{ table: string }>();
+    const routeIndex = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dzn_night_run_route_control'").all<{ name: string }>();
+    const routeColumns = await db.prepare("PRAGMA table_info(dzn_night_run_sessions)").all<{ name: string; dflt_value: string | null }>();
     assert.equal(table.results.length, 1);
     assert.equal(index.results.length, 1);
     assert.ok((foreignKeys.results ?? []).some((row: { table: string }) => row.table === "users"));
+    assert.equal(routeIndex.results.length, 1);
+    for (const column of ["decoy_armed", "decoy_used", "burst_used", "gate_extension_ms"]) assert.ok((routeColumns.results ?? []).some((row: { name: string; dflt_value: string | null }) => row.name === column));
     assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
     assert.equal((await db.prepare("SELECT COUNT(*) count FROM dzn_night_run_gate_scans").first<{ count: number }>())?.count, 0);
-    passed++; console.log("PASS Night Run recon migration has its schema, index, foreign key and zero-row baseline");
+    passed++; console.log("PASS Night Run recon and route-control migrations have their schema, indexes, foreign key and zero-row baseline");
   } finally { await miniflare.dispose(); }
 
   const nightRunScene = readFileSync("components/games/night-run-3d.tsx", "utf8");
@@ -286,10 +348,14 @@ async function run() {
   assert.match(nightRunScene, /const pursuers/, "The escape scene must render the pursuit convoy rather than a static empty route.");
   assert.match(nightRunScene, /const pursuitPressure/, "The pursuit formation must be derived before any motion loop runs.");
   assert.match(nightRunScene, /mastBeacon/, "The player convoy must retain its live signal-beacon model.");
+  assert.match(nightRunScene, /dznNightRunRouteControl/, "Canvas diagnostics must expose the active route-control visual state for browser QA.");
+  assert.match(nightRunScene, /const supportVisuals/, "The convoy scene must model route-control support rather than only presenting text controls.");
   assert.match(nightRunScene, /scannerRing\.visible = requiresRecon \|\| scannerAvailable/, "The scanner ring must not appear on ordinary reduced-motion gates.");
   assert.match(nightRunPanel, /action: "scan"/, "The accessible Night Run controls must dispatch the same authoritative scan action.");
   assert.match(nightRunPanel, /!game\.safeLane/, "The accessible lane deck must remain disabled while an encrypted route is masked.");
   assert.match(nightRunPanel, /nightRunTelemetry/, "The accessible Night Run panel must expose convoy state outside the WebGL scene.");
+  assert.match(nightRunPanel, /data-route-support="decoy"/, "The accessible Night Run panel must expose the same decoy action as the server.");
+  assert.match(nightRunPanel, /data-route-support="burst"/, "The accessible Night Run panel must expose the same signal burst action as the server.");
   assert.match(nightRunPanel, /Math\.min\(game\.totalGates, game\.gatesCleared \+ 1\)/, "Completed runs must not display a gate beyond the server-issued total.");
   console.log(`Night Run tests passed: ${passed}`);
 }

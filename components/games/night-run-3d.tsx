@@ -15,6 +15,8 @@ type NightRun3DProps = {
   motionRunning: boolean;
   requiresRecon: boolean;
   scannerAvailable: boolean;
+  decoyArmed: boolean;
+  burstActive: boolean;
   intensity: NightRunIntensity;
   gatesCleared: number;
   totalGates: number;
@@ -28,7 +30,7 @@ const LANES: { id: NightRunLane; x: number; label: string }[] = [
   { id: "right", x: 3.15, label: "Right" },
 ];
 
-export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, intensity, gatesCleared, totalGates, collisions, onDrive }: NightRun3DProps) {
+export function NightRun3D({ safeLane, active, disabled, motionRunning, requiresRecon, scannerAvailable, decoyArmed, burstActive, intensity, gatesCleared, totalGates, collisions, onDrive }: NightRun3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const driveRef = useRef(onDrive);
   const disabledRef = useRef(disabled);
@@ -56,6 +58,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     renderer.domElement.dataset.dznNightRunIntensity = intensity;
     renderer.domElement.dataset.dznNightRunGate = String(Math.min(totalGates, gatesCleared + 1));
     renderer.domElement.dataset.dznNightRunHull = String(Math.max(0, 100 - collisions * 50));
+    renderer.domElement.dataset.dznNightRunRouteControl = decoyArmed ? "decoy-armed" : burstActive ? "burst-active" : "none";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
     const backgroundScene = new THREE.Scene();
@@ -273,6 +276,35 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
     vehicle.position.set(0, 0, 5.6);
     environment.add(vehicle);
 
+    const supportVisuals = new THREE.Group();
+    const decoyGeometry = new THREE.OctahedronGeometry(0.24, 0);
+    const decoyRingGeometry = new THREE.TorusGeometry(0.38, 0.025, 8, 30);
+    const decoyMaterial = new THREE.MeshStandardMaterial({ color: 0x6be8ff, emissive: 0x0c91b9, emissiveIntensity: 1.8, metalness: 0.78, roughness: 0.18 });
+    const decoyRingMaterial = new THREE.MeshBasicMaterial({ color: 0x96f6ff, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false });
+    const burstGeometry = new THREE.TorusGeometry(1.25, 0.035, 8, 48);
+    const burstMaterial = new THREE.MeshBasicMaterial({ color: 0xffdd8b, transparent: true, opacity: 0.78, blending: THREE.AdditiveBlending, depthWrite: false });
+    disposables.push(decoyGeometry, decoyRingGeometry, burstGeometry); materials.push(decoyMaterial, decoyRingMaterial, burstMaterial);
+    const decoy = new THREE.Group();
+    const decoyCore = new THREE.Mesh(decoyGeometry, decoyMaterial);
+    const decoyRing = new THREE.Mesh(decoyRingGeometry, decoyRingMaterial);
+    decoyRing.rotation.x = Math.PI / 2;
+    const decoyLight = new THREE.PointLight(0x72eaff, 2.8, 4.4, 2);
+    decoy.add(decoyCore, decoyRing, decoyLight);
+    decoy.position.set(1.55, 0.95, 4.8);
+    decoy.visible = decoyArmed;
+    supportVisuals.add(decoy);
+    const burstRings: any[] = [];
+    for (let index = 0; index < 3; index++) {
+      const ring = new THREE.Mesh(burstGeometry, burstMaterial);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(0, 0.09 + index * 0.01, -3.95);
+      ring.visible = burstActive;
+      ring.userData.index = index;
+      burstRings.push(ring);
+      supportVisuals.add(ring);
+    }
+    environment.add(supportVisuals);
+
     const pursuerGeometry = new THREE.BoxGeometry(0.74, 0.2, 1.28);
     const pursuerCabinGeometry = new THREE.BoxGeometry(0.46, 0.2, 0.56);
     const pursuerMaterial = new THREE.MeshStandardMaterial({ color: 0x381445, emissive: 0x4f104f, emissiveIntensity: 1.35, metalness: 0.88, roughness: 0.19 });
@@ -445,6 +477,17 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
         scannerRing.material.opacity = masked ? 0.62 + Math.sin(elapsed * 4.2) * 0.22 : requiresRecon ? 0.22 : 0;
         scannerRing.rotation.z = elapsed * (masked ? 1.8 : 0.28);
         scannerRing.scale.setScalar(masked ? 1 + Math.sin(elapsed * 3.6) * 0.08 : 1);
+        decoy.visible = decoyArmed;
+        decoy.position.y = 0.95 + Math.sin(elapsed * 3.3) * 0.08;
+        decoy.rotation.y = elapsed * 2.1;
+        decoyRing.rotation.z = elapsed * 2.6;
+        decoyRingMaterial.opacity = decoyArmed ? 0.48 + Math.sin(elapsed * 5.2) * 0.22 : 0;
+        decoyLight.intensity = decoyArmed ? 2.25 + Math.sin(elapsed * 4.2) * 0.7 : 0;
+        burstRings.forEach((ring, index) => {
+          ring.visible = burstActive;
+          ring.scale.setScalar(burstActive ? 0.72 + ((elapsed * 0.7 + index * 0.22) % 1) * 0.58 : 1);
+          ring.material.opacity = burstActive ? 0.5 - index * 0.09 + Math.sin(elapsed * 5 + index) * 0.12 : 0;
+        });
         for (const lane of LANES) {
           const live = lane.id === safeLane && active;
           const material = gateMaterials.get(lane.id)!;
@@ -481,7 +524,7 @@ export function NightRun3D({ safeLane, active, disabled, motionRunning, requires
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [active, collisions, gatesCleared, intensity, motionRunning, requiresRecon, safeLane, scannerAvailable, totalGates]);
+  }, [active, burstActive, collisions, decoyArmed, gatesCleared, intensity, motionRunning, requiresRecon, safeLane, scannerAvailable, totalGates]);
 
   return <div ref={mountRef} className="dzn-night-run-3d" data-safe-lane={safeLane ?? "waiting"} />;
 }

@@ -20,7 +20,7 @@ import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_R
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_SIGHTS, RANGER_RANGE_TARGETS, RANGER_RANGE_WIND_META, type RangerRangePayload, type RangerRangeSight, type RangerRangeTarget } from "@/lib/games-ranger-range";
-import { NIGHT_RUN_LANES, NIGHT_RUN_MIN_ACTION_INTERVAL_MS, NIGHT_RUN_REWARD, type NightRunLane, type NightRunPayload } from "@/lib/games-night-run";
+import { NIGHT_RUN_LANES, NIGHT_RUN_MIN_ACTION_INTERVAL_MS, NIGHT_RUN_REWARD, type NightRunLane, type NightRunPayload, type NightRunRouteSupport } from "@/lib/games-night-run";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
@@ -1481,6 +1481,13 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
     void mutate({ action: "scan", gameId: game.id, version: game.version });
   }, [active, busy, cooldown, game, gateOpen, mutate]);
 
+  const deployRouteSupport = useCallback((support: NightRunRouteSupport) => {
+    if (!game || !game.routeControlAvailable || !game.safeLane || !active || !gateOpen || busy || cooldown) return;
+    if (support === "decoy" && !game.decoyAvailable) return;
+    if (support === "burst" && !game.burstAvailable) return;
+    void mutate({ action: "support", gameId: game.id, version: game.version, support });
+  }, [active, busy, cooldown, game, gateOpen, mutate]);
+
   useEffect(() => {
     if (!game || game.status !== "playing") return;
     const clock = serverClock.current;
@@ -1516,16 +1523,27 @@ function NightRunPanel({ now, motionRunning, onProgress }: { now: number; motion
     </div>
     {game ? <>
       <div className={styles.nightRunMeta}><span><Radio size={14} />{game.gatesCleared} / {game.totalGates}</span><span><Target size={14} />{game.collisions} collisions</span><span data-intensity={game.intensity}><Zap size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen} data-intensity={game.intensity} data-recon={game.scannerAvailable}>
-        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? game.scannerAvailable ? `${game.intensity} / SIGNAL JAMMED` : `${game.intensity} / GATE LIVE` : `${game.intensity} / CONVOY MOVING` : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? game.scannerAvailable ? "Jammer gate: scan the route" : `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
+      <div className={styles.nightRunStage} data-status={game.status} data-live={gateOpen} data-intensity={game.intensity} data-recon={game.scannerAvailable} data-route-control={game.decoyArmed ? "decoy-armed" : game.burstActive ? "burst-active" : "none"}>
+        <div className={styles.nightRunReadout} aria-live="polite"><span>{active ? gateOpen ? game.scannerAvailable ? `${game.intensity} / SIGNAL JAMMED` : game.decoyArmed ? `${game.intensity} / DECOY ARMED` : game.burstActive ? `${game.intensity} / GATE EXTENDED` : `${game.intensity} / GATE LIVE` : `${game.intensity} / CONVOY MOVING` : game.status === "won" ? "CITY / ESCAPED" : "CONVOY / STOPPED"}</span><strong>{active ? gateOpen ? game.scannerAvailable ? "Jammer gate: scan the route" : game.decoyArmed ? "Decoy will absorb one wrong steer" : game.burstActive ? `Safe lane: ${game.safeLane} - signal window extended` : `Safe lane: ${game.safeLane}` : "Read the next perimeter gate" : game.status === "won" ? "Convoy reached the DZN relay" : game.status === "failed" ? "Convoy disabled" : "Gate window expired"}</strong></div>
         <div className={styles.nightRunTelemetry} aria-label="Convoy telemetry">
           <div><span>CONVOY</span><strong>N-07 // SABLE</strong></div>
           <div><span>HULL</span><strong>{Math.round(((game.maxCollisions - game.collisions) / game.maxCollisions) * 100)}%</strong></div>
           <div><span>THREAT</span><strong data-intensity={game.intensity}>{game.intensity}</strong></div>
           <div><span>GATE</span><strong>{String(Math.min(game.totalGates, game.gatesCleared + 1)).padStart(2, "0")} / {String(game.totalGates).padStart(2, "0")}</strong></div>
         </div>
-        <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown || game.scannerAvailable} motionRunning={motionRunning} requiresRecon={game.requiresRecon} scannerAvailable={game.scannerAvailable} intensity={game.intensity} gatesCleared={game.gatesCleared} totalGates={game.totalGates} collisions={game.collisions} onDrive={drive} />
+        <NightRun3D safeLane={game.safeLane} active={gateOpen} disabled={busy || cooldown || game.scannerAvailable} motionRunning={motionRunning} requiresRecon={game.requiresRecon} scannerAvailable={game.scannerAvailable} decoyArmed={game.decoyArmed} burstActive={game.burstActive} intensity={game.intensity} gatesCleared={game.gatesCleared} totalGates={game.totalGates} collisions={game.collisions} onDrive={drive} />
         {game.scannerAvailable && <div className={styles.nightRunRecon} role="status"><div><ScanSearch size={20} /><span><strong>Encrypted convoy gate</strong><small>The safe lane stays masked until this one server-recorded scan completes.</small></span></div><button type="button" className={styles.secondary} disabled={busy || cooldown} onClick={scan}><ScanSearch size={17} />Run gate scan</button></div>}
+        {game.routeControlAvailable && <div className={styles.nightRunSupport} aria-label="Night Run route control">
+          <div className={styles.nightRunSupportIntro}><Satellite size={19} /><span><strong>Route control</strong><small>Each tool is available once per convoy and recorded by the DZN server.</small></span></div>
+          <div className={styles.nightRunSupportActions}>
+            <button type="button" data-route-support="decoy" disabled={!gateOpen || !game.safeLane || busy || cooldown || !game.decoyAvailable} onClick={() => deployRouteSupport("decoy")}>
+              <Shield size={17} /><span><strong>{game.decoyArmed ? "Decoy deployed" : game.decoySpent ? "Decoy spent" : "Deploy decoy"}</strong><small>{game.decoyArmed ? "Absorbs one bad steer" : game.decoySpent ? "No decoy remains" : "Protect the next wrong lane"}</small></span>
+            </button>
+            <button type="button" data-route-support="burst" disabled={!gateOpen || !game.safeLane || busy || cooldown || !game.burstAvailable} onClick={() => deployRouteSupport("burst")}>
+              <Zap size={17} /><span><strong>{game.burstActive ? "Signal window extended" : game.burstSpent ? "Burst spent" : "Signal burst"}</strong><small>{game.burstActive ? "Gate timing is extended" : game.burstSpent ? "No burst remains" : "Extend this gate window"}</small></span>
+            </button>
+          </div>
+        </div>}
         <div className={styles.nightRunLanes} role="group" aria-label="Night Run convoy lanes">
           {NIGHT_RUN_LANES.map((lane, index) => {
             const live = gateOpen && game.safeLane === lane;

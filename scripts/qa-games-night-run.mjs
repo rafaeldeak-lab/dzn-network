@@ -76,6 +76,14 @@ try {
       await page.locator('[data-live="true"][data-lane]').waitFor({ timeout: 5_000 });
       const liveLane = page.locator('[data-live="true"][data-lane]');
       await waitForEnabled(liveLane, "the live lane");
+      const burst = page.locator('[data-route-support="burst"]');
+      await waitForEnabled(burst, "the Night Run signal burst");
+      const burstResponsePromise = page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "POST");
+      await burst.click();
+      const burstResponse = await burstResponsePromise;
+      assert.equal(burstResponse.status(), 200, await burstResponse.text());
+      await page.locator('[data-route-control="burst-active"]').waitFor({ timeout: 5_000 });
+      assert.equal(await canvas.getAttribute("data-dzn-night-run-route-control"), "burst-active");
       const driveResponsePromise = page.waitForResponse(response => response.url().endsWith("/api/games/night-run") && response.request().method() === "POST");
       await liveLane.click({ force: true });
       const driveResponse = await driveResponsePromise;
