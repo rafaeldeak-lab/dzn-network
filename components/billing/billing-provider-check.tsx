@@ -14,6 +14,16 @@ const labels = {
 } as const;
 type Result = { checkedAt: string; checks: Record<keyof typeof labels, boolean>; webhookSigningSecretMatchVerified: boolean };
 
+function nextStep(checks: Result["checks"]) {
+  if (!checks.accountRequirementsClear) return "Stripe has outstanding account requirements. Resolve them in Stripe, then run this check again.";
+  if (!checks.accountCanCharge || !checks.accountCanPayOut || !checks.accountDetailsSubmitted) return "Stripe has not enabled every required payment capability. Resolve the account-status requirements in Stripe, then run this check again.";
+  if (!checks.starterPrice || !checks.proPrice) return "A subscription price needs review before customer checkout can continue.";
+  if (!checks.defaultPortal || !checks.paymentMethodUpdates || !checks.cancellationAtPeriodEnd || !checks.invoiceHistory) return "The Stripe customer portal needs its recovery settings reviewed before launch.";
+  if (!checks.webhookDestination || !checks.webhookEvents) return "The production Stripe webhook needs review before customer checkout can continue.";
+  if (!checks.liveKey || !checks.accountMatches || !checks.individualUkAccount) return "The live Stripe account connection needs review before customer checkout can continue.";
+  return "Provider configuration is verified. A genuine customer checkout and matching webhook delivery remain the final live proof.";
+}
+
 export function BillingProviderCheck() {
   const [account, setAccount] = useState("");
   const [fingerprint, setFingerprint] = useState("");
@@ -74,6 +84,7 @@ export function BillingProviderCheck() {
           {ok ? <CheckCircle2 size={18} className="shrink-0 text-emerald-300" aria-hidden="true" /> : <XCircle size={18} className="shrink-0 text-red-300" aria-hidden="true" />}
           <span className="min-w-0 flex-1">{label}</span><span className={ok ? "text-emerald-300" : "text-red-300"}>{ok ? "Verified" : "Not verified"}</span>
         </li>)}</ul>
+      <p className="mt-4 border-l-2 border-cyan-300/50 bg-cyan-300/5 px-3 py-2 text-sm leading-6 text-slate-200">{nextStep(result.checks)}</p>
       <p className="mt-4 text-sm text-slate-300">Payment delivery: not verified by this check. No settings changed.</p>
     </section>}
   </main>;
