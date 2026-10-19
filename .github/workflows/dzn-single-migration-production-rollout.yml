@@ -19,6 +19,7 @@ on:
           - 0101_games_hub_circuit_forge.sql
           - 0102_games_hub_ranger_range.sql
           - 0105_games_hub_night_run_recon.sql
+          - 0107_dzn_command_centre.sql
       confirm_production_migration:
         description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
         required: true
@@ -79,7 +80,7 @@ jobs:
             exit 1
           fi
           case "${MIGRATION_NAME_INPUT}" in
-            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql) ;;
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql) ;;
             *)
               echo "::error::migration_name is not an approved single-migration target."
               exit 1
