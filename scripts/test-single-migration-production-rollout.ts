@@ -183,6 +183,32 @@ try {
     { encoding: "utf8" },
   );
   assert.equal(commandCentreLedger.status, 0, `${commandCentreLedger.stdout ?? ""}${commandCentreLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(commandCentreDirectory, "stage");
+  const commandCentreStage = spawnSync(
+    process.execPath,
+    [
+      "node_modules/tsx/dist/cli.mjs",
+      "scripts/dzn-single-migration-production-rollout.ts",
+      "prepare",
+      "--migration",
+      "0107_dzn_command_centre.sql",
+      "--stage-dir",
+      stageDirectory,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(commandCentreStage.status, 0, `${commandCentreStage.stdout ?? ""}${commandCentreStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql).sort(), [
+    "dzn_command_centre_buildings",
+    "dzn_command_centre_profiles",
+    "dzn_command_centre_spend_ledger",
+    "idx_dzn_command_centre_buildings_state",
+    "idx_dzn_command_centre_spend_history",
+  ]);
 } finally {
   rmSync(commandCentreDirectory, { force: true, recursive: true });
 }

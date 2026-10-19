@@ -231,7 +231,7 @@ function expectedObjectSql(plan: MigrationPlan) {
   const objects: Record<string, string> = {};
 
   for (const statement of statements) {
-    const tableMatch = statement.match(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
+    const tableMatch = statement.match(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (tableMatch) {
       const name = tableMatch[1];
       if (!expectedTableNames.has(name) || objects[name]) {
@@ -241,7 +241,7 @@ function expectedObjectSql(plan: MigrationPlan) {
       continue;
     }
 
-    const indexMatch = statement.match(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
+    const indexMatch = statement.match(/^CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (indexMatch) {
       const name = indexMatch[1];
       const tableName = indexMatch[2];
