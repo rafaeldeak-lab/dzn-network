@@ -1,11 +1,12 @@
 import { verifyCheckoutPrice } from "./billing-checkout";
 import { stripeGetRequest } from "./stripe";
+import { hasClearStripeAccountRequirements, type StripeAccountRequirements } from "./stripe-account-requirements";
 import type { Env } from "./types";
 
 const events = ["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated",
   "customer.subscription.deleted", "invoice.payment_succeeded", "invoice.payment_failed"];
 type Account = { id?: string; charges_enabled?: boolean; payouts_enabled?: boolean; details_submitted?: boolean;
-  country?: string; business_type?: string; requirements?: { disabled_reason?: unknown; currently_due?: unknown[]; past_due?: unknown[] } };
+  country?: string; business_type?: string; requirements?: StripeAccountRequirements };
 type Portal = { is_default?: boolean; active?: boolean; livemode?: boolean; features?: {
   payment_method_update?: { enabled?: boolean }; invoice_history?: { enabled?: boolean };
   subscription_cancel?: { enabled?: boolean; mode?: string };
@@ -30,10 +31,7 @@ export async function getBillingProviderReadiness(env: Env, expectedAccount: str
       checks.accountCanPayOut = account?.payouts_enabled === true;
       checks.accountDetailsSubmitted = account?.details_submitted === true;
       checks.individualUkAccount = account?.country === "GB" && account?.business_type === "individual";
-      const requirements = account?.requirements;
-      checks.accountRequirementsClear = Boolean(requirements && !requirements.disabled_reason &&
-        Array.isArray(requirements.currently_due) && requirements.currently_due.length === 0 &&
-        Array.isArray(requirements.past_due) && requirements.past_due.length === 0);
+      checks.accountRequirementsClear = hasClearStripeAccountRequirements(account?.requirements);
     } catch { /* Provider errors and identity details must never be returned or logged. */ }
     if (checks.accountMatches) {
       for (const plan of ["starter", "pro"] as const) {
