@@ -13,6 +13,7 @@ import {
   resolveSurvivalCommandOutcome,
   sectorLockReason,
   survivalCommandDailyDirectiveFor,
+  survivalCommandDirectiveFingerprintMarker,
   survivalCommandDirectiveMatches,
   survivalCommandLoadoutEffect,
   validIncidentAction,
@@ -176,7 +177,8 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
     db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
       JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
       WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
-      LIMIT 1`).bind(user.id, currentDay, dailyDirective.sector, dailyDirective.approach).first<{ id: string }>(),
+        AND substr(ledger.outcome_fingerprint, 1, 2) = ?
+      LIMIT 1`).bind(user.id, currentDay, dailyDirective.sector, dailyDirective.approach, survivalCommandDirectiveFingerprintMarker(dailyDirective)).first<{ id: string }>(),
   ]);
   const sectors = SURVIVAL_COMMAND_SECTOR_KEYS.map(key => {
     const sector = SURVIVAL_COMMAND_SECTORS[key];
@@ -381,7 +383,9 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
   const directiveAlreadyCompleted = directiveMatched ? await db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
     JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
     WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
-    LIMIT 1`).bind(user.id, row.deployment_day, dailyDirective.sector, dailyDirective.approach).first<{ id: string }>() : null;
+      AND substr(ledger.outcome_fingerprint, 1, 2) = ?
+    LIMIT 1`).bind(user.id, row.deployment_day, dailyDirective.sector, dailyDirective.approach, survivalCommandDirectiveFingerprintMarker(dailyDirective)).first<{ id: string }>() : null;
+  const directiveAwarded = directiveMatched && !directiveAlreadyCompleted;
   const outcome = resolveSurvivalCommandOutcome({
     seed: row.seed,
     sector: row.sector,
@@ -390,8 +394,9 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
     action: body.decision,
     buildings,
     fieldOrder: fieldOrdersSchemaReady && isSurvivalCommandFieldOrder(row.field_order) ? row.field_order : null,
-    dailyDirective: directiveMatched && !directiveAlreadyCompleted ? dailyDirective : null,
+    dailyDirective: directiveAwarded ? dailyDirective : null,
   });
+  const outcomeFingerprint = directiveAwarded ? `${survivalCommandDirectiveFingerprintMarker(dailyDirective)}${outcome.fingerprint.slice(2)}` : outcome.fingerprint;
   const ledgerId = crypto.randomUUID();
   const results = await db.batch([
     db.prepare(`INSERT OR IGNORE INTO dzn_survival_command_resolution_ledger
@@ -399,7 +404,7 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM dzn_survival_command_expeditions
         WHERE id = ? AND user_id = ? AND status = 'deployed' AND version = ? AND ready_at <= ?)`)
-      .bind(ledgerId, user.id, row.id, body.requestId, body.decision, outcome.outcome, outcome.salvage, outcome.intel, outcome.fingerprint, now,
+      .bind(ledgerId, user.id, row.id, body.requestId, body.decision, outcome.outcome, outcome.salvage, outcome.intel, outcomeFingerprint, now,
         row.id, user.id, row.version, now),
     db.prepare(`UPDATE dzn_survival_command_expeditions SET status = 'resolved', resolved_at = ?, version = version + 1
       WHERE id = ? AND user_id = ? AND status = 'deployed' AND version = ? AND ready_at <= ?

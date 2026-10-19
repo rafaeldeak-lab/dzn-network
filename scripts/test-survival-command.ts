@@ -6,7 +6,7 @@ import { handleCommandCentre } from "../functions/_lib/command-centre";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleSurvivalCommand } from "../functions/_lib/survival-command";
 import type { Env } from "../functions/_lib/types";
-import { resolveSurvivalCommandOutcome, survivalCommandDailyDirectiveFor, type SurvivalCommandAction, type SurvivalCommandPayload } from "../lib/survival-command";
+import { resolveSurvivalCommandOutcome, survivalCommandDailyDirectiveFor, survivalCommandDirectiveFingerprintMarker, type SurvivalCommandAction, type SurvivalCommandPayload } from "../lib/survival-command";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -307,6 +307,18 @@ async function run() {
     const directive = survivalCommandDailyDirectiveFor("local-player", directiveDay!);
     assert.deepEqual(survivalCommandDailyDirectiveFor("local-player", directiveDay!), directive);
 
+    const legacyExpeditionId = randomUUID();
+    const legacyRequestId = randomUUID();
+    const legacyNow = Date.now() - 10_000;
+    value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_expeditions
+      (id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at)
+      VALUES (?, 'local-player', ?, 'perimeter', 'scout', 'field_kit', 'resolved', 'legacy-directive-proof', ?, 1, ?, ?, ?)`)
+      .run(legacyExpeditionId, legacyRequestId, directiveDay, legacyNow - 2, legacyNow - 1, legacyNow);
+    value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_resolution_ledger
+      (id, user_id, expedition_id, request_id, action, outcome, salvage, intel, outcome_fingerprint, resolved_at)
+      VALUES (?, 'local-player', ?, ?, 'secure', 'clean', 1, 1, 'deadbeef', ?)`)
+      .run(randomUUID(), legacyExpeditionId, randomUUID(), legacyNow);
+
     const first = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID() }));
     value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET deployment_day = ?, started_at = 0, ready_at = 1 WHERE id = ?").run(directiveDay, first.expedition!.id);
     const ready = await payload(await request(value));
@@ -315,9 +327,10 @@ async function run() {
     assert.ok(firstSeed);
     const base = resolveSurvivalCommandOutcome({ seed: firstSeed, sector: "perimeter", approach: "scout", loadout: "field_kit", action, buildings: ready.buildings! });
     await payload(await request(value, { action: "resolve", expeditionId: ready.expedition!.id, version: ready.expedition!.version, requestId: randomUUID(), decision: action }));
-    const firstLedger = value.db.sqlite.prepare("SELECT salvage, intel FROM dzn_survival_command_resolution_ledger WHERE expedition_id = ?").get(first.expedition!.id);
+    const firstLedger = value.db.sqlite.prepare("SELECT salvage, intel, outcome_fingerprint FROM dzn_survival_command_resolution_ledger WHERE expedition_id = ?").get(first.expedition!.id) as { salvage: number; intel: number; outcome_fingerprint: string } | undefined;
     assert.equal(firstLedger?.salvage, base.salvage + directive.bonus.salvage);
     assert.equal(firstLedger?.intel, base.intel + directive.bonus.intel);
+    assert.match(firstLedger?.outcome_fingerprint ?? "", new RegExp(`^${survivalCommandDirectiveFingerprintMarker(directive)}`));
 
     const second = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID() }));
     value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET deployment_day = ?, started_at = 0, ready_at = 1 WHERE id = ?").run(directiveDay, second.expedition!.id);

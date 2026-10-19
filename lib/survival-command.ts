@@ -363,6 +363,14 @@ export function survivalCommandDirectiveMatches(directive: SurvivalCommandDailyD
   return directive.sector === sector && directive.approach === approach;
 }
 
+// Resolution fingerprints are constrained to eight characters by the existing
+// ledger. q-prefixes are reserved for actual daily-directive awards; historical
+// outcome hashes are hexadecimal and therefore cannot occupy that namespace.
+export function survivalCommandDirectiveFingerprintMarker(directive: SurvivalCommandDailyDirective) {
+  const keys = Object.keys(SURVIVAL_COMMAND_DAILY_DIRECTIVES) as SurvivalCommandDailyDirectiveKey[];
+  return `q${keys.indexOf(directive.key)}`;
+}
+
 export function incidentForSeed(seed: string): SurvivalCommandIncident {
   const keys = Object.keys(SURVIVAL_COMMAND_INCIDENTS) as SurvivalCommandIncident[];
   return keys[hash(`${seed}:incident`) % keys.length];
