@@ -65,7 +65,7 @@ try {
     });
     assert.ok(telemetry && telemetry.width > 250 && telemetry.height > 190, "Survival Command should render a usable operations board.");
     assert.ok(telemetry.litPixels > 110, "Survival Command scene should not render blank pixels.");
-    assert.ok(telemetry.colourCount > 20, "Survival Command scene should render distinct sector lighting.");
+    assert.ok(telemetry.colourCount > 26, "Survival Command scene should render a detailed, distinct tactical diorama.");
     assert.equal(await page.getByText("Perimeter sweep", { exact: true }).count(), 2);
     assert.equal(await page.getByText("Rail-yard recovery", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Signal intercept", { exact: true }).count(), 1);
