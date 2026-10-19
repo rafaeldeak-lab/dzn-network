@@ -45,6 +45,7 @@ type NightRunRow = {
 };
 
 type NightRunGateScanRow = { scanned: number };
+const routeControlColumns = ["decoy_armed", "decoy_used", "burst_used", "gate_extension_ms"] as const;
 
 function randomIndex(length: number) {
   const limit = Math.floor(0x1_0000_0000 / length) * length;
@@ -89,6 +90,12 @@ function routeControl(row: NightRunRow, enabled: boolean) {
     burstUsed: enabled && row.burst_used === 1,
     burstActive: enabled && row.gate_extension_ms === NIGHT_RUN_SIGNAL_BURST_MS,
   };
+}
+
+async function hasRouteControlSchema(db: D1Database) {
+  const result = await db.prepare("PRAGMA table_info(dzn_night_run_sessions)").all<{ name: string }>();
+  const names = new Set((result.results ?? []).map(row => row.name));
+  return routeControlColumns.every(column => names.has(column));
 }
 
 function gateEndsAt(row: NightRunRow, reconEnabled = false, routeControlEnabled = false) {
@@ -175,9 +182,13 @@ export async function handleGamesNightRun(request: Request, env: Env): Promise<R
       if (Object.keys(body).length !== 1) return reply({ error: "Invalid Night Run request." }, 400);
       const gateStartedAt = now + NIGHT_RUN_GATE_LEAD_MS;
       const gameId = crypto.randomUUID();
-      const supportColumns = routeControlEnabled ? ", decoy_armed, decoy_used, burst_used, gate_extension_ms" : "";
-      const supportValues = routeControlEnabled ? ", 0, 0, 0, 0" : "";
-      const supportUpdate = routeControlEnabled ? ", decoy_armed = 0, decoy_used = 0, burst_used = 0, gate_extension_ms = 0" : "";
+      // A hidden route-control release can still have its migration installed. Reset
+      // those columns when a convoy restarts so toggling the feature cannot revive
+      // a previous run's armed or spent support state.
+      const routeControlSchemaPresent = routeControlEnabled || await hasRouteControlSchema(db);
+      const supportColumns = routeControlSchemaPresent ? ", decoy_armed, decoy_used, burst_used, gate_extension_ms" : "";
+      const supportValues = routeControlSchemaPresent ? ", 0, 0, 0, 0" : "";
+      const supportUpdate = routeControlSchemaPresent ? ", decoy_armed = 0, decoy_used = 0, burst_used = 0, gate_extension_ms = 0" : "";
       const result = await db.prepare(`INSERT INTO dzn_night_run_sessions
         (user_id, id, lane_sequence_json, gate_index, collisions, status, version, gate_started_at, started_at, updated_at${supportColumns})
         VALUES (?, ?, ?, 0, 0, 'playing', 0, ?, ?, ?${supportValues})

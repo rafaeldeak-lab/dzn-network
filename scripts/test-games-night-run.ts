@@ -178,6 +178,29 @@ async function run() {
     assert.equal((await call(fixture, support(state, "decoy"))).status, 400);
   });
 
+  await test("a feature-off restart clears installed route-control state before a later re-enable", async fixture => {
+    let state = await start(fixture);
+    const past = Date.now() - Math.max(NIGHT_RUN_MIN_REACTION_MS + 180, 700);
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(past, past - 800);
+    state = await visibleGate(fixture);
+    state = await payload(await call(fixture, support(state, "decoy")));
+    assert.equal(state.game?.decoyArmed, true);
+    fixture.env.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "false";
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
+    state = await start(fixture);
+    assert.equal(state.game?.routeControlAvailable, false);
+    fixture.env.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "true";
+    fixture.db.sqlite.prepare("UPDATE dzn_night_run_sessions SET gate_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(past, past - 800);
+    state = await visibleGate(fixture);
+    assert.equal(state.game?.decoyArmed, false);
+    assert.equal(state.game?.decoyAvailable, true);
+    assert.equal(state.game?.decoySpent, false);
+    assert.equal(state.game?.burstAvailable, true);
+    assert.equal(state.game?.burstSpent, false);
+  });
+
   await test("route control records one server-verified burst and one decoy-protected recovery", async fixture => {
     let state = await start(fixture);
     const route = JSON.parse(fixture.db.sqlite.prepare("SELECT lane_sequence_json FROM dzn_night_run_sessions WHERE user_id = 'local-player'").get()?.lane_sequence_json as string) as NightRunLane[];
