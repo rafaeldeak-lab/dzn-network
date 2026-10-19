@@ -233,10 +233,13 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
       const complete = isCompleteCircuit(circuitMasks(rotations));
       const status: CircuitForgeRow["status"] = complete ? "won" : rotationCount >= CIRCUIT_FORGE_MAX_ROTATIONS ? "failed" : "playing";
       const gridControlSchemaPresent = gridControlEnabled || await hasGridControlSchema(db);
-      // Keep a live scan target through other relay turns; only a disabled rollout clears latent control state.
-      const diagnosticReset = gridControlSchemaPresent && !gridControlEnabled ? ", diagnostic_index = NULL" : "";
+      // Keep a scan target through other turns, but retire it when its relay is manually aligned.
+      const diagnosedRelayAligned = gridControlEnabled && row.diagnostic_used === 1 && row.phase_used === 0
+        && row.diagnostic_index === index && rotations[index] === 0;
+      const diagnosticReset = gridControlSchemaPresent && (!gridControlEnabled || diagnosedRelayAligned) ? ", diagnostic_index = NULL" : "";
+      const phaseSpent = diagnosedRelayAligned ? ", phase_used = 1" : "";
       const update = db.prepare(`UPDATE dzn_circuit_forge_sessions
-        SET rotations_json = ?, rotations = ?, status = ?${diagnosticReset}, version = version + 1, updated_at = ?
+        SET rotations_json = ?, rotations = ?, status = ?${diagnosticReset}${phaseSpent}, version = version + 1, updated_at = ?
         WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ? AND rotations < ?`)
         .bind(JSON.stringify(rotations), rotationCount, status, now, user.id, row.id, row.version, now - CIRCUIT_FORGE_TTL_MS, CIRCUIT_FORGE_MAX_ROTATIONS);
       const statements = [update];

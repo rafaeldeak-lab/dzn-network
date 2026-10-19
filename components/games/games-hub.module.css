@@ -65,8 +65,7 @@
 .balances small { font-size: 9px; font-weight: 650; color: var(--muted); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 38px; align-items: start; }
 .mainColumn, .sidebar { min-width: 0; }
-.mainColumn { display: flex; flex-direction: column; }
-.activeGamePanel { order: -1; width: 100%; margin-bottom: 26px; }
+.activeGamePanel { width: 100%; margin-bottom: 26px; }
 .operationsCommand { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(260px, .82fr); gap: 22px; min-height: 262px; overflow: hidden; margin-bottom: 16px; padding: 23px; border: 1px solid #435256; border-radius: 6px; background: #071011; box-shadow: inset 0 0 0 1px #d0fff008, 0 18px 40px #0007; }
 .operationsCommandArt { z-index: -3; object-fit: cover; object-position: center; }
 .operationsCommandScrim { position: absolute; inset: 0; z-index: -2; pointer-events: none; background: linear-gradient(90deg, #050c0ff4 0%, #071114e6 42%, #061014ad 67%, #07101288 100%); }

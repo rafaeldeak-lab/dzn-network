@@ -254,32 +254,6 @@ export function GamesHub() {
       {error && <div className={styles.error} role="alert"><span>{error}</span><button title="Refresh saved progress" disabled={busy} onClick={() => void refresh()}><RefreshCw size={18} /></button></div>}
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
-          {view === "play" && operationsRecord && <>
-            <section className={styles.operationsCommand} aria-labelledby="operations-command-title">
-              <Image className={styles.operationsCommandArt} src="/images/games/operations-command-v1.webp" alt="" fill sizes="(max-width: 760px) 100vw, 900px" priority />
-              <div className={styles.operationsCommandScrim} aria-hidden="true" />
-              <div className={styles.operationsCommandCopy}>
-                <span className={styles.eyebrow}>DZN OPERATIONS / VERIFIED FIELD RECORD</span>
-                <h2 id="operations-command-title">Choose your next operation.</h2>
-                <p>Every result below is checked by the DZN game service before it changes your record. Pick a discipline, clear the operation, and build one connected field history.</p>
-                <div className={styles.operationFocus}><span>{selectedOperation.code}</span><strong>{selectedOperation.name}</strong><small>{selectedOperation.pressure}</small></div>
-              </div>
-              <dl className={styles.operationsRecord} aria-label="Your verified operations record">
-                <div><dt>Clearance</dt><dd>LV {operationsRecord.clearance.level}<span>{operationsRecord.clearance.title}</span></dd></div>
-                <div><dt>Recent record</dt><dd>{operationsRecord.recentOutcomes}<span>Latest verified outcomes</span></dd></div>
-                <div><dt>Weekly XP</dt><dd>{operationsRecord.weeklyXp.toLocaleString()}<span>Current seven-day window</span></dd></div>
-                <div><dt>Field streak</dt><dd>{operationsRecord.streak}<span>Consecutive reward days</span></dd></div>
-              </dl>
-              <div className={styles.clearanceTrack}><span>Clearance progress</span><progress value={operationsRecord.clearanceProgress} max={100} aria-label="Field clearance progress" /><strong>{operationsRecord.clearance.nextXp === null ? "Maximum clearance" : `${Math.max(0, operationsRecord.clearance.nextXp - xp).toLocaleString()} XP to next clearance`}</strong></div>
-            </section>
-            <div className={styles.gamePicker} role="group" aria-label="Choose an operation">
-              {Object.values(HUB_OPERATIONS).filter(operation => availableGames[operation.id]).map(operation => <button key={operation.id} data-game={operation.id} aria-pressed={selectedPlayGame === operation.id} onClick={() => setPlayGame(operation.id)}>
-                <span className={styles.operationCode}>{operation.code}</span>
-                <span className={styles.operationDescription}><small>{operation.discipline}</small><strong>{operation.name}</strong><span>{operation.objective}</span></span>
-                <span className={styles.operationPressure}>{selectedPlayGame === operation.id ? "Selected" : operation.pressure}</span>
-              </button>)}
-            </div>
-          </>}
           {view === "play" && <div className={styles.activeGamePanel}>
           {availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -324,7 +298,32 @@ export function GamesHub() {
           {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["night-run"] && selectedPlayGame === "night-run" && <NightRunPanel now={now} motionRunning={motionRunning} onProgress={() => void refresh()} />}
           </div>}
-
+          {view === "play" && operationsRecord && <>
+            <section className={styles.operationsCommand} aria-labelledby="operations-command-title">
+              <Image className={styles.operationsCommandArt} src="/images/games/operations-command-v1.webp" alt="" fill sizes="(max-width: 760px) 100vw, 900px" priority />
+              <div className={styles.operationsCommandScrim} aria-hidden="true" />
+              <div className={styles.operationsCommandCopy}>
+                <span className={styles.eyebrow}>DZN OPERATIONS / VERIFIED FIELD RECORD</span>
+                <h2 id="operations-command-title">Choose your next operation.</h2>
+                <p>Every result below is checked by the DZN game service before it changes your record. Pick a discipline, clear the operation, and build one connected field history.</p>
+                <div className={styles.operationFocus}><span>{selectedOperation.code}</span><strong>{selectedOperation.name}</strong><small>{selectedOperation.pressure}</small></div>
+              </div>
+              <dl className={styles.operationsRecord} aria-label="Your verified operations record">
+                <div><dt>Clearance</dt><dd>LV {operationsRecord.clearance.level}<span>{operationsRecord.clearance.title}</span></dd></div>
+                <div><dt>Recent record</dt><dd>{operationsRecord.recentOutcomes}<span>Latest verified outcomes</span></dd></div>
+                <div><dt>Weekly XP</dt><dd>{operationsRecord.weeklyXp.toLocaleString()}<span>Current seven-day window</span></dd></div>
+                <div><dt>Field streak</dt><dd>{operationsRecord.streak}<span>Consecutive reward days</span></dd></div>
+              </dl>
+              <div className={styles.clearanceTrack}><span>Clearance progress</span><progress value={operationsRecord.clearanceProgress} max={100} aria-label="Field clearance progress" /><strong>{operationsRecord.clearance.nextXp === null ? "Maximum clearance" : `${Math.max(0, operationsRecord.clearance.nextXp - xp).toLocaleString()} XP to next clearance`}</strong></div>
+            </section>
+            <div className={styles.gamePicker} role="group" aria-label="Choose an operation">
+              {Object.values(HUB_OPERATIONS).filter(operation => availableGames[operation.id]).map(operation => <button key={operation.id} data-game={operation.id} aria-pressed={selectedPlayGame === operation.id} onClick={() => setPlayGame(operation.id)}>
+                <span className={styles.operationCode}>{operation.code}</span>
+                <span className={styles.operationDescription}><small>{operation.discipline}</small><strong>{operation.name}</strong><span>{operation.objective}</span></span>
+                <span className={styles.operationPressure}>{selectedPlayGame === operation.id ? "Selected" : operation.pressure}</span>
+              </button>)}
+            </div>
+          </>}
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
             <div className={styles.workshopImage} role="img" aria-label="DZN field radio relay collectible" />
