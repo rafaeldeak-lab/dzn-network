@@ -33,13 +33,13 @@ const now = () => Math.floor(Date.now() / 1000);
 export async function createOrResumeCheckout(env: Env, request: Request, input: {
   discordUserId: string; planKey: PurchasablePlanKey; priceId: string; returnTo: string; acceptedOffer?: unknown;
 }) {
-  const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
-  // A restricted live account must stop before this route touches the billing ledger.
-  await verifyLiveCheckoutAccount(env, mode);
   const db = requireDb(env);
-  // No runtime schema creation for this ledger: missing migration must fail before Stripe.
+  // No runtime schema creation for this ledger: this read-only preflight must fail before Stripe.
   let attempt = await db.prepare("SELECT * FROM billing_checkout_attempts WHERE discord_user_id = ? AND state != 'closed' LIMIT 1")
     .bind(input.discordUserId).first<Attempt>();
+  const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
+  // A restricted live account must stop before runtime schema preparation or ledger writes.
+  await verifyLiveCheckoutAccount(env, mode);
   await ensureBillingSchema(env);
   const account = await db.prepare("SELECT stripe_customer_id, stripe_subscription_id, plan_status FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
     .bind(input.discordUserId).first<BillingAccount>();

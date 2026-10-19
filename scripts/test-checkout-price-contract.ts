@@ -10,6 +10,7 @@ const fixtures: ReturnType<typeof createCheckoutFixture>[] = [];
 const expectedProtected = new Map<ReturnType<typeof createCheckoutFixture>["db"], unknown>();
 const sessions = new Map<string, { body: string; session: ReturnType<typeof checkoutResponseFromRequest> }>();
 const reads: string[] = [], posts: string[] = [];
+let accountRequests = 0;
 let override: Record<string, unknown> = {};
 let priceFailure: number | "throw" | "invalid-json" | "null" | null = null;
 let loseResponse = false;
@@ -48,6 +49,7 @@ async function run() {
     const method = init?.method ?? "GET";
     if (url.pathname === "/v1/account") {
       assert.equal(method, "GET");
+      accountRequests++;
       return Response.json(liveAccount);
     }
     if (url.pathname.startsWith("/v1/prices/")) {
@@ -177,7 +179,18 @@ async function run() {
     requirements: { disabled_reason: null, currently_due: [], past_due: [] } };
   await request(live, "pro", 200);
   assert.equal(posts.length, liveBeforePosts + 1, "A healthy live account may continue to the exact verified Checkout request");
-  console.log("PASS live provider capability is checked before any checkout/trial write and a paused account fails closed");
+  const missingLiveBase = createCheckoutFixture({ migration: false });
+  missingLiveBase.db.sqlite.exec("INSERT INTO users(id, discord_id) VALUES ('owner', 'discord-owner')");
+  const missingLive: Fixture = { ...missingLiveBase, token: (await createSession(missingLiveBase.env, "owner")).token };
+  missingLive.env.STRIPE_SECRET_KEY = "sk_live_fixture";
+  missingLive.env.DZN_LIVE_CHECKOUT_ENABLED = "true";
+  missingLive.env.DZN_APP_URL = "https://dayz-network.com";
+  missingLive.env.DZN_PUBLIC_LEGAL_SELLER_NAME = DZN_PUBLISHED_SELLER.name;
+  missingLive.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS = DZN_PUBLISHED_SELLER.addressLines.join(" | ");
+  const missingLiveAccountRequests = accountRequests;
+  assert.equal((await request(missingLive, "pro", 503)).errorCode, "CHECKOUT_UNAVAILABLE");
+  assert.equal(accountRequests, missingLiveAccountRequests, "A missing live checkout migration must fail before Stripe account verification");
+  console.log("PASS live provider capability is checked after read-only migration preflight and before any checkout/trial write");
   for (const f of fixtures) {
     assert.deepEqual(f.db.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
     assert.deepEqual(protectedRows({ ...f, token: "" }), expectedProtected.get(f.db) ?? [[], []]);
