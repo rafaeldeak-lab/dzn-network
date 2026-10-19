@@ -10,6 +10,7 @@ export type StripeAccountRequirements = {
  */
 export function hasClearStripeAccountRequirements(requirements: StripeAccountRequirements) {
   if (requirements == null) return true;
-  const emptyList = (value: unknown) => value === undefined || (Array.isArray(value) && value.length === 0);
-  return requirements.disabled_reason == null && emptyList(requirements.currently_due) && emptyList(requirements.past_due);
+  return requirements.disabled_reason == null &&
+    Array.isArray(requirements.currently_due) && requirements.currently_due.length === 0 &&
+    Array.isArray(requirements.past_due) && requirements.past_due.length === 0;
 }

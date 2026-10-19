@@ -90,6 +90,8 @@ async function run() {
   account = { ...baseAccount, requirements: undefined };
   assert.equal((await read()).checks.accountRequirementsClear, true, "An omitted empty requirements object must not block a healthy account");
   assert.equal((await read()).providerConfigurationVerified, true);
+  account = { ...baseAccount, requirements: { disabled_reason: null } };
+  assert.equal((await read()).checks.accountRequirementsClear, false, "A partial requirements object must remain blocked");
   account = { ...baseAccount, requirements: { disabled_reason: null, currently_due: ["verification"], past_due: [] } };
   assert.equal((await read()).checks.accountRequirementsClear, false, "An explicit pending requirement must remain blocked");
   account = baseAccount; wrongPrice = true;
