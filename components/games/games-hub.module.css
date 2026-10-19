@@ -960,6 +960,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .triviaChoices button { transition: none; }
+  .triviaChoices button::after { transition: none; }
 }
 
 .nightRunTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
