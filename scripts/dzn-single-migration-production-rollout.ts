@@ -114,6 +114,16 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
     ],
     indexes: ["idx_dzn_night_run_gate_scans_session"],
   },
+  "0107_dzn_command_centre.sql": {
+    migration: "0107_dzn_command_centre.sql",
+    predecessor: "0106_games_hub_cipher_grid_specialist.sql",
+    tables: [
+      playerOwnedTable("dzn_command_centre_profiles", ["user_id", "created_at", "updated_at"]),
+      playerOwnedTable("dzn_command_centre_buildings", ["user_id", "building", "level", "target_level", "construction_started_at", "completes_at", "version"]),
+      playerOwnedTable("dzn_command_centre_spend_ledger", ["id", "user_id", "request_id", "building", "from_level", "to_level", "parts_spent", "created_at"]),
+    ],
+    indexes: ["idx_dzn_command_centre_buildings_state", "idx_dzn_command_centre_spend_history"],
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
@@ -221,7 +231,7 @@ function expectedObjectSql(plan: MigrationPlan) {
   const objects: Record<string, string> = {};
 
   for (const statement of statements) {
-    const tableMatch = statement.match(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
+    const tableMatch = statement.match(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (tableMatch) {
       const name = tableMatch[1];
       if (!expectedTableNames.has(name) || objects[name]) {
@@ -231,7 +241,7 @@ function expectedObjectSql(plan: MigrationPlan) {
       continue;
     }
 
-    const indexMatch = statement.match(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
+    const indexMatch = statement.match(/^CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (indexMatch) {
       const name = indexMatch[1];
       const tableName = indexMatch[2];

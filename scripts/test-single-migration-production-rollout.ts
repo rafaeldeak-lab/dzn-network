@@ -15,6 +15,7 @@ const migrations = [
   "0101_games_hub_circuit_forge.sql",
   "0102_games_hub_ranger_range.sql",
   "0105_games_hub_night_run_recon.sql",
+  "0107_dzn_command_centre.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -112,6 +113,8 @@ const migrationNames = readdirSync("migrations")
   .sort((left, right) => left.localeCompare(right));
 const relayRushIndex = migrationNames.indexOf("0096_games_hub_relay_rush.sql");
 assert.ok(relayRushIndex > 0, "Relay Rush must have an established predecessor.");
+const commandCentreIndex = migrationNames.indexOf("0107_dzn_command_centre.sql");
+assert.ok(commandCentreIndex > 0, "Command Centre must have an established predecessor.");
 
 function verifyLedger(names: string[]) {
   const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));
@@ -159,5 +162,55 @@ assert.match(missingLedger.output, /Missing names: 0095_dzn_owner_discord_delive
 const unexpectedLedger = verifyLedger([...historicalLedgerOrder, "9999_unexpected.sql"]);
 assert.notEqual(unexpectedLedger.status, 0, "The verifier must reject an unexpected migration name.");
 assert.match(unexpectedLedger.output, /Unexpected names: 9999_unexpected\.sql/);
+
+const commandCentreDirectory = mkdtempSync(join(process.cwd(), ".dzn-command-centre-migration-test-"));
+try {
+  const ledgerPath = join(commandCentreDirectory, "ledger.json");
+  writeFileSync(ledgerPath, JSON.stringify([{ results: migrationNames.slice(0, commandCentreIndex).map((name) => ({ name })) }]), "utf8");
+  const commandCentreLedger = spawnSync(
+    process.execPath,
+    [
+      "node_modules/tsx/dist/cli.mjs",
+      "scripts/dzn-single-migration-production-rollout.ts",
+      "verify-ledger",
+      "--migration",
+      "0107_dzn_command_centre.sql",
+      "--ledger",
+      ledgerPath,
+      "--phase",
+      "before",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(commandCentreLedger.status, 0, `${commandCentreLedger.stdout ?? ""}${commandCentreLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(commandCentreDirectory, "stage");
+  const commandCentreStage = spawnSync(
+    process.execPath,
+    [
+      "node_modules/tsx/dist/cli.mjs",
+      "scripts/dzn-single-migration-production-rollout.ts",
+      "prepare",
+      "--migration",
+      "0107_dzn_command_centre.sql",
+      "--stage-dir",
+      stageDirectory,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(commandCentreStage.status, 0, `${commandCentreStage.stdout ?? ""}${commandCentreStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql).sort(), [
+    "dzn_command_centre_buildings",
+    "dzn_command_centre_profiles",
+    "dzn_command_centre_spend_ledger",
+    "idx_dzn_command_centre_buildings_state",
+    "idx_dzn_command_centre_spend_history",
+  ]);
+} finally {
+  rmSync(commandCentreDirectory, { force: true, recursive: true });
+}
 
 console.log("Single-migration production rollout safety tests passed.");
