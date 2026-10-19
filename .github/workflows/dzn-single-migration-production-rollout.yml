@@ -116,8 +116,27 @@ jobs:
           npm run lint
           npm run test:production-migration-queue
           npm run test:single-migration-production-rollout
+          npm run test:survival-command-loadout-migration-maintenance
           npm run test:games-hub
           git diff --check
+
+      - name: Verify protected account-closure maintenance in production
+        run: |
+          set -euo pipefail
+          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/survival-command-loadout-migration)"
+          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
+          let response;
+          try {
+            response = JSON.parse(process.env.MAINTENANCE_RESPONSE || "");
+          } catch {
+            throw new Error("Survival Command loadout maintenance did not return the expected JSON signal.");
+          }
+          const keys = response && Object.prototype.toString.call(response) === "[object Object]" ? Object.keys(response) : [];
+          if (keys.length !== 1 || keys[0] !== "status" || response.status !== "survival-command-loadout-maintenance") {
+            throw new Error("Survival Command loadout account-closure maintenance is not active in production.");
+          }
+          console.log("Survival Command loadout account-closure maintenance JSON signal verified in production.");
+          NODE
 
       - name: Build an isolated migration stage
         run: |
@@ -146,6 +165,39 @@ jobs:
           }
           console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
           NODE
+
+      - name: Drain in-flight account-deletion operations before the preservation baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          # New closures are blocked by the deployed maintenance flag. Wait for the
+          # previous runtime grace window, then require two empty read-only samples.
+          sleep 90
+          OPERATION_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-account-deletion-operation-query)"
+          OPERATIONS_FILE="${MIGRATION_STAGE}/account-deletion-operations.json"
+          DRAIN_ATTEMPTS=30
+          REQUIRED_CONSECUTIVE_EMPTY_READS=2
+          consecutive_empty_reads=0
+          for attempt in $(seq 1 "${DRAIN_ATTEMPTS}"); do
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "${OPERATION_QUERY}" > "${OPERATIONS_FILE}"
+            if npx tsx scripts/dzn-single-migration-production-rollout.ts verify-account-deletion-operations \
+              --operations "${OPERATIONS_FILE}" >/dev/null 2>&1; then
+              consecutive_empty_reads=$((consecutive_empty_reads + 1))
+              if [ "${consecutive_empty_reads}" -ge "${REQUIRED_CONSECUTIVE_EMPTY_READS}" ]; then
+                rm -f "${OPERATIONS_FILE}"
+                echo "Account-deletion operations drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
+                exit 0
+              fi
+            else
+              consecutive_empty_reads=0
+            fi
+            sleep 15
+          done
+          echo "::error::Account-deletion operations did not drain before the preservation baseline. No migration was applied."
+          rm -f "${OPERATIONS_FILE}"
+          exit 1
 
       - name: Record D1 recovery bookmark
         env:

@@ -242,8 +242,14 @@ switch (command) {
   case "fingerprint":
     fingerprint(required("--rows"));
     break;
+  case "print-account-deletion-operation-query":
+    printAccountDeletionOperationQuery();
+    break;
+  case "verify-account-deletion-operations":
+    verifyAccountDeletionOperations(required("--operations"));
+    break;
   default:
-    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables, print-state-preservation-table, print-state-preservation-objects-query, print-state-preservation-rows-query, print-state-preservation-loadouts-query, verify-state-preservation-before, verify-state-preservation-after, fingerprint.");
+    throw new Error("Expected one of: prepare, verify-ledger, verify-baseline, verify-schema, print-objects-query, print-target-tables, print-state-preservation-table, print-state-preservation-objects-query, print-state-preservation-rows-query, print-state-preservation-loadouts-query, verify-state-preservation-before, verify-state-preservation-after, fingerprint, print-account-deletion-operation-query, verify-account-deletion-operations.");
 }
 
 function required(name: string) {
@@ -425,6 +431,23 @@ function readRows(path: string) {
   const parsed = JSON.parse(raw.slice(start, end + 1));
   const entries = Array.isArray(parsed) ? parsed : [parsed];
   return entries.flatMap((entry) => entry?.results ?? entry?.result?.[0]?.results ?? []);
+}
+
+function printAccountDeletionOperationQuery() {
+  console.log("SELECT COUNT(*) AS active_account_deletion_operation_count FROM user_notifications WHERE type = 'internal_account_deletion_operation';");
+}
+
+function verifyAccountDeletionOperations(operationsPath: string) {
+  const rows = readRows(operationsPath);
+  if (rows.length !== 1) throw new Error("Expected exactly one aggregate account-deletion operation row.");
+  const activeOperationCount = Number(rows[0]?.active_account_deletion_operation_count ?? -1);
+  if (!Number.isInteger(activeOperationCount) || activeOperationCount < 0) {
+    throw new Error("Expected a non-negative active_account_deletion_operation_count.");
+  }
+  if (activeOperationCount !== 0) {
+    throw new Error(`Account-deletion operations are still active (${activeOperationCount}); refusing to capture the state-preservation baseline.`);
+  }
+  console.log("No active account-deletion operations remain.");
 }
 
 function verifyLedger(migrationName: string, ledgerPath: string, phase: string) {

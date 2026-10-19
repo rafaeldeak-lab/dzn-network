@@ -44,8 +44,8 @@ assert.doesNotMatch(
 const scopedToken = "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}";
 assert.equal(
   workflow.split(scopedToken).length - 1,
-  5,
-  "The production D1 token must be scoped to the five Wrangler-only steps.",
+  6,
+  "The production D1 token must be scoped to the six Wrangler-only steps.",
 );
 assert.ok(
   workflow.indexOf(scopedToken) > workflow.indexOf("- name: Install source dependencies"),
@@ -77,6 +77,10 @@ assert.match(workflow, /verify-schema/);
 assert.match(workflow, /verify-state-preservation-before/);
 assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
+assert.match(workflow, /survival-command-loadout-migration/);
+assert.match(workflow, /Drain in-flight account-deletion operations before the preservation baseline/);
+assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
+assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
 assert.match(workflow, /migrations apply/);
 assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflow must have exactly one migration application command.");
 assert.match(workflow, /--config "\$\{MIGRATION_STAGE\}\/wrangler\.toml"/);
@@ -110,6 +114,8 @@ assert.match(controller, /Production zero-object baseline passed/);
 assert.match(controller, /Production schema, index, constraint, foreign-key, and zero-row verification passed/);
 assert.match(controller, /source hash does not match the approved state-preservation plan/);
 assert.match(controller, /Production state preservation, default initialization, constraints, and foreign keys passed/);
+assert.match(controller, /internal_account_deletion_operation/);
+assert.match(controller, /Account-deletion operations are still active/);
 assert.match(controller, /Expected Wrangler JSON array/);
 assert.doesNotMatch(controller, /migrations apply/i);
 assert.doesNotMatch(controller, /CLOUDFLARE_API_TOKEN/);
@@ -341,6 +347,14 @@ try {
   const beforeInfo = write("before-info.json", wrappedRows(["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version"].map((name) => ({ name }))));
   const foreignKeys = write("foreign-keys.json", wrappedRows([{ from: "user_id", table: "users", to: "id", on_delete: "CASCADE" }]));
   const foreignKeyCheck = write("foreign-key-check.json", wrappedRows([]));
+  const operationQuery = run(["print-account-deletion-operation-query"]);
+  assert.equal(operationQuery.status, 0, operationQuery.stderr);
+  assert.match(operationQuery.stdout, /FROM user_notifications/);
+  const drainedOperations = run(["verify-account-deletion-operations", "--operations", write("drained-operations.json", wrappedRows([{ active_account_deletion_operation_count: 0 }]))]);
+  assert.equal(drainedOperations.status, 0, `${drainedOperations.stdout ?? ""}${drainedOperations.stderr ?? ""}`);
+  const activeOperations = run(["verify-account-deletion-operations", "--operations", write("active-operations.json", wrappedRows([{ active_account_deletion_operation_count: 1 }]))]);
+  assert.notEqual(activeOperations.status, 0, "The rollout must reject an active account deletion operation.");
+  assert.match(`${activeOperations.stdout ?? ""}${activeOperations.stderr ?? ""}`, /Account-deletion operations are still active/);
   const baseline = run(["verify-state-preservation-before", "--migration", "0109_dzn_survival_command_loadouts.sql", "--objects", beforeObjects, "--table-info", beforeInfo, "--foreign-keys", foreignKeys, "--foreign-key-check", foreignKeyCheck]);
   assert.equal(baseline.status, 0, `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`);
 
