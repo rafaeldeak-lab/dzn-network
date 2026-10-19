@@ -23,6 +23,10 @@ assert.match(workflow, /verify-write-quiesce/);
 assert.match(workflow, /https:\/\/dayz-network\.com\/api\/health\/state-preserving-migration/);
 assert.match(workflow, /MAINTENANCE_STATUS.*200/);
 assert.match(workflow, /test:account-deletion-maintenance/);
+assert.match(workflow, /Drain in-flight account-deletion leases before the preservation baseline/);
+assert.match(workflow, /DRAIN_ATTEMPTS=30/);
+assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
+assert.match(workflow, /verify-account-deletion-leases/);
 assert.match(workflow, /hashes only/);
 assert.match(workflow, /Feature activation: intentionally not performed/);
 assert.match(workflow, /Website deployment: intentionally not performed/);
@@ -35,6 +39,9 @@ assert.match(controller, /MIGRATION_SHA256/);
 assert.match(controller, /source hash does not match the approved data-preservation plan/);
 assert.match(controller, /Cipher Grid session fingerprint changed/);
 assert.match(controller, /Protected writes are not quiesced/);
+assert.match(controller, /dzn_owner_discord_access_role_mutations/);
+assert.match(controller, /active_account_deletion_lease_count/);
+assert.match(controller, /Account-deletion leases are still active/);
 assert.match(controller, /Staging table .* remained/);
 assert.match(controller, /foreign_key_check/);
 assert.match(controller, /SELECT user_id, id, answer, attempts_json, status, version, started_at, updated_at/);
@@ -75,6 +82,17 @@ try {
   const activeAccountDelete = run(["verify-write-quiesce", "--config", activeAccountDeleteConfig]);
   assert.notEqual(activeAccountDelete.status, 0, "The rollout must reject an active account deletion path.");
   assert.match(`${activeAccountDelete.stdout}\n${activeAccountDelete.stderr}`, /DZN_ACCOUNT_DELETE_ENABLED/);
+
+  const noLeases = run(["verify-account-deletion-leases", "--leases", write("no-account-deletion-leases.json", wrappedRows([{ active_account_deletion_lease_count: 0 }]))]);
+  assert.equal(noLeases.status, 0, `${noLeases.stdout}\n${noLeases.stderr}`);
+  assert.match(noLeases.stdout, /No active account-deletion leases remain/);
+  const activeLeases = run(["verify-account-deletion-leases", "--leases", write("active-account-deletion-leases.json", wrappedRows([{ active_account_deletion_lease_count: 1 }]))]);
+  assert.notEqual(activeLeases.status, 0, "The rollout must refuse to baseline while an account deletion lease remains active.");
+  assert.match(`${activeLeases.stdout}\n${activeLeases.stderr}`, /Account-deletion leases are still active/);
+  const leaseQuery = run(["print-account-deletion-lease-query"]);
+  assert.equal(leaseQuery.status, 0, leaseQuery.stderr);
+  assert.match(leaseQuery.stdout, /operation = 'account_deletion'/);
+  assert.match(leaseQuery.stdout, /julianday\(expires_at\)/);
 
   const before = run(["fingerprint", "--rows", beforeRows]);
   const after = run(["fingerprint", "--rows", afterRows]);
