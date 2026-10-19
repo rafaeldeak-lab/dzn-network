@@ -42,6 +42,10 @@ async function run() {
     assert.equal((await maintenanceRequest(fixture.env)).status, 200, "The independent maintenance signal must prove both protected write paths are quiesced.");
     assert.equal((await maintenanceRequest(fixture.env, "POST")).status, 405, "The maintenance signal must remain read-only.");
 
+    fixture.env.DZN_GAMES_CIPHER_GRID_ENABLED = "true";
+    fixture.env.DZN_ACCOUNT_DELETE_ENABLED = "true";
+    assert.equal((await maintenanceRequest(fixture.env)).status, 404, "The temporary maintenance signal must disappear after both protected paths are reactivated.");
+
     delete fixture.env.DZN_ACCOUNT_DELETE_ENABLED;
     assert.equal((await request(fixture.env)).status, 401, "The maintenance guard must not disable the normal authorization boundary outside the temporary production window.");
     assert.equal((await maintenanceRequest(fixture.env)).status, 404, "The maintenance signal must disappear when the protected window is not fully configured.");

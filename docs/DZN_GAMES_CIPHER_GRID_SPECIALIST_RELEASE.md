@@ -11,12 +11,14 @@ until both operations below have completed.
 3. Verify the migration ledger entry, the rebuilt session table, its primary
    key and unique identifier constraint, the five-or-six-character answer
    constraint, foreign-key integrity, and the preserved row count.
-4. Only after that verification, enable
-   `DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED=true`.
+4. Only after that verification, resume the existing Cipher Grid entry point
+   with `DZN_GAMES_CIPHER_GRID_ENABLED=true`.
 
-The specialist flag is deliberately absent from production configuration until
-the database operation succeeds. With the flag absent or false, Cipher Grid
-continues serving only its existing five-letter, five-attempt field ciphers.
+The specialist flag is deliberately absent from production configuration. It
+remains a separate, reviewed release after the state-preserving migration has
+completed. With the flag absent or false, Cipher Grid continues serving its
+five-letter, five-attempt field ciphers while the upgraded schema preserves the
+option to add the six-letter mode later.
 
 ## Gameplay boundary
 
