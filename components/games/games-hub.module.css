@@ -430,6 +430,13 @@
 .hideSeekConsole > div { display: grid; gap: 3px; }
 .hideSeekConsole strong { color: #dcf7f1; font-size: 11px; text-transform: uppercase; }
 .hideSeekConsole span { color: #9cbab6; font-size: 11px; line-height: 1.4; }
+.hideSeekTelemetry { flex: 0 0 auto; min-width: 118px; padding: 6px 8px; border: 1px solid #47635e; border-radius: 4px; background: #061113; }
+.hideSeekTelemetry span { font: 8px var(--font-geist-mono), monospace; letter-spacing: .09em; text-transform: uppercase; }
+.hideSeekTelemetry strong { color: #a9d9d1; font: 800 10px var(--font-geist-mono), monospace; letter-spacing: .04em; white-space: nowrap; }
+.hideSeekTelemetry[data-band=faint] { border-color: #866cb1; }
+.hideSeekTelemetry[data-band=trace] { border-color: #5f98c5; }
+.hideSeekTelemetry[data-band=strong] { border-color: #b78844; background: #171208; }
+.hideSeekTelemetry[data-band=locked] { border-color: #5cb37c; background: #0c2017; }
 .hideSeekCoordinate { flex: 0 0 auto; padding: 6px 8px; border: 1px solid #3c6861; border-radius: 4px; color: #9cf5e5 !important; background: #041011; font: 10px var(--font-geist-mono), monospace; white-space: nowrap; }
 .hideSeekBrief { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 12px 0 0; list-style: none; }
 .hideSeekBrief li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 9px; align-items: start; min-width: 0; padding: 9px; border: 1px solid #324844; border-radius: 5px; background: #081214d9; }

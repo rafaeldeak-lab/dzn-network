@@ -2,7 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import { HIDE_SEEK_RECON_TARGETS, HIDE_SEEK_TARGET_BY_ID } from "./games-hide-seek-targets";
-import { HIDE_SEEK_MAX_MISSES, HIDE_SEEK_REWARD, type HideSeekGame, type HideSeekPayload } from "../../lib/games-hide-seek";
+import { HIDE_SEEK_MAX_MISSES, HIDE_SEEK_REWARD, type HideSeekGame, type HideSeekPayload, type HideSeekSignalBearing, type HideSeekSignalTelemetry } from "../../lib/games-hide-seek";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
 const reply = (body: unknown, status = 200) => json(body, { status, headers });
@@ -32,7 +32,24 @@ function sessionBrief(sessionId: string, slot: number, clue: string) {
   return `${clue} Recon tag ${callsign}-${slot.toString().padStart(2, "0")}.`;
 }
 
-function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastScan"] = null): HideSeekGame {
+function bearingFor(deltaX: number, deltaY: number): HideSeekSignalBearing {
+  const directions: HideSeekSignalBearing[] = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+  const sector = Math.round(Math.atan2(deltaX, -deltaY) / (Math.PI / 4));
+  return directions[(sector + directions.length) % directions.length];
+}
+
+function scanTelemetry(targets: Array<{ x: number; y: number }>, x: number, y: number, locked: boolean): HideSeekSignalTelemetry {
+  if (locked) return { band: "locked", bearing: null };
+  const nearest = targets.reduce<{ x: number; y: number; distance: number } | null>((current, target) => {
+    const distance = Math.hypot(target.x - x, target.y - y);
+    return !current || distance < current.distance ? { ...target, distance } : current;
+  }, null);
+  if (!nearest || nearest.distance > 480) return { band: "none", bearing: null };
+  if (nearest.distance > 330) return { band: "faint", bearing: null };
+  return { band: nearest.distance > 170 ? "trace" : "strong", bearing: bearingFor(nearest.x - x, nearest.y - y) };
+}
+
+function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastScan"] = null, telemetry: HideSeekSignalTelemetry | null = null): HideSeekGame {
   const targetIds = parseIds(row.target_ids_json);
   const found = new Set(parseIds(row.found_ids_json));
   const targets = targetIds.map(id => {
@@ -50,14 +67,14 @@ function gameView(row: HideSeekRow, now: number, lastScan: HideSeekGame["lastSca
   const recoveredSignals = targets.flatMap((target, index) => found.has(target.id) ? [{ slot: index + 1, x: target.x, y: target.y }] : []);
   return { id: row.id, version: row.version, status, foundCount: found.size, misses: row.misses,
     maxMisses: HIDE_SEEK_MAX_MISSES, startedAt: row.started_at, expiresAt: row.started_at + TTL,
-    scene, targetCount: targets.length, clues, recoveredSignals, lastScan };
+    scene, targetCount: targets.length, clues, recoveredSignals, lastScan, telemetry };
 }
 
-async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false, lastScan: HideSeekGame["lastScan"] = null): Promise<HideSeekPayload> {
+async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false, lastScan: HideSeekGame["lastScan"] = null, telemetry: HideSeekSignalTelemetry | null = null): Promise<HideSeekPayload> {
   const row = await db.prepare("SELECT * FROM dzn_hide_seek_sessions WHERE user_id = ?").bind(user.id).first<HideSeekRow>();
   const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_hide_seek_reward_ledger WHERE user_id = ? AND reward_key = ?")
     .bind(user.id, dayKey(now)).first<{ rewarded: number }>();
-  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: row ? gameView(row, now, lastScan) : null };
+  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: row ? gameView(row, now, lastScan, telemetry) : null };
 }
 
 export async function handleGamesHideSeek(request: Request, env: Env): Promise<Response> {
@@ -77,6 +94,7 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
 
     let rewardGranted = false;
     let lastScan: HideSeekGame["lastScan"] = null;
+    let telemetry: HideSeekSignalTelemetry | null = null;
     if (body.action === "start") {
       if (Object.keys(body).length !== 1) return reply({ error: "Invalid Signal Hunt request." }, 400);
       const result = await db.prepare(`INSERT INTO dzn_hide_seek_sessions
@@ -95,10 +113,14 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
       const row = await db.prepare("SELECT * FROM dzn_hide_seek_sessions WHERE user_id = ?").bind(user.id).first<HideSeekRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This hunt is not available." }, 404);
       if (row.status !== "playing" || row.version !== body.version || now >= row.started_at + TTL) return reply({ error: "This hunt changed or ended. Refresh to continue." }, 409);
-      const targets = parseIds(row.target_ids_json);
+      const targetIds = parseIds(row.target_ids_json);
       const found = new Set(parseIds(row.found_ids_json));
-      const hit = targets.map(id => HIDE_SEEK_TARGET_BY_ID.get(id)).find(target => target && !found.has(target.id)
+      const targets = targetIds.map(id => HIDE_SEEK_TARGET_BY_ID.get(id)).filter((target): target is NonNullable<typeof target> => Boolean(target));
+      if (targets.length !== targetIds.length) throw new Error("Invalid stored target");
+      const unrecoveredTargets = targets.filter(target => !found.has(target.id));
+      const hit = unrecoveredTargets.find(target => target
         && Math.hypot(target.x - Number(body.x), target.y - Number(body.y)) <= 45);
+      telemetry = scanTelemetry(unrecoveredTargets, Number(body.x), Number(body.y), Boolean(hit));
       if (hit) {
         found.add(hit.id);
         lastScan = "signal-acquired";
@@ -118,7 +140,7 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
       if (!result[0].meta.changes) return reply({ error: "Another scan reached this hunt first. Refresh to continue." }, 409);
       rewardGranted = status === "won" && Boolean(result[1]?.meta.changes);
     } else return reply({ error: "Unknown Signal Hunt action." }, 400);
-    return reply(await readState(db, user, now, rewardGranted, lastScan));
+    return reply(await readState(db, user, now, rewardGranted, lastScan, telemetry));
   } catch {
     return reply({ error: "DZN Signal Hunt is temporarily unavailable. Your Hub progress is unchanged." }, 503);
   }

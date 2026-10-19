@@ -63,8 +63,28 @@ try {
     await scene.focus();
     for (let press = 0; press < 10; press++) await page.keyboard.press("ArrowRight");
     await page.getByText("X 1000 / Y 0500").waitFor();
+    let delayedScan = false;
+    await page.route("**/api/games/hide-seek", async route => {
+      const request = route.request();
+      if (!delayedScan && request.method() === "POST") {
+        delayedScan = true;
+        await new Promise(resolve => setTimeout(resolve, 280));
+      }
+      await route.continue();
+    });
     await page.keyboard.press("Enter");
+    for (let attempt = 0; attempt < 30 && !delayedScan; attempt++) await page.waitForTimeout(10);
+    assert.equal(delayedScan, true, "The regression check must hold the first scan before issuing a competing pointer action.");
+    await scene.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: bounds.left + 8, clientY: bounds.top + 8 }));
+    });
+    await page.waitForTimeout(40);
+    assert.equal((await page.locator('[class*="hideSeekCoordinate"]').textContent())?.trim(), "X 1000 / Y 0500", "An in-flight scan must keep its original reticle point.");
     await page.getByText("Empty sweep").waitFor();
+    await page.getByText("Signal read").waitFor();
+    await page.keyboard.press("ArrowLeft");
+    await page.getByText("Awaiting scan").waitFor();
     assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {

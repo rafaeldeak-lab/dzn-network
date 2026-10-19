@@ -53,6 +53,14 @@ function emptyPoint(fixture: Fixture) {
   }
   throw new Error("No empty scene point available");
 }
+function signalProbePoint(fixture: Fixture, target: { x: number; y: number }) {
+  const targets = selectedTargets(fixture);
+  for (const [deltaX, deltaY] of [[120, 0], [-120, 0], [0, 120], [0, -120], [100, 100], [-100, -100]]) {
+    const point = { x: target.x + deltaX, y: target.y + deltaY };
+    if (point.x >= 0 && point.x <= 1000 && point.y >= 0 && point.y <= 1000 && targets.every(other => Math.hypot(other.x - point.x, other.y - point.y) > 45)) return point;
+  }
+  throw new Error("No safe Signal Hunt telemetry probe is available");
+}
 
 async function run() {
   await test("authentication, origin, method and feature switches fail closed", async fixture => {
@@ -75,6 +83,7 @@ async function run() {
     assert.equal(state.game?.clues.length, 4);
     assert.equal(state.game?.recoveredSignals.length, 0);
     assert.equal(state.game?.lastScan, null);
+    assert.equal(state.game?.telemetry, null);
     assert.deepEqual(state.game?.clues.map(target => target.slot), [1, 2, 3, 4]);
     assert.ok(state.game?.clues.every(target => target.clue.length > 16 && !target.found));
     const selected = selectedTargets(fixture);
@@ -120,6 +129,19 @@ async function run() {
     assert.doesNotMatch(JSON.stringify(state.game), new RegExp(recovered.id), "Recovered markers must not expose canonical target IDs either.");
     state = await payload(await call(fixture, scan(state, emptyPoint(fixture))));
     assert.equal(state.game?.lastScan, "empty");
+    assert.notEqual(state.game?.telemetry?.band, "locked");
+  });
+  await test("missed scans return only bounded tactical telemetry without leaking targets", async fixture => {
+    let state = await start(fixture);
+    const target = selectedTargets(fixture)[0];
+    const point = signalProbePoint(fixture, target);
+    state = await payload(await call(fixture, scan(state, point)));
+    assert.equal(state.game?.lastScan, "empty");
+    assert.equal(state.game?.telemetry?.band, "strong");
+    assert.ok(state.game?.telemetry?.bearing, "A strong return should provide a coarse direction.");
+    assert.doesNotMatch(JSON.stringify(state.game?.telemetry), /"x"\s*:|"y"\s*:|recon-|signal-/i);
+    const refreshed = await payload(await call(fixture));
+    assert.equal(refreshed.game?.telemetry, null, "Transient scan telemetry must not persist across a new page read.");
   });
   await test("four server-validated finds win and mint one bounded daily reward", async fixture => {
     let state = await start(fixture);
@@ -152,10 +174,15 @@ async function run() {
     const visualSource = readFileSync("components/games/signal-hunt-3d.tsx", "utf8");
     assert.match(hubSource, /const SignalHunt3D = dynamic/);
     assert.match(hubSource, /scanPoint=\{reticlePoint\}/);
+    assert.match(hubSource, /telemetry=\{game\.telemetry\}/);
+    assert.match(hubSource, /clearScanTelemetry/);
+    assert.match(hubSource, /function beginScan/);
+    assert.match(hubSource, /if \(!beginScan\(point\.x, point\.y\)\) return/);
     assert.match(visualSource, /const unavailableRef = useRef\(onUnavailable\);/);
     assert.match(visualSource, /new THREE\.OrthographicCamera/);
     assert.match(visualSource, /state\.scanPoint\.x \/ 1000 \* 2 - 1/);
     assert.match(visualSource, /1 - state\.scanPoint\.y \/ 1000 \* 2/);
+    assert.match(visualSource, /bearingCue/);
     assert.match(visualSource, /geometries\.push\(horizon\.geometry\)/);
     assert.match(visualSource, /materials\.push\(horizon\.material\)/);
     assert.doesNotMatch(visualSource, /recoveredSignals|target_ids_json|HIDE_SEEK_TARGET_BY_ID/);

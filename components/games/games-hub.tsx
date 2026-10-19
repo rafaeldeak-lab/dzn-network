@@ -12,7 +12,7 @@ import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TA
 import { HUB_OPERATIONS, buildOperationsRecord, operationForGame } from "@/lib/games-operations";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
-import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
+import { HIDE_SEEK_REWARD, type HideSeekPayload, type HideSeekSignalTelemetry } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridDifficulty, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
@@ -55,6 +55,15 @@ const SIGNAL_SHIFT_COOLDOWN_MS = SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS + 40;
 const CIRCUIT_FORGE_COOLDOWN_MS = CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS + 40;
 const RANGER_RANGE_COOLDOWN_MS = RANGER_RANGE_MIN_ACTION_INTERVAL_MS + 50;
 const NIGHT_RUN_COOLDOWN_MS = NIGHT_RUN_MIN_ACTION_INTERVAL_MS + 50;
+const HIDE_SEEK_BEARING_LABEL: Record<NonNullable<HideSeekSignalTelemetry["bearing"]>, string> = {
+  north: "N", "north-east": "NE", east: "E", "south-east": "SE", south: "S", "south-west": "SW", west: "W", "north-west": "NW",
+};
+function hideSeekSignalReadout(telemetry: HideSeekSignalTelemetry | null) {
+  if (!telemetry) return "Awaiting scan";
+  if (telemetry.band === "locked") return "Lock secured";
+  const prefix = telemetry.band === "none" ? "No return" : telemetry.band === "faint" ? "Faint static" : telemetry.band === "trace" ? "Trace return" : "Strong return";
+  return telemetry.bearing ? `${prefix} // ${HIDE_SEEK_BEARING_LABEL[telemetry.bearing]}` : prefix;
+}
 const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
@@ -595,6 +604,11 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   const [reticle, setReticle] = useState({ gameId: "", x: 500, y: 500 });
   const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
+  const scanPending = useRef(false);
+
+  const clearScanTelemetry = useCallback(() => {
+    setPayload(current => current?.game ? { ...current, game: { ...current.game, telemetry: null } } : current);
+  }, []);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -630,19 +644,23 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   // Derive a centered scanner until this hunt has an intentional pointer or key action.
   // This avoids a synchronous effect update every time a fresh hunt arrives.
   const reticlePoint = game && reticle.gameId !== game.id ? { x: 500, y: 500 } : reticle;
-  function scan(x: number, y: number) {
-    if (!game || !active || busy) return;
+  function beginScan(x: number, y: number) {
+    if (!game || !active || busy || scanPending.current) return;
     if (game.recoveredSignals.some((signal) => Math.hypot(signal.x - x, signal.y - y) <= 45)) return;
-    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y });
+    scanPending.current = true;
+    clearScanTelemetry();
+    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }).finally(() => { scanPending.current = false; });
+    return true;
   }
   function scanAt(x: number, y: number) {
+    if (!game || !active || busy || scanPending.current) return;
     const point = { x: Math.max(0, Math.min(1000, Math.round(x))), y: Math.max(0, Math.min(1000, Math.round(y))) };
+    if (!beginScan(point.x, point.y)) return;
     setReticle({ gameId: game?.id ?? "", ...point });
-    scan(point.x, point.y);
   }
   function handleSceneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!active || busy) return;
-    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); scan(reticlePoint.x, reticlePoint.y); return; }
+    if (!active || busy || scanPending.current) return;
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); beginScan(reticlePoint.x, reticlePoint.y); return; }
     const delta = event.key === "ArrowUp" ? { x: 0, y: -50 }
       : event.key === "ArrowRight" ? { x: 50, y: 0 }
         : event.key === "ArrowDown" ? { x: 0, y: 50 }
@@ -650,6 +668,7 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
             : null;
     if (!delta) return;
     event.preventDefault();
+    clearScanTelemetry();
     setReticle({ gameId: game?.id ?? "", x: Math.max(0, Math.min(1000, reticlePoint.x + delta.x)), y: Math.max(0, Math.min(1000, reticlePoint.y + delta.y)) });
   }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
@@ -671,13 +690,13 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
           alt={game.scene === "recon-v2" ? "Storm reconnaissance station in the DZN mountain range" : "DZN mountain communications outpost"}
           fill sizes="(max-width: 760px) 100vw, 760px" />
         <div className={styles.hideSeekSceneVisual} aria-hidden="true">
-          {!threeUnavailable && <SignalHunt3D active={Boolean(active)} foundCount={game.foundCount} misses={game.misses} scanPoint={reticlePoint} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
+          {!threeUnavailable && <SignalHunt3D active={Boolean(active)} foundCount={game.foundCount} misses={game.misses} scanPoint={reticlePoint} telemetry={game.telemetry} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
         </div>
         <div className={styles.hideSeekOverlay} aria-hidden="true"><div><span>RECON // {game.scene === "recon-v2" ? "NIGHT RANGE" : "OUTPOST"}</span><strong>{active ? "SCANNER ARMED" : "UPLINK STANDBY"}</strong></div><div><small>{`LOCKS ${game.foundCount.toString().padStart(2, "0")} / ${game.targetCount.toString().padStart(2, "0")}`}</small><i /></div></div>
         {active ? <span className={styles.hideSeekReticle} style={{ left: `${reticlePoint.x / 10}%`, top: `${reticlePoint.y / 10}%` }} aria-hidden="true"><Crosshair size={24} /></span> : null}
         {game.recoveredSignals.map((signal) => <span key={signal.slot} className={styles.hideSeekRecovered} style={{ left: `${signal.x / 10}%`, top: `${signal.y / 10}%` }} role="img" aria-label={`Recovered signal ${signal.slot}`} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}><Check size={15} /></span>)}
       </div>
-      <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><span className={styles.hideSeekCoordinate}>X {reticlePoint.x.toString().padStart(4, "0")} / Y {reticlePoint.y.toString().padStart(4, "0")}</span></div>
+      <div className={styles.hideSeekConsole}><div><strong>Field scanner</strong><span>Click terrain to lock a scan. Arrow keys move the reticle; Enter commits it.</span></div><div className={styles.hideSeekTelemetry} data-band={game.telemetry?.band ?? "idle"}><span>Signal read</span><strong>{hideSeekSignalReadout(game.telemetry)}</strong></div><span className={styles.hideSeekCoordinate}>X {reticlePoint.x.toString().padStart(4, "0")} / Y {reticlePoint.y.toString().padStart(4, "0")}</span></div>
       <ol className={styles.hideSeekBrief} aria-label="Classified signal brief">
         {game.clues.map((clue) => <li key={clue.slot} data-found={clue.found}><span>{clue.found ? <Check size={15} /> : clue.slot.toString().padStart(2, "0")}</span><p>{clue.clue}</p></li>)}
       </ol>
@@ -686,7 +705,7 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
           : game.status === "failed" ? <><Target size={22} /><div><strong>Search window closed</strong><span>Too many empty scans. Your existing progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Hunt expired</strong><span>Start a new reconnaissance run when ready.</span></div></>
               : game.lastScan === "signal-acquired" ? <><ShieldCheck size={20} /><div><strong>Signal acquired</strong><span>Marker verified. The remaining coordinates stay classified.</span></div></>
-                : game.lastScan === "empty" ? <><Target size={20} /><div><strong>Empty sweep</strong><span>No signal locked at that position. Read the classified brief before the next pass.</span></div></>
+                : game.lastScan === "empty" ? <><Target size={20} /><div><strong>Empty sweep</strong><span>{game.telemetry ? `${hideSeekSignalReadout(game.telemetry)}. Adjust your next pass without exposing a target position.` : "No signal locked at that position. Read the classified brief before the next pass."}</span></div></>
                   : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Read the classified brief, sweep terrain and infrastructure, then commit each scan. Every find is verified by DZN.</span></div></>}
       </div>
     </> : <div className={styles.triviaReady}><Search size={34} /><h3>Run a classified sweep.</h3><p>Recover four signals from a live visual brief. The server keeps every unrecovered coordinate classified.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
