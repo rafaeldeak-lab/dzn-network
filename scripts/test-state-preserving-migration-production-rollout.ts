@@ -19,6 +19,9 @@ assert.match(workflow, /0106_games_hub_cipher_grid_specialist\.sql/);
 assert.match(workflow, /d1 time-travel info/);
 assert.match(workflow, /migrations apply/);
 assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflow must have exactly one migration application command.");
+assert.match(workflow, /verify-write-quiesce/);
+assert.match(workflow, /https:\/\/dayz-network\.com\/api\/games\/cipher-grid/);
+assert.match(workflow, /CIPHER_GRID_STATUS.*404/);
 assert.match(workflow, /hashes only/);
 assert.match(workflow, /Feature activation: intentionally not performed/);
 assert.match(workflow, /Website deployment: intentionally not performed/);
@@ -30,6 +33,7 @@ assert.doesNotMatch(workflow, /stripe/i);
 assert.match(controller, /MIGRATION_SHA256/);
 assert.match(controller, /source hash does not match the approved data-preservation plan/);
 assert.match(controller, /Cipher Grid session fingerprint changed/);
+assert.match(controller, /Cipher Grid writes are not quiesced/);
 assert.match(controller, /Staging table .* remained/);
 assert.match(controller, /foreign_key_check/);
 assert.match(controller, /SELECT user_id, id, answer, attempts_json, status, version, started_at, updated_at/);
@@ -58,6 +62,15 @@ const afterFingerprint = join(directory, "after.sha256");
 const run = (args: string[]) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/dzn-state-preserving-migration-production-rollout.ts", ...args], { encoding: "utf8" });
 
 try {
+  const quiescedConfig = write("quiesced-wrangler.toml", "[env.production.vars]\nDZN_GAMES_CIPHER_GRID_ENABLED = \"false\"\n");
+  const quiesced = run(["verify-write-quiesce", "--config", quiescedConfig]);
+  assert.equal(quiesced.status, 0, `${quiesced.stdout}\n${quiesced.stderr}`);
+  assert.match(quiesced.stdout, /write path is source-configured as disabled/);
+  const activeConfig = write("active-wrangler.toml", "[env.production.vars]\nDZN_GAMES_CIPHER_GRID_ENABLED = \"true\"\n");
+  const active = run(["verify-write-quiesce", "--config", activeConfig]);
+  assert.notEqual(active.status, 0, "The rollout must reject an active Cipher Grid write path.");
+  assert.match(`${active.stdout}\n${active.stderr}`, /writes are not quiesced/);
+
   const before = run(["fingerprint", "--rows", beforeRows]);
   const after = run(["fingerprint", "--rows", afterRows]);
   assert.equal(before.status, 0, before.stderr);

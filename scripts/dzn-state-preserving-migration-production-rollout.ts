@@ -41,6 +41,9 @@ switch (command) {
   case "verify-before":
     verifyBefore(required("--objects"), required("--table-info"), required("--foreign-keys"), required("--foreign-key-check"));
     break;
+  case "verify-write-quiesce":
+    verifyWriteQuiesce(required("--config"));
+    break;
   case "fingerprint":
     fingerprint(required("--rows"));
     break;
@@ -66,7 +69,7 @@ switch (command) {
     console.log(`SELECT COUNT(*) AS row_count FROM ${TABLE};`);
     break;
   default:
-    throw new Error("Expected one of: prepare, verify-ledger, verify-before, fingerprint, verify-after, print-objects-query, print-rows-query, print-row-count-query.");
+    throw new Error("Expected one of: prepare, verify-ledger, verify-before, verify-write-quiesce, fingerprint, verify-after, print-objects-query, print-rows-query, print-row-count-query.");
 }
 
 function required(name: string) {
@@ -108,6 +111,20 @@ function resolveInsideRepository(value: string) {
     throw new Error("Stage and verification paths must be inside the checked-out repository.");
   }
   return resolved;
+}
+
+function verifyWriteQuiesce(configPath: string) {
+  const source = readFileSync(resolveInsideRepository(configPath), "utf8");
+  const marker = "[env.production.vars]";
+  const start = source.indexOf(marker);
+  const tail = start < 0 ? "" : source.slice(start + marker.length);
+  const nextSection = tail.search(/^\[/m);
+  const section = nextSection < 0 ? tail : tail.slice(0, nextSection);
+  const values = [...section.matchAll(/^DZN_GAMES_CIPHER_GRID_ENABLED\s*=\s*"([^"]+)"\s*$/gm)].map((match) => match[1]);
+  if (values.length !== 1 || values[0] !== "false") {
+    throw new Error("Cipher Grid writes are not quiesced: production configuration must contain exactly one DZN_GAMES_CIPHER_GRID_ENABLED = \"false\" entry.");
+  }
+  console.log("Production Cipher Grid write path is source-configured as disabled.");
 }
 
 function prepareMigrationStage(stageInput: string) {
