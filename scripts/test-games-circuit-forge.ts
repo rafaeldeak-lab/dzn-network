@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesCircuitForge } from "../functions/_lib/games-circuit-forge";
-import { circuitMasks, isCompleteCircuit, poweredCircuitTiles } from "../functions/_lib/games-circuit-forge-layout";
+import { CIRCUIT_FORGE_CANONICAL_MASKS, circuitMasks, isCompleteCircuit, poweredCircuitTiles } from "../functions/_lib/games-circuit-forge-layout";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
 import { CIRCUIT_FORGE_MAX_ROTATIONS, CIRCUIT_FORGE_REWARD, CIRCUIT_FORGE_TTL_MS, type CircuitForgePayload } from "../lib/games-circuit-forge";
@@ -54,9 +54,9 @@ function nearSolvedRotations() {
   return [3, ...Array(24).fill(0)] as number[];
 }
 
-function setBoard(fixture: Fixture, rotations = nearSolvedRotations(), count = 0) {
-  fixture.db.sqlite.prepare("UPDATE dzn_circuit_forge_sessions SET rotations_json = ?, rotations = ?, status = 'playing', updated_at = ? WHERE user_id = 'local-player'")
-    .run(JSON.stringify(rotations), count, Date.now() - 1_000);
+function setBoard(fixture: Fixture, rotations = nearSolvedRotations(), count = 0, version = count) {
+  fixture.db.sqlite.prepare("UPDATE dzn_circuit_forge_sessions SET rotations_json = ?, rotations = ?, version = ?, status = 'playing', updated_at = ? WHERE user_id = 'local-player'")
+    .run(JSON.stringify(rotations), count, version, Date.now() - 1_000);
 }
 
 function command(state: CircuitForgePayload, index = 0) {
@@ -130,7 +130,7 @@ async function run() {
     assert.equal(stored.diagnostic_index, null);
   }, false);
 
-  await gridControlTest("the server issues one diagnostic target and one authoritative phase rotation", async fixture => {
+  await gridControlTest("the server issues one diagnostic target and one authoritative phase alignment", async fixture => {
     await start(fixture);
     setBoard(fixture, [3, ...Array(24).fill(0)]);
     const state = await payload(await call(fixture));
@@ -142,13 +142,29 @@ async function run() {
     assert.equal(diagnosed.game?.phaseAvailable, true);
     assert.equal((await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version })).status, 409);
     settle(fixture);
+    assert.equal((await call(fixture, { action: "phase", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: 1 })).status, 409);
     const phased = await payload(await call(fixture, { action: "phase", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: 0 }));
     assert.equal(phased.game?.phaseUsed, true);
     assert.equal(phased.game?.phaseAvailable, false);
     assert.equal(phased.game?.diagnosticIndex, null);
     assert.equal(phased.game?.rotations, 1);
+    assert.equal(phased.game?.status, "won");
     assert.equal((await call(fixture, { action: "phase", gameId: phased.game?.id, version: phased.game?.version, index: 0 })).status, 409);
     assert.equal((await call(fixture, { action: "phase", gameId: phased.game?.id, version: phased.game?.version, index: 12 })).status, 400);
+  });
+
+  await gridControlTest("diagnostics skip symmetrically aligned straight relays", async fixture => {
+    await start(fixture);
+    const straightIndex = CIRCUIT_FORGE_CANONICAL_MASKS.findIndex(mask => mask === 5 || mask === 10);
+    assert.notEqual(straightIndex, -1);
+    const rotations = Array(25).fill(0);
+    rotations[straightIndex] = 2;
+    setBoard(fixture, rotations);
+    const state = await payload(await call(fixture));
+    assert.equal((await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version })).status, 409);
+    const stored = fixture.db.sqlite.prepare("SELECT diagnostic_used, diagnostic_index FROM dzn_circuit_forge_sessions WHERE user_id = 'local-player'").get() as { diagnostic_used: number; diagnostic_index: number | null };
+    assert.equal(stored.diagnostic_used, 0);
+    assert.equal(stored.diagnostic_index, null);
   });
 
   await gridControlTest("a new board clears installed control state before a later re-enable", async fixture => {
@@ -165,16 +181,31 @@ async function run() {
     assert.equal(refreshed.game?.diagnosticIndex, null);
   });
 
-  await gridControlTest("a phase rotation can complete a board and uses the normal daily reward ledger", async fixture => {
+  await gridControlTest("a phase alignment can complete a board and uses the normal daily reward ledger", async fixture => {
     await start(fixture);
     setBoard(fixture, [2, ...Array(24).fill(0)]);
     const state = await payload(await call(fixture));
+    const diagnosed = await payload(await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version }));
     settle(fixture);
-    const completed = await payload(await call(fixture, { action: "phase", gameId: state.game?.id, version: state.game?.version, index: 0 }));
+    const completed = await payload(await call(fixture, { action: "phase", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: diagnosed.game?.diagnosticIndex }));
     assert.equal(completed.game?.status, "won");
     assert.equal(completed.game?.phaseUsed, true);
     assert.equal(completed.rewardGranted, true);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_circuit_forge_reward_ledger").get()?.count, 1);
+  });
+
+  await gridControlTest("diagnostics do not consume state-version capacity at the rotation cap", async fixture => {
+    await start(fixture);
+    setBoard(fixture, [2, ...Array(24).fill(0)], CIRCUIT_FORGE_MAX_ROTATIONS - 1);
+    const state = await payload(await call(fixture));
+    assert.equal(state.game?.version, CIRCUIT_FORGE_MAX_ROTATIONS - 1);
+    const diagnosed = await payload(await call(fixture, { action: "diagnose", gameId: state.game?.id, version: state.game?.version }));
+    assert.equal(diagnosed.game?.version, CIRCUIT_FORGE_MAX_ROTATIONS - 1);
+    settle(fixture);
+    const failed = await payload(await call(fixture, { action: "rotate", gameId: diagnosed.game?.id, version: diagnosed.game?.version, index: 0 }));
+    assert.equal(failed.game?.status, "failed");
+    assert.equal(failed.game?.version, CIRCUIT_FORGE_MAX_ROTATIONS);
+    assert.equal((await call(fixture)).status, 200);
   });
 
   await test("server-validated rotations, complete state and daily reward cap apply exactly", async fixture => {

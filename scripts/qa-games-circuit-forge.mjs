@@ -26,7 +26,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-    await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+    await page.goto(`${origin}/${viewport.name === "phone" ? "__local-login-other" : "__local-login"}`, { waitUntil: "networkidle" });
     await page.locator('[data-game="circuit-forge"]').click();
     await page.getByRole("heading", { name: "DZN Circuit Forge" }).waitFor();
     if (viewport.name === "desktop") {
@@ -40,6 +40,14 @@ try {
       const phase = page.locator('[data-grid-control="phase"]');
       await phase.click();
       await page.getByText("Phase lock spent", { exact: true }).waitFor({ state: "visible" });
+    } else {
+      await page.getByRole("button", { name: "Start rebuild" }).click();
+      const diagnostic = page.locator('[data-grid-control="diagnose"]');
+      await diagnostic.waitFor({ state: "visible" });
+      await diagnostic.click();
+      const diagnosticTile = page.locator('[data-diagnostic="true"]');
+      await diagnosticTile.waitFor({ state: "visible" });
+      assert.equal(await diagnosticTile.evaluate(element => getComputedStyle(element).animationName), "none");
     }
     await page.getByRole("grid", { name: "Circuit Forge power grid" }).waitFor({ state: viewport.name === "desktop" ? "visible" : "attached" });
     const canvas = page.locator('canvas[data-dzn-circuit-forge-canvas="true"]');

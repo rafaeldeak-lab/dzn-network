@@ -67,6 +67,9 @@ async function main() {
       if (url.pathname === "/__local-login") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/games", "Cache-Control": "no-store" }); res.end(); return;
       }
+      if (url.pathname === "/__local-login-other") {
+        res.writeHead(303, { "Set-Cookie": `${fixture.otherCookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/games", "Cache-Control": "no-store" }); res.end(); return;
+      }
       if (url.pathname === "/__local-command-centre") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/command-centre", "Cache-Control": "no-store" }); res.end(); return;
       }

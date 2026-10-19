@@ -103,7 +103,7 @@ function gameView(row: CircuitForgeRow, now: number, gridControlEnabled: boolean
     diagnosticAvailable: gridControlEnabled && status === "playing" && !diagnosticUsed,
     diagnosticUsed,
     diagnosticIndex: gridControlEnabled ? row.diagnostic_index ?? null : null,
-    phaseAvailable: gridControlEnabled && status === "playing" && !phaseUsed,
+    phaseAvailable: gridControlEnabled && status === "playing" && diagnosticUsed && row.diagnostic_index !== null && row.diagnostic_index !== undefined && !phaseUsed,
     phaseUsed,
   };
 }
@@ -166,13 +166,14 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
         || now >= row.started_at + CIRCUIT_FORGE_TTL_MS) {
         return reply({ error: "This diagnostic is no longer available. Refresh the board." }, 409);
       }
-      const candidates = parseRotations(row.rotations_json)
-        .map((rotation, index) => rotation !== 0 && index !== CIRCUIT_FORGE_CORE_INDEX ? index : -1)
+      const masks = circuitMasks(parseRotations(row.rotations_json));
+      const candidates = masks
+        .map((mask, index) => mask !== CIRCUIT_FORGE_CANONICAL_MASKS[index] && index !== CIRCUIT_FORGE_CORE_INDEX ? index : -1)
         .filter(index => index >= 0);
       if (!candidates.length) return reply({ error: "The grid no longer needs a diagnostic. Continue the rebuild." }, 409);
       const diagnosticIndex = candidates[(row.version + row.rotations) % candidates.length];
       const result = await db.prepare(`UPDATE dzn_circuit_forge_sessions
-        SET diagnostic_used = 1, diagnostic_index = ?, version = version + 1, updated_at = ?
+        SET diagnostic_used = 1, diagnostic_index = ?, updated_at = ?
         WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND diagnostic_used = 0 AND started_at > ?`)
         .bind(diagnosticIndex, now, user.id, row.id, row.version, now - CIRCUIT_FORGE_TTL_MS).run();
       if (!result.meta.changes) return reply({ error: "Another grid control reached this board first. Refresh to continue." }, 409);
@@ -186,13 +187,14 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
       }
       const row = await db.prepare("SELECT * FROM dzn_circuit_forge_sessions WHERE user_id = ?").bind(user.id).first<CircuitForgeRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This Circuit Forge board is not available." }, 404);
-      if (row.status !== "playing" || row.version !== body.version || row.phase_used !== 0
+      if (row.status !== "playing" || row.version !== body.version || row.phase_used !== 0 || row.diagnostic_used !== 1 || row.diagnostic_index !== index
         || row.rotations >= CIRCUIT_FORGE_MAX_ROTATIONS || now >= row.started_at + CIRCUIT_FORGE_TTL_MS) {
         return reply({ error: "This phase control is no longer available. Refresh the board." }, 409);
       }
       if (now < row.updated_at + CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS) return reply({ error: "Rotate one relay at a time." }, 429);
       const rotations = parseRotations(row.rotations_json);
-      rotations[index] = (rotations[index] + 2) % 4;
+      // The server owns the canonical layout, so the one-use lock can precisely realign only the diagnosed relay.
+      rotations[index] = 0;
       const rotationCount = row.rotations + 1;
       const complete = isCompleteCircuit(circuitMasks(rotations));
       const status: CircuitForgeRow["status"] = complete ? "won" : rotationCount >= CIRCUIT_FORGE_MAX_ROTATIONS ? "failed" : "playing";

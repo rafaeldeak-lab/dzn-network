@@ -791,6 +791,9 @@
 .hub[data-motion=paused] .wordChainCommandDeck[data-active=true]::after { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .wordChainCommandDeck[data-active=true]::after { animation: none; } }
 
+.hub[data-motion=paused] .circuitForgeTile[data-diagnostic=true] { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .circuitForgeTile[data-diagnostic=true] { animation: none; } }
+
 .rangerRangeTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .rangerRangeTools > div { display: grid; gap: 4px; }
 .rangerRangeTools strong { font-size: 13px; }

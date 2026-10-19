@@ -1224,7 +1224,7 @@ function CircuitForgePanel({ now, motionRunning, onProgress }: { now: number; mo
                 <ScanSearch size={15} /><span><strong>{game.diagnosticUsed ? "Topology scan spent" : "Run topology scan"}</strong><small>{game.diagnosticUsed ? game.diagnosticIndex !== null ? `Relay ${String(game.diagnosticIndex + 1).padStart(2, "0")} requires alignment.` : "Fault trace consumed." : "Reveal one relay that still needs a turn."}</small></span>
               </button>
               <button type="button" className={styles.circuitForgeControl} data-grid-control="phase" disabled={!active || busy || cooldown || !game.phaseAvailable || game.diagnosticIndex === null} onClick={phase}>
-                <Zap size={15} /><span><strong>{game.phaseUsed ? "Phase lock spent" : "Deploy phase lock"}</strong><small>{game.phaseUsed ? "One phase control is issued per grid." : game.diagnosticIndex !== null ? `Turn relay ${String(game.diagnosticIndex + 1).padStart(2, "0")} through 180 degrees.` : "Run the diagnostic to select a relay."}</small></span>
+                <Zap size={15} /><span><strong>{game.phaseUsed ? "Phase lock spent" : "Deploy phase lock"}</strong><small>{game.phaseUsed ? "One phase control is issued per grid." : game.diagnosticIndex !== null ? `Align relay ${String(game.diagnosticIndex + 1).padStart(2, "0")} to the verified route.` : "Run the diagnostic to select a relay."}</small></span>
               </button>
             </div>}
             <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
