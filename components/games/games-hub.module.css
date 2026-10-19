@@ -315,6 +315,7 @@
 .triviaClearanceDots i { display: block; width: 17px; height: 4px; border: 1px solid #527d78; background: #0b2020; box-shadow: inset 0 0 0 1px #00000050; }
 .triviaClearanceDots i[data-state=secured] { border-color: #91f6de; background: #49cdb8; box-shadow: 0 0 9px #48d9c991; }
 .triviaClearanceDots i[data-state=live] { border-color: #f3c46c; background: #553e1e; animation: trivia-clearance-pulse 1.8s ease-in-out infinite; }
+.hub[data-motion=paused] .triviaClearanceDots i[data-state=live] { animation-play-state: paused; }
 .triviaMeta { display: flex; flex-wrap: wrap; gap: 16px; color: #bdd1cd; font-size: 11px; margin: 0; }
 .triviaMeta span:last-child { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 .triviaPromptRail { align-self: center; max-width: min(740px, 69%); display: grid; gap: 10px; padding: 16px 18px; border-left: 3px solid #8df5e6; border-block: 1px solid #86e7d938; background: #061110db; box-shadow: 0 12px 28px #02050552, inset 0 1px #d8fff114; }
@@ -835,7 +836,7 @@
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
 @media (max-width: 360px) { .hubNav { align-items: flex-start; } .hubNav .navActions { width: 100%; justify-content: space-between; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
-@media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after, .hideSeekScene::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
+@media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after, .outpostRunMapShell[data-active=true] .outpostRunSweep::after, .hideSeekScene::after, .triviaClearanceDots i[data-state=live] { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight, .outpostRunSweep { display: none; } }
 @media (max-width: 560px) { .wordChainPanel { padding: 13px; } .chainReadout { align-items: flex-start; flex-direction: column; gap: 4px; } .wordChainCommandDeck { grid-template-columns: 1fr; min-height: 0; } .wordChainScene, .wordChainScene :global(.dzn-word-chain-3d) { min-height: 258px; } .wordChainDeckHud { top: 11px; left: 11px; } .wordChainWordRail { min-height: 258px; align-content: end; padding: 16px; } .wordChainTiles { gap: 5px; } .wordChainTiles b { width: 33px; height: 39px; font-size: 18px; } .wordChainTurnPanel { min-height: 112px; padding: 14px 16px; border-top: 1px solid #4e746e; border-left: 0; } }
 .hub[data-motion=paused] .wordChainCommandDeck[data-active=true]::after { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .wordChainCommandDeck[data-active=true]::after { animation: none; } }
