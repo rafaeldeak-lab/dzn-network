@@ -33,6 +33,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0102_games_hub_ranger_range.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0104_games_hub_night_run.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0110_games_hub_night_run_route_control.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0107_dzn_command_centre.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0109_dzn_survival_command_loadouts.sql", "utf8"));
@@ -49,6 +50,7 @@ async function main() {
   fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_ENABLED = "true";
   fixture.env.DZN_GAMES_NIGHT_RUN_RECON_ENABLED = "true";
+  fixture.env.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "true";
   fixture.env.DZN_COMMAND_CENTRE_ENABLED = "true";
   fixture.env.DZN_SURVIVAL_COMMAND_ENABLED = "true";
   const root = resolve("out");
