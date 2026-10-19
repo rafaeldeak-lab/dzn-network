@@ -176,6 +176,8 @@ async function run() {
     assert.match(hubSource, /scanPoint=\{reticlePoint\}/);
     assert.match(hubSource, /telemetry=\{game\.telemetry\}/);
     assert.match(hubSource, /clearScanTelemetry/);
+    assert.match(hubSource, /function beginScan/);
+    assert.match(hubSource, /if \(!beginScan\(point\.x, point\.y\)\) return/);
     assert.match(visualSource, /const unavailableRef = useRef\(onUnavailable\);/);
     assert.match(visualSource, /new THREE\.OrthographicCamera/);
     assert.match(visualSource, /state\.scanPoint\.x \/ 1000 \* 2 - 1/);

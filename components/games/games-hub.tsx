@@ -604,6 +604,7 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   const [reticle, setReticle] = useState({ gameId: "", x: 500, y: 500 });
   const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
+  const scanPending = useRef(false);
 
   const clearScanTelemetry = useCallback(() => {
     setPayload(current => current?.game ? { ...current, game: { ...current.game, telemetry: null } } : current);
@@ -643,20 +644,23 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   // Derive a centered scanner until this hunt has an intentional pointer or key action.
   // This avoids a synchronous effect update every time a fresh hunt arrives.
   const reticlePoint = game && reticle.gameId !== game.id ? { x: 500, y: 500 } : reticle;
-  function scan(x: number, y: number) {
-    if (!game || !active || busy) return;
+  function beginScan(x: number, y: number) {
+    if (!game || !active || busy || scanPending.current) return;
     if (game.recoveredSignals.some((signal) => Math.hypot(signal.x - x, signal.y - y) <= 45)) return;
+    scanPending.current = true;
     clearScanTelemetry();
-    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y });
+    void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }).finally(() => { scanPending.current = false; });
+    return true;
   }
   function scanAt(x: number, y: number) {
+    if (!game || !active || busy || scanPending.current) return;
     const point = { x: Math.max(0, Math.min(1000, Math.round(x))), y: Math.max(0, Math.min(1000, Math.round(y))) };
+    if (!beginScan(point.x, point.y)) return;
     setReticle({ gameId: game?.id ?? "", ...point });
-    scan(point.x, point.y);
   }
   function handleSceneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!active || busy) return;
-    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); scan(reticlePoint.x, reticlePoint.y); return; }
+    if (!active || busy || scanPending.current) return;
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); beginScan(reticlePoint.x, reticlePoint.y); return; }
     const delta = event.key === "ArrowUp" ? { x: 0, y: -50 }
       : event.key === "ArrowRight" ? { x: 50, y: 0 }
         : event.key === "ArrowDown" ? { x: 0, y: 50 }
