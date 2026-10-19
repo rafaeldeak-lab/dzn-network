@@ -118,29 +118,40 @@ jobs:
           npm run test:production-migration-queue
           npm run test:single-migration-production-rollout
           npm run test:survival-command-loadout-migration-maintenance
+          npm run test:night-run-route-control-migration-maintenance
           npm run test:games-hub
           git diff --check
 
-      - name: Verify protected account-closure maintenance in production
+      - name: Verify protected write maintenance in production
         run: |
           set -euo pipefail
-          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ]; then
-            echo "Account-closure maintenance is not required for ${MIGRATION_NAME}."
-            exit 0
-          fi
-          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/survival-command-loadout-migration)"
-          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
+          case "${MIGRATION_NAME}" in
+            0109_dzn_survival_command_loadouts.sql)
+              MAINTENANCE_URL="https://dayz-network.com/api/health/survival-command-loadout-migration"
+              EXPECTED_STATUS="survival-command-loadout-maintenance"
+              ;;
+            0110_games_hub_night_run_route_control.sql)
+              MAINTENANCE_URL="https://dayz-network.com/api/health/night-run-route-control-migration"
+              EXPECTED_STATUS="night-run-route-control-maintenance"
+              ;;
+            *)
+              echo "Protected write maintenance is not required for ${MIGRATION_NAME}."
+              exit 0
+              ;;
+          esac
+          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" "${MAINTENANCE_URL}")"
+          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" EXPECTED_STATUS="${EXPECTED_STATUS}" node <<'NODE'
           let response;
           try {
             response = JSON.parse(process.env.MAINTENANCE_RESPONSE || "");
           } catch {
-            throw new Error("Survival Command loadout maintenance did not return the expected JSON signal.");
+            throw new Error("Protected write maintenance did not return the expected JSON signal.");
           }
           const keys = response && Object.prototype.toString.call(response) === "[object Object]" ? Object.keys(response) : [];
-          if (keys.length !== 1 || keys[0] !== "status" || response.status !== "survival-command-loadout-maintenance") {
-            throw new Error("Survival Command loadout account-closure maintenance is not active in production.");
+          if (keys.length !== 1 || keys[0] !== "status" || response.status !== process.env.EXPECTED_STATUS) {
+            throw new Error("Protected write maintenance is not active in production.");
           }
-          console.log("Survival Command loadout account-closure maintenance JSON signal verified in production.");
+          console.log(`Protected write maintenance JSON signal verified: ${response.status}.`);
           NODE
 
       - name: Build an isolated migration stage
@@ -171,13 +182,13 @@ jobs:
           console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
           NODE
 
-      - name: Drain in-flight account-deletion operations before the preservation baseline
+      - name: Drain protected writes before the preservation baseline
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
         run: |
           set -euo pipefail
-          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ]; then
-            echo "Account-deletion drain is not required for ${MIGRATION_NAME}."
+          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ] && [ "${MIGRATION_NAME}" != "0110_games_hub_night_run_route_control.sql" ]; then
+            echo "Protected-write drain is not required for ${MIGRATION_NAME}."
             exit 0
           fi
           # New closures are blocked by the deployed maintenance flag. Wait for the
@@ -188,6 +199,7 @@ jobs:
           DRAIN_ATTEMPTS=30
           REQUIRED_CONSECUTIVE_EMPTY_READS=2
           consecutive_empty_reads=0
+          drained=false
           for attempt in $(seq 1 "${DRAIN_ATTEMPTS}"); do
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
               --command "${OPERATION_QUERY}" > "${OPERATIONS_FILE}"
@@ -197,16 +209,41 @@ jobs:
               if [ "${consecutive_empty_reads}" -ge "${REQUIRED_CONSECUTIVE_EMPTY_READS}" ]; then
                 rm -f "${OPERATIONS_FILE}"
                 echo "Account-deletion operations drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
-                exit 0
+                drained=true
+                break
               fi
             else
               consecutive_empty_reads=0
             fi
             sleep 15
           done
-          echo "::error::Account-deletion operations did not drain before the preservation baseline. No migration was applied."
-          rm -f "${OPERATIONS_FILE}"
-          exit 1
+          if [ "${drained}" != "true" ]; then
+            echo "::error::Account-deletion operations did not drain before the preservation baseline. No migration was applied."
+            rm -f "${OPERATIONS_FILE}"
+            exit 1
+          fi
+
+          if [ "${MIGRATION_NAME}" = "0110_games_hub_night_run_route_control.sql" ]; then
+            STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
+            FIRST_ROWS="${MIGRATION_STAGE}/night-run-quiesce-one.json"
+            SECOND_ROWS="${MIGRATION_STAGE}/night-run-quiesce-two.json"
+            FIRST_FINGERPRINT="${MIGRATION_STAGE}/night-run-quiesce-one.sha256"
+            SECOND_FINGERPRINT="${MIGRATION_STAGE}/night-run-quiesce-two.sha256"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${STATE_ROWS_QUERY}" > "${FIRST_ROWS}"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint --rows "${FIRST_ROWS}" > "${FIRST_FINGERPRINT}"
+            rm -f "${FIRST_ROWS}"
+            sleep 15
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${STATE_ROWS_QUERY}" > "${SECOND_ROWS}"
+            npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint --rows "${SECOND_ROWS}" > "${SECOND_FINGERPRINT}"
+            rm -f "${SECOND_ROWS}"
+            if ! cmp -s "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"; then
+              echo "::error::Night Run sessions changed while protected maintenance was active. No migration was applied."
+              rm -f "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"
+              exit 1
+            fi
+            rm -f "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"
+            echo "Night Run session writes quiesced across two private read-only fingerprints."
+          fi
 
       - name: Record D1 recovery bookmark
         env:

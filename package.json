@@ -35,6 +35,7 @@
     "qa:games-ranger-range": "node scripts/qa-games-ranger-range.mjs",
     "test:games-night-run": "tsx scripts/test-games-night-run.ts",
     "test:games-night-run-production-activation": "tsx scripts/test-games-night-run-production-activation.ts",
+    "test:night-run-route-control-migration-maintenance": "tsx scripts/test-night-run-route-control-migration-maintenance.ts",
     "qa:games-night-run": "node scripts/qa-games-night-run.mjs",
     "test:games-trivia": "tsx scripts/test-games-trivia.ts",
     "qa:games-trivia": "node scripts/qa-games-trivia.mjs",

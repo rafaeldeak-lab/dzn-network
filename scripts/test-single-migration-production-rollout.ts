@@ -79,14 +79,24 @@ assert.match(workflow, /verify-state-preservation-before/);
 assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
 assert.match(workflow, /survival-command-loadout-migration/);
-assert.match(workflow, /Drain in-flight account-deletion operations before the preservation baseline/);
+assert.match(workflow, /night-run-route-control-migration/);
+assert.match(workflow, /Drain protected writes before the preservation baseline/);
 assert.equal(
   (workflow.match(/MIGRATION_NAME.*0109_dzn_survival_command_loadouts\.sql/g) ?? []).length,
-  2,
-  "Account-closure maintenance and draining must run only for the 0109 state-preserving migration.",
+  1,
+  "The 0109 migration must remain explicitly gated by protected-write maintenance and draining.",
 );
+assert.equal(
+  (workflow.match(/MIGRATION_NAME.*0110_games_hub_night_run_route_control\.sql/g) ?? []).length,
+  2,
+  "The 0110 migration must remain explicitly gated by protected-write maintenance and draining.",
+);
+assert.match(workflow, /0109_dzn_survival_command_loadouts\.sql\)[\s\S]*?survival-command-loadout-maintenance/);
+assert.match(workflow, /0110_games_hub_night_run_route_control\.sql\)[\s\S]*?night-run-route-control-maintenance/);
 assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
 assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
+assert.match(workflow, /test:night-run-route-control-migration-maintenance/);
+assert.match(workflow, /Night Run session writes quiesced across two private read-only fingerprints/);
 assert.match(workflow, /migrations apply/);
 assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflow must have exactly one migration application command.");
 assert.match(workflow, /--config "\$\{MIGRATION_STAGE\}\/wrangler\.toml"/);

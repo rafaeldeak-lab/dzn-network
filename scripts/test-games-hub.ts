@@ -107,7 +107,7 @@ async function run() {
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
       DZN_GAMES_RELAY_RUSH_ENABLED: "true",
       DZN_GAMES_CIPHER_GRID_ENABLED: "true",
-      DZN_ACCOUNT_DELETE_ENABLED: "true",
+      DZN_ACCOUNT_DELETE_ENABLED: "false",
       DZN_GAMES_ECHO_ARRAY_ENABLED: "true",
       DZN_GAMES_OUTPOST_RUN_ENABLED: "true",
       DZN_GAMES_SIGNAL_SHIFT_ENABLED: "true",
@@ -115,6 +115,7 @@ async function run() {
       DZN_GAMES_RANGER_RANGE_ENABLED: "true",
       DZN_GAMES_NIGHT_RUN_ENABLED: "true",
       DZN_GAMES_NIGHT_RUN_RECON_ENABLED: "true",
+      DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE: "true",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});

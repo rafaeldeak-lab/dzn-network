@@ -163,6 +163,9 @@ export async function handleGamesNightRun(request: Request, env: Env): Promise<R
     if (env.DZN_GAMES_HUB_ENABLED !== "true" || env.DZN_GAMES_NIGHT_RUN_ENABLED !== "true") {
       return reply({ error: "DZN Night Run is not open yet." }, 404);
     }
+    if (request.method === "POST" && env.DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE === "true") {
+      return reply({ error: "DZN Night Run is temporarily unavailable during protected maintenance. Your convoy progress is unchanged." }, 503);
+    }
     const db = requireDb(env);
     const now = Date.now();
     const reconEnabled = env.DZN_GAMES_NIGHT_RUN_RECON_ENABLED === "true";
