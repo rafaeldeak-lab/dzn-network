@@ -199,6 +199,16 @@ async function run() {
     assert.equal(state.game?.energy, OUTPOST_RUN_MAX_ENERGY, "The armed shield must absorb exactly one server-declared hazard.");
     assert.equal(state.game?.shieldArmed, false);
     assert.equal(state.game?.visibleCells.some(cell => cell.kind === "hazard" && same(cell, north)), true);
+
+    fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - 6_000, Date.now() - 1_000);
+    const secondRun = await start(fixture);
+    settle(fixture);
+    const afterMove = await payload(await call(fixture, command(secondRun, "move", "north")));
+    settle(fixture);
+    const reconAfterMove = await payload(await call(fixture, supportCommand(afterMove, "recon")));
+    assert.equal(reconAfterMove.game?.reconCells, 3, "Recon after moving must omit sectors the player already visited.");
+    assert.equal(reconAfterMove.game?.visibleCells.some(cell => same(cell, { row: 2, column: 2 })), true);
   });
 
   await test("new tactical runs require the field beacon before the relay and preserve legacy sessions", async fixture => {

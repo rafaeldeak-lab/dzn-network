@@ -215,8 +215,11 @@ function scanHint(position: Coordinate, target: Coordinate) {
   return [vertical, horizontal].filter(Boolean).join("-") || "relay acquired";
 }
 
-function reconnaissanceCells(position: Coordinate) {
-  return OUTPOST_RUN_DIRECTIONS.map(direction => moveCoordinate(position, direction)).filter(isCoordinate);
+function reconnaissanceCells(position: Coordinate, visited: Coordinate[]) {
+  const alreadyKnown = new Set(visited.map(cell => `${cell.row}:${cell.column}`));
+  return OUTPOST_RUN_DIRECTIONS.map(direction => moveCoordinate(position, direction))
+    .filter(isCoordinate)
+    .filter(cell => !alreadyKnown.has(`${cell.row}:${cell.column}`));
 }
 
 function visibleCells(layout: OutpostLayout, visited: Coordinate[]): OutpostRunCell[] {
@@ -342,7 +345,7 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         let nextSupport: OutpostSupportState;
         if (body.support === "recon") {
           if (support.reconUsed) return reply({ error: "The recon drone has already completed its field sweep." }, 409);
-          nextSupport = { ...support, reconUsed: true, reconCells: reconnaissanceCells(position) };
+          nextSupport = { ...support, reconUsed: true, reconCells: reconnaissanceCells(position, parseVisited(row.visited_json, maxMoves)) };
         } else {
           if (support.shieldUsed) return reply({ error: "The storm shield has already been deployed on this run." }, 409);
           nextSupport = { ...support, shieldUsed: true, shieldArmed: true };
