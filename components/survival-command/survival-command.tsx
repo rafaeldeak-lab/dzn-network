@@ -128,7 +128,7 @@ export function SurvivalCommand() {
       </nav>
 
       <header className={styles.header}>
-        <div><p className={styles.eyebrow}>DZN // SURVIVAL COMMAND</p><h1>Sector Operations</h1><p className={styles.intro}>Build a route, send a team, lock a tactical protocol at field contact, then decide how the recovery ends. Every return becomes part of your private command record.</p></div>
+        <div><p className={styles.eyebrow}>DZN // SURVIVAL COMMAND</p><h1>Sector Operations</h1><p className={styles.intro}>Build a route, send a team, make a field decision when contact is established, then decide how the recovery ends. Every return becomes part of your private command record.</p></div>
         <div className={styles.accountState} aria-label="Survival Command resources">
           <span><Boxes size={17} />{payload?.resources.salvage ?? 0}<small>salvage</small></span>
           <span><Radio size={17} />{payload?.resources.intel ?? 0}<small>intel</small></span>
@@ -203,7 +203,7 @@ function FieldOrderDossier({ expedition, sector, busy, onSetOrder }: { expeditio
 function DecisionDossier({ expedition, sector, busy, onResolve }: { expedition: NonNullable<SurvivalCommandPayload["expedition"]>; sector: SurvivalCommandPayload["sectors"][number] | null; busy: string | null; onResolve: (action: string) => void }) {
   const loadout = SURVIVAL_COMMAND_LOADOUTS[expedition.loadout];
   const order = expedition.fieldOrder ? SURVIVAL_COMMAND_FIELD_ORDERS[expedition.fieldOrder] : null;
-  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span>{order && <span>{order.name}</span>}</div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected route, locked field order, loadout and final recovery are calculated server-side.</p></>;
+  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span>{order && <span>{order.name}</span>}</div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected route{order ? ", locked field order," : ""} loadout and final recovery are calculated server-side.</p></>;
 }
 
 function DeployDossier({ selected, approach, loadout, loadouts, resources, buildings, busy, deployment, onApproach, onLoadout, onUnlock, onDeploy }: {

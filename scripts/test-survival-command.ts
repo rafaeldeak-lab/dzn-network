@@ -106,6 +106,8 @@ async function run() {
   assert.match(scene, /dznSurvivalCommandCanvas/);
   assert.match(client, /Set the field order/);
   assert.match(client, /Tactical command window/);
+  assert.match(client, /selected route\{order \? ", locked field order," : ""\}/);
+  assert.doesNotMatch(client, /Build a route, send a team, lock a tactical protocol/);
   assert.match(scene, /fieldOrderColours/);
   assert.match(styles, /survival-command-field-command-v2\.png/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
