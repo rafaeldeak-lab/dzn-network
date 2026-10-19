@@ -18,6 +18,7 @@ const migrations = [
   "0107_dzn_command_centre.sql",
   "0108_dzn_survival_command_expeditions.sql",
   "0109_dzn_survival_command_loadouts.sql",
+  "0110_games_hub_night_run_route_control.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -317,11 +318,11 @@ try {
   const preparedStage = run(["prepare", "--migration", "0109_dzn_survival_command_loadouts.sql", "--stage-dir", stageDirectory]);
   assert.equal(preparedStage.status, 0, `${preparedStage.stdout ?? ""}${preparedStage.stderr ?? ""}`);
   const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
-    migration: { statePreservation?: { sourceHash: string; addedColumn: { name: string; expectedValue: string } } };
+    migration: { statePreservation?: { sourceHash: string; addedColumns: Array<{ name: string; expectedValue: string }> } };
     expectedObjectSql: Record<string, string>;
   };
   assert.equal(prepared.migration.statePreservation?.sourceHash, "80cbe71073858d889f617c423b6b0f0a43cb89d1d52788ed4fcc519e2a20ad43");
-  assert.deepEqual(prepared.migration.statePreservation?.addedColumn, { name: "loadout", expectedValue: "field_kit" });
+  assert.deepEqual(prepared.migration.statePreservation?.addedColumns, [{ name: "loadout", expectedValue: "field_kit" }]);
   assert.deepEqual(Object.keys(prepared.expectedObjectSql).sort(), [
     "dzn_survival_command_loadout_unlocks",
     "dzn_survival_command_spend_ledger",
@@ -391,10 +392,10 @@ try {
     "--after-row-count", write("after-count.json", wrappedRows([{ row_count: 1 }])),
     "--before-fingerprint", beforeFingerprint,
     "--after-fingerprint", afterFingerprint,
-    "--loadouts", write("loadouts.json", wrappedRows([{ id: "expedition-a", loadout: "field_kit" }])),
+    "--defaults", write("defaults.json", wrappedRows([{ id: "expedition-a", loadout: "field_kit" }])),
   ]);
   assert.equal(verified.status, 0, `${verified.stdout ?? ""}${verified.stderr ?? ""}`);
-  assert.match(verified.stdout, /1 expedition rows retained/);
+  assert.match(verified.stdout, /1 dzn_survival_command_expeditions rows retained/);
 
   const incorrectDefault = run([
     "verify-state-preservation-after",
@@ -407,12 +408,116 @@ try {
     "--after-row-count", join(survivalLoadoutsDirectory, "after-count.json"),
     "--before-fingerprint", beforeFingerprint,
     "--after-fingerprint", afterFingerprint,
-    "--loadouts", write("incorrect-loadouts.json", wrappedRows([{ id: "expedition-a", loadout: "signal_scanner" }])),
+    "--defaults", write("incorrect-defaults.json", wrappedRows([{ id: "expedition-a", loadout: "signal_scanner" }])),
   ]);
   assert.notEqual(incorrectDefault.status, 0, "The verifier must reject an incorrect default for preserved expedition rows.");
   assert.match(`${incorrectDefault.stdout ?? ""}${incorrectDefault.stderr ?? ""}`, /was not initialized to field_kit/);
 } finally {
   rmSync(survivalLoadoutsDirectory, { force: true, recursive: true });
+}
+
+const nightRunRouteControlDirectory = mkdtempSync(join(process.cwd(), ".dzn-night-run-route-control-migration-test-"));
+try {
+  const run = (args: string[]) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/dzn-single-migration-production-rollout.ts", ...args], { encoding: "utf8" });
+  const wrappedRows = (rows: unknown[]) => JSON.stringify([{ results: rows }]);
+  const write = (name: string, value: string) => {
+    const path = join(nightRunRouteControlDirectory, name);
+    writeFileSync(path, value, "utf8");
+    return path;
+  };
+  const routeControlIndex = migrationNames.indexOf("0110_games_hub_night_run_route_control.sql");
+  assert.equal(migrationNames[routeControlIndex - 1], "0109_dzn_survival_command_loadouts.sql");
+  const ledgerPath = write("ledger.json", wrappedRows(migrationNames.slice(0, routeControlIndex).map((name) => ({ name }))));
+  const routeControlLedger = run(["verify-ledger", "--migration", "0110_games_hub_night_run_route_control.sql", "--ledger", ledgerPath, "--phase", "before"]);
+  assert.equal(routeControlLedger.status, 0, `${routeControlLedger.stdout ?? ""}${routeControlLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(nightRunRouteControlDirectory, "stage");
+  const preparedStage = run(["prepare", "--migration", "0110_games_hub_night_run_route_control.sql", "--stage-dir", stageDirectory]);
+  assert.equal(preparedStage.status, 0, `${preparedStage.stdout ?? ""}${preparedStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    migration: { statePreservation?: { sourceHash: string; addedColumns: Array<{ name: string; expectedValue: string }> } };
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.equal(prepared.migration.statePreservation?.sourceHash, "97c632a2d541eaeb480b9a4f455678abf139de69df0aedc9bdb47b9376126f22");
+  assert.deepEqual(prepared.migration.statePreservation?.addedColumns, [
+    { name: "decoy_armed", expectedValue: "0" },
+    { name: "decoy_used", expectedValue: "0" },
+    { name: "burst_used", expectedValue: "0" },
+    { name: "gate_extension_ms", expectedValue: "0" },
+  ]);
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql), ["idx_dzn_night_run_route_control"]);
+
+  const row = {
+    user_id: "user-a",
+    id: "night-run-a",
+    lane_sequence_json: "[\"left\",\"centre\",\"right\"]",
+    gate_index: 2,
+    collisions: 0,
+    status: "playing",
+    version: 4,
+    gate_started_at: 1,
+    started_at: 2,
+    updated_at: 3,
+  };
+  const beforeSql = "CREATE TABLE dzn_night_run_sessions (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL UNIQUE, lane_sequence_json TEXT NOT NULL CHECK (json_valid(lane_sequence_json) AND json_type(lane_sequence_json) = 'array'), gate_index INTEGER NOT NULL DEFAULT 0 CHECK (gate_index BETWEEN 0 AND 9), collisions INTEGER NOT NULL DEFAULT 0 CHECK (collisions BETWEEN 0 AND 2), status TEXT NOT NULL DEFAULT 'playing', version INTEGER NOT NULL DEFAULT 0, gate_started_at INTEGER NOT NULL, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)";
+  const afterSql = `${beforeSql.slice(0, -1)}, decoy_armed INTEGER NOT NULL DEFAULT 0 CHECK (decoy_armed IN (0, 1)), decoy_used INTEGER NOT NULL DEFAULT 0 CHECK (decoy_used IN (0, 1)), burst_used INTEGER NOT NULL DEFAULT 0 CHECK (burst_used IN (0, 1)), gate_extension_ms INTEGER NOT NULL DEFAULT 0 CHECK (gate_extension_ms IN (0, 900)))`;
+  const columns = ["user_id", "id", "lane_sequence_json", "gate_index", "collisions", "status", "version", "gate_started_at", "started_at", "updated_at"];
+  const foreignKeys = write("foreign-keys.json", wrappedRows([{ from: "user_id", table: "users", to: "id", on_delete: "CASCADE" }]));
+  const foreignKeyCheck = write("foreign-key-check.json", wrappedRows([]));
+  const baseline = run([
+    "verify-state-preservation-before",
+    "--migration", "0110_games_hub_night_run_route_control.sql",
+    "--objects", write("before-objects.json", wrappedRows([{ type: "table", name: "dzn_night_run_sessions", tbl_name: "dzn_night_run_sessions", sql: beforeSql }])),
+    "--table-info", write("before-info.json", wrappedRows(columns.map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+  ]);
+  assert.equal(baseline.status, 0, `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`);
+  const beforeRows = write("before-rows.json", wrappedRows([row]));
+  const afterRows = write("after-rows.json", wrappedRows([row]));
+  const beforeFingerprint = join(nightRunRouteControlDirectory, "before.sha256");
+  const afterFingerprint = join(nightRunRouteControlDirectory, "after.sha256");
+  const beforeHash = run(["fingerprint", "--rows", beforeRows]);
+  const afterHash = run(["fingerprint", "--rows", afterRows]);
+  assert.equal(beforeHash.status, 0, beforeHash.stderr);
+  assert.equal(afterHash.status, 0, afterHash.stderr);
+  writeFileSync(beforeFingerprint, beforeHash.stdout.trim(), "utf8");
+  writeFileSync(afterFingerprint, afterHash.stdout.trim(), "utf8");
+  const defaultQuery = run(["print-state-preservation-defaults-query", "--migration", "0110_games_hub_night_run_route_control.sql"]);
+  assert.equal(defaultQuery.status, 0, defaultQuery.stderr);
+  assert.match(defaultQuery.stdout, /SELECT id, decoy_armed, decoy_used, burst_used, gate_extension_ms FROM dzn_night_run_sessions/);
+  const verified = run([
+    "verify-state-preservation-after",
+    "--migration", "0110_games_hub_night_run_route_control.sql",
+    "--objects", write("after-objects.json", wrappedRows([{ type: "table", name: "dzn_night_run_sessions", tbl_name: "dzn_night_run_sessions", sql: afterSql }])),
+    "--table-info", write("after-info.json", wrappedRows([...columns, "decoy_armed", "decoy_used", "burst_used", "gate_extension_ms"].map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", write("before-count.json", wrappedRows([{ row_count: 1 }])),
+    "--after-row-count", write("after-count.json", wrappedRows([{ row_count: 1 }])),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("defaults.json", wrappedRows([{ id: "night-run-a", decoy_armed: 0, decoy_used: 0, burst_used: 0, gate_extension_ms: 0 }])),
+  ]);
+  assert.equal(verified.status, 0, `${verified.stdout ?? ""}${verified.stderr ?? ""}`);
+  assert.match(verified.stdout, /1 dzn_night_run_sessions rows retained/);
+  const incorrectDefault = run([
+    "verify-state-preservation-after",
+    "--migration", "0110_games_hub_night_run_route_control.sql",
+    "--objects", join(nightRunRouteControlDirectory, "after-objects.json"),
+    "--table-info", join(nightRunRouteControlDirectory, "after-info.json"),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", join(nightRunRouteControlDirectory, "before-count.json"),
+    "--after-row-count", join(nightRunRouteControlDirectory, "after-count.json"),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("incorrect-defaults.json", wrappedRows([{ id: "night-run-a", decoy_armed: 0, decoy_used: 1, burst_used: 0, gate_extension_ms: 0 }])),
+  ]);
+  assert.notEqual(incorrectDefault.status, 0, "The verifier must reject any incorrect default for a preserved Night Run session.");
+  assert.match(`${incorrectDefault.stdout ?? ""}${incorrectDefault.stderr ?? ""}`, /decoy_used was not initialized to 0/);
+} finally {
+  rmSync(nightRunRouteControlDirectory, { force: true, recursive: true });
 }
 
 console.log("Single-migration production rollout safety tests passed.");

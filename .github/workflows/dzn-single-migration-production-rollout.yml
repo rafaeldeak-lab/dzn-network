@@ -22,6 +22,7 @@ on:
           - 0107_dzn_command_centre.sql
           - 0108_dzn_survival_command_expeditions.sql
           - 0109_dzn_survival_command_loadouts.sql
+          - 0110_games_hub_night_run_route_control.sql
       confirm_production_migration:
         description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
         required: true
@@ -82,7 +83,7 @@ jobs:
             exit 1
           fi
           case "${MIGRATION_NAME_INPUT}" in
-            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql) ;;
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql|0110_games_hub_night_run_route_control.sql) ;;
             *)
               echo "::error::migration_name is not an approved single-migration target."
               exit 1
@@ -321,7 +322,7 @@ jobs:
             trap cleanup_state_rows EXIT
             STATE_OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-objects-query --migration "${MIGRATION_NAME}")"
             STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
-            STATE_LOADOUTS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-loadouts-query --migration "${MIGRATION_NAME}")"
+            STATE_DEFAULTS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-defaults-query --migration "${MIGRATION_NAME}")"
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
               --command "${STATE_OBJECT_QUERY}" > "${MIGRATION_STAGE}/state-objects-after.json"
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
@@ -333,7 +334,7 @@ jobs:
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
               --command "SELECT COUNT(*) AS row_count FROM ${STATE_TABLE};" > "${MIGRATION_STAGE}/state-row-count-after.json"
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
-              --command "${STATE_LOADOUTS_QUERY}" > "${MIGRATION_STAGE}/state-loadouts-after.json"
+              --command "${STATE_DEFAULTS_QUERY}" > "${MIGRATION_STAGE}/state-defaults-after.json"
             npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint \
               --rows "${MIGRATION_STAGE}/state-rows-after.json" > "${MIGRATION_STAGE}/state-fingerprint-after.sha256"
             npx tsx scripts/dzn-single-migration-production-rollout.ts verify-state-preservation-after \
@@ -346,8 +347,8 @@ jobs:
               --after-row-count "${MIGRATION_STAGE}/state-row-count-after.json" \
               --before-fingerprint "${MIGRATION_STAGE}/state-fingerprint-before.sha256" \
               --after-fingerprint "${MIGRATION_STAGE}/state-fingerprint-after.sha256" \
-              --loadouts "${MIGRATION_STAGE}/state-loadouts-after.json"
-            rm "${MIGRATION_STAGE}/state-rows-after.json" "${MIGRATION_STAGE}/state-loadouts-after.json"
+              --defaults "${MIGRATION_STAGE}/state-defaults-after.json"
+            rm "${MIGRATION_STAGE}/state-rows-after.json" "${MIGRATION_STAGE}/state-defaults-after.json"
           fi
 
           {
