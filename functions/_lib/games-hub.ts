@@ -1,7 +1,7 @@
 import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
-import { createGameBoard, gameView, GAME_TTL, moveGame, type GameRow } from "./games-hub-engine";
+import { createGameState, gameView, GAME_TTL, moveGame, scanGame, serializeGameState, type GameRow } from "./games-hub-engine";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, WORKSHOP_PART_COST, type GameMode, type HubGameAvailability, type HubPayload } from "../../lib/games-hub";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
@@ -320,17 +320,18 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
 
     if (body.action === "start") {
       if (!isMode(body.mode)) return reply({ error: "Choose a valid difficulty." }, 400);
-      const board = createGameBoard(body.mode);
+      const state = createGameState(body.mode);
       const result = await db.prepare(`INSERT INTO dzn_game_sessions
         (user_id, id, mode, board_json, status, version, started_at, updated_at) VALUES (?, ?, ?, ?, 'playing', 0, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET id = excluded.id, mode = excluded.mode, board_json = excluded.board_json,
         status = 'playing', version = 0, started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_game_sessions.started_at <= ?`)
-        .bind(user.id, crypto.randomUUID(), body.mode, JSON.stringify(board), now, now, now - 5000).run();
+        .bind(user.id, crypto.randomUUID(), body.mode, serializeGameState(state), now, now, now - 5000).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another board." }, 429);
-    } else if (body.action === "move") {
+    } else if (body.action === "move" || body.action === "scan") {
+      const scanning = body.action === "scan";
       if (!isId(body.gameId) || !Number.isInteger(body.version) || !Number.isInteger(body.x) || !Number.isInteger(body.y)
-        || !["reveal", "flag"].includes(String(body.tool))) return reply({ error: "Invalid move." }, 400);
+        || (!scanning && !["reveal", "flag"].includes(String(body.tool)))) return reply({ error: scanning ? "Invalid scanner target." : "Invalid move." }, 400);
       const row = await readGame(db, user.id);
       if (!row || row.id !== body.gameId) return reply({ error: "This board is not available." }, 404);
       if (row.status !== "playing" || now >= row.started_at + GAME_TTL || row.version !== body.version || row.version >= 2000) {
@@ -339,11 +340,11 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
       const size = GAME_MODES[row.mode].size;
       const x = body.x as number, y = body.y as number;
       if (x < 0 || y < 0 || x >= size || y >= size) return reply({ error: "Choose a cell on the board." }, 400);
-      const next = moveGame(row, x, y, body.tool as "reveal" | "flag");
+      const next = scanning ? scanGame(row, x, y) : moveGame(row, x, y, body.tool as "reveal" | "flag");
       if (next) {
         const update = db.prepare(`UPDATE dzn_game_sessions SET board_json = ?, status = ?, version = version + 1, updated_at = ?
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing'`)
-          .bind(JSON.stringify(next.board), next.status, now, user.id, row.id, row.version);
+          .bind(serializeGameState(next.state), next.status, now, user.id, row.id, row.version);
         const statements = [update];
         if (next.status === "won") {
           const rewards = GAME_MODES[row.mode];
@@ -357,7 +358,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         // Persist the verified result and daily reward together; stale moves never overwrite a board.
         const result = await db.batch(statements);
         if (!result[0].meta.changes) return reply({ error: "Another move reached this board first. Refresh to continue." }, 409);
-      }
+      } else return reply({ error: scanning ? "That sector cannot be scanned again." : "That move is no longer available." }, 409);
     } else if (body.action === "assemble") {
       if (!isId(body.requestId)) return reply({ error: "Invalid assembly request." }, 400);
       const rewardKey = `workshop:${body.requestId}`;

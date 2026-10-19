@@ -2,13 +2,19 @@ import {
   makeEmptyBoard, setHasMine, hasMine, hasFlag, isRevealed,
   setHasFlag, setIsRevealed, getSurroundingMineCount, reveal,
 } from "@taros-minesweeper/lib";
-import { GAME_MODES, type GameCell, type GameMode, type GameView } from "../../lib/games-hub";
+import { GAME_MODES, type GameCell, type GameMode, type GamePhase, type GameScan, type GameView } from "../../lib/games-hub";
 
 export type GameRow = {
   user_id: string; id: string; mode: GameMode; board_json: string;
   status: "playing" | "won" | "lost"; version: number; started_at: number; updated_at: number;
 };
 export const GAME_TTL = 30 * 60 * 1000;
+
+export type GameState = {
+  version: 1;
+  cells: number[][];
+  scans: GameScan[];
+};
 
 function randomIndex(length: number) {
   const limit = Math.floor(0x100000000 / length) * length;
@@ -30,8 +36,44 @@ export function createGameBoard(mode: GameMode) {
   return board;
 }
 
+export function createGameState(mode: GameMode): GameState {
+  return { version: 1, cells: createGameBoard(mode), scans: [] };
+}
+
+function isBoard(value: unknown): value is number[][] {
+  return Array.isArray(value) && value.length > 0 && value.every(row => Array.isArray(row) && row.length === value.length
+    && row.every(cell => typeof cell === "number" && Number.isInteger(cell)));
+}
+
+function readGameState(serialized: string): GameState {
+  const parsed: unknown = JSON.parse(serialized);
+  const legacyBoard = isBoard(parsed) ? parsed : null;
+  const modern = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as { version?: unknown; cells?: unknown; scans?: unknown } : null;
+  const cells = legacyBoard ?? (modern && isBoard(modern.cells) ? modern.cells : null);
+  if (!cells) throw new Error("Invalid stored game state.");
+  const seen = new Set<string>();
+  const scans = Array.isArray(modern?.scans) ? modern.scans.flatMap((value): GameScan[] => {
+    if (!value || typeof value !== "object") return [];
+    const scan = value as Partial<GameScan>;
+    const { x, y, threats } = scan;
+    if (typeof x !== "number" || typeof y !== "number" || typeof threats !== "number"
+      || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(threats)
+      || x < 0 || y < 0 || x >= cells.length || y >= cells.length || threats < 0 || threats > 9) return [];
+    const key = `${x}:${y}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ x, y, threats }];
+  }) : [];
+  return { version: 1, cells, scans };
+}
+
+export function serializeGameState(state: GameState) {
+  return JSON.stringify(state);
+}
+
 export function moveGame(row: GameRow, x: number, y: number, action: "reveal" | "flag") {
-  let board = JSON.parse(row.board_json) as number[][];
+  const state = readGameState(row.board_json);
+  let board = state.cells;
   const selected = board[y][x];
   if (isRevealed(selected) || (action === "reveal" && hasFlag(selected))) return null;
   let status = row.status;
@@ -57,15 +99,39 @@ export function moveGame(row: GameRow, x: number, y: number, action: "reveal" | 
       if (board.every(line => line.every(cell => hasMine(cell) || isRevealed(cell)))) status = "won";
     }
   }
-  return { board, status };
+  return { board, state: { ...state, cells: board }, status };
+}
+
+export function scanGame(row: GameRow, x: number, y: number) {
+  const state = readGameState(row.board_json);
+  const board = state.cells;
+  const selected = board[y]?.[x];
+  // The first cleared sector is guaranteed safe. Delay scans until it is established so a later safety relocation can never invalidate a scan report.
+  const openingCleared = board.some(line => line.some(cell => !hasMine(cell) && isRevealed(cell)));
+  if (!openingCleared || selected === undefined || isRevealed(selected) || hasFlag(selected) || state.scans.length >= GAME_MODES[row.mode].scans
+    || state.scans.some(scan => scan.x === x && scan.y === y)) return null;
+  let threats = 0;
+  for (let yy = Math.max(0, y - 1); yy <= Math.min(board.length - 1, y + 1); yy++) {
+    for (let xx = Math.max(0, x - 1); xx <= Math.min(board.length - 1, x + 1); xx++) {
+      if (hasMine(board[yy][xx])) threats++;
+    }
+  }
+  const scans = [...state.scans, { x, y, threats }];
+  return { board, state: { ...state, scans }, status: row.status };
 }
 
 export function gameView(row: GameRow, now: number): GameView {
-  const board = JSON.parse(row.board_json) as number[][];
+  const state = readGameState(row.board_json);
+  const board = state.cells;
   const status = row.status === "playing" && now >= row.started_at + GAME_TTL ? "expired" : row.status;
+  const safeTotal = board.flat().filter(cell => !hasMine(cell)).length;
+  const safeCleared = board.flat().filter(cell => !hasMine(cell) && isRevealed(cell)).length;
+  const progress = safeTotal ? safeCleared / safeTotal : 0;
+  const phase: GamePhase = progress < 0.34 ? "triangulate" : progress < 0.76 ? "contain" : "extract";
   return {
     id: row.id, mode: row.mode, version: row.version, status,
     startedAt: row.started_at, expiresAt: row.started_at + GAME_TTL,
+    scans: state.scans, scanCharges: GAME_MODES[row.mode].scans, safeCleared, safeTotal, phase,
     cells: board.map((line, y) => line.map((cell, x): GameCell => {
       if (status !== "playing" && hasMine(cell)) return "mine";
       if (hasFlag(cell)) return "flag";

@@ -115,7 +115,7 @@ async function main() {
                 : url.pathname.endsWith("/night-run") ? handleGamesNightRun : handler;
         const response = await responseHandler(new Request(url, { method: req.method, headers: {
           cookie: req.headers.cookie ?? "", origin: req.headers.origin ?? "", "content-type": req.headers["content-type"] ?? "",
-        }, body: req.method === "POST" ? Buffer.concat(chunks) : undefined }), fixture.env);
+        }, body: req.method === "POST" ? Buffer.concat(chunks).toString("utf8") : undefined }), fixture.env);
         res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer())); return;
       }
       if (url.pathname.startsWith("/api/")) { res.writeHead(401, { "Content-Type": "application/json" }); res.end('{"authenticated":false}'); return; }

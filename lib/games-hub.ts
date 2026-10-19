@@ -1,7 +1,7 @@
 export const GAME_MODES = {
-  recon: { label: "Recon", size: 10, mines: 15, xp: 50, parts: 1 },
-  patrol: { label: "Patrol", size: 15, mines: 40, xp: 100, parts: 2 },
-  survival: { label: "Survival", size: 20, mines: 80, xp: 150, parts: 3 },
+  recon: { label: "Recon", size: 10, mines: 15, scans: 2, xp: 50, parts: 1 },
+  patrol: { label: "Patrol", size: 15, mines: 40, scans: 3, xp: 100, parts: 2 },
+  survival: { label: "Survival", size: 20, mines: 80, scans: 4, xp: 150, parts: 3 },
 } as const;
 export type GameMode = keyof typeof GAME_MODES;
 export const HUB_GAME_IDS = ["minefield", "trivia", "word-chain", "hide-seek", "relay-rush", "cipher-grid", "echo-array", "outpost-run", "signal-shift", "circuit-forge", "ranger-range", "night-run"] as const;
@@ -22,10 +22,13 @@ export const DEFAULT_HUB_GAME_AVAILABILITY: HubGameAvailability = {
   "night-run": false,
 };
 export type GameCell = "hidden" | "flag" | "mine" | number;
+export type GameScan = { x: number; y: number; threats: number };
+export type GamePhase = "triangulate" | "contain" | "extract";
 export type GameView = {
   id: string; mode: GameMode; version: number;
   status: "playing" | "won" | "lost" | "expired";
   cells: GameCell[][]; startedAt: number; expiresAt: number;
+  scans: GameScan[]; scanCharges: number; safeCleared: number; safeTotal: number; phase: GamePhase;
 };
 export const WORKSHOP_PART_COST = 12;
 export const WORKSHOP_STAGES = ["Power unit", "Signal array", "Field relay"] as const;

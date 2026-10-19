@@ -42,7 +42,7 @@ try {
       await page.screenshot({ path: path.join(output, `operations-${scenario.width}-${scenario.reducedMotion}.png`) });
     }
     const canvas = page.locator('canvas[data-dzn-minefield-canvas="true"]');
-    const briefingImage = page.getByAltText("Night reconnaissance terrain with a DZN minefield scanner and survey markers");
+    const briefingImage = page.getByAltText("Night tactical clearance sector with a reconnaissance drone and survey beacons");
     let briefing = null;
     if (await canvas.count() === 0) {
       await briefingImage.waitFor({ state: "visible" });
@@ -79,7 +79,7 @@ try {
       return { width: canvas.width, height: canvas.height, litPixels, distinct: colors.size };
     });
     const commandTable = await page.locator(".dzn-minefield-3d").evaluate(element => getComputedStyle(element).backgroundImage);
-    assert.match(commandTable, /minefield-command-table-v1\.webp/);
+    assert.match(commandTable, /sector-sweep-command-v1\.png/);
     const layout = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       field: document.querySelector(".dzn-minefield-3d")?.getBoundingClientRect().toJSON(),
@@ -118,13 +118,66 @@ try {
 
     if (scenario.width === 1440) {
       const version = await page.locator(".dzn-minefield-3d").getAttribute("data-game-version");
+      const scannerButton = page.getByRole("button", { name: "Clear an opening sector before scanner deployment", exact: true });
+      assert.equal(await scannerButton.isDisabled(), true, "A scanner must not report before the guaranteed-safe opening is established");
       await canvas.click({ position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) / 2), y: Math.round((await canvas.evaluate(element => element.clientHeight)) / 2) } });
       await page.waitForFunction(previous => document.querySelector(".dzn-minefield-3d")?.getAttribute("data-game-version") !== previous, version);
       const move = writes.map(entry => entry.body).find(body => body?.action === "move");
       assert.deepEqual(Object.keys(move).sort(), ["action", "gameId", "tool", "version", "x", "y"], "3D interaction must use the existing bounded move contract");
       assert.equal(move.tool, "reveal");
+      const readyScanner = page.getByRole("button", { name: "Deploy a local threat scan", exact: true });
+      assert.equal(await readyScanner.isDisabled(), false);
+      await readyScanner.click();
+      const scanPositions = [[0.2, 0.3], [0.8, 0.3], [0.2, 0.7], [0.8, 0.7], [0.5, 0.24], [0.5, 0.76]];
+      let scanned = false;
+      let scannedAt = null;
+      for (const [x, y] of scanPositions) {
+        const scanVersion = await page.locator(".dzn-minefield-3d").getAttribute("data-game-version");
+        await canvas.click({ position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * y) } });
+        try {
+          await page.waitForFunction(previous => document.querySelector(".dzn-minefield-3d")?.getAttribute("data-game-version") !== previous, scanVersion, { timeout: 1_200 });
+          scanned = true;
+          scannedAt = { x, y };
+          break;
+        } catch { /* Try the next visible sector until a hidden tile is intersected. */ }
+      }
+      assert.equal(scanned, true, "3D field should expose a hidden sector for an available scanner charge");
+      assert.ok(scannedAt);
+      const scan = writes.map(entry => entry.body).find(body => body?.action === "scan");
+      assert.deepEqual(Object.keys(scan).sort(), ["action", "gameId", "version", "x", "y"], "3D scanner must use its bounded server scan contract");
+      const scanIntel = page.getByRole("region", { name: "Local 3 x 3 threat density", exact: true });
+      await scanIntel.locator("li").waitFor();
+      assert.match(await scanIntel.textContent(), /\d+ threats?/, "Scanner intelligence must render the server threat count outside the decorative canvas");
       await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
-      await page.getByRole("group", { name: /Minesweeper board/i }).waitFor();
+      await page.getByRole("group", { name: /Sector Sweep board/i }).waitFor();
+      const remainingSectors = page.locator('button[data-state="hidden"]');
+      const finalChargeIndex = await remainingSectors.evaluateAll(sectors => sectors.findIndex(sector => !sector.getAttribute("aria-label")?.includes("Scan result:")));
+      assert.ok(finalChargeIndex >= 0, "Tactical grid should retain an unscanned hidden sector for the final Recon scanner charge");
+      await remainingSectors.nth(finalChargeIndex).click();
+      await scanIntel.locator("li").nth(1).waitFor();
+      assert.equal(await readyScanner.isDisabled(), true, "Scanner control must disable after the final server-recorded charge");
+      await page.getByRole("button", { name: "3D field", exact: true }).click();
+      await canvas.waitFor({ state: "visible" });
+      const exhaustedScanWrites = writes.length;
+      for (const [x, y] of scanPositions) {
+        await canvas.click({ position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * y) } });
+      }
+      await page.waitForTimeout(150);
+      assert.equal(writes.length, exhaustedScanWrites, "3D field must not submit scan requests after the final charge is spent");
+      const flagVersion = await page.locator(".dzn-minefield-3d").getAttribute("data-game-version");
+      await canvas.click({ button: "right", position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * scannedAt.x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * scannedAt.y) } });
+      await page.waitForFunction(previous => document.querySelector(".dzn-minefield-3d")?.getAttribute("data-game-version") !== previous, flagVersion);
+      const flagMove = writes.map(entry => entry.body).filter(body => body?.action === "move").at(-1);
+      assert.equal(flagMove.tool, "flag", "3D right-click must place a containment marker even while the scanner is selected");
+      await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
+      await page.getByRole("group", { name: /Sector Sweep board/i }).waitFor();
+      const scannedCell = page.locator(`button[data-index="${scan.y * 10 + scan.x}"]`);
+      assert.match(await scannedCell.getAttribute("aria-label"), /Scan result: \d+ threats? in the local 3 by 3 sector/, "Tactical grid must expose the exact scan result to assistive technology");
+      await scannedCell.focus();
+      const writeCount = writes.length;
+      await page.keyboard.press("s");
+      await page.waitForTimeout(150);
+      assert.equal(writes.length, writeCount, "Scanner shortcut must not submit a duplicate scan for an already scanned sector");
     }
 
     assert.deepEqual(errors, []);
@@ -142,7 +195,7 @@ try {
     const fallbackErrors = [];
     fallbackPage.on("pageerror", error => fallbackErrors.push(error.message));
     await fallbackPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
-    await fallbackPage.getByRole("group", { name: /Minesweeper board/i }).waitFor();
+    await fallbackPage.getByRole("group", { name: /Sector Sweep board/i }).waitFor();
     assert.equal(await fallbackPage.locator('canvas[data-dzn-minefield-canvas="true"]').count(), 0);
     assert.equal(await fallbackPage.getByRole("button", { name: "Tactical grid", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await fallbackPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
