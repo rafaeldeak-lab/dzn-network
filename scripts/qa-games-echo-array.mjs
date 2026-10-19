@@ -26,25 +26,43 @@ try {
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     const [loadResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/echo-array") && response.request().method() === "GET"),
-      page.getByRole("button", { name: /Echo Array/ }).click(),
+      page.locator('[data-game="echo-array"]').click(),
     ]);
-    assert.equal(loadResponse.status(), 200, await loadResponse.text());
+    assert.equal(loadResponse.status(), 200);
+    const initialState = await loadResponse.json();
     await page.getByRole("heading", { name: "DZN Echo Array" }).waitFor();
     const signalChamber = await page.locator('[aria-labelledby="echo-array-title"]').evaluate(element => getComputedStyle(element, "::before").backgroundImage);
     assert.match(signalChamber, /echo-array-signal-chamber-v2\.png/);
-    if (index === 0) {
+    const hasActiveGame = initialState.game?.status === "playing";
+    if (index === 0 && !hasActiveGame) {
+      const startButton = page.getByRole("button", { name: /^(Start|New) echo$/ });
+      await startButton.waitFor({ state: "visible" });
+      if (await startButton.isDisabled()) await page.waitForTimeout(5_200);
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/echo-array") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Start echo" }).click(),
+        startButton.click(),
       ]);
       assert.equal(startResponse.status(), 200, await startResponse.text());
     }
     await page.getByRole("group", { name: "Echo Array signal nodes" }).waitFor();
     await page.getByText("Repeat the stored signal", { exact: true }).waitFor({ timeout: 8_000 });
+    await page.getByLabel("Locked cue buffer").waitFor();
     const echoCanvas = page.locator('canvas[data-dzn-echo-array-canvas="true"]');
     await echoCanvas.waitFor({ state: "visible" });
     assert.equal(await echoCanvas.count(), 1);
     await echoCanvas.scrollIntoViewIfNeeded();
+    const commandScene = page.locator('[class*="echoArrayConsole"]');
+    const commandSceneBounds = await commandScene.evaluate(element => ({
+      console: element.getBoundingClientRect().height,
+      scene: element.querySelector('[class*="dzn-echo-array-3d"]')?.getBoundingClientRect().height ?? 0,
+      controls: element.querySelector('[class*="echoArrayControlDeck"]')?.getBoundingClientRect().height ?? 0,
+      stage: element.parentElement?.getBoundingClientRect().height ?? 0,
+    }));
+    const isPhone = viewport.name === "phone";
+    assert.ok(commandSceneBounds.scene >= (isPhone ? 250 : 290) && commandSceneBounds.scene <= 400,
+      `Echo Array 3D scene should remain bounded: ${JSON.stringify(commandSceneBounds)}.`);
+    assert.ok(commandSceneBounds.console <= (isPhone ? 650 : 430) && commandSceneBounds.stage <= (isPhone ? 900 : 650),
+      `Echo Array command layout should remain compact: ${JSON.stringify(commandSceneBounds)}.`);
     const canvasState = await echoCanvas.evaluate(element => {
       const canvas = element;
       const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
@@ -60,7 +78,7 @@ try {
       }
       return { width: canvas.width, height: canvas.height, litPixels, colors: colors.size };
     });
-    assert.ok(canvasState.width >= 280 && canvasState.height >= 260, `Echo Array canvas is undersized: ${JSON.stringify(canvasState)}`);
+    assert.ok(canvasState.width >= 280 && canvasState.height >= (isPhone ? 240 : 280), `Echo Array canvas is undersized: ${JSON.stringify(canvasState)}`);
     assert.ok(canvasState.litPixels > canvasState.width * canvasState.height * 0.008, `Echo Array canvas is blank: ${JSON.stringify(canvasState)}`);
     assert.ok(canvasState.colors > 18, `Echo Array canvas lacks colour range: ${JSON.stringify(canvasState)}`);
     await echoCanvas.screenshot({ path: path.join(output, `${viewport.name}-canvas.png`) });

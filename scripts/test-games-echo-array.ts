@@ -233,6 +233,14 @@ async function run() {
     assert.ok(hub.summary.history.some(entry => entry.kind === "echo-array"));
   });
 
+  await test("the Echo Array command surface uses the server cue cadence without embedding private sequence storage", async () => {
+    const source = readFileSync("components/games/games-hub.tsx", "utf8");
+    assert.match(source, /const cueIntervalMs = game\?\.cueIntervalMs/);
+    assert.match(source, /echoArrayCueBuffer/);
+    assert.match(source, /Cue buffer is locked/);
+    assert.doesNotMatch(source, /sequence_json/);
+  });
+
   await test("account deletion cascades private Echo Array state and rewards", async fixture => {
     await completeRun(fixture, await start(fixture));
     assert.equal(await eraseOrRetainAccountUser(fixture.env.DB, "local-player"), 1);
