@@ -60,6 +60,55 @@ export const SURVIVAL_COMMAND_APPROACHES = {
 export type SurvivalCommandApproach = keyof typeof SURVIVAL_COMMAND_APPROACHES;
 export const SURVIVAL_COMMAND_APPROACH_KEYS = Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[];
 
+export const SURVIVAL_COMMAND_LOADOUTS = {
+  field_kit: {
+    name: "Field kit",
+    detail: "Standard recovery equipment. Reliable, but specialised field advantages remain unavailable.",
+    workshopLevel: 1,
+    cost: { salvage: 0, intel: 0 },
+    salvageBonus: 0,
+    intelBonus: 0,
+    breakthroughBonus: 0,
+    strainReduction: 0,
+    preferredActions: [],
+  },
+  signal_scanner: {
+    name: "Signal scanner",
+    detail: "A tuned relay scanner that improves intelligence recovery and helps turn a clean scout route into a breakthrough.",
+    workshopLevel: 1,
+    cost: { salvage: 10, intel: 8 },
+    salvageBonus: 0,
+    intelBonus: 2,
+    breakthroughBonus: 4,
+    strainReduction: 0,
+    preferredActions: ["triangulate"],
+  },
+  recovery_kit: {
+    name: "Recovery kit",
+    detail: "Reinforced extraction gear for high-value cache work. It improves salvage recovery when the team commits to the find.",
+    workshopLevel: 2,
+    cost: { salvage: 18, intel: 5 },
+    salvageBonus: 3,
+    intelBonus: 0,
+    breakthroughBonus: 2,
+    strainReduction: 0,
+    preferredActions: ["extract", "stabilize"],
+  },
+  convoy_plating: {
+    name: "Convoy plating",
+    detail: "Armoured panels and route hardening. It reduces the chance of a strained return on exposed breach operations.",
+    workshopLevel: 3,
+    cost: { salvage: 30, intel: 12 },
+    salvageBonus: 1,
+    intelBonus: 0,
+    breakthroughBonus: 2,
+    strainReduction: 6,
+    preferredActions: ["bridge", "hold"],
+  },
+} as const;
+export type SurvivalCommandLoadout = keyof typeof SURVIVAL_COMMAND_LOADOUTS;
+export const SURVIVAL_COMMAND_LOADOUT_KEYS = Object.keys(SURVIVAL_COMMAND_LOADOUTS) as SurvivalCommandLoadout[];
+
 export const SURVIVAL_COMMAND_INCIDENTS = {
   signal: {
     title: "Unmarked transmission",
@@ -105,6 +154,7 @@ export type SurvivalCommandExpedition = {
   id: string;
   sector: SurvivalCommandSector;
   approach: SurvivalCommandApproach;
+  loadout: SurvivalCommandLoadout;
   startedAt: number;
   readyAt: number;
   version: number;
@@ -116,6 +166,7 @@ export type SurvivalCommandHistory = {
   id: string;
   sector: SurvivalCommandSector;
   approach: SurvivalCommandApproach;
+  loadout: SurvivalCommandLoadout;
   outcome: SurvivalCommandOutcome;
   action: string;
   salvage: number;
@@ -126,9 +177,26 @@ export type SurvivalCommandHistory = {
 export type SurvivalCommandPayload = {
   serverTime: number;
   profile: { establishedAt: number } | null;
-  resources: { salvage: number; intel: number; resolvedExpeditions: number };
+  resources: {
+    salvage: number;
+    intel: number;
+    salvageEarned: number;
+    intelEarned: number;
+    salvageSpent: number;
+    intelSpent: number;
+    resolvedExpeditions: number;
+  };
   deployment: { used: number; capacity: number; dayKey: string };
   buildings: SurvivalCommandBuildingLevels | null;
+  loadouts: Array<{
+    key: SurvivalCommandLoadout;
+    name: string;
+    detail: string;
+    unlocked: boolean;
+    workshopLevel: number;
+    cost: { salvage: number; intel: number };
+    effect: string;
+  }>;
   sectors: SurvivalCommandSectorView[];
   expedition: SurvivalCommandExpedition | null;
   history: SurvivalCommandHistory[];
@@ -140,6 +208,21 @@ export function isSurvivalCommandSector(value: unknown): value is SurvivalComman
 
 export function isSurvivalCommandApproach(value: unknown): value is SurvivalCommandApproach {
   return typeof value === "string" && SURVIVAL_COMMAND_APPROACH_KEYS.includes(value as SurvivalCommandApproach);
+}
+
+export function isSurvivalCommandLoadout(value: unknown): value is SurvivalCommandLoadout {
+  return typeof value === "string" && SURVIVAL_COMMAND_LOADOUT_KEYS.includes(value as SurvivalCommandLoadout);
+}
+
+export function survivalCommandLoadoutEffect(loadout: SurvivalCommandLoadout) {
+  const config = SURVIVAL_COMMAND_LOADOUTS[loadout];
+  const effects = [];
+  if (config.salvageBonus) effects.push(`+${config.salvageBonus} salvage`);
+  if (config.intelBonus) effects.push(`+${config.intelBonus} intel`);
+  if (config.breakthroughBonus) effects.push(`+${config.breakthroughBonus}% breakthrough`);
+  if (config.strainReduction) effects.push(`${config.strainReduction}% less strain`);
+  if (config.preferredActions.length) effects.push(`field edge on ${config.preferredActions.join(" / ")}`);
+  return effects.length ? effects.join(" • ") : "standard recovery profile";
 }
 
 export function sectorLockReason(sector: SurvivalCommandSector, buildings: SurvivalCommandBuildingLevels | null) {
@@ -180,10 +263,12 @@ export function resolveSurvivalCommandOutcome(input: {
   seed: string;
   sector: SurvivalCommandSector;
   approach: SurvivalCommandApproach;
+  loadout: SurvivalCommandLoadout;
   action: SurvivalCommandAction;
   buildings: SurvivalCommandBuildingLevels;
 }) {
   const sector = SURVIVAL_COMMAND_SECTORS[input.sector];
+  const loadout = SURVIVAL_COMMAND_LOADOUTS[input.loadout];
   const roll = hash(`${input.seed}:${input.approach}:${input.action}:outcome`) % 100;
   const approachShift = input.approach === "scout" ? { salvage: -1, intel: 2, threshold: 16 }
     : input.approach === "breach" ? { salvage: 3, intel: -1, threshold: 30 }
@@ -191,16 +276,20 @@ export function resolveSurvivalCommandOutcome(input: {
   const actionShift = hash(`${input.action}:action`) % 3;
   const workshopBonus = Math.max(0, input.buildings.workshop - 1);
   const watchtowerBonus = Math.max(0, input.buildings.watchtower - 1);
-  const outcome: SurvivalCommandOutcome = roll < 14 ? "strained" : roll < approachShift.threshold + workshopBonus * 2 ? "breakthrough" : "clean";
+  const preferredActions: readonly string[] = loadout.preferredActions;
+  const loadoutActionEdge = preferredActions.includes(input.action) ? 1 : 0;
+  const strainThreshold = Math.max(4, 14 - loadout.strainReduction);
+  const breakthroughThreshold = approachShift.threshold + workshopBonus * 2 + loadout.breakthroughBonus + loadoutActionEdge * 2;
+  const outcome: SurvivalCommandOutcome = roll < strainThreshold ? "strained" : roll < breakthroughThreshold ? "breakthrough" : "clean";
   const salvageBase = sector.reward.salvage[0] + hash(`${input.seed}:salvage`) % (sector.reward.salvage[1] - sector.reward.salvage[0] + 1);
   const intelBase = sector.reward.intel[0] + hash(`${input.seed}:intel`) % (sector.reward.intel[1] - sector.reward.intel[0] + 1);
   const multiplier = outcome === "breakthrough" ? 1.45 : outcome === "strained" ? 0.55 : 1;
-  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus) * multiplier));
-  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus) * multiplier));
+  const salvage = Math.max(1, Math.floor((salvageBase + approachShift.salvage + actionShift + workshopBonus + loadout.salvageBonus + loadoutActionEdge) * multiplier));
+  const intel = Math.max(1, Math.floor((intelBase + approachShift.intel + watchtowerBonus + loadout.intelBonus + loadoutActionEdge) * multiplier));
   const detail = outcome === "breakthrough"
     ? "The field decision opened a secondary route. The return team brought back more than the original brief predicted."
     : outcome === "strained"
       ? "The team returned under pressure. The recovery was reduced, but the operation was not lost."
       : "The team completed the recovery plan and returned with a clean operational record.";
-  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
+  return { outcome, salvage, intel, detail, fingerprint: hash(`${input.seed}:${input.approach}:${input.loadout}:${input.action}:${outcome}:${salvage}:${intel}`).toString(16).padStart(8, "0") };
 }

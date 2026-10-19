@@ -6,7 +6,7 @@ import { handleCommandCentre } from "../functions/_lib/command-centre";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleSurvivalCommand } from "../functions/_lib/survival-command";
 import type { Env } from "../functions/_lib/types";
-import type { SurvivalCommandPayload } from "../lib/survival-command";
+import { resolveSurvivalCommandOutcome, type SurvivalCommandPayload } from "../lib/survival-command";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -15,7 +15,10 @@ let passed = 0;
 async function fixture(migrate = true) {
   const value = await gamesFixture();
   value.db.sqlite.exec(readFileSync("migrations/0107_dzn_command_centre.sql", "utf8"));
-  if (migrate) value.db.sqlite.exec(readFileSync("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
+  if (migrate) {
+    value.db.sqlite.exec(readFileSync("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
+    value.db.sqlite.exec(readFileSync("migrations/0109_dzn_survival_command_loadouts.sql", "utf8"));
+  }
   (value.env as Env).DZN_COMMAND_CENTRE_ENABLED = "true";
   (value.env as Env).DZN_SURVIVAL_COMMAND_ENABLED = "true";
   return value;
@@ -51,20 +54,40 @@ async function establish(value: Fixture) {
   return payload(await request(value, { action: "initialize" }));
 }
 
+function creditRecoveredResources(value: Fixture, salvage: number, intel: number) {
+  const expeditionId = randomUUID();
+  const requestId = randomUUID();
+  const now = Date.now();
+  value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_expeditions
+    (id, user_id, request_id, sector, approach, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at)
+    VALUES (?, 'local-player', ?, 'perimeter', 'balanced', 'resolved', '1234567890123456', ?, 1, ?, ?, ?)`)
+    .run(expeditionId, requestId, new Date(now).toISOString().slice(0, 10), now - 2, now - 1, now);
+  value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_resolution_ledger
+    (id, user_id, expedition_id, request_id, action, outcome, salvage, intel, outcome_fingerprint, resolved_at)
+    VALUES (?, 'local-player', ?, ?, 'secure', 'clean', ?, ?, '1234abcd', ?)`)
+    .run(randomUUID(), expeditionId, randomUUID(), salvage, intel, now);
+}
+
 async function run() {
   const source = readFileSync("functions/_lib/survival-command.ts", "utf8");
   const migration = readFileSync("migrations/0108_dzn_survival_command_expeditions.sql", "utf8");
+  const loadoutMigration = readFileSync("migrations/0109_dzn_survival_command_loadouts.sql", "utf8");
   const client = readFileSync("components/survival-command/survival-command.tsx", "utf8");
   const scene = readFileSync("components/survival-command/survival-command-scene.tsx", "utf8");
+  const styles = readFileSync("components/survival-command/survival-command.module.css", "utf8");
   const deletion = readFileSync("functions/_lib/deletion.ts", "utf8");
   const playerHubRoute = readFileSync("functions/api/player/hub.ts", "utf8");
   const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
   assert.match(source, /DZN_SURVIVAL_COMMAND_ENABLED !== "true"/);
   assert.match(source, /resolveSurvivalCommandOutcome/);
   assert.match(source, /SUM\(deployment_cost\)/);
+  assert.match(source, /unlock-loadout/);
+  assert.match(source, /dzn_survival_command_spend_ledger/);
   assert.match(source, /request\.headers\.get\("origin"\)/);
   assert.match(migration, /idx_dzn_survival_command_one_active_expedition/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
+  assert.match(loadoutMigration, /ALTER TABLE dzn_survival_command_expeditions/);
+  assert.match(loadoutMigration, /dzn_survival_command_loadout_unlocks/);
   assert.match(client, /Route plan/);
   assert.match(client, /readyRefreshRef/);
   assert.match(client, /activeRemaining > 0/);
@@ -72,8 +95,11 @@ async function run() {
   assert.match(client, /payload\.deployment\.dayKey === serverDayKey/);
   assert.match(client, /deployment\.used \+ selected\.deploymentCost > deployment\.capacity/);
   assert.match(client, /Base recovery estimates only/);
+  assert.match(client, /Field loadout/);
   assert.match(scene, /dznSurvivalCommandCanvas/);
+  assert.match(styles, /survival-command-operations-v1\.png/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
+  assert.match(deletion, /dzn_survival_command_spend_ledger/);
   assert.match(playerHubRoute, /DZN_SURVIVAL_COMMAND_ENABLED === "true"/);
   assert.match(playerHome, /href: "\/survival-command"/);
   assert.match(playerHome, /hubData\?\.survival_command\?\.available === true/);
@@ -108,21 +134,21 @@ async function run() {
 
   await test("server unlocks, timing and one active team are enforced", async value => {
     await establish(value);
-    assert.equal((await request(value, { action: "deploy", sector: "rail_yard", approach: "balanced", requestId: randomUUID() })).status, 409);
-    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", requestId: randomUUID(), reward: 9999 }));
+    assert.equal((await request(value, { action: "deploy", sector: "rail_yard", approach: "balanced", loadout: "field_kit", requestId: randomUUID() })).status, 409);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID(), reward: 9999 }));
     assert.equal(started.expedition?.sector, "perimeter");
     assert.equal(started.expedition?.state, "in-transit");
     assert.equal(started.expedition?.incident, null);
     assert.equal(started.deployment.used, 1);
-    assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "breach", requestId: randomUUID() })).status, 409);
+    assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "breach", loadout: "field_kit", requestId: randomUUID() })).status, 409);
   });
 
   await test("only server-ready expeditions accept a valid decision and record rewards once", async value => {
     await establish(value);
-    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() }));
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
     const expedition = started.expedition!;
     assert.equal((await request(value, { action: "resolve", expeditionId: expedition.id, version: expedition.version, requestId: randomUUID(), decision: "extract" })).status, 409);
-    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET ready_at = started_at + 1 WHERE id = ?").run(expedition.id);
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE id = ?").run(expedition.id);
     const ready = await payload(await request(value));
     assert.equal(ready.expedition?.state, "ready");
     assert.ok(ready.expedition?.incident?.actions.length);
@@ -140,7 +166,7 @@ async function run() {
 
   await test("expeditions and dossiers remain scoped to their initiating player", async value => {
     await establish(value);
-    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() }));
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
     assert.equal((await request(value, { action: "resolve", expeditionId: started.expedition!.id, version: 0, requestId: randomUUID(), decision: "secure" }, { cookie: value.otherCookie })).status, 404);
     assert.equal(value.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_survival_command_resolution_ledger").get()?.count, 0);
   });
@@ -153,20 +179,53 @@ async function run() {
         VALUES (?, 'local-player', ?, 'perimeter', 'scout', 'resolved', '1234567890123456', ?, 1, ?, ?, ?)`)
         .run(randomUUID(), randomUUID(), new Date().toISOString().slice(0, 10), index + 1, index + 2, index + 2);
     }
-    assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() })).status, 409);
+    assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() })).status, 409);
+  });
+
+  await test("field loadouts use an earned server ledger and persist with the expedition", async value => {
+    await establish(value);
+    assert.equal((await request(value, { action: "unlock-loadout", loadout: "signal_scanner", requestId: randomUUID() })).status, 409);
+    creditRecoveredResources(value, 70, 40);
+    const unlockId = randomUUID();
+    const unlocked = await payload(await request(value, { action: "unlock-loadout", loadout: "signal_scanner", requestId: unlockId }));
+    assert.equal(unlocked.loadouts.find(entry => entry.key === "signal_scanner")?.unlocked, true);
+    assert.equal(unlocked.resources.salvage, 60);
+    assert.equal(unlocked.resources.intel, 32);
+    const replay = await payload(await request(value, { action: "unlock-loadout", loadout: "signal_scanner", requestId: unlockId }));
+    assert.equal(replay.resources.salvage, 60);
+    assert.equal(value.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_survival_command_spend_ledger").get()?.count, 1);
+    assert.equal((await request(value, { action: "unlock-loadout", loadout: "recovery_kit", requestId: unlockId })).status, 409);
+    assert.equal((await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "unreleased", requestId: randomUUID() })).status, 400);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "signal_scanner", requestId: randomUUID() }));
+    assert.equal(started.expedition?.loadout, "signal_scanner");
+  });
+
+  await test("field loadouts change deterministic mission risk and recovery, not only presentation", async () => {
+    const buildings = { headquarters: 4, workshop: 3, watchtower: 3, communications: 3 };
+    const base = resolveSurvivalCommandOutcome({ seed: "scanner-proof-seed", sector: "radio_ridge", approach: "scout", loadout: "field_kit", action: "triangulate", buildings });
+    const scanner = resolveSurvivalCommandOutcome({ seed: "scanner-proof-seed", sector: "radio_ridge", approach: "scout", loadout: "signal_scanner", action: "triangulate", buildings });
+    assert.ok(scanner.intel > base.intel);
+    const protectedSeed = Array.from({ length: 300 }, (_, index) => `plating-proof-${index}`).find(seed => {
+      const basic = resolveSurvivalCommandOutcome({ seed, sector: "blacksite", approach: "breach", loadout: "field_kit", action: "bridge", buildings });
+      const plated = resolveSurvivalCommandOutcome({ seed, sector: "blacksite", approach: "breach", loadout: "convoy_plating", action: "bridge", buildings });
+      return basic.outcome === "strained" && plated.outcome !== "strained";
+    });
+    assert.ok(protectedSeed, "Convoy plating should reduce the deterministic strained-return range.");
   });
 
   await test("retained Store accounts erase every private Survival Command record", async value => {
     await establish(value);
-    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", requestId: randomUUID() }));
-    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET ready_at = started_at + 1 WHERE id = ?").run(started.expedition!.id);
+    creditRecoveredResources(value, 70, 40);
+    await payload(await request(value, { action: "unlock-loadout", loadout: "signal_scanner", requestId: randomUUID() }));
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE id = ?").run(started.expedition!.id);
     const ready = await payload(await request(value));
     await payload(await request(value, { action: "resolve", expeditionId: ready.expedition!.id, version: ready.expedition!.version, requestId: randomUUID(), decision: ready.expedition!.incident!.actions[0] }));
     value.db.sqlite.exec("CREATE TABLE store_orders (id TEXT PRIMARY KEY, purchasing_user_id TEXT NOT NULL)");
     value.db.sqlite.prepare("INSERT INTO store_orders (id, purchasing_user_id) VALUES ('retained-order', 'local-player')").run();
     assert.equal(await eraseOrRetainAccountUser(value.db as unknown as D1Database, "local-player"), 1);
     assert.match(String(value.db.sqlite.prepare("SELECT discord_id FROM users WHERE id = 'local-player'").get()?.discord_id), /^deleted-/);
-    for (const table of ["dzn_survival_command_profiles", "dzn_survival_command_expeditions", "dzn_survival_command_resolution_ledger"]) {
+    for (const table of ["dzn_survival_command_profiles", "dzn_survival_command_expeditions", "dzn_survival_command_resolution_ledger", "dzn_survival_command_loadout_unlocks", "dzn_survival_command_spend_ledger"]) {
       assert.equal(value.db.sqlite.prepare(`SELECT COUNT(*) count FROM ${table} WHERE user_id = 'local-player'`).get()?.count, 0);
     }
     assert.equal(value.db.sqlite.prepare("SELECT COUNT(*) count FROM store_orders WHERE purchasing_user_id = 'local-player'").get()?.count, 1);
@@ -176,16 +235,18 @@ async function run() {
   try {
     const db = await miniflare.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (id TEXT PRIMARY KEY); INSERT INTO users VALUES ('local-player');");
-    for (const file of ["migrations/0107_dzn_command_centre.sql", "migrations/0108_dzn_survival_command_expeditions.sql"]) {
+    for (const file of ["migrations/0107_dzn_command_centre.sql", "migrations/0108_dzn_survival_command_expeditions.sql", "migrations/0109_dzn_survival_command_loadouts.sql"]) {
       const statements = readFileSync(file, "utf8").replace(/^--.*$/gm, "").split(";").map(value => value.trim()).filter(Boolean);
       for (const statement of statements) await db.prepare(statement).run();
     }
-    for (const table of ["dzn_survival_command_profiles", "dzn_survival_command_expeditions", "dzn_survival_command_resolution_ledger"]) {
+    for (const table of ["dzn_survival_command_profiles", "dzn_survival_command_expeditions", "dzn_survival_command_resolution_ledger", "dzn_survival_command_loadout_unlocks", "dzn_survival_command_spend_ledger"]) {
       assert.equal((await db.prepare(`SELECT COUNT(*) count FROM ${table}`).first<{ count: number }>())?.count, 0);
     }
     assert.equal((await db.prepare("PRAGMA foreign_key_check").all()).results.length, 0);
     const activeIndexes = await db.prepare("PRAGMA index_list('dzn_survival_command_expeditions')").all<{ name: string }>();
     assert.ok((activeIndexes.results ?? []).some((index: { name: string }) => index.name === "idx_dzn_survival_command_one_active_expedition"));
+    const loadoutIndexes = await db.prepare("PRAGMA index_list('dzn_survival_command_spend_ledger')").all<{ name: string }>();
+    assert.ok((loadoutIndexes.results ?? []).some((index: { name: string }) => index.name === "idx_dzn_survival_command_loadout_history"));
     await assert.rejects(db.prepare("INSERT INTO dzn_survival_command_expeditions (id, user_id, request_id, sector, approach, status, seed, deployment_day, deployment_cost, started_at, ready_at) VALUES ('x', 'missing', 'request', 'perimeter', 'scout', 'deployed', '1234567890123456', '2026-10-18', 1, 1, 2)").run());
     passed++; console.log("PASS local D1 migration constraints, indexes, foreign keys and zero-row baseline");
   } finally { await miniflare.dispose(); }

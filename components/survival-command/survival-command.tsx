@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowLeft, ArrowRight, BadgeAlert, Binoculars, Boxes, Check, ChevronRight, Clock3, Crosshair, LockKeyhole, MapPinned, Radio, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Backpack, BadgeAlert, Binoculars, Boxes, Check, ChevronRight, Clock3, Crosshair, LockKeyhole, MapPinned, Radar, Radio, Shield, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "../site-header";
 import {
   SURVIVAL_COMMAND_APPROACHES,
+  SURVIVAL_COMMAND_LOADOUTS,
   SURVIVAL_COMMAND_SECTOR_KEYS,
   type SurvivalCommandApproach,
+  type SurvivalCommandLoadout,
   type SurvivalCommandPayload,
   type SurvivalCommandSector,
 } from "../../lib/survival-command";
@@ -15,6 +17,7 @@ import { SurvivalCommandScene } from "./survival-command-scene";
 import styles from "./survival-command.module.css";
 
 const APPROACH_ICONS: Record<SurvivalCommandApproach, typeof Radio> = { scout: Binoculars, balanced: ShieldCheck, breach: Crosshair };
+const LOADOUT_ICONS: Record<SurvivalCommandLoadout, typeof Radio> = { field_kit: Backpack, signal_scanner: Radar, recovery_kit: Wrench, convoy_plating: Shield };
 
 function duration(value: number) {
   const seconds = Math.max(0, Math.ceil(value / 1000));
@@ -35,6 +38,7 @@ export function SurvivalCommand() {
   const [clock, setClock] = useState(() => Date.now());
   const [selectedSector, setSelectedSector] = useState<SurvivalCommandSector>("perimeter");
   const [approach, setApproach] = useState<SurvivalCommandApproach>("balanced");
+  const [loadout, setLoadout] = useState<SurvivalCommandLoadout>("field_kit");
   const [motionRunning, setMotionRunning] = useState(true);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const mutationLock = useRef(false);
@@ -142,7 +146,7 @@ export function SurvivalCommand() {
           </aside>
 
           <div className={styles.scenePanel}>
-            <SurvivalCommandScene selectedSector={expedition?.sector ?? selectedSector} expedition={expedition} motionRunning={motionRunning} onUnavailable={() => setWebglUnavailable(true)} />
+            <SurvivalCommandScene selectedSector={expedition?.sector ?? selectedSector} selectedLoadout={expedition?.loadout ?? loadout} expedition={expedition} motionRunning={motionRunning} onUnavailable={() => setWebglUnavailable(true)} />
             <div className={styles.sceneLabel}><MapPinned size={15} /><span>{expedition ? activeSector?.coordinate : selected?.coordinate ?? "GRID -- / --"}</span></div>
             {webglUnavailable && <div className={styles.sceneFallback}><MapPinned size={28} /><span>The 3D sector board is unavailable on this device. Mission decisions remain accessible.</span></div>}
           </div>
@@ -152,8 +156,9 @@ export function SurvivalCommand() {
               : expedition ? expedition.state === "in-transit"
                 ? <TransitDossier sector={activeSector} remaining={activeRemaining} readyAt={expedition.readyAt} />
                 : <DecisionDossier expedition={expedition} sector={activeSector} busy={busy} onResolve={decision => void mutate(`resolve:${decision}`, { action: "resolve", expeditionId: expedition.id, version: expedition.version, requestId: crypto.randomUUID(), decision })} />
-                : <DeployDossier selected={selected} approach={approach} busy={busy} deployment={payload.deployment}
-                  onApproach={setApproach} onDeploy={() => selected && void mutate("deploy", { action: "deploy", sector: selected.key, approach, requestId: crypto.randomUUID() })} />}
+                : <DeployDossier selected={selected} approach={approach} loadout={loadout} loadouts={payload.loadouts} resources={payload.resources} buildings={payload.buildings} busy={busy} deployment={payload.deployment}
+                  onApproach={setApproach} onLoadout={setLoadout} onUnlock={key => void mutate(`unlock:${key}`, { action: "unlock-loadout", loadout: key, requestId: crypto.randomUUID() })}
+                  onDeploy={() => selected && void mutate("deploy", { action: "deploy", sector: selected.key, approach, loadout, requestId: crypto.randomUUID() })} />}
           </section>
         </section>
 
@@ -169,7 +174,7 @@ export function SurvivalCommand() {
 
         <section className={styles.history} aria-labelledby="history-heading">
           <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>Operation record</p><h2 id="history-heading">Recent returns</h2></div><p>Completion history is private to this player account and never alters DayZ server outcomes, rankings or locations.</p></div>
-          {payload?.history.length ? <ol className={styles.historyList}>{payload.history.map(row => <li key={row.id}><span className={styles.historyMarker} data-outcome={row.outcome} /><div><strong>{payload.sectors.find(sector => sector.key === row.sector)?.name ?? row.sector}</strong><small>{row.outcome} resolution via {row.action}</small></div><span className={styles.historyRewards}><b>+{row.salvage}</b> salvage <b>+{row.intel}</b> intel<time>{time(row.resolvedAt)}</time></span></li>)}</ol>
+          {payload?.history.length ? <ol className={styles.historyList}>{payload.history.map(row => <li key={row.id}><span className={styles.historyMarker} data-outcome={row.outcome} /><div><strong>{payload.sectors.find(sector => sector.key === row.sector)?.name ?? row.sector}</strong><small>{row.outcome} resolution via {row.action} using {SURVIVAL_COMMAND_LOADOUTS[row.loadout].name}</small></div><span className={styles.historyRewards}><b>+{row.salvage}</b> salvage <b>+{row.intel}</b> intel<time>{time(row.resolvedAt)}</time></span></li>)}</ol>
             : <div className={styles.emptyHistory}><Truck size={23} /><span>Your first recovered operation will appear here.</span></div>}
         </section>
       </>}
@@ -186,11 +191,31 @@ function TransitDossier({ sector, remaining, readyAt }: { sector: SurvivalComman
 }
 
 function DecisionDossier({ expedition, sector, busy, onResolve }: { expedition: NonNullable<SurvivalCommandPayload["expedition"]>; sector: SurvivalCommandPayload["sectors"][number] | null; busy: string | null; onResolve: (action: string) => void }) {
-  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span></div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The final recovery is calculated server-side.</p></>;
+  const loadout = SURVIVAL_COMMAND_LOADOUTS[expedition.loadout];
+  return <><p className={styles.dossierKicker}>Field decision required</p><h2>{expedition.incident?.title}</h2><p>{expedition.incident?.detail}</p><div className={styles.incidentMeta}><span>{sector?.name}</span><span>{expedition.approach} route</span><span>{loadout.name}</span></div><div className={styles.decisionList}>{expedition.incident?.actions.map(action => <button key={action} disabled={busy !== null} onClick={() => onResolve(action)}><span>{action}</span><ArrowRight size={17} /></button>)}</div><p className={styles.returnTime}>One response is written to this operation. The selected loadout and final recovery are calculated server-side.</p></>;
 }
 
-function DeployDossier({ selected, approach, busy, deployment, onApproach, onDeploy }: { selected: SurvivalCommandPayload["sectors"][number] | null; approach: SurvivalCommandApproach; busy: string | null; deployment: SurvivalCommandPayload["deployment"]; onApproach: (approach: SurvivalCommandApproach) => void; onDeploy: () => void }) {
+function DeployDossier({ selected, approach, loadout, loadouts, resources, buildings, busy, deployment, onApproach, onLoadout, onUnlock, onDeploy }: {
+  selected: SurvivalCommandPayload["sectors"][number] | null;
+  approach: SurvivalCommandApproach;
+  loadout: SurvivalCommandLoadout;
+  loadouts: SurvivalCommandPayload["loadouts"];
+  resources: SurvivalCommandPayload["resources"];
+  buildings: SurvivalCommandPayload["buildings"];
+  busy: string | null;
+  deployment: SurvivalCommandPayload["deployment"];
+  onApproach: (approach: SurvivalCommandApproach) => void;
+  onLoadout: (loadout: SurvivalCommandLoadout) => void;
+  onUnlock: (loadout: SurvivalCommandLoadout) => void;
+  onDeploy: () => void;
+}) {
   const locked = !selected?.unlocked;
   const capacityExceeded = !selected || deployment.used + selected.deploymentCost > deployment.capacity;
-  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />Base {selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />Base {selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div><p className={styles.returnTime}>Base recovery estimates only. Route choice, field decision, settlement readiness and the final operation outcome determine the recorded return.</p><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><button className={styles.primaryAction} disabled={busy !== null || locked || capacityExceeded} onClick={onDeploy}><Truck size={18} />{locked ? "Sector locked" : capacityExceeded ? "Insufficient deployment capacity" : busy === "deploy" ? "Dispatching..." : `Dispatch team (${selected?.deploymentCost ?? 0} capacity)`}</button></>;
+  return <><p className={styles.dossierKicker}>New deployment</p><h2>{selected?.name ?? "Select a sector"}</h2><p>{selected?.briefing ?? "Choose an available sector from the operational map."}</p><div className={styles.rewardLine}><span><Boxes size={15} />Base {selected?.reward.salvage[0] ?? 0}-{selected?.reward.salvage[1] ?? 0} salvage</span><span><Radio size={15} />Base {selected?.reward.intel[0] ?? 0}-{selected?.reward.intel[1] ?? 0} intel</span></div><p className={styles.returnTime}>Base recovery estimates only. Route choice, field decision, settlement readiness and the final operation outcome determine the recorded return.</p><fieldset className={styles.approaches}><legend>Route plan</legend>{(Object.keys(SURVIVAL_COMMAND_APPROACHES) as SurvivalCommandApproach[]).map(key => { const Icon = APPROACH_ICONS[key]; const value = SURVIVAL_COMMAND_APPROACHES[key]; return <button key={key} type="button" data-selected={approach === key} onClick={() => onApproach(key)}><Icon size={17} /><span><strong>{value.name}</strong><small>{value.detail}</small></span></button>; })}</fieldset><fieldset className={styles.loadouts}><legend>Field loadout</legend><p className={styles.loadoutBalance}><Boxes size={13} />{resources.salvage} salvage <Radio size={13} />{resources.intel} intel</p>{loadouts.map(entry => { const Icon = LOADOUT_ICONS[entry.key]; const affordable = resources.salvage >= entry.cost.salvage && resources.intel >= entry.cost.intel; const workshopReady = entry.workshopLevel <= (buildings?.workshop ?? 0);
+    const canUnlock = !entry.unlocked && affordable && workshopReady;
+    const status = entry.unlocked ? (loadout === entry.key ? "Selected" : "Select")
+      : !workshopReady ? `Workshop Level ${entry.workshopLevel} required`
+        : !affordable ? `Need ${entry.cost.salvage} salvage / ${entry.cost.intel} intel`
+          : `Prepare ${entry.cost.salvage} salvage / ${entry.cost.intel} intel`;
+    return <button key={entry.key} type="button" className={styles.loadout} data-selected={entry.unlocked && loadout === entry.key} data-locked={!entry.unlocked} disabled={busy !== null || (!entry.unlocked && !canUnlock)} onClick={() => entry.unlocked ? onLoadout(entry.key) : onUnlock(entry.key)}><Icon size={17} /><span><strong>{entry.name}</strong><small>{entry.effect}</small><em>{status}</em></span></button>; })}</fieldset><button className={styles.primaryAction} disabled={busy !== null || locked || capacityExceeded} onClick={onDeploy}><Truck size={18} />{locked ? "Sector locked" : capacityExceeded ? "Insufficient deployment capacity" : busy === "deploy" ? "Dispatching..." : `Dispatch team (${selected?.deploymentCost ?? 0} capacity)`}</button></>;
 }
