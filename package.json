@@ -196,6 +196,7 @@
     "test:production-migration-queue": "tsx scripts/test-production-migration-queue.ts",
     "test:single-migration-production-rollout": "tsx scripts/test-single-migration-production-rollout.ts",
     "test:account-deletion-maintenance": "tsx scripts/test-account-deletion-maintenance.ts",
+    "test:state-preserving-migration-production-rollout": "tsx scripts/test-state-preserving-migration-production-rollout.ts",
     "adm:audit-health": "tsx scripts/adm-audit-health.ts",
     "qa:player-hub-rendered": "node scripts/qa-player-hub-rendered.mjs",
     "qa:public-player-profile-rendered": "node scripts/qa-public-player-profile-rendered.mjs",
