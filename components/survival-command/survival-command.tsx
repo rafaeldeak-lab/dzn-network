@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowLeft, ArrowRight, Backpack, BadgeAlert, Binoculars, Boxes, Check, ChevronRight, Clock3, Crosshair, Eye, LockKeyhole, MapPinned, PackageCheck, Radar, Radio, Shield, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
+import { Activity, ArrowRight, Backpack, BadgeAlert, Binoculars, Boxes, ChevronRight, Clock3, Crosshair, Eye, LockKeyhole, MapPinned, PackageCheck, Radar, Radio, Shield, ShieldCheck, TowerControl, Truck, Wrench, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "../site-header";
 import {
   SURVIVAL_COMMAND_APPROACHES,

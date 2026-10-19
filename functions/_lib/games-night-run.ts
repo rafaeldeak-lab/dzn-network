@@ -18,7 +18,6 @@ import {
   type NightRunGame,
   type NightRunLane,
   type NightRunPayload,
-  type NightRunRouteSupport,
 } from "../../lib/games-night-run";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
