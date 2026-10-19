@@ -235,7 +235,10 @@ async function testNotificationPaginationBoundary() {
       bind: (...values: unknown[]) => prepare(sql, values),
       all: async () => ({ results: sqlite.prepare(sql).all(...bindings) }),
       first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
-      run: async () => ({ meta: { changes: Number(sqlite.prepare(sql).run(...bindings).changes ?? 0) } }),
+      run: async () => {
+        const result = sqlite.prepare(sql).run(...bindings) as { changes?: number };
+        return { meta: { changes: Number(result.changes ?? 0) } };
+      },
     });
     const env = {
       DZN_PULSE_ENABLED: "true",
