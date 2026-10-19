@@ -15,6 +15,7 @@ import {
   type OutpostRunDirection,
   type OutpostRunGame,
   type OutpostRunPayload,
+  type OutpostRunSupport,
 } from "../../lib/games-outpost-run";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
@@ -22,14 +23,22 @@ const reply = (body: unknown, status = 200) => json(body, { status, headers });
 const dayKey = (now: number) => new Date(now).toISOString().slice(0, 10);
 const isId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
 const isDirection = (value: unknown): value is OutpostRunDirection => typeof value === "string" && (OUTPOST_RUN_DIRECTIONS as readonly string[]).includes(value);
+const isSupport = (value: unknown): value is OutpostRunSupport => value === "recon" || value === "shield";
 
 type Coordinate = { row: number; column: number };
+type OutpostSupportState = {
+  reconUsed: boolean;
+  shieldUsed: boolean;
+  shieldArmed: boolean;
+  reconCells: Coordinate[];
+};
 type OutpostLayout = {
   target: Coordinate;
   hazards: Coordinate[];
   beacon?: Coordinate;
   beaconSecured?: boolean;
   scanHint?: string;
+  support?: OutpostSupportState;
 };
 const start = { row: 2, column: 2 };
 const LEGACY_OUTPOST_RUN_MAX_ENERGY = 4;
@@ -52,6 +61,7 @@ type OutpostRunRow = {
 };
 
 const scanHints = new Set(["north", "south", "east", "west", "north-east", "north-west", "south-east", "south-west", "relay acquired"]);
+const spentLegacySupport: OutpostSupportState = { reconUsed: true, shieldUsed: true, shieldArmed: false, reconCells: [] };
 
 function sameCoordinate(left: Coordinate, right: Coordinate) {
   return left.row === right.row && left.column === right.column;
@@ -67,13 +77,27 @@ function isScanHint(value: unknown): value is string {
   return typeof value === "string" && scanHints.has(value);
 }
 
+function isSupportState(value: unknown): value is OutpostSupportState {
+  if (!value || typeof value !== "object") return false;
+  const support = value as OutpostSupportState;
+  return typeof support.reconUsed === "boolean" && typeof support.shieldUsed === "boolean" && typeof support.shieldArmed === "boolean"
+    && Array.isArray(support.reconCells) && support.reconCells.length <= 4 && support.reconCells.every(isCoordinate)
+    && new Set(support.reconCells.map(cell => `${cell.row}:${cell.column}`)).size === support.reconCells.length
+    && (!support.shieldArmed || support.shieldUsed);
+}
+
+function supportForLayout(layout: OutpostLayout): OutpostSupportState {
+  return layout.support ?? spentLegacySupport;
+}
+
 function parseLayout(value: string): OutpostLayout {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || !isCoordinate((parsed as OutpostLayout).target) || !Array.isArray((parsed as OutpostLayout).hazards)
     || (parsed as OutpostLayout).hazards.length < 3 || (parsed as OutpostLayout).hazards.length > GENERATED_HAZARD_COUNT || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
     || ((parsed as OutpostLayout).beacon !== undefined && !isCoordinate((parsed as OutpostLayout).beacon))
     || ((parsed as OutpostLayout).beaconSecured !== undefined && typeof (parsed as OutpostLayout).beaconSecured !== "boolean")
-    || ((parsed as OutpostLayout).scanHint !== undefined && !isScanHint((parsed as OutpostLayout).scanHint))) {
+    || ((parsed as OutpostLayout).scanHint !== undefined && !isScanHint((parsed as OutpostLayout).scanHint))
+    || ((parsed as OutpostLayout).support !== undefined && !isSupportState((parsed as OutpostLayout).support))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   const layout = parsed as OutpostLayout;
@@ -86,7 +110,8 @@ function parseLayout(value: string): OutpostLayout {
   ));
   if (uniqueHazards.size !== layout.hazards.length || sameCoordinate(layout.target, start)
     || layout.hazards.some(hazard => sameCoordinate(hazard, start) || sameCoordinate(hazard, layout.target))
-    || invalidBeacon || (layout.beaconSecured && !beacon)) {
+    || invalidBeacon || (layout.beaconSecured && !beacon)
+    || supportForLayout(layout).reconCells.some(cell => sameCoordinate(cell, start))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   return layout;
@@ -170,7 +195,9 @@ function chooseLayout(): OutpostLayout {
     const route = [...protectedRoute(start, beacon), ...protectedRoute(beacon, target).slice(1)];
     const protectedCells = new Set(route.map(cell => `${cell.row}:${cell.column}`));
     const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, GENERATED_HAZARD_COUNT);
-    if (hasSafeRoute(start, beacon, hazards) && hasSafeRoute(beacon, target, hazards)) return { target, hazards, beacon, beaconSecured: false };
+    if (hasSafeRoute(start, beacon, hazards) && hasSafeRoute(beacon, target, hazards)) {
+      return { target, hazards, beacon, beaconSecured: false, support: { reconUsed: false, shieldUsed: false, shieldArmed: false, reconCells: [] } };
+    }
   }
   throw new Error("Unable to build a safe Outpost Run route");
 }
@@ -188,9 +215,16 @@ function scanHint(position: Coordinate, target: Coordinate) {
   return [vertical, horizontal].filter(Boolean).join("-") || "relay acquired";
 }
 
+function reconnaissanceCells(position: Coordinate, visited: Coordinate[]) {
+  const alreadyKnown = new Set(visited.map(cell => `${cell.row}:${cell.column}`));
+  return OUTPOST_RUN_DIRECTIONS.map(direction => moveCoordinate(position, direction))
+    .filter(isCoordinate)
+    .filter(cell => !alreadyKnown.has(`${cell.row}:${cell.column}`));
+}
+
 function visibleCells(layout: OutpostLayout, visited: Coordinate[]): OutpostRunCell[] {
   const seen = new Set<string>();
-  return visited.filter(cell => {
+  return [...visited, ...supportForLayout(layout).reconCells].filter(cell => {
     const key = `${cell.row}:${cell.column}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -213,6 +247,7 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
   }
   const status = row.status === "playing" && now >= row.started_at + OUTPOST_RUN_TTL_MS ? "expired" : row.status;
   const position = { row: row.position_row, column: row.position_column };
+  const support = supportForLayout(layout);
   return {
     id: row.id,
     version: row.version,
@@ -229,6 +264,10 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
     beaconSecured: Boolean(layout.beaconSecured),
     scanHint: row.scanned ? layout.scanHint ?? null : null,
     scanAvailable: status === "playing" && row.scanned === 0,
+    reconAvailable: status === "playing" && !support.reconUsed,
+    shieldAvailable: status === "playing" && !support.shieldUsed,
+    shieldArmed: status === "playing" && support.shieldArmed,
+    reconCells: support.reconCells.length,
     visibleCells: visibleCells(layout, visited),
     startedAt: row.started_at,
     expiresAt: row.started_at + OUTPOST_RUN_TTL_MS,
@@ -277,11 +316,12 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         WHERE dzn_outpost_run_sessions.started_at <= ?`)
         .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([start]), OUTPOST_RUN_MAX_ENERGY, now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another outpost run." }, 429);
-    } else if (body.action === "scan" || body.action === "move") {
-      const expectedKeys = body.action === "scan" ? ["action", "gameId", "version"] : ["action", "gameId", "version", "direction"];
+    } else if (body.action === "scan" || body.action === "move" || body.action === "support") {
+      const expectedKeys = body.action === "move" ? ["action", "gameId", "version", "direction"]
+        : body.action === "support" ? ["action", "gameId", "version", "support"] : ["action", "gameId", "version"];
       const keys = Object.keys(body);
       if (keys.length !== expectedKeys.length || keys.some(key => !expectedKeys.includes(key)) || !isId(body.gameId) || !Number.isInteger(body.version)
-        || (body.action === "move" && !isDirection(body.direction))) return reply({ error: "Choose a valid Outpost Run command." }, 400);
+        || (body.action === "move" && !isDirection(body.direction)) || (body.action === "support" && !isSupport(body.support))) return reply({ error: "Choose a valid Outpost Run command." }, 400);
       const row = await db.prepare("SELECT * FROM dzn_outpost_run_sessions WHERE user_id = ?").bind(user.id).first<OutpostRunRow>();
       if (!row || row.id !== body.gameId) return reply({ error: "This outpost run is not available." }, 404);
       if (row.status !== "playing" || row.version !== body.version || now >= row.started_at + OUTPOST_RUN_TTL_MS) {
@@ -300,18 +340,36 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
           .bind(JSON.stringify(scannedLayout), now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS).run();
         if (!result.meta.changes) return reply({ error: "Another command reached this run first. Refresh to continue." }, 409);
+      } else if (body.action === "support") {
+        const support = supportForLayout(layout);
+        let nextSupport: OutpostSupportState;
+        if (body.support === "recon") {
+          if (support.reconUsed) return reply({ error: "The recon drone has already completed its field sweep." }, 409);
+          nextSupport = { ...support, reconUsed: true, reconCells: reconnaissanceCells(position, parseVisited(row.visited_json, maxMoves)) };
+        } else {
+          if (support.shieldUsed) return reply({ error: "The storm shield has already been deployed on this run." }, 409);
+          nextSupport = { ...support, shieldUsed: true, shieldArmed: true };
+        }
+        const result = await db.prepare(`UPDATE dzn_outpost_run_sessions SET layout_json = ?, version = version + 1, updated_at = ?
+          WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
+          .bind(JSON.stringify({ ...layout, support: nextSupport }), now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS).run();
+        if (!result.meta.changes) return reply({ error: "Another command reached this run first. Refresh to continue." }, 409);
       } else {
         const direction = body.direction as OutpostRunDirection;
         const next = moveCoordinate(position, direction);
         if (!isCoordinate(next)) return reply({ error: "That route leaves the field grid." }, 400);
         const visited = parseVisited(row.visited_json, maxMoves);
+        const support = supportForLayout(layout);
         const terrainHazard = layout.hazards.some(hazard => sameCoordinate(hazard, next));
-        const energy = row.energy - (terrainHazard ? 1 : 0);
+        const shieldAbsorbed = terrainHazard && support.shieldArmed;
+        const energy = row.energy - (terrainHazard && !shieldAbsorbed ? 1 : 0);
         const moves = row.moves + 1;
         const beaconSecured = Boolean(layout.beacon && sameCoordinate(layout.beacon, next));
-        const nextLayout = beaconSecured && !layout.beaconSecured
-          ? { ...layout, beaconSecured: true, scanHint: undefined }
-          : layout;
+        const nextLayout = {
+          ...layout,
+          support: shieldAbsorbed ? { ...support, shieldArmed: false } : support,
+          ...(beaconSecured && !layout.beaconSecured ? { beaconSecured: true, scanHint: undefined } : {}),
+        };
         const reachedRelay = sameCoordinate(layout.target, next) && (!layout.beacon || nextLayout.beaconSecured);
         const status: OutpostRunRow["status"] = reachedRelay ? "won" : energy <= 0 || moves >= maxMoves ? "failed" : "playing";
         const update = db.prepare(`UPDATE dzn_outpost_run_sessions

@@ -57,6 +57,11 @@ function command(state: OutpostRunPayload, action: "scan" | "move", direction?: 
     : { action, gameId: state.game.id, version: state.game.version, direction };
 }
 
+function supportCommand(state: OutpostRunPayload, support: "recon" | "shield") {
+  assert.ok(state.game);
+  return { action: "support", gameId: state.game.id, version: state.game.version, support };
+}
+
 function same(left: Coordinate, right: Coordinate) { return left.row === right.row && left.column === right.column; }
 
 function safePath(start: Coordinate, target: Coordinate, hazards: Coordinate[]): OutpostRunDirection[] {
@@ -157,7 +162,8 @@ async function run() {
     const state = await start(fixture);
     for (const body of [null, [], { action: "start", reward: 100 }, { action: "move" },
       { ...command(state, "move", "north"), direction: "up" }, { ...command(state, "move", "north"), version: 1.5 },
-      { ...command(state, "move", "north"), reward: OUTPOST_RUN_REWARD.xp }]) {
+      { ...command(state, "move", "north"), reward: OUTPOST_RUN_REWARD.xp },
+      { ...supportCommand(state, "recon"), support: "teleport" }, { ...supportCommand(state, "shield"), direction: "north" }]) {
       assert.equal((await call(fixture, body)).status, 400);
     }
     assert.equal((await call(fixture, command(state, "move", "north"))).status, 429);
@@ -165,6 +171,44 @@ async function run() {
     const scanned = await payload(await call(fixture, command(state, "scan")));
     settle(fixture);
     assert.equal((await call(fixture, command(scanned, "scan"))).status, 409);
+  });
+
+  await test("field support is private, single-use and resolved by the server", async fixture => {
+    let state = await start(fixture);
+    assert.equal(state.game?.reconAvailable, true);
+    assert.equal(state.game?.shieldAvailable, true);
+    assert.equal(state.game?.shieldArmed, false);
+    settle(fixture);
+    state = await payload(await call(fixture, supportCommand(state, "recon")));
+    assert.equal(state.game?.reconAvailable, false);
+    assert.equal(state.game?.reconCells, 4);
+    assert.equal(state.game?.visibleCells.length, 5);
+    assert.equal(JSON.stringify(state).includes("layout_json"), false);
+    settle(fixture);
+    assert.equal((await call(fixture, supportCommand(state, "recon"))).status, 409);
+
+    settle(fixture);
+    state = await payload(await call(fixture, supportCommand(state, "shield")));
+    assert.equal(state.game?.shieldAvailable, false);
+    assert.equal(state.game?.shieldArmed, true);
+    const layout = layoutFor(fixture);
+    const north = { row: 1, column: 2 };
+    fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET layout_json = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(JSON.stringify({ ...layout, hazards: [north, ...layout.hazards.filter(hazard => !same(hazard, north))].slice(0, 5) }), Date.now() - 1_000);
+    state = await payload(await call(fixture, command(state, "move", "north")));
+    assert.equal(state.game?.energy, OUTPOST_RUN_MAX_ENERGY, "The armed shield must absorb exactly one server-declared hazard.");
+    assert.equal(state.game?.shieldArmed, false);
+    assert.equal(state.game?.visibleCells.some(cell => cell.kind === "hazard" && same(cell, north)), true);
+
+    fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - 6_000, Date.now() - 1_000);
+    const secondRun = await start(fixture);
+    settle(fixture);
+    const afterMove = await payload(await call(fixture, command(secondRun, "move", "north")));
+    settle(fixture);
+    const reconAfterMove = await payload(await call(fixture, supportCommand(afterMove, "recon")));
+    assert.equal(reconAfterMove.game?.reconCells, 3, "Recon after moving must omit sectors the player already visited.");
+    assert.equal(reconAfterMove.game?.visibleCells.some(cell => same(cell, { row: 2, column: 2 })), true);
   });
 
   await test("new tactical runs require the field beacon before the relay and preserve legacy sessions", async fixture => {

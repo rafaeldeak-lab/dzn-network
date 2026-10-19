@@ -44,9 +44,36 @@ try {
       ]);
       assert.equal(scanResponse.status(), 200, await scanResponse.text());
       await page.waitForTimeout(260);
+      await page.getByText("FIELD SUPPORT").waitFor();
+      const [reconResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Deploy recon drone" }).click(),
+      ]);
+      assert.equal(reconResponse.status(), 200, await reconResponse.text());
+      await page.waitForTimeout(260);
+      const [shieldResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Arm storm shield" }).click(),
+      ]);
+      assert.equal(shieldResponse.status(), 200, await shieldResponse.text());
+      const safeDirection = await page.getByRole("grid", { name: "Outpost Run fog grid" }).evaluate(grid => {
+        const cells = [...grid.querySelectorAll('[role="gridcell"]')].map(cell => cell.getAttribute("aria-label") ?? "");
+        const player = cells.map(label => label.match(/^You, row (\d+), column (\d+)/)).find(Boolean);
+        if (!player) return null;
+        const playerRow = Number(player[1]); const playerColumn = Number(player[2]);
+        const clear = cells.map(label => label.match(/^Surveyed ground, row (\d+), column (\d+)/)).find(match => Boolean(match)
+          && Math.abs(Number(match[1]) - playerRow) + Math.abs(Number(match[2]) - playerColumn) === 1);
+        if (!clear) return null;
+        const row = Number(clear[1]); const column = Number(clear[2]);
+        return row < playerRow ? "north" : row > playerRow ? "south" : column < playerColumn ? "west" : "east";
+      });
+      assert.ok(safeDirection, "Recon must expose at least one safe adjacent route from the generated protected path.");
+      await page.waitForTimeout(260);
+      const armedCanvas = page.locator('[data-dzn-outpost-run-canvas="true"]');
+      assert.equal(await armedCanvas.getAttribute("data-dzn-outpost-run-shield"), "armed");
       const [moveResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Move north" }).click(),
+        page.getByRole("button", { name: `Move ${safeDirection}` }).click(),
       ]);
       assert.equal(moveResponse.status(), 200, await moveResponse.text());
     }
@@ -54,6 +81,10 @@ try {
     const terrainCanvas = page.locator('[data-dzn-outpost-run-canvas="true"]');
     await terrainCanvas.waitFor();
     assert.equal(await terrainCanvas.count(), 1, "Outpost Run should render exactly one tactical terrain canvas.");
+    if (index === 0) {
+      assert.equal(await terrainCanvas.getAttribute("data-dzn-outpost-run-shield"), "armed");
+      assert.match(await page.getByRole("button", { name: "Recon sweep complete" }).textContent() ?? "", /nearby sectors mapped/);
+    }
     const terrainBounds = await terrainCanvas.evaluate(canvas => {
       const bounds = canvas.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height, pixels: canvas.width * canvas.height };

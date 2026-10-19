@@ -12,6 +12,7 @@ type OutpostRun3DProps = {
   objective: "beacon" | "relay";
   intensity: "calibration" | "pressure" | "blackout";
   scanHint: string | null;
+  shieldArmed: boolean;
   active: boolean;
   disabled: boolean;
   motionRunning: boolean;
@@ -50,7 +51,7 @@ export function scanVector(scanHint: string | null) {
   return direction.lengthSq() ? direction.normalize() : new THREE.Vector3(0, 0, -1);
 }
 
-export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, intensity, scanHint, active, disabled, motionRunning, onMove }: OutpostRun3DProps) {
+export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, intensity, scanHint, shieldArmed, active, disabled, motionRunning, onMove }: OutpostRun3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const moveRef = useRef(onMove);
   const disabledRef = useRef(disabled);
@@ -92,6 +93,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     renderer.toneMappingExposure = 1.52;
     renderer.domElement.dataset.dznOutpostRunCanvas = "true";
     renderer.domElement.dataset.dznOutpostRunIntensity = intensity;
+    renderer.domElement.dataset.dznOutpostRunShield = shieldArmed ? "armed" : "offline";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mount.appendChild(renderer.domElement);
 
@@ -154,9 +156,10 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const roverTrackGeometry = new THREE.BoxGeometry(0.11, 0.12, 0.54);
     const roverWheelGeometry = new THREE.CylinderGeometry(0.09, 0.09, 0.075, 10);
     const roverDishGeometry = new THREE.TorusGeometry(0.13, 0.018, 6, 20);
+    const shieldGeometry = new THREE.SphereGeometry(0.56, 18, 12);
     const scannerGeometry = new THREE.RingGeometry(0.44, 0.47, 42);
     const scannerNeedleGeometry = new THREE.BoxGeometry(0.045, 0.02, 0.78);
-    disposables.push(terrainGeometry, edgeGeometry, fogGeometry, hazardGeometry, markerRingGeometry, towerGeometry, foundationGeometry, relayDishGeometry, roverBodyGeometry, roverCabGeometry, roverTrackGeometry, roverWheelGeometry, roverDishGeometry, scannerGeometry, scannerNeedleGeometry);
+    disposables.push(terrainGeometry, edgeGeometry, fogGeometry, hazardGeometry, markerRingGeometry, towerGeometry, foundationGeometry, relayDishGeometry, roverBodyGeometry, roverCabGeometry, roverTrackGeometry, roverWheelGeometry, roverDishGeometry, shieldGeometry, scannerGeometry, scannerNeedleGeometry);
 
     const clickable: THREE.Mesh[] = [];
     const tileGroups = new Map<string, THREE.Group>();
@@ -245,7 +248,8 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const cabMaterial = new THREE.MeshStandardMaterial({ color: 0x164d56, emissive: 0x0a7d87, emissiveIntensity: 0.92, roughness: 0.18, metalness: 0.67 });
     const trackMaterial = new THREE.MeshStandardMaterial({ color: 0x1e3137, emissive: 0x071217, emissiveIntensity: 0.3, roughness: 0.76, metalness: 0.45 });
     const roverHaloMaterial = new THREE.MeshBasicMaterial({ color: 0x85fff2, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false });
-    materials.push(roverMaterial, cabMaterial, trackMaterial, roverHaloMaterial);
+    const shieldMaterial = new THREE.MeshBasicMaterial({ color: 0x85d8ff, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false });
+    materials.push(roverMaterial, cabMaterial, trackMaterial, roverHaloMaterial, shieldMaterial);
     const roverBody = new THREE.Mesh(roverBodyGeometry, roverMaterial);
     const roverCab = new THREE.Mesh(roverCabGeometry, cabMaterial);
     roverBody.position.y = 0.26; roverCab.position.set(0, 0.44, -0.05);
@@ -265,6 +269,10 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const roverHalo = new THREE.Mesh(markerRingGeometry, roverHaloMaterial);
     roverMast.scale.y = 0.47; roverMast.position.set(0, 0.6, 0.12); roverDish.position.set(0, 0.77, 0.12); roverDish.rotation.x = Math.PI / 2; roverHalo.position.y = 0.12; roverHalo.rotation.x = Math.PI / 2;
     player.add(roverMast, roverDish, roverHalo, new THREE.PointLight(0x75ffe8, 1.35, 2.5, 2));
+    const shieldBubble = new THREE.Mesh(shieldGeometry, shieldMaterial);
+    shieldBubble.position.y = 0.44;
+    shieldBubble.visible = shieldArmed;
+    player.add(shieldBubble);
     board.add(player);
 
     const currentTile = tileGroups.get(cellKey(row, column));
@@ -343,6 +351,9 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
       signalRings.forEach((ring, index) => {
         ring.scale.setScalar(index % 2 ? 0.96 : 1.04);
       });
+      shieldBubble.visible = shieldArmed;
+      shieldMaterial.opacity = shieldArmed ? 0.1 + (motionRunning ? (Math.sin(seconds * 3.4) + 1) * 0.035 : 0.04) : 0;
+      shieldBubble.scale.setScalar(shieldArmed && motionRunning ? 1 + Math.sin(seconds * 2.7) * 0.05 : 1);
       if (motionRunning) {
         board.rotation.y = -0.27 + Math.sin(seconds * 0.24) * 0.025;
         roverBody.position.y = 0.26 + Math.sin(seconds * 2.8) * 0.024;
@@ -384,7 +395,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [active, column, gridSize, intensity, motionRunning, objective, row, scanHint, visibleCells]);
+  }, [active, column, gridSize, intensity, motionRunning, objective, row, scanHint, shieldArmed, visibleCells]);
 
   return <div ref={mountRef} className="dzn-outpost-run-3d" data-live={active ? "true" : "false"} data-objective={objective} />;
 }
