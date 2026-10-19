@@ -7,6 +7,7 @@ import {
   deploymentCapacity,
   incidentForSeed,
   isSurvivalCommandApproach,
+  isSurvivalCommandFieldOrder,
   isSurvivalCommandLoadout,
   isSurvivalCommandSector,
   resolveSurvivalCommandOutcome,
@@ -15,6 +16,7 @@ import {
   validIncidentAction,
   type SurvivalCommandBuildingLevels,
   type SurvivalCommandExpedition,
+  type SurvivalCommandFieldOrder,
   type SurvivalCommandHistory,
   type SurvivalCommandLoadout,
   type SurvivalCommandPayload,
@@ -53,6 +55,9 @@ type ExpeditionRow = {
   ready_at: number;
   resolved_at: number | null;
   version: number;
+  field_order?: SurvivalCommandFieldOrder | null;
+  field_order_request_id?: string | null;
+  field_order_at?: number | null;
 };
 type HistoryRow = {
   id: string;
@@ -60,6 +65,7 @@ type HistoryRow = {
   approach: "scout" | "balanced" | "breach";
   loadout: SurvivalCommandLoadout;
   outcome: SurvivalCommandHistory["outcome"];
+  field_order?: SurvivalCommandFieldOrder | null;
   action: string;
   salvage: number;
   intel: number;
@@ -110,6 +116,12 @@ async function schemaIsReady(db: D1Database) {
   return SURVIVAL_COMMAND_TABLES.every(table => names.has(table));
 }
 
+async function fieldOrdersSchemaIsReady(db: D1Database) {
+  const columns = await db.prepare("PRAGMA table_info('dzn_survival_command_expeditions')").all<{ name: string }>();
+  const names = new Set((columns.results ?? []).map(column => column.name));
+  return ["field_order", "field_order_request_id", "field_order_at"].every(column => names.has(column));
+}
+
 async function readBuildingLevels(db: D1Database, userId: string): Promise<SurvivalCommandBuildingLevels | null> {
   const rows = await db.prepare(`SELECT building, level FROM dzn_command_centre_buildings WHERE user_id = ?
     AND building IN ('headquarters', 'workshop', 'watchtower', 'communications')`).bind(userId).all<BuildingRow>();
@@ -123,9 +135,11 @@ async function readBuildingLevels(db: D1Database, userId: string): Promise<Survi
   };
 }
 
-function visibleExpedition(row: ExpeditionRow, now: number): SurvivalCommandExpedition {
+function visibleExpedition(row: ExpeditionRow, now: number, fieldOrdersAvailable: boolean, fieldOrdersSchemaReady: boolean): SurvivalCommandExpedition {
   const ready = now >= row.ready_at;
-  const incidentKey = ready ? incidentForSeed(row.seed) : null;
+  // The release flag governs new choices. A choice already written under a live rollout remains part of that operation.
+  const fieldOrder = fieldOrdersSchemaReady && isSurvivalCommandFieldOrder(row.field_order) ? row.field_order : null;
+  const incidentKey = ready && (!fieldOrdersAvailable || fieldOrder) ? incidentForSeed(row.seed) : null;
   const incident = incidentKey ? SURVIVAL_COMMAND_INCIDENTS[incidentKey] : null;
   return {
     id: row.id,
@@ -136,20 +150,21 @@ function visibleExpedition(row: ExpeditionRow, now: number): SurvivalCommandExpe
     readyAt: row.ready_at,
     version: row.version,
     state: ready ? "ready" : "in-transit",
+    fieldOrder,
     incident: incident ? { key: incidentKey!, title: incident.title, detail: incident.detail, actions: incident.actions } : null,
   };
 }
 
-async function readPayload(db: D1Database, user: SessionUser, now: number): Promise<SurvivalCommandPayload> {
+async function readPayload(db: D1Database, user: SessionUser, now: number, fieldOrdersAvailable: boolean, fieldOrdersSchemaReady: boolean): Promise<SurvivalCommandPayload> {
   const [profile, buildings, resources, used, active, history, unlocked] = await Promise.all([
     db.prepare("SELECT established_at FROM dzn_survival_command_profiles WHERE user_id = ?").bind(user.id).first<ProfileRow>(),
     readBuildingLevels(db, user.id),
     readResources(db, user.id),
     db.prepare("SELECT COALESCE(SUM(deployment_cost), 0) AS count FROM dzn_survival_command_expeditions WHERE user_id = ? AND deployment_day = ?")
       .bind(user.id, dayKey(now)).first<{ count: number }>(),
-    db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version
+    db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version${fieldOrdersSchemaReady ? ", field_order, field_order_request_id, field_order_at" : ""}
       FROM dzn_survival_command_expeditions WHERE user_id = ? AND status = 'deployed' ORDER BY started_at DESC LIMIT 1`).bind(user.id).first<ExpeditionRow>(),
-    db.prepare(`SELECT expedition.id, expedition.sector, expedition.approach, expedition.loadout, ledger.outcome, ledger.action, ledger.salvage, ledger.intel, ledger.resolved_at
+    db.prepare(`SELECT expedition.id, expedition.sector, expedition.approach, expedition.loadout, ledger.outcome, ledger.action, ledger.salvage, ledger.intel, ledger.resolved_at${fieldOrdersSchemaReady ? ", expedition.field_order" : ""}
       FROM dzn_survival_command_expeditions AS expedition
       JOIN dzn_survival_command_resolution_ledger AS ledger ON ledger.expedition_id = expedition.id
       WHERE expedition.user_id = ? ORDER BY ledger.resolved_at DESC, ledger.id DESC LIMIT 5`).bind(user.id).all<HistoryRow>(),
@@ -189,13 +204,15 @@ async function readPayload(db: D1Database, user: SessionUser, now: number): Prom
       };
     }),
     sectors,
-    expedition: active ? visibleExpedition(active, now) : null,
+    fieldOrdersAvailable,
+    expedition: active ? visibleExpedition(active, now, fieldOrdersAvailable, fieldOrdersSchemaReady) : null,
     history: (history.results ?? []).map(row => ({
       id: row.id,
       sector: row.sector,
       approach: row.approach,
       loadout: row.loadout,
       outcome: row.outcome,
+      fieldOrder: fieldOrdersSchemaReady && isSurvivalCommandFieldOrder(row.field_order) ? row.field_order : null,
       action: row.action,
       salvage: row.salvage,
       intel: row.intel,
@@ -296,11 +313,38 @@ async function unlockLoadout(db: D1Database, user: SessionUser, body: Record<str
   return { error: "This loadout could not be reserved from the current field balance. Refresh before retrying.", status: 409 } as const;
 }
 
-async function resolve(db: D1Database, user: SessionUser, body: Record<string, unknown>, now: number) {
+async function setFieldOrder(db: D1Database, user: SessionUser, body: Record<string, unknown>, now: number, fieldOrdersAvailable: boolean) {
+  if (!fieldOrdersAvailable) return { error: "Field Command orders are not open on this environment yet.", status: 409 } as const;
+  if (typeof body.expeditionId !== "string" || !isRequestId(body.requestId) || !Number.isInteger(body.version) || !isSurvivalCommandFieldOrder(body.order)) {
+    return { error: "Choose one available field order from the current sector dossier.", status: 400 } as const;
+  }
+  const [row, replay] = await Promise.all([
+    db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version,
+      field_order, field_order_request_id, field_order_at
+      FROM dzn_survival_command_expeditions WHERE id = ? AND user_id = ?`).bind(body.expeditionId, user.id).first<ExpeditionRow>(),
+    db.prepare("SELECT id, field_order FROM dzn_survival_command_expeditions WHERE user_id = ? AND field_order_request_id = ?")
+      .bind(user.id, body.requestId).first<{ id: string; field_order: SurvivalCommandFieldOrder }>(),
+  ]);
+  if (!row) return { error: "That sector operation is no longer available to this account.", status: 404 } as const;
+  if (replay?.id === row.id && replay.field_order === body.order) return { error: null, status: 200 } as const;
+  if (replay) return { error: "That field-order request is already attached to another operation.", status: 409 } as const;
+  if (row.status !== "deployed" || row.version !== body.version || row.ready_at > now) {
+    return { error: "This operation is not ready or has changed. Refresh the sector board before setting a field order.", status: 409 } as const;
+  }
+  if (row.field_order) return { error: "A field order is already locked for this operation.", status: 409 } as const;
+  const result = await db.prepare(`UPDATE dzn_survival_command_expeditions
+    SET field_order = ?, field_order_request_id = ?, field_order_at = ?, version = version + 1
+    WHERE id = ? AND user_id = ? AND status = 'deployed' AND version = ? AND ready_at <= ? AND field_order IS NULL`)
+    .bind(body.order, body.requestId, now, row.id, user.id, row.version, now).run();
+  if (!changes(result)) return { error: "This operation changed before the field order was locked. Refresh the sector board.", status: 409 } as const;
+  return { error: null, status: 200 } as const;
+}
+
+async function resolve(db: D1Database, user: SessionUser, body: Record<string, unknown>, now: number, fieldOrdersAvailable: boolean, fieldOrdersSchemaReady: boolean) {
   if (typeof body.expeditionId !== "string" || !isRequestId(body.requestId) || !Number.isInteger(body.version)) {
     return { error: "Use the current sector dossier before resolving this operation.", status: 400 } as const;
   }
-  const row = await db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version
+  const row = await db.prepare(`SELECT id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at, version${fieldOrdersSchemaReady ? ", field_order, field_order_request_id, field_order_at" : ""}
     FROM dzn_survival_command_expeditions WHERE id = ? AND user_id = ?`).bind(body.expeditionId, user.id).first<ExpeditionRow>();
   if (!row) return { error: "That sector operation is no longer available to this account.", status: 404 } as const;
   const existing = await db.prepare("SELECT id, expedition_id FROM dzn_survival_command_resolution_ledger WHERE user_id = ? AND request_id = ?")
@@ -310,12 +354,23 @@ async function resolve(db: D1Database, user: SessionUser, body: Record<string, u
   if (row.status !== "deployed" || row.version !== body.version || row.ready_at > now) {
     return { error: "This operation is not ready or has changed. Refresh the sector board before continuing.", status: 409 } as const;
   }
+  if (fieldOrdersAvailable && !isSurvivalCommandFieldOrder(row.field_order)) {
+    return { error: "Lock one field order before making the incident decision.", status: 409 } as const;
+  }
   const incident = incidentForSeed(row.seed);
   if (!validIncidentAction(incident, body.decision)) return { error: "Choose one of the available field decisions.", status: 400 } as const;
   const buildings = await readBuildingLevels(db, user.id);
   if (!buildings) return { error: "Command Centre records are unavailable. The expedition has not been changed.", status: 409 } as const;
   if (!isSurvivalCommandLoadout(row.loadout)) return { error: "This operation has an invalid field loadout. It has not been resolved.", status: 409 } as const;
-  const outcome = resolveSurvivalCommandOutcome({ seed: row.seed, sector: row.sector, approach: row.approach, loadout: row.loadout, action: body.decision, buildings });
+  const outcome = resolveSurvivalCommandOutcome({
+    seed: row.seed,
+    sector: row.sector,
+    approach: row.approach,
+    loadout: row.loadout,
+    action: body.decision,
+    buildings,
+    fieldOrder: fieldOrdersSchemaReady && isSurvivalCommandFieldOrder(row.field_order) ? row.field_order : null,
+  });
   const ledgerId = crypto.randomUUID();
   const results = await db.batch([
     db.prepare(`INSERT OR IGNORE INTO dzn_survival_command_resolution_ledger
@@ -347,8 +402,10 @@ export async function handleSurvivalCommand(request: Request, env: Env): Promise
     }
     const db = requireDb(env);
     if (!(await schemaIsReady(db))) return reply({ error: "Survival Command is preparing secure expedition storage. Try again shortly." }, 503);
+    const fieldOrdersSchemaReady = await fieldOrdersSchemaIsReady(db);
+    const fieldOrdersAvailable = env.DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED === "true" && fieldOrdersSchemaReady;
     const now = Date.now();
-    if (request.method === "GET") return reply(await readPayload(db, user, now));
+    if (request.method === "GET") return reply(await readPayload(db, user, now, fieldOrdersAvailable, fieldOrdersSchemaReady));
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 2048);
     if (!parsed.ok) return reply({ error: "Invalid Survival Command request." }, parsed.status);
     const body = parsed.value;
@@ -356,10 +413,11 @@ export async function handleSurvivalCommand(request: Request, env: Env): Promise
     const result = body.action === "initialize" ? await establish(db, user.id, now)
       : body.action === "deploy" ? await deploy(db, user, body, now)
         : body.action === "unlock-loadout" ? await unlockLoadout(db, user, body, now)
-        : body.action === "resolve" ? await resolve(db, user, body, now)
+        : body.action === "set-field-order" ? await setFieldOrder(db, user, body, now, fieldOrdersAvailable)
+          : body.action === "resolve" ? await resolve(db, user, body, now, fieldOrdersAvailable, fieldOrdersSchemaReady)
           : { error: "Unknown Survival Command action.", status: 400 };
     if (result.error) return reply({ error: result.error }, result.status);
-    return reply(await readPayload(db, user, now));
+    return reply(await readPayload(db, user, now, fieldOrdersAvailable, fieldOrdersSchemaReady));
   } catch {
     return reply({ error: "Survival Command is temporarily unavailable. Stored expedition progress has not been reset." }, 503);
   }

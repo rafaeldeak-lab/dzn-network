@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { SurvivalCommandExpedition, SurvivalCommandLoadout, SurvivalCommandSector } from "../../lib/survival-command";
+import type { SurvivalCommandExpedition, SurvivalCommandFieldOrder, SurvivalCommandLoadout, SurvivalCommandSector } from "../../lib/survival-command";
 
 type SceneState = { selectedSector: SurvivalCommandSector; selectedLoadout: SurvivalCommandLoadout; expedition: SurvivalCommandExpedition | null };
 type Props = SceneState & { motionRunning: boolean; onUnavailable: () => void };
@@ -173,6 +173,11 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       recovery_kit: 0xffb65f,
       convoy_plating: 0xec71a8,
     };
+    const fieldOrderColours: Record<SurvivalCommandFieldOrder, number> = {
+      overwatch: 0x72ead6,
+      intercept: 0xa993ff,
+      recovery: 0xffbd69,
+    };
     const loadoutNodes = {} as Record<SurvivalCommandLoadout, THREE.Group>;
     const loadoutMaterial = new THREE.MeshStandardMaterial({ color: 0xb7e7df, emissive: 0x173e40, emissiveIntensity: 1.25, roughness: 0.35, metalness: 0.78 });
     const loadoutAccent = new THREE.MeshBasicMaterial({ color: 0x6debd1, transparent: true, opacity: 0.86 });
@@ -227,6 +232,33 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     loadoutLight.position.set(-0.75, 0.8, 0.92);
     root.add(loadoutLight);
 
+    const directive = new THREE.Group();
+    const directiveBaseGeometry = new THREE.CylinderGeometry(0.44, 0.58, 0.08, 6);
+    const directiveCoreGeometry = new THREE.OctahedronGeometry(0.18, 0);
+    const directiveRingGeometry = new THREE.TorusGeometry(0.43, 0.024, 8, 24);
+    const directiveBeamGeometry = new THREE.ConeGeometry(0.18, 0.82, 6, 1, true);
+    const directiveBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x183e42, emissive: 0x0a2327, emissiveIntensity: 1.1, metalness: 0.82, roughness: 0.24 });
+    const directiveCoreMaterial = new THREE.MeshStandardMaterial({ color: 0x72ead6, emissive: 0x72ead6, emissiveIntensity: 2.2, metalness: 0.74, roughness: 0.14 });
+    const directiveRingMaterial = new THREE.MeshBasicMaterial({ color: 0x72ead6, transparent: true, opacity: 0.84, depthWrite: false });
+    const directiveBeamMaterial = new THREE.MeshBasicMaterial({ color: 0x72ead6, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false });
+    geometries.push(directiveBaseGeometry, directiveCoreGeometry, directiveRingGeometry, directiveBeamGeometry);
+    materials.push(directiveBaseMaterial, directiveCoreMaterial, directiveRingMaterial, directiveBeamMaterial);
+    const directiveBase = new THREE.Mesh(directiveBaseGeometry, directiveBaseMaterial);
+    const directiveCore = new THREE.Mesh(directiveCoreGeometry, directiveCoreMaterial);
+    const directiveRing = new THREE.Mesh(directiveRingGeometry, directiveRingMaterial);
+    const directiveBeam = new THREE.Mesh(directiveBeamGeometry, directiveBeamMaterial);
+    directive.position.set(0.76, 0.12, -0.82);
+    directiveCore.position.y = 0.34;
+    directiveRing.position.y = 0.31;
+    directiveRing.rotation.x = Math.PI / 2;
+    directiveBeam.position.y = 0.67;
+    directive.add(directiveBase, directiveCore, directiveRing, directiveBeam);
+    directive.visible = false;
+    root.add(directive);
+    const directiveLight = new THREE.PointLight(0x72ead6, 0, 3.6, 2);
+    directiveLight.position.set(0.76, 0.85, -0.82);
+    root.add(directiveLight);
+
     const particleGeometry = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(140 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
@@ -260,6 +292,19 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       for (const [key, node] of Object.entries(loadoutNodes) as Array<[SurvivalCommandLoadout, THREE.Group]>) node.visible = key === activeLoadout;
       loadoutLight.color.setHex(loadoutColours[activeLoadout]);
       loadoutLight.intensity = state.expedition?.state === "ready" ? 2.8 : 1.45;
+      const fieldOrder = state.expedition?.state === "ready" ? state.expedition.fieldOrder : null;
+      directive.visible = Boolean(fieldOrder);
+      if (fieldOrder) {
+        const colour = fieldOrderColours[fieldOrder];
+        directiveCoreMaterial.color.setHex(colour);
+        directiveCoreMaterial.emissive.setHex(colour);
+        directiveRingMaterial.color.setHex(colour);
+        directiveBeamMaterial.color.setHex(colour);
+        directiveLight.color.setHex(colour);
+        directiveLight.intensity = 2.25;
+      } else {
+        directiveLight.intensity = 0;
+      }
     };
     applyStateRef.current = applyState;
     applyState(stateRef.current);
@@ -294,6 +339,14 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
         const progress = (Math.sin(elapsed * 0.72) + 1) / 2;
         convoy.position.set(target.x * progress, 0, target.z * progress);
         convoy.rotation.y = Math.atan2(target.x, target.z);
+      }
+      if (directive.visible) {
+        directiveRing.rotation.z = elapsed * 1.1;
+        directiveCore.rotation.y = elapsed * 1.45;
+        const pulse = 1 + Math.sin(elapsed * 2.1) * 0.12;
+        directiveCore.scale.setScalar(pulse);
+        directiveBeam.scale.y = 1 + Math.sin(elapsed * 1.6) * 0.16;
+        directiveLight.intensity = 2.05 + Math.sin(elapsed * 2.1) * 0.45;
       }
       render();
       frame = window.requestAnimationFrame(animate);

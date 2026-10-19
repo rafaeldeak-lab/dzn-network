@@ -38,6 +38,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0107_dzn_command_centre.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0109_dzn_survival_command_loadouts.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0112_dzn_survival_command_field_orders.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
@@ -55,6 +56,7 @@ async function main() {
   fixture.env.DZN_GAMES_NIGHT_RUN_ROUTE_CONTROL_ENABLED = "true";
   fixture.env.DZN_COMMAND_CENTRE_ENABLED = "true";
   fixture.env.DZN_SURVIVAL_COMMAND_ENABLED = "true";
+  fixture.env.DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED = "true";
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
@@ -75,6 +77,17 @@ async function main() {
       }
       if (url.pathname === "/__local-survival-command") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/survival-command", "Cache-Control": "no-store" }); res.end(); return;
+      }
+      if (url.pathname === "/__local-survival-command-other") {
+        res.writeHead(303, { "Set-Cookie": `${fixture.otherCookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/survival-command", "Cache-Control": "no-store" }); res.end(); return;
+      }
+      if (url.pathname === "/__local-survival-command-ready") {
+        fixture.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE user_id = ? AND status = 'deployed'").run("local-player");
+        res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/survival-command", "Cache-Control": "no-store" }); res.end(); return;
+      }
+      if (url.pathname === "/__local-survival-command-ready-other") {
+        fixture.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE user_id = ? AND status = 'deployed'").run("other-player");
+        res.writeHead(303, { "Set-Cookie": `${fixture.otherCookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/survival-command", "Cache-Control": "no-store" }); res.end(); return;
       }
       if (url.pathname === "/api/auth/me") {
         res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
