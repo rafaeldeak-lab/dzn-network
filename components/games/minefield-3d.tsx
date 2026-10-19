@@ -254,7 +254,8 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
       raycaster.setFromCamera(pointer, camera);
       return raycaster.intersectObjects(tileMeshes, false).find(hit => {
         const tile = hit.object as THREE.Mesh;
-        return tile.userData.selectable && (action !== "scan" || (tile.userData.state === "hidden" && !tile.userData.scanUsed));
+        return tile.userData.selectable && (action !== "scan" || (game.safeCleared > 0 && game.scans.length < game.scanCharges
+          && tile.userData.state === "hidden" && !tile.userData.scanUsed));
       })?.object as THREE.Mesh | undefined;
     }
 

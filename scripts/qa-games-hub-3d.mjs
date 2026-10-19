@@ -148,6 +148,22 @@ try {
       const scanIntel = page.getByRole("region", { name: "Local 3 x 3 threat density", exact: true });
       await scanIntel.locator("li").waitFor();
       assert.match(await scanIntel.textContent(), /\d+ threats?/, "Scanner intelligence must render the server threat count outside the decorative canvas");
+      await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
+      await page.getByRole("group", { name: /Sector Sweep board/i }).waitFor();
+      const remainingSectors = page.locator('button[data-state="hidden"]');
+      const finalChargeIndex = await remainingSectors.evaluateAll(sectors => sectors.findIndex(sector => !sector.getAttribute("aria-label")?.includes("Scan result:")));
+      assert.ok(finalChargeIndex >= 0, "Tactical grid should retain an unscanned hidden sector for the final Recon scanner charge");
+      await remainingSectors.nth(finalChargeIndex).click();
+      await scanIntel.locator("li").nth(1).waitFor();
+      assert.equal(await readyScanner.isDisabled(), true, "Scanner control must disable after the final server-recorded charge");
+      await page.getByRole("button", { name: "3D field", exact: true }).click();
+      await canvas.waitFor({ state: "visible" });
+      const exhaustedScanWrites = writes.length;
+      for (const [x, y] of scanPositions) {
+        await canvas.click({ position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * y) } });
+      }
+      await page.waitForTimeout(150);
+      assert.equal(writes.length, exhaustedScanWrites, "3D field must not submit scan requests after the final charge is spent");
       const flagVersion = await page.locator(".dzn-minefield-3d").getAttribute("data-game-version");
       await canvas.click({ button: "right", position: { x: Math.round((await canvas.evaluate(element => element.clientWidth)) * scannedAt.x), y: Math.round((await canvas.evaluate(element => element.clientHeight)) * scannedAt.y) } });
       await page.waitForFunction(previous => document.querySelector(".dzn-minefield-3d")?.getAttribute("data-game-version") !== previous, flagVersion);
