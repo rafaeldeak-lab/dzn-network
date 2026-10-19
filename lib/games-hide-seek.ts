@@ -15,6 +15,15 @@ export type HideSeekRecoveredSignal = {
   y: number;
 };
 
+export type HideSeekSignalBearing = "north" | "north-east" | "east" | "south-east" | "south" | "south-west" | "west" | "north-west";
+
+export type HideSeekSignalTelemetry = {
+  // A scan result is intentionally coarse. Exact target coordinates and target
+  // identities remain server-held until the player earns a confirmed recovery.
+  band: "none" | "faint" | "trace" | "strong" | "locked";
+  bearing: HideSeekSignalBearing | null;
+};
+
 export type HideSeekGame = {
   id: string;
   version: number;
@@ -29,6 +38,7 @@ export type HideSeekGame = {
   clues: HideSeekSignalBrief[];
   recoveredSignals: HideSeekRecoveredSignal[];
   lastScan: "signal-acquired" | "empty" | null;
+  telemetry: HideSeekSignalTelemetry | null;
 };
 
 export type HideSeekPayload = {

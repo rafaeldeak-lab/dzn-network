@@ -65,6 +65,7 @@ try {
     await page.getByText("X 1000 / Y 0500").waitFor();
     await page.keyboard.press("Enter");
     await page.getByText("Empty sweep").waitFor();
+    await page.getByText("Signal read").waitFor();
     assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {

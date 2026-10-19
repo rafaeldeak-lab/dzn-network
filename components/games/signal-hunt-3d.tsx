@@ -2,21 +2,23 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import type { HideSeekSignalTelemetry } from "@/lib/games-hide-seek";
 
 type SignalHunt3DProps = {
   active: boolean;
   foundCount: number;
   misses: number;
   scanPoint: { x: number; y: number };
+  telemetry: HideSeekSignalTelemetry | null;
   motionRunning: boolean;
   onUnavailable: () => void;
 };
 
-type HuntVisualState = Pick<SignalHunt3DProps, "active" | "foundCount" | "misses" | "scanPoint">;
+type HuntVisualState = Pick<SignalHunt3DProps, "active" | "foundCount" | "misses" | "scanPoint" | "telemetry">;
 
-export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunning, onUnavailable }: SignalHunt3DProps) {
+export function SignalHunt3D({ active, foundCount, misses, scanPoint, telemetry, motionRunning, onUnavailable }: SignalHunt3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<HuntVisualState>({ active, foundCount, misses, scanPoint });
+  const stateRef = useRef<HuntVisualState>({ active, foundCount, misses, scanPoint, telemetry });
   const unavailableRef = useRef(onUnavailable);
   const applyStateRef = useRef<((state: HuntVisualState) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
@@ -26,11 +28,11 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
   }, [onUnavailable]);
 
   useEffect(() => {
-    const state = { active, foundCount, misses, scanPoint };
+    const state = { active, foundCount, misses, scanPoint, telemetry };
     stateRef.current = state;
     applyStateRef.current?.(state);
     renderRef.current?.();
-  }, [active, foundCount, misses, scanPoint]);
+  }, [active, foundCount, misses, scanPoint, telemetry]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -101,6 +103,15 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
     beam.position.y = 0.02;
     scanner.add(beam);
 
+    const bearingCue = new THREE.Group();
+    const bearingGeometry = new THREE.ConeGeometry(0.024, 0.09, 3);
+    const bearingMaterial = new THREE.MeshBasicMaterial({ color: 0x7df8e7, transparent: true, opacity: 0, depthWrite: false });
+    geometries.push(bearingGeometry); materials.push(bearingMaterial);
+    const bearingPointer = new THREE.Mesh(bearingGeometry, bearingMaterial);
+    bearingPointer.position.y = 0.145;
+    bearingCue.add(bearingPointer);
+    scanner.add(bearingCue);
+
     const mastGeometry = new THREE.CylinderGeometry(0.035, 0.035, 1.1, 8);
     const mastMaterial = new THREE.MeshBasicMaterial({ color: 0x8af9ee, transparent: true, opacity: 0.62 });
     geometries.push(mastGeometry); materials.push(mastMaterial);
@@ -141,7 +152,11 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
       const x = state.scanPoint.x / 1000 * 2 - 1;
       const y = 1 - state.scanPoint.y / 1000 * 2;
       const warning = Math.min(1, state.misses / 6);
-      const activeColour = warning > 0.58 ? 0xffbb70 : 0x6ff4e0;
+      const telemetryColour = state.telemetry?.band === "locked" ? 0x8cf4b5
+        : state.telemetry?.band === "strong" ? 0xffd36b
+          : state.telemetry?.band === "trace" ? 0x8fbeff
+            : state.telemetry?.band === "faint" ? 0xab8cff : null;
+      const activeColour = telemetryColour ?? (warning > 0.58 ? 0xffbb70 : 0x6ff4e0);
       scanner.position.set(x, y, 0);
       ringMaterial.color.setHex(state.active ? activeColour : 0x7c9e9d);
       ringMaterial.opacity = state.active ? 0.9 : 0.35;
@@ -154,6 +169,15 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
       routeMaterial.color.setHex(warning > 0.58 ? 0xf5a85d : 0xd8d195);
       horizonMaterial.color.setHex(state.active ? 0x58d6cb : 0x477775);
       horizonMaterial.opacity = state.active ? 0.32 : 0.18;
+      const bearingAngles: Record<NonNullable<HideSeekSignalTelemetry["bearing"]>, number> = {
+        north: 0, "north-east": -Math.PI / 4, east: -Math.PI / 2, "south-east": -Math.PI * 0.75,
+        south: Math.PI, "south-west": Math.PI * 0.75, west: Math.PI / 2, "north-west": Math.PI / 4,
+      };
+      const bearing = state.telemetry?.bearing;
+      bearingCue.visible = Boolean(state.active && bearing);
+      if (bearing) bearingCue.rotation.z = bearingAngles[bearing];
+      bearingMaterial.color.setHex(activeColour);
+      bearingMaterial.opacity = bearingCue.visible ? state.telemetry?.band === "strong" ? 0.94 : 0.72 : 0;
     };
     applyStateRef.current = applyState;
     applyState(stateRef.current);
@@ -193,6 +217,7 @@ export function SignalHunt3D({ active, foundCount, misses, scanPoint, motionRunn
       outerRing.rotation.z = -elapsed * 0.3;
       outerRing.scale.setScalar(1.6 + Math.sin(elapsed * 1.35) * 0.28);
       beam.scale.y = 0.92 + Math.sin(elapsed * 1.9) * 0.1;
+      bearingCue.scale.setScalar(1 + Math.sin(elapsed * 2.4) * 0.08);
       particles.rotation.y = elapsed * 0.026;
       route.rotation.y = Math.sin(elapsed * 0.45) * 0.035;
       render();
