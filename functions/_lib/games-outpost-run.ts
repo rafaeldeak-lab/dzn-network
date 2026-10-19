@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import {
   OUTPOST_RUN_DIRECTIONS,
+  OUTPOST_RUN_CONTRACTS,
   OUTPOST_RUN_GRID_SIZE,
   OUTPOST_RUN_MAX_ENERGY,
   OUTPOST_RUN_MAX_MOVES,
@@ -12,8 +13,10 @@ import {
   OUTPOST_RUN_TTL_MS,
   outpostRunIntensity,
   type OutpostRunCell,
+  type OutpostRunContract,
   type OutpostRunDirection,
   type OutpostRunGame,
+  type OutpostRunObjective,
   type OutpostRunPayload,
   type OutpostRunSupport,
 } from "../../lib/games-outpost-run";
@@ -24,6 +27,7 @@ const dayKey = (now: number) => new Date(now).toISOString().slice(0, 10);
 const isId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
 const isDirection = (value: unknown): value is OutpostRunDirection => typeof value === "string" && (OUTPOST_RUN_DIRECTIONS as readonly string[]).includes(value);
 const isSupport = (value: unknown): value is OutpostRunSupport => value === "recon" || value === "shield";
+const isContract = (value: unknown): value is OutpostRunContract => typeof value === "string" && (OUTPOST_RUN_CONTRACTS as readonly string[]).includes(value);
 
 type Coordinate = { row: number; column: number };
 type OutpostSupportState = {
@@ -33,17 +37,25 @@ type OutpostSupportState = {
   reconCells: Coordinate[];
 };
 type OutpostLayout = {
+  contract?: OutpostRunContract;
   target: Coordinate;
   hazards: Coordinate[];
   beacon?: Coordinate;
   beaconSecured?: boolean;
+  cache?: Coordinate;
+  cacheSecured?: boolean;
   scanHint?: string;
   support?: OutpostSupportState;
 };
 const start = { row: 2, column: 2 };
 const LEGACY_OUTPOST_RUN_MAX_ENERGY = 4;
 const LEGACY_OUTPOST_RUN_MAX_MOVES = 12;
-const GENERATED_HAZARD_COUNT = 5;
+const MAX_GENERATED_HAZARD_COUNT = 6;
+const CONTRACT_PROFILES = {
+  survey: { maxEnergy: 3, maxMoves: 10, hazards: 5, needsBeacon: true, needsCache: false },
+  intercept: { maxEnergy: 3, maxMoves: 8, hazards: 6, needsBeacon: false, needsCache: false },
+  recovery: { maxEnergy: 4, maxMoves: 12, hazards: 5, needsBeacon: true, needsCache: true },
+} as const;
 type OutpostRunRow = {
   user_id: string;
   id: string;
@@ -90,18 +102,42 @@ function supportForLayout(layout: OutpostLayout): OutpostSupportState {
   return layout.support ?? spentLegacySupport;
 }
 
+function contractForLayout(layout: OutpostLayout): OutpostRunContract | "legacy" {
+  return layout.contract && isContract(layout.contract) ? layout.contract : "legacy";
+}
+
+function objectiveForLayout(layout: OutpostLayout): OutpostRunObjective {
+  if (layout.beacon && !layout.beaconSecured) return "beacon";
+  if (layout.cache && !layout.cacheSecured) return "cache";
+  return "relay";
+}
+
+function objectiveTarget(layout: OutpostLayout) {
+  const objective = objectiveForLayout(layout);
+  return objective === "beacon" ? layout.beacon! : objective === "cache" ? layout.cache! : layout.target;
+}
+
+function objectivesTotal(layout: OutpostLayout) { return 1 + Number(Boolean(layout.beacon)) + Number(Boolean(layout.cache)); }
+function objectivesCompleted(layout: OutpostLayout) {
+  return Number(Boolean(layout.beacon && layout.beaconSecured)) + Number(Boolean(layout.cache && layout.cacheSecured));
+}
+
 function parseLayout(value: string): OutpostLayout {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || !isCoordinate((parsed as OutpostLayout).target) || !Array.isArray((parsed as OutpostLayout).hazards)
-    || (parsed as OutpostLayout).hazards.length < 3 || (parsed as OutpostLayout).hazards.length > GENERATED_HAZARD_COUNT || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
+    || (parsed as OutpostLayout).hazards.length < 3 || (parsed as OutpostLayout).hazards.length > MAX_GENERATED_HAZARD_COUNT || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
+    || ((parsed as OutpostLayout).contract !== undefined && !isContract((parsed as OutpostLayout).contract))
     || ((parsed as OutpostLayout).beacon !== undefined && !isCoordinate((parsed as OutpostLayout).beacon))
     || ((parsed as OutpostLayout).beaconSecured !== undefined && typeof (parsed as OutpostLayout).beaconSecured !== "boolean")
+    || ((parsed as OutpostLayout).cache !== undefined && !isCoordinate((parsed as OutpostLayout).cache))
+    || ((parsed as OutpostLayout).cacheSecured !== undefined && typeof (parsed as OutpostLayout).cacheSecured !== "boolean")
     || ((parsed as OutpostLayout).scanHint !== undefined && !isScanHint((parsed as OutpostLayout).scanHint))
     || ((parsed as OutpostLayout).support !== undefined && !isSupportState((parsed as OutpostLayout).support))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   const layout = parsed as OutpostLayout;
   const beacon = layout.beacon;
+  const cache = layout.cache;
   const uniqueHazards = new Set(layout.hazards.map(hazard => `${hazard.row}:${hazard.column}`));
   const invalidBeacon = Boolean(beacon && (
     sameCoordinate(beacon, start)
@@ -111,14 +147,28 @@ function parseLayout(value: string): OutpostLayout {
   if (uniqueHazards.size !== layout.hazards.length || sameCoordinate(layout.target, start)
     || layout.hazards.some(hazard => sameCoordinate(hazard, start) || sameCoordinate(hazard, layout.target))
     || invalidBeacon || (layout.beaconSecured && !beacon)
+    || Boolean(cache && (sameCoordinate(cache, start) || sameCoordinate(cache, layout.target) || (beacon && sameCoordinate(cache, beacon)) || layout.hazards.some(hazard => sameCoordinate(hazard, cache))))
+    || Boolean(layout.cacheSecured && !cache)
     || supportForLayout(layout).reconCells.some(cell => sameCoordinate(cell, start))) {
     throw new Error("Invalid stored Outpost Run layout");
+  }
+  const contract = contractForLayout(layout);
+  if (contract !== "legacy") {
+    const profile = CONTRACT_PROFILES[contract];
+    if (layout.hazards.length !== profile.hazards || Boolean(beacon) !== profile.needsBeacon || Boolean(cache) !== profile.needsCache
+      || (cache && !beacon)) throw new Error("Invalid stored Outpost Run layout");
   }
   return layout;
 }
 
-function maxMovesForLayout(layout: OutpostLayout) { return layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_MOVES : OUTPOST_RUN_MAX_MOVES; }
-function maxEnergyForLayout(layout: OutpostLayout) { return layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_ENERGY : OUTPOST_RUN_MAX_ENERGY; }
+function maxMovesForLayout(layout: OutpostLayout) {
+  const contract = contractForLayout(layout);
+  return contract === "legacy" ? layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_MOVES : OUTPOST_RUN_MAX_MOVES : CONTRACT_PROFILES[contract].maxMoves;
+}
+function maxEnergyForLayout(layout: OutpostLayout) {
+  const contract = contractForLayout(layout);
+  return contract === "legacy" ? layout.hazards.length === 3 ? LEGACY_OUTPOST_RUN_MAX_ENERGY : OUTPOST_RUN_MAX_ENERGY : CONTRACT_PROFILES[contract].maxEnergy;
+}
 
 function parseVisited(value: string, maxMoves: number): Coordinate[] {
   const parsed = JSON.parse(value) as unknown;
@@ -184,19 +234,33 @@ function hasSafeRoute(from: Coordinate, target: Coordinate, hazards: Coordinate[
   return false;
 }
 
-function chooseLayout(): OutpostLayout {
+function routeThrough(checkpoints: Coordinate[]) {
+  return checkpoints.reduce<Coordinate[]>((route, checkpoint, index) => index === 0 ? [checkpoint] : [...route, ...protectedRoute(route.at(-1)!, checkpoint).slice(1)], []);
+}
+
+function chooseLayout(contract: OutpostRunContract): OutpostLayout {
+  const profile = CONTRACT_PROFILES[contract];
   for (let attempt = 0; attempt < 48; attempt++) {
     const target = extractionTargets[randomIndex(extractionTargets.length)];
-    const beaconCandidates = coordinates.filter(cell => !sameCoordinate(cell, start) && !sameCoordinate(cell, target)
-      && manhattanDistance(start, cell) >= 2
-      && manhattanDistance(start, cell) + manhattanDistance(cell, target) >= 6
-      && manhattanDistance(start, cell) + manhattanDistance(cell, target) <= OUTPOST_RUN_MAX_MOVES - 2);
-    const beacon = beaconCandidates[randomIndex(beaconCandidates.length)];
-    const route = [...protectedRoute(start, beacon), ...protectedRoute(beacon, target).slice(1)];
+    const candidates = coordinates.filter(cell => !sameCoordinate(cell, start) && !sameCoordinate(cell, target) && manhattanDistance(start, cell) >= 2);
+    const beacon = profile.needsBeacon ? shuffled(candidates).find(cell => {
+      const routeLength = manhattanDistance(start, cell) + manhattanDistance(cell, target);
+      return routeLength >= 6 && routeLength <= profile.maxMoves - 2;
+    }) : undefined;
+    if (profile.needsBeacon && !beacon) continue;
+    const cache = profile.needsCache ? shuffled(candidates).find(cell => {
+      if (!beacon || sameCoordinate(cell, beacon)) return false;
+      const routeLength = manhattanDistance(start, beacon) + manhattanDistance(beacon, cell) + manhattanDistance(cell, target);
+      return routeLength >= 8 && routeLength <= profile.maxMoves - 2;
+    }) : undefined;
+    if (profile.needsCache && !cache) continue;
+    const checkpoints = [start, ...(beacon ? [beacon] : []), ...(cache ? [cache] : []), target];
+    const route = routeThrough(checkpoints);
+    if (route.length - 1 > profile.maxMoves - 2) continue;
     const protectedCells = new Set(route.map(cell => `${cell.row}:${cell.column}`));
-    const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, GENERATED_HAZARD_COUNT);
-    if (hasSafeRoute(start, beacon, hazards) && hasSafeRoute(beacon, target, hazards)) {
-      return { target, hazards, beacon, beaconSecured: false, support: { reconUsed: false, shieldUsed: false, shieldArmed: false, reconCells: [] } };
+    const hazards = shuffled(coordinates.filter(cell => !protectedCells.has(`${cell.row}:${cell.column}`))).slice(0, profile.hazards);
+    if (checkpoints.slice(1).every((checkpoint, index) => hasSafeRoute(checkpoints[index], checkpoint, hazards))) {
+      return { contract, target, hazards, ...(beacon ? { beacon, beaconSecured: false } : {}), ...(cache ? { cache, cacheSecured: false } : {}), support: { reconUsed: false, shieldUsed: false, shieldArmed: false, reconCells: [] } };
     }
   }
   throw new Error("Unable to build a safe Outpost Run route");
@@ -232,6 +296,7 @@ function visibleCells(layout: OutpostLayout, visited: Coordinate[]): OutpostRunC
   }).map(cell => ({ ...cell, kind: sameCoordinate(cell, { row: 2, column: 2 }) ? "start"
     : sameCoordinate(cell, layout.target) ? "relay"
       : layout.beacon && sameCoordinate(cell, layout.beacon) ? "beacon"
+      : layout.cache && sameCoordinate(cell, layout.cache) ? "cache"
       : layout.hazards.some(hazard => sameCoordinate(cell, hazard)) ? "hazard" : "clear" }));
 }
 
@@ -260,8 +325,12 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
     moves: row.moves,
     maxMoves,
     intensity: outpostRunIntensity(row.moves),
-    objective: layout.beacon && !layout.beaconSecured ? "beacon" : "relay",
+    contract: contractForLayout(layout),
+    objective: objectiveForLayout(layout),
+    objectivesCompleted: objectivesCompleted(layout),
+    objectivesTotal: objectivesTotal(layout),
     beaconSecured: Boolean(layout.beaconSecured),
+    cacheSecured: Boolean(layout.cacheSecured),
     scanHint: row.scanned ? layout.scanHint ?? null : null,
     scanAvailable: status === "playing" && row.scanned === 0,
     reconAvailable: status === "playing" && !support.reconUsed,
@@ -305,8 +374,8 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
 
     let rewardGranted = false;
     if (body.action === "start") {
-      if (Object.keys(body).length !== 1) return reply({ error: "Invalid Outpost Run request." }, 400);
-      const layout = chooseLayout();
+      if (Object.keys(body).some(key => key !== "action" && key !== "contract") || (body.contract !== undefined && !isContract(body.contract))) return reply({ error: "Choose a valid Outpost Run contract." }, 400);
+      const layout = chooseLayout(body.contract ?? "survey");
       const result = await db.prepare(`INSERT INTO dzn_outpost_run_sessions
         (user_id, id, layout_json, visited_json, position_row, position_column, energy, moves, scanned, status, version, started_at, updated_at)
         VALUES (?, ?, ?, ?, 2, 2, ?, 0, 0, 'playing', 0, ?, ?)
@@ -314,7 +383,7 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         position_row = 2, position_column = 2, energy = excluded.energy, moves = 0, scanned = 0, status = 'playing', version = 0,
         started_at = excluded.started_at, updated_at = excluded.updated_at
         WHERE dzn_outpost_run_sessions.started_at <= ?`)
-        .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([start]), OUTPOST_RUN_MAX_ENERGY, now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
+        .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([start]), maxEnergyForLayout(layout), now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
       if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another outpost run." }, 429);
     } else if (body.action === "scan" || body.action === "move" || body.action === "support") {
       const expectedKeys = body.action === "move" ? ["action", "gameId", "version", "direction"]
@@ -334,7 +403,7 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
       const position = { row: row.position_row, column: row.position_column };
       if (body.action === "scan") {
         if (row.scanned) return reply({ error: "The portable scanner has already been used on this run." }, 409);
-        const objective = layout.beacon && !layout.beaconSecured ? layout.beacon : layout.target;
+        const objective = objectiveTarget(layout);
         const scannedLayout = { ...layout, scanHint: scanHint(position, objective) };
         const result = await db.prepare(`UPDATE dzn_outpost_run_sessions SET layout_json = ?, scanned = 1, version = version + 1, updated_at = ?
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
@@ -364,18 +433,21 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
         const shieldAbsorbed = terrainHazard && support.shieldArmed;
         const energy = row.energy - (terrainHazard && !shieldAbsorbed ? 1 : 0);
         const moves = row.moves + 1;
-        const beaconSecured = Boolean(layout.beacon && sameCoordinate(layout.beacon, next));
+        const beaconSecured = Boolean(layout.beacon && !layout.beaconSecured && sameCoordinate(layout.beacon, next));
+        const cacheSecured = Boolean(layout.cache && !layout.cacheSecured && layout.beaconSecured && sameCoordinate(layout.cache, next));
+        const objectiveAdvanced = beaconSecured || cacheSecured;
         const nextLayout = {
           ...layout,
           support: shieldAbsorbed ? { ...support, shieldArmed: false } : support,
           ...(beaconSecured && !layout.beaconSecured ? { beaconSecured: true, scanHint: undefined } : {}),
+          ...(cacheSecured && !layout.cacheSecured ? { cacheSecured: true, scanHint: undefined } : {}),
         };
-        const reachedRelay = sameCoordinate(layout.target, next) && (!layout.beacon || nextLayout.beaconSecured);
+        const reachedRelay = sameCoordinate(layout.target, next) && objectiveForLayout(nextLayout) === "relay";
         const status: OutpostRunRow["status"] = reachedRelay ? "won" : energy <= 0 || moves >= maxMoves ? "failed" : "playing";
         const update = db.prepare(`UPDATE dzn_outpost_run_sessions
-          SET layout_json = ?, visited_json = ?, position_row = ?, position_column = ?, energy = ?, moves = ?, status = ?, version = version + 1, updated_at = ?
+          SET layout_json = ?, visited_json = ?, position_row = ?, position_column = ?, energy = ?, moves = ?, scanned = ?, status = ?, version = version + 1, updated_at = ?
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
-          .bind(JSON.stringify(nextLayout), JSON.stringify([...visited, next]), next.row, next.column, energy, moves, status, now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS);
+          .bind(JSON.stringify(nextLayout), JSON.stringify([...visited, next]), next.row, next.column, energy, moves, objectiveAdvanced ? 0 : row.scanned, status, now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS);
         const statements = [update];
         if (status === "won") {
           statements.push(db.prepare(`INSERT INTO dzn_outpost_run_reward_ledger

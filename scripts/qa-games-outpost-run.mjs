@@ -32,6 +32,10 @@ try {
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Outpost Run" }).waitFor();
     if (index === 0) {
+      const contracts = page.getByRole("group", { name: "Outpost Run contracts" });
+      await contracts.waitFor();
+      assert.equal(await contracts.getByRole("button").count(), 3, "Outpost Run must expose its three distinct contract choices before a run starts.");
+      assert.equal(await contracts.getByRole("button", { name: /Recovery Claim/ }).getAttribute("aria-pressed"), "false");
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/outpost-run") && response.request().method() === "POST"),
         page.getByRole("button", { name: "Start run" }).click(),
@@ -102,8 +106,8 @@ try {
     assert.ok(litPixels > 80, "The tactical terrain must contain visible mission lighting, not a black canvas.");
     assert.ok(sampledColours.size > 18, "The tactical terrain must contain meaningful visual detail, not a flat placeholder.");
     if (index === 0) {
-      assert.equal(await page.locator('[data-objective="beacon"]').first().textContent(), "beacon required");
-      assert.match(await page.getByText("Secure the field beacon before extraction").textContent() ?? "", /field beacon/);
+      assert.equal(await page.locator('[data-objective="beacon"]').first().textContent(), "field beacon");
+      assert.match(await page.getByText("Secure the field beacon before the next objective activates").textContent() ?? "", /field beacon/);
     }
     assert.equal(await page.locator('[role="gridcell"]').count(), 25);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);

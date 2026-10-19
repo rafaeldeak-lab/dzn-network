@@ -16,7 +16,7 @@ import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridDifficulty, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
-import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload, type OutpostRunSupport } from "@/lib/games-outpost-run";
+import { OUTPOST_RUN_CONTRACTS, OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunContract, type OutpostRunDirection, type OutpostRunObjective, type OutpostRunPayload, type OutpostRunSupport } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_SIGHTS, RANGER_RANGE_TARGETS, RANGER_RANGE_WIND_META, type RangerRangePayload, type RangerRangeSight, type RangerRangeTarget } from "@/lib/games-ranger-range";
@@ -60,6 +60,18 @@ const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }
 const ECHO_ARRAY_NODE_ORDER: EchoArrayNode[] = ["north", "east", "south", "west"];
 const OUTPOST_RUN_DIRECTION_META: Record<OutpostRunDirection, { label: string; icon: typeof ArrowUp }> = {
   north: { label: "Move north", icon: ArrowUp }, east: { label: "Move east", icon: ArrowRight }, south: { label: "Move south", icon: ArrowDown }, west: { label: "Move west", icon: ArrowLeft },
+};
+const OUTPOST_RUN_CONTRACT_META: Record<OutpostRunContract, { label: string; detail: string; route: string; briefing: string }> = {
+  survey: { label: "Survey Route", detail: "Beacon then relay", route: "Two objectives / balanced hazards", briefing: "Build a clean map through the storm: secure the field beacon, then trace its relay bearing." },
+  intercept: { label: "Relay Intercept", detail: "Direct extraction", route: "One objective / six hazards", briefing: "Skip the beacon and force the emergency relay before the fast route closes." },
+  recovery: { label: "Recovery Claim", detail: "Beacon, cache, relay", route: "Three objectives / extended pack", briefing: "Recover the sealed field cache after the beacon, then bring the relay online with an expanded field pack." },
+};
+const OUTPOST_RUN_LEGACY_DIRECT_META = { label: "Legacy relay run", detail: "Direct extraction", route: "One preserved objective", briefing: "This active route predates contract selection. Trace the emergency relay and complete the extraction." };
+const OUTPOST_RUN_LEGACY_SURVEY_META = { label: "Legacy field run", detail: "Beacon then relay", route: "Two preserved objectives", briefing: "This active route predates contract selection. Secure the field beacon, then trace its relay bearing." };
+const OUTPOST_RUN_OBJECTIVE_META: Record<OutpostRunObjective, { label: string; command: string; readout: string; detail: string }> = {
+  beacon: { label: "field beacon", command: "Use beacon scanner", readout: "FIELD BEACON", detail: "Secure the field beacon before the next objective activates." },
+  cache: { label: "recovery cache", command: "Use cache scanner", readout: "RECOVERY CACHE", detail: "Recover the sealed cache before the relay can accept an extraction signal." },
+  relay: { label: "emergency relay", command: "Use relay scanner", readout: "EMERGENCY RELAY", detail: "Trace the emergency relay and complete the extraction." },
 };
 const RANGER_RANGE_TARGET_META: Record<RangerRangeTarget, { label: string; key: string; detail: string }> = {
   ridge: { label: "Ridge", key: "1", detail: "High ridge plate" },
@@ -902,6 +914,7 @@ function EchoArrayPanel({ now, motionRunning, onProgress }: { now: number; motio
 
 function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; motionRunning: boolean; onProgress: () => void }) {
   const [payload, setPayload] = useState<OutpostRunPayload | null>(null);
+  const [contract, setContract] = useState<OutpostRunContract>("survey");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -948,6 +961,10 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
   }, [busy, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
+  const contractMeta = game?.contract === "legacy"
+    ? game.objectivesTotal === 1 ? OUTPOST_RUN_LEGACY_DIRECT_META : OUTPOST_RUN_LEGACY_SURVEY_META
+    : OUTPOST_RUN_CONTRACT_META[game ? game.contract : contract];
+  const objectiveMeta = game ? OUTPOST_RUN_OBJECTIVE_META[game.objective] : null;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
@@ -973,17 +990,23 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>08 / TACTICAL EXTRACTION</span><h2 id="outpost-run-title">DZN Outpost Run</h2></div><Map size={24} /></div>
     {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.outpostRunTools}>
-      <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves} · ${game.objective === "beacon" ? "stage 1 / 2" : "stage 2 / 2"}` : "Two-stage field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Secure a field beacon, then find the emergency relay through the weather front."}</span></div>
+      <div><strong>{game ? `${contractMeta.label} · objective ${game.objectivesCompleted + 1} / ${game.objectivesTotal}` : "Select an extraction contract"}</strong><span>{game ? `${game.energy} stamina cells remaining · ${contractMeta.route}` : contractMeta.briefing}</span></div>
       <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New outpost run available five seconds after the last start" : undefined}
-        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
+        onClick={() => void mutate({ action: "start", contract })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
     </div>
+    {!active && <div className={styles.outpostRunContractDeck} role="group" aria-label="Outpost Run contracts">
+      {OUTPOST_RUN_CONTRACTS.map(item => { const meta = OUTPOST_RUN_CONTRACT_META[item]; const selected = contract === item; return <button key={item} type="button" className={styles.outpostRunContract}
+        data-selected={selected} onClick={() => setContract(item)} disabled={busy || restartCoolingDown} aria-pressed={selected}>
+        <span>{item === "survey" ? "01" : item === "intercept" ? "02" : "03"}</span><strong>{meta.label}</strong><small>{meta.detail}</small><em>{meta.route}</em>
+      </button>; })}
+    </div>}
     {game ? <>
-      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span data-objective={game.objective}><Radio size={14} />{game.objective === "beacon" ? "beacon required" : "relay extraction"}</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
-      <div className={styles.outpostRunStage} data-status={game.status} data-intensity={game.intensity} data-objective={game.objective}>
-        <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / ${game.objective === "beacon" ? "FIELD BEACON" : "EMERGENCY RELAY"}` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? game.objective === "beacon" ? "Secure the field beacon before extraction" : game.intensity === "calibration" ? "Trace the emergency relay" : game.intensity === "pressure" ? "Commit to the surviving route" : "Break through the blackout" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
+      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span data-objective={game.objective}><Radio size={14} />{objectiveMeta?.label}</span><span data-intensity={game.intensity}><Radio size={14} />{game.intensity}</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.outpostRunStage} data-status={game.status} data-intensity={game.intensity} data-objective={game.objective} data-contract={game.contract}>
+        <div className={styles.outpostRunReadout}><span>{active ? `${game.intensity.toUpperCase()} / ${objectiveMeta?.readout}` : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? objectiveMeta?.detail : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
         <div className={styles.outpostRunTerrain}>
-          <div className={styles.outpostRunTerrainHud} data-intensity={game.intensity} aria-hidden="true"><span>SCOUT ROVER // T-05</span><strong>{game.objective === "beacon" ? "BEACON LOCK" : "RELAY UPLINK"}</strong><small>{game.scanHint ? `BEARING ${game.scanHint.replace("-", " / ").toUpperCase()}` : "SCANNER STANDBY"}</small></div>
+          <div className={styles.outpostRunTerrainHud} data-intensity={game.intensity} aria-hidden="true"><span>{`${contractMeta.label.toUpperCase()} // T-05`}</span><strong>{objectiveMeta?.readout}</strong><small>{game.scanHint ? `BEARING ${game.scanHint.replace("-", " / ").toUpperCase()}` : "SCANNER STANDBY"}</small></div>
           <OutpostRun3D gridSize={game.gridSize} row={game.row} column={game.column} visibleCells={game.visibleCells} objective={game.objective} intensity={game.intensity} scanHint={game.scanHint} shieldArmed={game.shieldArmed}
             active={active} disabled={busy || cooldown} motionRunning={motionRunning} onMove={sendMove} />
           <span className={styles.outpostRunTerrainLabel}>LIVE TERRAIN // CLICK AN ADJACENT TILE OR USE THE COMMAND PAD</span>
@@ -996,10 +1019,10 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
               const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
               const terrain = revealed.get(`${row}:${column}`);
               const player = game.row === row && game.column === column;
-              const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "beacon" ? "Field beacon" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
+              const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "beacon" ? "Field beacon" : terrain === "cache" ? "Recovery cache" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
               return <div key={`${row}:${column}`} role="gridcell" aria-label={`${label}, row ${row + 1}, column ${column + 1}`}
                 className={styles.outpostRunCell} data-terrain={terrain ?? "unknown"} data-player={player}>
-                {terrain === "relay" ? <Radio size={18} /> : terrain === "beacon" ? <ShieldCheck size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
+                {terrain === "relay" ? <Radio size={18} /> : terrain === "beacon" ? <ShieldCheck size={18} /> : terrain === "cache" ? <BookOpen size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
                 {player && <ShieldCheck className={styles.outpostRunPlayer} size={19} />}
               </div>;
             })}
@@ -1007,7 +1030,7 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
         </div>
         <div className={styles.outpostRunCommand}>
           <button className={styles.outpostRunScan} disabled={busy || cooldown || !active || !game.scanAvailable}
-            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : game.scanAvailable ? game.objective === "beacon" ? "Use beacon scanner" : "Use relay scanner" : "Scanner spent"}</button>
+            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : game.scanAvailable ? objectiveMeta?.command : "Scanner spent"}</button>
           <div className={styles.outpostRunControls} aria-label="Outpost movement controls">
             {OUTPOST_RUN_DIRECTIONS.map(direction => { const meta = OUTPOST_RUN_DIRECTION_META[direction]; const DirectionIcon = meta.icon; return <button key={direction} type="button"
               className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}
@@ -1020,15 +1043,15 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
           <button type="button" className={styles.outpostRunSupport} data-support="shield" data-armed={game.shieldArmed} disabled={busy || cooldown || !active || !game.shieldAvailable}
             onClick={() => deploySupport("shield")}><Shield size={18} /><span><strong>{game.shieldArmed ? "Storm shield armed" : game.shieldAvailable ? "Arm storm shield" : "Storm shield spent"}</strong><small>{game.shieldArmed ? "The next hazard will not drain stamina." : game.shieldAvailable ? "Absorb one hazard strike when the route breaks." : "The field pack has no further shielding."}</small></span></button>
         </div>
-        <p className={styles.outpostRunHint}>Every run has a fresh server-owned two-stage route. Secure the field beacon first, use your drone to read a tight perimeter, reserve the shield for a known hazard, and take the relay before the signal closes.</p>
+        <p className={styles.outpostRunHint}>{contractMeta.briefing} DZN holds the route, hazards, objective order and reward server-side; recon and shielding remain one-use field decisions.</p>
       </div>
       <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
         {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay secured</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${OUTPOST_RUN_REWARD.xp} XP and +${OUTPOST_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Outpost Run complete."}</span></div></>
           : game.status === "failed" ? <><Target size={22} /><div><strong>Field pack exhausted</strong><span>Hazards or a lost route ended the extraction. Existing Hub progress is unchanged.</span></div></>
             : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start a new field run when you are ready.</span></div></>
-              : <><Radio size={20} /><div><strong>{game.objective === "beacon" ? "Field beacon required" : game.intensity === "blackout" ? "Blackout extraction" : "Extraction active"}</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : game.objective === "beacon" ? "Use the scanner once, then secure the beacon before the relay can activate." : "The beacon is secure. Read the fresh fog route to the relay."}</span></div></>}
+              : <><Radio size={20} /><div><strong>{game.intensity === "blackout" ? "Blackout extraction" : `${objectiveMeta?.label} active`}</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : objectiveMeta?.detail}</span></div></>}
       </div>
-    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Hold the route through the unknown.</h3><p>Take a fresh server-issued two-stage extraction through the weather front. Secure the field beacon, read the fog, protect your three stamina cells, then bring the emergency relay online before the signal closes.</p><div className={styles.rewardPills}><span>Two-stage field route</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
+    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Choose the field contract.</h3><p>{contractMeta.briefing} Every contract is built and checked by DZN on the server. The daily reward is fixed, regardless of route choice.</p><div className={styles.rewardPills}><span>{contractMeta.route}</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

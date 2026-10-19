@@ -9,7 +9,7 @@ type OutpostRun3DProps = {
   row: number;
   column: number;
   visibleCells: OutpostRunCell[];
-  objective: "beacon" | "relay";
+  objective: "beacon" | "cache" | "relay";
   intensity: "calibration" | "pressure" | "blackout";
   scanHint: string | null;
   shieldArmed: boolean;
@@ -35,6 +35,7 @@ function directionForCell(row: number, column: number, targetRow: number, target
 function paletteFor(kind: CellKind) {
   if (kind === "relay") return { tile: 0x17665f, emissive: 0x0d776c, glow: 0x78ffe8 };
   if (kind === "beacon") return { tile: 0x655520, emissive: 0x745b10, glow: 0xffea8a };
+  if (kind === "cache") return { tile: 0x654027, emissive: 0x743515, glow: 0xffb46a };
   if (kind === "hazard") return { tile: 0x5d271b, emissive: 0x66180f, glow: 0xff8a5d };
   if (kind === "start") return { tile: 0x4a4725, emissive: 0x4e4210, glow: 0xf6db77 };
   if (kind === "clear") return { tile: 0x204839, emissive: 0x103628, glow: 0x92d6bf };
@@ -101,7 +102,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const moon = new THREE.DirectionalLight(0x8ce6df, 2.2);
     moon.position.set(-7, 11, 3);
     scene.add(moon);
-    const objectiveColor = objective === "beacon" ? 0xffdc6f : 0x5cf8e0;
+    const objectiveColor = objective === "beacon" ? 0xffdc6f : objective === "cache" ? 0xff995f : 0x5cf8e0;
     const threatColor = intensity === "blackout" ? 0xee5c9b : intensity === "pressure" ? 0xffa45d : 0x4ad6d0;
     const signalLight = new THREE.PointLight(objectiveColor, 10, 18, 1.5);
     signalLight.position.set(0, 4.8, 0);
@@ -151,6 +152,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const towerGeometry = new THREE.CylinderGeometry(0.052, 0.11, 0.76, 8);
     const foundationGeometry = new THREE.CylinderGeometry(0.26, 0.31, 0.11, 8);
     const relayDishGeometry = new THREE.SphereGeometry(0.22, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    const cacheGeometry = new THREE.BoxGeometry(0.48, 0.28, 0.42);
     const roverBodyGeometry = new THREE.BoxGeometry(0.46, 0.16, 0.58);
     const roverCabGeometry = new THREE.BoxGeometry(0.28, 0.17, 0.27);
     const roverTrackGeometry = new THREE.BoxGeometry(0.11, 0.12, 0.54);
@@ -159,7 +161,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
     const shieldGeometry = new THREE.SphereGeometry(0.56, 18, 12);
     const scannerGeometry = new THREE.RingGeometry(0.44, 0.47, 42);
     const scannerNeedleGeometry = new THREE.BoxGeometry(0.045, 0.02, 0.78);
-    disposables.push(terrainGeometry, edgeGeometry, fogGeometry, hazardGeometry, markerRingGeometry, towerGeometry, foundationGeometry, relayDishGeometry, roverBodyGeometry, roverCabGeometry, roverTrackGeometry, roverWheelGeometry, roverDishGeometry, shieldGeometry, scannerGeometry, scannerNeedleGeometry);
+    disposables.push(terrainGeometry, edgeGeometry, fogGeometry, hazardGeometry, markerRingGeometry, towerGeometry, foundationGeometry, relayDishGeometry, cacheGeometry, roverBodyGeometry, roverCabGeometry, roverTrackGeometry, roverWheelGeometry, roverDishGeometry, shieldGeometry, scannerGeometry, scannerNeedleGeometry);
 
     const clickable: THREE.Mesh[] = [];
     const tileGroups = new Map<string, THREE.Group>();
@@ -228,6 +230,16 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
         materials.push(foundation.material, tower.material, crown.material, ring.material);
         foundation.position.y = 0.01; tower.position.y = 0.42; crown.position.y = 0.83; ring.position.y = 0.75; ring.rotation.x = Math.PI / 2;
         structure.add(foundation, tower, crown, ring, new THREE.PointLight(0xffcf5a, 1.25, 2.4, 2));
+        group.add(structure); signalRings.push(ring);
+      }
+      if (cell.kind === "cache") {
+        const structure = new THREE.Group();
+        const crate = new THREE.Mesh(cacheGeometry, new THREE.MeshStandardMaterial({ color: 0x6c3d20, emissive: 0x4d1d0a, emissiveIntensity: 0.82, roughness: 0.48, metalness: 0.55 }));
+        const latch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.045), new THREE.MeshStandardMaterial({ color: 0xffc468, emissive: 0xa94d12, emissiveIntensity: 1.35, roughness: 0.24, metalness: 0.7 }));
+        const ring = new THREE.Mesh(markerRingGeometry, new THREE.MeshBasicMaterial({ color: 0xffae68, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false }));
+        materials.push(crate.material, latch.material, ring.material);
+        crate.position.y = 0.16; latch.position.set(0, 0.2, 0.235); ring.position.y = 0.45; ring.rotation.x = Math.PI / 2;
+        structure.add(crate, latch, ring, new THREE.PointLight(0xffa25e, 1.12, 2.2, 2));
         group.add(structure); signalRings.push(ring);
       }
       if (cell.kind === "relay") {
@@ -342,7 +354,7 @@ export function OutpostRun3D({ gridSize, row, column, visibleCells, objective, i
         material.emissive.setHex(palette.emissive);
         material.emissiveIntensity = key === playerKey ? 1.25 : adjacent && active ? 0.92 : cell.kind === "unknown" ? 0.48 : 0.62;
         light.color.setHex(palette.glow);
-        light.intensity = key === playerKey ? 1.7 : adjacent && active ? 0.42 : cell.kind === "relay" || cell.kind === "beacon" ? 0.9 : 0;
+        light.intensity = key === playerKey ? 1.7 : adjacent && active ? 0.42 : cell.kind === "relay" || cell.kind === "beacon" || cell.kind === "cache" ? 0.9 : 0;
       }
       scanner.visible = Boolean(scanHint);
       scannerMaterial.opacity = scanHint ? 0.58 : 0;
