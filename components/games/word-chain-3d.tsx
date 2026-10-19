@@ -6,15 +6,20 @@ import * as THREE from "three";
 type WordChain3DProps = {
   active: boolean;
   turn: number;
+  wordLength: number;
+  requiredLetter: string;
+  operatorCount: number;
   motionRunning: boolean;
   onUnavailable: () => void;
 };
 
-export function WordChain3D({ active, turn, motionRunning, onUnavailable }: WordChain3DProps) {
+type WordChainVisualState = Pick<WordChain3DProps, "active" | "turn" | "wordLength" | "requiredLetter" | "operatorCount">;
+
+export function WordChain3D({ active, turn, wordLength, requiredLetter, operatorCount, motionRunning, onUnavailable }: WordChain3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const gameStateRef = useRef({ active, turn });
+  const gameStateRef = useRef<WordChainVisualState>({ active, turn, wordLength, requiredLetter, operatorCount });
   const unavailableRef = useRef(onUnavailable);
-  const applyStateRef = useRef<((state: { active: boolean; turn: number }) => void) | null>(null);
+  const applyStateRef = useRef<((state: WordChainVisualState) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -22,10 +27,10 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
   }, [onUnavailable]);
 
   useEffect(() => {
-    gameStateRef.current = { active, turn };
-    applyStateRef.current?.({ active, turn });
+    gameStateRef.current = { active, turn, wordLength, requiredLetter, operatorCount };
+    applyStateRef.current?.({ active, turn, wordLength, requiredLetter, operatorCount });
     renderRef.current?.();
-  }, [active, turn]);
+  }, [active, turn, wordLength, requiredLetter, operatorCount]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -148,6 +153,60 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
       tiles.push(tile);
     }
 
+    const signalPath = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-4.15, -0.1, 0.6), new THREE.Vector3(-2.15, 0.18, -1.85),
+      new THREE.Vector3(0, 0.78, 0.36), new THREE.Vector3(2.15, 0.18, 1.92),
+      new THREE.Vector3(4.15, 0.42, -0.12),
+    ]);
+    const relayTubeGeometry = new THREE.TubeGeometry(signalPath, 96, 0.052, 8, false);
+    const relayTubeMaterial = new THREE.MeshBasicMaterial({ color: 0x5fe8da, transparent: true, opacity: 0.72 });
+    geometries.push(relayTubeGeometry); materials.push(relayTubeMaterial);
+    const relayTube = new THREE.Mesh(relayTubeGeometry, relayTubeMaterial);
+    deck.add(relayTube);
+
+    const packetGeometry = new THREE.IcosahedronGeometry(0.115, 1);
+    const packetMaterial = new THREE.MeshStandardMaterial({ color: 0xb6fff3, emissive: 0x36dac6, emissiveIntensity: 2.4, metalness: 0.72, roughness: 0.18 });
+    geometries.push(packetGeometry); materials.push(packetMaterial);
+    const relayPackets: THREE.Mesh[] = [];
+    for (let index = 0; index < 4; index++) {
+      const packet = new THREE.Mesh(packetGeometry, packetMaterial);
+      packet.userData.offset = index * 0.23;
+      deck.add(packet);
+      relayPackets.push(packet);
+    }
+
+    const stationBaseGeometry = new THREE.CylinderGeometry(0.38, 0.54, 0.22, 20);
+    const stationMastGeometry = new THREE.CylinderGeometry(0.045, 0.075, 1.2, 10);
+    const stationBeaconGeometry = new THREE.OctahedronGeometry(0.16, 1);
+    const stationBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x10282b, metalness: 0.88, roughness: 0.28 });
+    const stationMastMaterial = new THREE.MeshStandardMaterial({ color: 0x234a4d, emissive: 0x0e393a, emissiveIntensity: 0.9, metalness: 0.74, roughness: 0.2 });
+    const stationBeaconMaterial = new THREE.MeshStandardMaterial({ color: 0x84fff0, emissive: 0x2ec9bc, emissiveIntensity: 2.1, metalness: 0.62, roughness: 0.16 });
+    geometries.push(stationBaseGeometry, stationMastGeometry, stationBeaconGeometry);
+    materials.push(stationBaseMaterial, stationMastMaterial, stationBeaconMaterial);
+    const stations: THREE.Mesh[] = [];
+    for (const [index, position] of [[-3.9, -0.13, 0.5], [-2.2, 0.12, -1.78], [2.18, 0.12, 1.86], [4.02, 0.36, -0.14]].entries()) {
+      const base = new THREE.Mesh(stationBaseGeometry, stationBaseMaterial);
+      base.position.set(position[0], position[1], position[2]);
+      deck.add(base);
+      const mast = new THREE.Mesh(stationMastGeometry, stationMastMaterial);
+      mast.position.set(position[0], position[1] + 0.67, position[2]);
+      deck.add(mast);
+      const beacon = new THREE.Mesh(stationBeaconGeometry, stationBeaconMaterial);
+      beacon.position.set(position[0], position[1] + 1.34, position[2]);
+      beacon.userData.offset = index * 0.75;
+      beacon.userData.baseY = position[1] + 1.34;
+      deck.add(beacon);
+      stations.push(beacon);
+    }
+
+    const fieldGeometry = new THREE.RingGeometry(4.88, 5.04, 64);
+    const fieldMaterial = new THREE.MeshBasicMaterial({ color: 0x4ee4d1, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+    geometries.push(fieldGeometry); materials.push(fieldMaterial);
+    const fieldRing = new THREE.Mesh(fieldGeometry, fieldMaterial);
+    fieldRing.rotation.x = -Math.PI / 2;
+    fieldRing.position.y = -0.34;
+    deck.add(fieldRing);
+
     const particleGeometry = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(96 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
@@ -163,17 +222,28 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
     particles.position.y = -0.15;
     deck.add(particles);
 
-    const applyState = (state: { active: boolean; turn: number }) => {
-      const colour = state.active ? 0x4cead1 : 0x8caaa8;
+    const applyState = (state: WordChainVisualState) => {
+      const letterCode = state.requiredLetter.charCodeAt(0) || 65;
+      const colour = state.active ? [0x4cead1, 0x78d8ff, 0xf1be70][letterCode % 3] : 0x72aaa3;
       coreMaterial.color.setHex(colour);
       coreMaterial.emissive.setHex(state.active ? 0x117c75 : 0x17393a);
-      coreMaterial.emissiveIntensity = state.active ? 1.82 : 0.72;
+      coreMaterial.emissiveIntensity = state.active ? 1.5 + Math.min(0.75, state.wordLength * 0.06) : 1.02;
       ringMaterial.color.setHex(colour);
-      ringMaterial.opacity = state.active ? 0.82 : 0.38;
+      ringMaterial.opacity = state.active ? 0.82 : 0.54;
       trimMaterial.color.setHex(state.active ? 0x55ead8 : 0x557270);
       particleMaterial.color.setHex(colour);
-      particleMaterial.opacity = state.active ? 0.58 : 0.24;
-      relayLight.intensity = state.active ? 12 + Math.min(5, state.turn * 0.2) : 3.2;
+      particleMaterial.opacity = state.active ? 0.58 : 0.4;
+      relayTubeMaterial.color.setHex(colour);
+      relayTubeMaterial.opacity = state.active ? 0.76 : 0.5;
+      packetMaterial.color.setHex(state.active ? 0xc8fff7 : 0xa4dbd3);
+      packetMaterial.emissive.setHex(state.active ? colour : 0x34625e);
+      packetMaterial.emissiveIntensity = state.active ? 2 + Math.min(0.85, state.operatorCount * 0.16) : 0.9;
+      stationBeaconMaterial.color.setHex(state.active ? colour : 0x9fcfc7);
+      stationBeaconMaterial.emissive.setHex(state.active ? colour : 0x315f5b);
+      stationBeaconMaterial.emissiveIntensity = state.active ? 1.85 + Math.min(0.65, state.wordLength * 0.05) : 0.76;
+      fieldMaterial.color.setHex(colour);
+      relayLight.color.setHex(colour);
+      relayLight.intensity = state.active ? 11 + Math.min(5, state.turn * 0.18) : 5.4;
       tiles.forEach((tile, index) => {
         const material = tile.material as THREE.MeshStandardMaterial;
         material.emissiveIntensity = state.active ? 0.78 + (index + state.turn) % 3 * 0.14 : 0.22;
@@ -212,6 +282,20 @@ export function WordChain3D({ active, turn, motionRunning, onUnavailable }: Word
       rings.forEach((ring, index) => { ring.rotation.z += (index % 2 ? -1 : 1) * 0.008; });
       pylons.forEach(cap => { cap.position.y = 0.76 + Math.sin(elapsed * 1.8 + cap.userData.offset) * 0.07; });
       tiles.forEach(tile => { tile.position.y = -0.23 + Math.sin(elapsed * 1.15 + tile.userData.offset) * 0.035; });
+      const state = gameStateRef.current;
+      const transitRate = 0.055 + Math.min(0.022, state.operatorCount * 0.003);
+      relayPackets.forEach(packet => {
+        const pathPoint = signalPath.getPointAt((elapsed * transitRate + packet.userData.offset) % 1);
+        packet.position.copy(pathPoint);
+        const pulse = 0.85 + Math.sin(elapsed * 3.2 + packet.userData.offset * 8) * 0.16;
+        packet.scale.setScalar(state.active ? pulse : 0.58);
+        packet.rotation.y += 0.05;
+      });
+      stations.forEach(station => {
+        station.position.y = station.userData.baseY + Math.sin(elapsed * 1.7 + station.userData.offset) * 0.06;
+        station.scale.setScalar(state.active ? 0.88 + Math.sin(elapsed * 2.4 + station.userData.offset) * 0.1 : 0.72);
+      });
+      fieldRing.rotation.z = elapsed * 0.035;
       particles.rotation.y = elapsed * 0.045;
       render();
       frame = window.requestAnimationFrame(animate);

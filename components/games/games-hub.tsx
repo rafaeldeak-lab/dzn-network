@@ -542,13 +542,17 @@ function WordChainPanel({ motionRunning, onProgress }: { motionRunning: boolean;
 
   const required = payload?.round.requiredLetter.toUpperCase() ?? "-";
   const relayPhase = !payload ? "LINK" : payload.round.version < 8 ? "ESTABLISH" : payload.round.version < 32 ? "ROUTE" : "SUSTAIN";
+  const operatorCount = payload ? new Set(payload.round.entries.map(entry => entry.player)).size : 0;
+  const normalizedEntry = word.trim().toUpperCase();
+  const entryState = !normalizedEntry ? "AWAITING INPUT" : normalizedEntry.length < 3 ? "ASSEMBLING" : normalizedEntry.startsWith(required) ? "PREFIX VERIFIED" : "PREFIX MISMATCH";
+  const entryDetail = !normalizedEntry ? `Transmit a new word beginning with ${required}.` : normalizedEntry.length < 3 ? "Add at least three characters before transmission." : normalizedEntry.startsWith(required) ? "Prefix matches the live relay requirement. DZN verifies the word and turn server-side." : `The next relay word must begin with ${required}.`;
   return <section aria-labelledby="word-chain-title" className={styles.wordChainPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>03 / NETWORK RELAY</span><h2 id="word-chain-title">DZN Word Chain</h2></div><Radio size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Word Chain" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     {payload && <>
       <div className={`${styles.wordChainCommandDeck} ${threeUnavailable ? styles.wordChainCommandDeckFallback : ""}`} data-active={payload.round.canPlay && !payload.round.completed} data-renderer={threeUnavailable ? "fallback" : "webgl"}>
         <div className={styles.wordChainScene} aria-hidden="true">
-          {!threeUnavailable && <WordChain3D active={payload.round.canPlay && !payload.round.completed} turn={payload.round.version} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
+          {!threeUnavailable && <WordChain3D active={payload.round.canPlay && !payload.round.completed} turn={payload.round.version} wordLength={payload.round.currentWord.length} requiredLetter={required} operatorCount={operatorCount} motionRunning={motionRunning} onUnavailable={() => setThreeUnavailable(true)} />}
         </div>
         <div className={styles.wordChainDeckHud}>
           <span>DAILY RELAY / C-17</span><strong>{relayPhase}</strong><small>{`TURN ${payload.round.version.toString().padStart(2, "0")}`}</small>
@@ -564,16 +568,18 @@ function WordChainPanel({ motionRunning, onProgress }: { motionRunning: boolean;
           <span>{payload.round.completed ? "Daily chain complete" : payload.round.canPlay ? "Your relay window is live" : "Awaiting another operator"}</span>
           <strong>{payload.round.completed ? "LINK SEALED" : payload.round.canPlay ? "TRANSMIT NEXT WORD" : "CHAIN IN TRANSIT"}</strong>
           <small>{payload.round.completed ? "A new shared chain opens tomorrow." : payload.round.canPlay ? "One accepted word advances the public relay." : "Turns alternate between different players."}</small>
+          <div className={styles.wordChainTelemetry} aria-label="Word Chain live status"><span><b>{payload.round.version}</b> accepted turns</span><span><b>{operatorCount}</b> recent operators</span><span><b>{required}</b> ingress letter</span></div>
         </div>
       </div>
       <form className={styles.chainForm} onSubmit={event => { event.preventDefault(); void play(); }}>
         <label htmlFor="word-chain-entry">Your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
           placeholder={`${required.toLowerCase()}...`} disabled={busy || !payload.round.canPlay} onChange={event => setWord(event.target.value.replace(/[^a-zA-Z]/g, "").slice(0, 18))} />
         <button className={styles.primary} disabled={busy || !payload.round.canPlay || word.length < 3}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <ArrowRight size={17} />}Send turn</button></div>
+        <div className={styles.wordChainTransmission} data-state={entryState === "PREFIX VERIFIED" ? "verified" : entryState === "PREFIX MISMATCH" ? "blocked" : "idle"} aria-live="polite"><div className={styles.wordChainTransmissionTiles} aria-hidden="true">{normalizedEntry ? normalizedEntry.split("").map((letter, index) => <b key={`${letter}-${index}`}>{letter}</b>) : <><b>{required}</b><i /><i /><i /></>}</div><div><strong>{entryState}</strong><span>{entryDetail}</span></div></div>
         <small>{payload.round.completed ? "Signal complete. A new shared chain starts tomorrow." : payload.round.canPlay ? "Real words only. Used words cannot repeat." : "Another player must take the next turn."}</small>
       </form>
       <div className={styles.chainReward}><ShieldCheck size={18} /><div><strong>{payload.rewardedToday ? "Daily relay reward earned" : `First accepted turn: +${WORD_CHAIN_REWARD.xp} XP and +${WORD_CHAIN_REWARD.parts} part`}</strong><span>Game words stay in this game feed and are not posted to Global Chat.</span></div></div>
-      <div className={styles.chainFeed}><div className={styles.triviaMeta}><span>Latest accepted turns</span><span>Turn {payload.round.version}</span></div>
+      <div className={styles.chainFeed}><div className={styles.chainFeedHeading}><div><span>Relay log</span><strong>Latest accepted turns</strong></div><span>Turn {payload.round.version.toString().padStart(2, "0")}</span></div>
         {payload.round.entries.length ? <ol>{payload.round.entries.map(entry => <li key={entry.id}><span>{entry.turn.toString().padStart(2, "0")}</span><strong>{entry.word}</strong><small>{entry.player}</small></li>)}</ol>
           : <div className={styles.chainEmpty}>Be the first player to continue today&apos;s signal.</div>}
       </div>

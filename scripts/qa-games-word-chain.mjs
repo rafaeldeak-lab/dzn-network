@@ -34,6 +34,9 @@ try {
     assert.match(await relay.evaluate(element => getComputedStyle(element, "::before").backgroundImage), /word-chain-relay-v2/);
     const commandDeck = page.locator('[class*="wordChainCommandDeck"]');
     await commandDeck.waitFor({ state: "visible" });
+    await page.getByText("AWAITING INPUT", { exact: true }).waitFor();
+    await page.getByText("Relay log", { exact: true }).waitFor();
+    assert.equal(await commandDeck.evaluate(element => getComputedStyle(element, "::after").animationName), "none");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (index === 0) {
       const commandCanvas = page.locator('canvas[data-dzn-word-chain-canvas="true"]');
@@ -53,6 +56,7 @@ try {
       const word = dictionary.find(candidate => candidate.startsWith(state.payload.round.requiredLetter));
       assert.ok(word, `QA dictionary lacks ${state.payload.round.requiredLetter}`);
       await page.getByLabel("Your word").fill(word);
+      await page.getByText("PREFIX VERIFIED", { exact: true }).waitFor();
       const [playResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/word-chain") && response.request().method() === "POST"),
         page.getByRole("button", { name: "Send turn" }).click(),
