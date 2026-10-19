@@ -1,0 +1,258 @@
+name: DZN State-Preserving Migration Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Exact main commit containing the approved migration source
+        required: true
+      migration_name:
+        description: One approved state-preserving migration to apply
+        required: true
+        type: choice
+        options:
+          - 0106_games_hub_cipher_grid_specialist.sql
+      confirm_production_migration:
+        description: Must equal APPLY_EXACTLY_ONE_DZN_STATE_PRESERVING_MIGRATION
+        required: true
+
+concurrency:
+  group: dzn-state-preserving-migration-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollout:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      MIGRATION_STAGE: .dzn-state-preserving-migration-stage
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      ROLLOUT_CONFIRMATION_INPUT: ${{ inputs.confirm_production_migration }}
+      APPROVED_COMMIT_INPUT: ${{ inputs.approved_commit }}
+      MIGRATION_NAME_INPUT: ${{ inputs.migration_name }}
+
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate production rollout boundary
+        run: |
+          set -euo pipefail
+          if [ "${ROLLOUT_CONFIRMATION_INPUT}" != "APPLY_EXACTLY_ONE_DZN_STATE_PRESERVING_MIGRATION" ]; then
+            echo "::error::confirm_production_migration must equal APPLY_EXACTLY_ONE_DZN_STATE_PRESERVING_MIGRATION."
+            exit 1
+          fi
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::This workflow may only run from main."
+            exit 1
+          fi
+          APPROVED_COMMIT="${APPROVED_COMMIT_INPUT}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character main SHA."
+            exit 1
+          fi
+          ROLLOUT_COMMIT="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::main HEAD ${ROLLOUT_COMMIT} does not match approved_commit ${APPROVED_COMMIT}."
+            exit 1
+          fi
+          if [ "${MIGRATION_NAME_INPUT}" != "0106_games_hub_cipher_grid_specialist.sql" ]; then
+            echo "::error::migration_name is not an approved state-preserving target."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::A valid CLOUDFLARE_ACCOUNT_ID is required."
+            exit 1
+          fi
+          printf "ROLLOUT_COMMIT=%s\n" "${ROLLOUT_COMMIT}" >> "$GITHUB_ENV"
+          printf "MIGRATION_NAME=%s\n" "${MIGRATION_NAME_INPUT}" >> "$GITHUB_ENV"
+          {
+            echo "## DZN State-Preserving Migration Production Rollout"
+            echo "- Commit: ${ROLLOUT_COMMIT}"
+            echo "- Migration: ${MIGRATION_NAME_INPUT}"
+            echo "- Production D1: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Website deployment: not run"
+            echo "- Feature flags: unchanged"
+            echo "- Discord: not contacted"
+            echo "- Payments: not contacted"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install source dependencies
+        run: npm ci
+
+      - name: Validate source controller and queue
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:production-migration-queue
+          npm run test:state-preserving-migration-production-rollout
+          npm run test:account-deletion-maintenance
+          npm run test:games-hub
+          git diff --check
+
+      - name: Verify protected maintenance in source and production
+        run: |
+          set -euo pipefail
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-write-quiesce --config wrangler.toml
+          MAINTENANCE_RESPONSE="$(curl --silent --show-error --fail --max-time 20 --header "Accept: application/json" https://dayz-network.com/api/health/state-preserving-migration)"
+          MAINTENANCE_RESPONSE="${MAINTENANCE_RESPONSE}" node <<'NODE'
+          let response;
+          try {
+            response = JSON.parse(process.env.MAINTENANCE_RESPONSE || "");
+          } catch {
+            throw new Error("Protected migration maintenance did not return the expected JSON signal.");
+          }
+          const keys = response && Object.prototype.toString.call(response) === "[object Object]" ? Object.keys(response) : [];
+          if (keys.length !== 1 || keys[0] !== "status" || response.status !== "protected-migration-maintenance") {
+            throw new Error("Protected migration maintenance is not active in production.");
+          }
+          console.log("Protected migration maintenance JSON signal verified in production.");
+          NODE
+          echo "Cipher Grid and account-deletion production write paths verified as quiesced."
+
+      - name: Build isolated migration stage
+        run: |
+          set -euo pipefail
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts prepare --stage-dir "${MIGRATION_STAGE}"
+          test -s "${MIGRATION_STAGE}/migration-plan.json"
+          test -s "${MIGRATION_STAGE}/wrangler.toml"
+
+      - name: Confirm production D1 identity
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN is required for this D1-only operation."
+            exit 1
+          fi
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const databases = JSON.parse(process.env.D1_LIST || "[]");
+          const target = databases.find((entry) => entry.name === process.env.PRODUCTION_D1_DATABASE_NAME);
+          if (!target || target.uuid !== process.env.PRODUCTION_D1_DATABASE_ID) {
+            throw new Error("Production D1 identity did not match dzn_network_db.");
+          }
+          console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
+          NODE
+
+      - name: Drain in-flight account-deletion operations before the preservation baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The deployed account-closure path writes a durable marker before any asynchronous
+          # cleanup. Maintenance blocks new work; wait for the old runtime grace window, then
+          # require two empty read-only observations of every account-deletion operation.
+          sleep 90
+          OPERATION_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-account-deletion-operation-query)"
+          OPERATIONS_FILE="${MIGRATION_STAGE}/account-deletion-operations.json"
+          DRAIN_ATTEMPTS=30
+          REQUIRED_CONSECUTIVE_EMPTY_READS=2
+          consecutive_empty_reads=0
+          for attempt in $(seq 1 "${DRAIN_ATTEMPTS}"); do
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${OPERATION_QUERY}" > "${OPERATIONS_FILE}"
+            if npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-account-deletion-operations --operations "${OPERATIONS_FILE}" >/dev/null 2>&1; then
+              consecutive_empty_reads=$((consecutive_empty_reads + 1))
+              if [ "${consecutive_empty_reads}" -ge "${REQUIRED_CONSECUTIVE_EMPTY_READS}" ]; then
+                rm -f "${OPERATIONS_FILE}"
+                echo "Account-deletion operations drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
+                exit 0
+              fi
+            else
+              consecutive_empty_reads=0
+            fi
+            sleep 15
+          done
+          echo "::error::Account-deletion operations did not drain before the protected state baseline. No migration was applied."
+          rm -f "${OPERATIONS_FILE}"
+          exit 1
+
+      - name: Record D1 recovery bookmark
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" --json > "${MIGRATION_STAGE}/time-travel-before.json"
+          MIGRATION_STAGE="${MIGRATION_STAGE}" node <<'NODE'
+          const fs = require("node:fs");
+          const payload = JSON.parse(fs.readFileSync(`${process.env.MIGRATION_STAGE}/time-travel-before.json`, "utf8"));
+          const entry = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = entry?.bookmark ?? entry?.result?.bookmark ?? entry?.bookmarks?.[0]?.bookmark;
+          if (!bookmark) throw new Error("Cloudflare did not return a D1 Time Travel bookmark.");
+          fs.appendFileSync(process.env.GITHUB_ENV, `D1_BACKUP_BOOKMARK=${bookmark}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- D1 recovery bookmark: ${bookmark}\n`);
+          console.log("Production D1 recovery bookmark recorded.");
+          NODE
+
+      - name: Verify source state and capture private preservation baseline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          cleanup_rows() { rm -f "${MIGRATION_STAGE}/rows-before.json" "${MIGRATION_STAGE}/rows-after.json"; }
+          trap cleanup_rows EXIT
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "SELECT name FROM d1_migrations ORDER BY id;" > "${MIGRATION_STAGE}/ledger-before.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-ledger --ledger "${MIGRATION_STAGE}/ledger-before.json" --phase before
+          OBJECT_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-objects-query)"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${OBJECT_QUERY}" > "${MIGRATION_STAGE}/objects-before.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA table_info(dzn_cipher_grid_sessions);" > "${MIGRATION_STAGE}/table-info-before.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA foreign_key_list(dzn_cipher_grid_sessions);" > "${MIGRATION_STAGE}/foreign-keys-before.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA foreign_key_check;" > "${MIGRATION_STAGE}/foreign-key-check-before.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-before --objects "${MIGRATION_STAGE}/objects-before.json" --table-info "${MIGRATION_STAGE}/table-info-before.json" --foreign-keys "${MIGRATION_STAGE}/foreign-keys-before.json" --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-before.json"
+          ROWS_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-rows-query)"
+          COUNT_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-row-count-query)"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${ROWS_QUERY}" > "${MIGRATION_STAGE}/rows-before.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${COUNT_QUERY}" > "${MIGRATION_STAGE}/row-count-before.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts fingerprint --rows "${MIGRATION_STAGE}/rows-before.json" > "${MIGRATION_STAGE}/fingerprint-before.sha256"
+          rm "${MIGRATION_STAGE}/rows-before.json"
+          echo "Private preservation baseline captured as a row count and SHA-256 fingerprint; hashes only are retained and source rows are not logged."
+
+      - name: Apply exactly one staged migration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" --remote --config "${MIGRATION_STAGE}/wrangler.toml"
+
+      - name: Verify ledger, rebuilt schema, foreign keys, and preserved state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          cleanup_rows() { rm -f "${MIGRATION_STAGE}/rows-before.json" "${MIGRATION_STAGE}/rows-after.json"; }
+          trap cleanup_rows EXIT
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "SELECT name FROM d1_migrations ORDER BY id;" > "${MIGRATION_STAGE}/ledger-after.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-ledger --ledger "${MIGRATION_STAGE}/ledger-after.json" --phase after
+          OBJECT_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-objects-query)"
+          ROWS_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-rows-query)"
+          COUNT_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-row-count-query)"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${OBJECT_QUERY}" > "${MIGRATION_STAGE}/objects-after.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA table_info(dzn_cipher_grid_sessions);" > "${MIGRATION_STAGE}/table-info-after.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA foreign_key_list(dzn_cipher_grid_sessions);" > "${MIGRATION_STAGE}/foreign-keys-after.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "PRAGMA foreign_key_check;" > "${MIGRATION_STAGE}/foreign-key-check-after.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${ROWS_QUERY}" > "${MIGRATION_STAGE}/rows-after.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${COUNT_QUERY}" > "${MIGRATION_STAGE}/row-count-after.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts fingerprint --rows "${MIGRATION_STAGE}/rows-after.json" > "${MIGRATION_STAGE}/fingerprint-after.sha256"
+          rm "${MIGRATION_STAGE}/rows-after.json"
+          npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-after --objects "${MIGRATION_STAGE}/objects-after.json" --table-info "${MIGRATION_STAGE}/table-info-after.json" --foreign-keys "${MIGRATION_STAGE}/foreign-keys-after.json" --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-after.json" --before-row-count "${MIGRATION_STAGE}/row-count-before.json" --after-row-count "${MIGRATION_STAGE}/row-count-after.json" --before-fingerprint "${MIGRATION_STAGE}/fingerprint-before.sha256" --after-fingerprint "${MIGRATION_STAGE}/fingerprint-after.sha256"
+          {
+            echo "- Ledger/schema/data-preservation verification: passed"
+            echo "- Feature activation: intentionally not performed"
+            echo "- Website deployment: intentionally not performed"
+            echo "- Discord, billing, and Nitrado actions: intentionally not performed"
+          } >> "$GITHUB_STEP_SUMMARY"
