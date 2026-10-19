@@ -145,15 +145,15 @@ async function readCipherGrid(db: D1Database, user: SessionUser, now: number, sp
 
 export async function handleGamesCipherGrid(request: Request, env: Env): Promise<Response> {
   if (!["GET", "POST"].includes(request.method)) return methodNotAllowed();
+  if (env.DZN_GAMES_HUB_ENABLED !== "true" || env.DZN_GAMES_CIPHER_GRID_ENABLED !== "true") {
+    return reply({ error: "DZN Cipher Grid is not open yet." }, 404);
+  }
   if (request.method === "POST" && request.headers.get("origin") !== new URL(request.url).origin) {
     return reply({ error: "This request must come from DZN Network." }, 403);
   }
   try {
     const user = await getSessionUser(env, request);
     if (!user) return reply({ error: "Sign in with Discord to decode Cipher Grid." }, 401);
-    if (env.DZN_GAMES_HUB_ENABLED !== "true" || env.DZN_GAMES_CIPHER_GRID_ENABLED !== "true") {
-      return reply({ error: "DZN Cipher Grid is not open yet." }, 404);
-    }
     const db = requireDb(env);
     const now = Date.now();
     const specialistAvailable = env.DZN_GAMES_CIPHER_GRID_SPECIALIST_ENABLED === "true";

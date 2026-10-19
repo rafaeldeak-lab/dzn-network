@@ -7,14 +7,15 @@ binding = "DB"
 database_name = "dzn_network_db"
 database_id = "37515c66-2787-49e4-8568-a461517e975e"
 
-# Production activation approved after the isolated 0070 migration was verified.
+# Cipher Grid is temporarily quiesced for the isolated 0106 state-preserving migration.
+# Re-enable it only after the migration workflow has verified the ledger, schema, foreign keys, and preserved sessions.
 [env.production.vars]
 DZN_GAMES_HUB_ENABLED = "true"
 DZN_GAMES_TRIVIA_ENABLED = "true"
 DZN_GAMES_WORD_CHAIN_ENABLED = "true"
 DZN_GAMES_HIDE_SEEK_ENABLED = "true"
 DZN_GAMES_RELAY_RUSH_ENABLED = "true"
-DZN_GAMES_CIPHER_GRID_ENABLED = "true"
+DZN_GAMES_CIPHER_GRID_ENABLED = "false"
 DZN_GAMES_ECHO_ARRAY_ENABLED = "true"
 DZN_GAMES_OUTPOST_RUN_ENABLED = "true"
 DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true"
