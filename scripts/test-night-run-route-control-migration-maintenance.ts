@@ -8,8 +8,8 @@ import { gamesFixture } from "./lib/games-hub-local";
 const wrangler = readFileSync("wrangler.toml", "utf8");
 const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
 assert.match(productionBlock, /^DZN_GAMES_NIGHT_RUN_ENABLED = "true"$/m);
-assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "false"$/m);
-assert.match(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = "true"$/m);
+assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m);
+assert.doesNotMatch(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = /m);
 
 async function run() {
   const fixture = await gamesFixture();
