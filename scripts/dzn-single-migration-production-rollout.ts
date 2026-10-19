@@ -106,6 +106,14 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
     ],
     indexes: ["idx_dzn_ranger_range_rewards_history"],
   },
+  "0105_games_hub_night_run_recon.sql": {
+    migration: "0105_games_hub_night_run_recon.sql",
+    predecessor: "0104_games_hub_night_run.sql",
+    tables: [
+      playerOwnedTable("dzn_night_run_gate_scans", ["user_id", "game_id", "gate_index", "scanned_at"]),
+    ],
+    indexes: ["idx_dzn_night_run_gate_scans_session"],
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
