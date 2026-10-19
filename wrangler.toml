@@ -7,17 +7,17 @@ binding = "DB"
 database_name = "dzn_network_db"
 database_id = "37515c66-2787-49e4-8568-a461517e975e"
 
-# Cipher Grid and account closure are temporarily quiesced for the isolated 0106
-# state-preserving migration. Re-enable them only after the workflow has verified
-# the ledger, schema, foreign keys, and preserved sessions.
+# Cipher Grid and account closure resume only after the isolated 0106 workflow
+# has verified the migration ledger, rebuilt schema, foreign keys, and preserved
+# session fingerprint. The specialist variant remains separately disabled.
 [env.production.vars]
 DZN_GAMES_HUB_ENABLED = "true"
 DZN_GAMES_TRIVIA_ENABLED = "true"
 DZN_GAMES_WORD_CHAIN_ENABLED = "true"
 DZN_GAMES_HIDE_SEEK_ENABLED = "true"
 DZN_GAMES_RELAY_RUSH_ENABLED = "true"
-DZN_GAMES_CIPHER_GRID_ENABLED = "false"
-DZN_ACCOUNT_DELETE_ENABLED = "false"
+DZN_GAMES_CIPHER_GRID_ENABLED = "true"
+DZN_ACCOUNT_DELETE_ENABLED = "true"
 DZN_GAMES_ECHO_ARRAY_ENABLED = "true"
 DZN_GAMES_OUTPOST_RUN_ENABLED = "true"
 DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true"
