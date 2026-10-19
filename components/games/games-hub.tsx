@@ -605,6 +605,10 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   const [threeUnavailable, setThreeUnavailable] = useState(false);
   const generation = useRef(0);
 
+  const clearScanTelemetry = useCallback(() => {
+    setPayload(current => current?.game ? { ...current, game: { ...current.game, telemetry: null } } : current);
+  }, []);
+
   const load = useCallback(async () => {
     const sequence = ++generation.current;
     try {
@@ -642,6 +646,7 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
   function scan(x: number, y: number) {
     if (!game || !active || busy) return;
     if (game.recoveredSignals.some((signal) => Math.hypot(signal.x - x, signal.y - y) <= 45)) return;
+    clearScanTelemetry();
     void mutate({ action: "scan", gameId: game.id, version: game.version, x, y });
   }
   function scanAt(x: number, y: number) {
@@ -659,6 +664,7 @@ function HideSeekPanel({ now, motionRunning, onProgress }: { now: number; motion
             : null;
     if (!delta) return;
     event.preventDefault();
+    clearScanTelemetry();
     setReticle({ gameId: game?.id ?? "", x: Math.max(0, Math.min(1000, reticlePoint.x + delta.x)), y: Math.max(0, Math.min(1000, reticlePoint.y + delta.y)) });
   }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>

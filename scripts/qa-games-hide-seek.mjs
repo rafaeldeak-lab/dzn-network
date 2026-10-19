@@ -66,6 +66,8 @@ try {
     await page.keyboard.press("Enter");
     await page.getByText("Empty sweep").waitFor();
     await page.getByText("Signal read").waitFor();
+    await page.keyboard.press("ArrowLeft");
+    await page.getByText("Awaiting scan").waitFor();
     assert.equal(await page.locator('[class*="hideSeekRecovered"]').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {

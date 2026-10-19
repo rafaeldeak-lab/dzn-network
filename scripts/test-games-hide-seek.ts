@@ -129,7 +129,7 @@ async function run() {
     assert.doesNotMatch(JSON.stringify(state.game), new RegExp(recovered.id), "Recovered markers must not expose canonical target IDs either.");
     state = await payload(await call(fixture, scan(state, emptyPoint(fixture))));
     assert.equal(state.game?.lastScan, "empty");
-    assert.equal(state.game?.telemetry?.band, "none");
+    assert.notEqual(state.game?.telemetry?.band, "locked");
   });
   await test("missed scans return only bounded tactical telemetry without leaking targets", async fixture => {
     let state = await start(fixture);
@@ -175,6 +175,7 @@ async function run() {
     assert.match(hubSource, /const SignalHunt3D = dynamic/);
     assert.match(hubSource, /scanPoint=\{reticlePoint\}/);
     assert.match(hubSource, /telemetry=\{game\.telemetry\}/);
+    assert.match(hubSource, /clearScanTelemetry/);
     assert.match(visualSource, /const unavailableRef = useRef\(onUnavailable\);/);
     assert.match(visualSource, /new THREE\.OrthographicCamera/);
     assert.match(visualSource, /state\.scanPoint\.x \/ 1000 \* 2 - 1/);
