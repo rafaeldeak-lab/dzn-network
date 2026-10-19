@@ -6,7 +6,7 @@ import { handleCommandCentre } from "../functions/_lib/command-centre";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleSurvivalCommand } from "../functions/_lib/survival-command";
 import type { Env } from "../functions/_lib/types";
-import { resolveSurvivalCommandOutcome, type SurvivalCommandPayload } from "../lib/survival-command";
+import { resolveSurvivalCommandOutcome, survivalCommandDailyDirectiveFor, survivalCommandDirectiveFingerprintMarker, type SurvivalCommandAction, type SurvivalCommandPayload } from "../lib/survival-command";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -88,6 +88,8 @@ async function run() {
   assert.match(source, /dzn_survival_command_spend_ledger/);
   assert.match(source, /set-field-order/);
   assert.match(source, /DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED/);
+  assert.match(source, /survivalCommandDailyDirectiveFor/);
+  assert.match(source, /directiveAlreadyCompleted/);
   assert.match(source, /request\.headers\.get\("origin"\)/);
   assert.match(migration, /idx_dzn_survival_command_one_active_expedition/);
   assert.match(migration, /UNIQUE \(user_id, request_id\)/);
@@ -103,6 +105,8 @@ async function run() {
   assert.match(client, /deployment\.used \+ selected\.deploymentCost > deployment\.capacity/);
   assert.match(client, /Base recovery estimates only/);
   assert.match(client, /Field loadout/);
+  assert.match(client, /Daily directive/);
+  assert.match(client, /Directive route matched/);
   assert.match(scene, /dznSurvivalCommandCanvas/);
   assert.match(client, /Set the field order/);
   assert.match(client, /Tactical command window/);
@@ -290,6 +294,57 @@ async function run() {
       return unprotected.outcome === "strained" && overwatch.outcome !== "strained";
     });
     assert.ok(protectedSeed, "Overwatch should reduce the deterministic strained-return range.");
+  });
+
+  await test("daily directives stay aligned to active deployment days and are paid only once", async value => {
+    await establish(value);
+    const directiveDay = Array.from({ length: 180 }, (_, index) => `2034-05-${String((index % 28) + 1).padStart(2, "0")}`)
+      .find(day => {
+        const directive = survivalCommandDailyDirectiveFor("local-player", day);
+        return directive.sector === "perimeter" && directive.approach === "scout";
+      });
+    assert.ok(directiveDay);
+    const directive = survivalCommandDailyDirectiveFor("local-player", directiveDay!);
+    assert.deepEqual(survivalCommandDailyDirectiveFor("local-player", directiveDay!), directive);
+
+    const legacyExpeditionId = randomUUID();
+    const legacyRequestId = randomUUID();
+    const legacyNow = Date.now() - 10_000;
+    value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_expeditions
+      (id, user_id, request_id, sector, approach, loadout, status, seed, deployment_day, deployment_cost, started_at, ready_at, resolved_at)
+      VALUES (?, 'local-player', ?, 'perimeter', 'scout', 'field_kit', 'resolved', 'legacy-directive-proof', ?, 1, ?, ?, ?)`)
+      .run(legacyExpeditionId, legacyRequestId, directiveDay, legacyNow - 2, legacyNow - 1, legacyNow);
+    value.db.sqlite.prepare(`INSERT INTO dzn_survival_command_resolution_ledger
+      (id, user_id, expedition_id, request_id, action, outcome, salvage, intel, outcome_fingerprint, resolved_at)
+      VALUES (?, 'local-player', ?, ?, 'secure', 'clean', 1, 1, 'deadbeef', ?)`)
+      .run(randomUUID(), legacyExpeditionId, randomUUID(), legacyNow);
+
+    const first = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET deployment_day = ?, started_at = 0, ready_at = 1 WHERE id = ?").run(directiveDay, first.expedition!.id);
+    const ready = await payload(await request(value));
+    assert.equal(ready.dailyDirective?.dayKey, directiveDay, "An expedition crossing UTC rollover must retain its deployment-day directive.");
+    assert.equal(ready.dailyDirective?.key, directive.key, "The active directive must remain aligned to the route being resolved.");
+    const action = ready.expedition!.incident!.actions[0]! as SurvivalCommandAction;
+    const firstSeed = (value.db.sqlite.prepare("SELECT seed FROM dzn_survival_command_expeditions WHERE id = ?").get(first.expedition!.id) as { seed: string } | undefined)?.seed;
+    assert.ok(firstSeed);
+    const base = resolveSurvivalCommandOutcome({ seed: firstSeed, sector: "perimeter", approach: "scout", loadout: "field_kit", action, buildings: ready.buildings! });
+    await payload(await request(value, { action: "resolve", expeditionId: ready.expedition!.id, version: ready.expedition!.version, requestId: randomUUID(), decision: action }));
+    const firstLedger = value.db.sqlite.prepare("SELECT salvage, intel, outcome_fingerprint FROM dzn_survival_command_resolution_ledger WHERE expedition_id = ?").get(first.expedition!.id) as { salvage: number; intel: number; outcome_fingerprint: string } | undefined;
+    assert.equal(firstLedger?.salvage, base.salvage + directive.bonus.salvage);
+    assert.equal(firstLedger?.intel, base.intel + directive.bonus.intel);
+    assert.match(firstLedger?.outcome_fingerprint ?? "", new RegExp(`^${survivalCommandDirectiveFingerprintMarker(directive)}`));
+
+    const second = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET deployment_day = ?, started_at = 0, ready_at = 1 WHERE id = ?").run(directiveDay, second.expedition!.id);
+    const secondReady = await payload(await request(value));
+    const secondAction = secondReady.expedition!.incident!.actions[0]! as SurvivalCommandAction;
+    const secondSeed = (value.db.sqlite.prepare("SELECT seed FROM dzn_survival_command_expeditions WHERE id = ?").get(second.expedition!.id) as { seed: string } | undefined)?.seed;
+    assert.ok(secondSeed);
+    const secondBase = resolveSurvivalCommandOutcome({ seed: secondSeed, sector: "perimeter", approach: "scout", loadout: "field_kit", action: secondAction, buildings: secondReady.buildings! });
+    await payload(await request(value, { action: "resolve", expeditionId: secondReady.expedition!.id, version: secondReady.expedition!.version, requestId: randomUUID(), decision: secondAction }));
+    const secondLedger = value.db.sqlite.prepare("SELECT salvage, intel FROM dzn_survival_command_resolution_ledger WHERE expedition_id = ?").get(second.expedition!.id);
+    assert.equal(secondLedger?.salvage, secondBase.salvage);
+    assert.equal(secondLedger?.intel, secondBase.intel);
   });
 
   await test("retained Store accounts erase every private Survival Command record", async value => {

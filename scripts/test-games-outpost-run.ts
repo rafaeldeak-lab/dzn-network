@@ -314,8 +314,15 @@ async function run() {
   await test("hazard depletion fails a run without minting a reward", async fixture => {
     let state = await start(fixture);
     const layout = layoutFor(fixture);
-    const hazard = layout.hazards[0];
-    const path = safePath({ row: 2, column: 2 }, hazard, layout.hazards.filter(item => !same(item, hazard)));
+    const origin = { row: 2, column: 2 };
+    const hazard = layout.hazards.find(candidate => {
+      try {
+        safePath(origin, candidate, layout.hazards.filter(item => !same(item, candidate)));
+        return true;
+      } catch { return false; }
+    });
+    assert.ok(hazard, "A generated field must expose at least one reachable hazard for depletion coverage.");
+    const path = safePath(origin, hazard, layout.hazards.filter(item => !same(item, hazard)));
     fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET energy = 1 WHERE user_id = 'local-player'").run();
     for (const direction of path) {
       settle(fixture);

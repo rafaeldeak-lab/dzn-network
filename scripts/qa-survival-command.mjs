@@ -34,6 +34,7 @@ try {
     await page.reload({ waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Sector Operations" }).waitFor();
     await page.getByText("Field loadout", { exact: true }).waitFor();
+    await page.getByText("Daily directive", { exact: true }).waitFor();
     await page.getByRole("button", { name: /Dispatch team/ }).click();
     await page.goto(`${origin}/__local-survival-command-ready${viewport.fixture}`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Set the field order" }).waitFor();
