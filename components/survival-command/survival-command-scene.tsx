@@ -38,8 +38,8 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     const mountElement = mount;
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x071014, 0.072);
-    const camera = new THREE.PerspectiveCamera(37, 1, 0.1, 44);
-    camera.position.set(8.4, 8.2, 10.8);
+    const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 44);
+    camera.position.set(7.45, 7.6, 9.65);
     camera.lookAt(0, 0.1, 0);
     let renderer: THREE.WebGLRenderer;
     try {
@@ -51,7 +51,7 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.34;
+    renderer.toneMappingExposure = 1.48;
     renderer.domElement.dataset.dznSurvivalCommandCanvas = "true";
     renderer.domElement.setAttribute("aria-hidden", "true");
     mountElement.appendChild(renderer.domElement);
@@ -65,10 +65,10 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     const key = new THREE.DirectionalLight(0xffc38f, 2.3);
     key.position.set(-6, 9, 5);
     scene.add(key);
-    const cyanLight = new THREE.PointLight(0x4de8d6, 12, 14, 1.8);
+    const cyanLight = new THREE.PointLight(0x4de8d6, 16, 14, 1.8);
     cyanLight.position.set(-1, 2.9, 1.5);
     scene.add(cyanLight);
-    const violetLight = new THREE.PointLight(0x748dff, 9, 10, 2);
+    const violetLight = new THREE.PointLight(0x748dff, 12, 10, 2);
     violetLight.position.set(4, 3.3, -2.5);
     scene.add(violetLight);
 
@@ -86,6 +86,35 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     wire.rotation.x = -Math.PI / 2;
     wire.position.y = -0.11;
     root.add(wire);
+
+    // Build a readable miniature world first. The route markers and sector states
+    // remain authoritative UI, while the scene gives those choices a place.
+    const terrainGeometry = new THREE.DodecahedronGeometry(0.72, 0);
+    const terrainMaterial = new THREE.MeshStandardMaterial({ color: 0x245b63, emissive: 0x0d343a, emissiveIntensity: 0.92, roughness: 0.88, metalness: 0.13 });
+    const roadGeometry = new THREE.BoxGeometry(10.6, 0.035, 0.38);
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x132128, emissive: 0x061014, emissiveIntensity: 0.42, roughness: 0.72, metalness: 0.5 });
+    const roadEdgeMaterial = new THREE.MeshBasicMaterial({ color: 0x4fd7ca, transparent: true, opacity: 0.24, depthWrite: false });
+    geometries.push(terrainGeometry, roadGeometry); materials.push(terrainMaterial, roadMaterial, roadEdgeMaterial);
+    for (const [x, z, scale, rotation] of [[-4.7, -1.15, 1.15, 0.32], [-3.8, 2.8, 0.68, -0.4], [4.45, 0.3, 0.9, 0.18], [1.2, 4.25, 0.65, -0.24], [-0.35, -4.45, 0.82, 0.54]] as const) {
+      const ridge = new THREE.Mesh(terrainGeometry, terrainMaterial);
+      ridge.position.set(x, -0.02 + scale * 0.16, z);
+      ridge.scale.set(scale * 1.45, scale * 0.62, scale);
+      ridge.rotation.set(rotation * 0.2, rotation, rotation * -0.16);
+      root.add(ridge);
+    }
+    for (const [x, z, length, rotation] of [[0, 0.52, 8.5, -0.22], [1.46, -0.52, 6.1, Math.PI / 2 + 0.18]] as const) {
+      const road = new THREE.Mesh(roadGeometry, roadMaterial);
+      road.position.set(x, -0.08, z);
+      road.scale.x = length / 10.6;
+      road.rotation.y = rotation;
+      root.add(road);
+      const roadEdge = new THREE.LineSegments(new THREE.EdgesGeometry(roadGeometry), roadEdgeMaterial);
+      roadEdge.position.copy(road.position);
+      roadEdge.scale.copy(road.scale);
+      roadEdge.rotation.copy(road.rotation);
+      geometries.push(roadEdge.geometry as THREE.BufferGeometry);
+      root.add(roadEdge);
+    }
 
     const mountainGeometry = new THREE.ConeGeometry(0.85, 1.8, 5);
     const mountainMaterial = new THREE.MeshStandardMaterial({ color: 0x163436, emissive: 0x061517, emissiveIntensity: 0.48, roughness: 0.9, metalness: 0.08 });
@@ -115,6 +144,7 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     const selectedRouteMaterial = new THREE.LineBasicMaterial({ color: 0x84fbeb, transparent: true, opacity: 0.91 });
     materials.push(routeMaterial, selectedRouteMaterial);
     const routeLines = new Map<SurvivalCommandSector, THREE.Line>();
+    const sectorRings: Array<{ ring: THREE.Mesh; antenna: THREE.Group; key: SurvivalCommandSector }> = [];
     const sectorNodes: Array<{ key: SurvivalCommandSector; node: THREE.Group; core: THREE.Mesh; beacon: THREE.Mesh; light: THREE.PointLight }> = [];
     const nodeBaseGeometry = new THREE.CylinderGeometry(0.56, 0.72, 0.16, 6);
     const nodeCoreGeometry = new THREE.BoxGeometry(0.56, 0.46, 0.56);
@@ -122,7 +152,11 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     geometries.push(nodeBaseGeometry, nodeCoreGeometry, beaconGeometry);
     for (const keyName of Object.keys(sectorLayout) as SurvivalCommandSector[]) {
       const point = sectorLayout[keyName];
-      const routeGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.03, 0), new THREE.Vector3(point.x, 0.03, point.z)]);
+      const routeGeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0.04, 0),
+        new THREE.Vector3(point.x * 0.48, 0.16, point.z * 0.48),
+        new THREE.Vector3(point.x, 0.04, point.z),
+      ]);
       geometries.push(routeGeometry);
       const route = new THREE.Line(routeGeometry, routeMaterial);
       root.add(route);
@@ -143,6 +177,66 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       const light = new THREE.PointLight(point.colour, 1.8, 3.2, 2);
       light.position.y = 0.78;
       node.add(light);
+
+      const siteDeckGeometry = new THREE.BoxGeometry(1.65, 0.1, 1.4);
+      const siteDeckMaterial = new THREE.MeshStandardMaterial({ color: 0x102a30, emissive: 0x07171b, emissiveIntensity: 0.58, roughness: 0.62, metalness: 0.62 });
+      const siteAccentMaterial = new THREE.MeshStandardMaterial({ color: point.colour, emissive: point.colour, emissiveIntensity: 1.25, roughness: 0.3, metalness: 0.74 });
+      const siteShadowMaterial = new THREE.MeshStandardMaterial({ color: 0x122126, emissive: 0x051015, emissiveIntensity: 0.42, roughness: 0.76, metalness: 0.48 });
+      const antennaMaterial = new THREE.MeshBasicMaterial({ color: point.colour, transparent: true, opacity: 0.8, depthWrite: false });
+      geometries.push(siteDeckGeometry); materials.push(siteDeckMaterial, siteAccentMaterial, siteShadowMaterial, antennaMaterial);
+      const siteDeck = new THREE.Mesh(siteDeckGeometry, siteDeckMaterial);
+      siteDeck.position.y = -0.12;
+      node.add(siteDeck);
+      const antenna = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.018, 8, 32), antennaMaterial);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.66;
+      geometries.push(ring.geometry as THREE.BufferGeometry);
+      antenna.add(ring);
+
+      if (keyName === "perimeter") {
+        const towerBody = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.18, 0.92, 6), siteShadowMaterial);
+        const towerCap = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.24, 4), siteAccentMaterial);
+        const spot = new THREE.PointLight(point.colour, 1.45, 2.8, 2);
+        towerBody.position.set(-0.42, 0.38, -0.18); towerCap.position.set(-0.42, 0.94, -0.18); spot.position.set(-0.42, 0.92, -0.18);
+        antenna.add(towerBody, towerCap, spot);
+        geometries.push(towerBody.geometry as THREE.BufferGeometry, towerCap.geometry as THREE.BufferGeometry);
+        for (const [x, z] of [[0.46, -0.36], [0.64, -0.1], [0.62, 0.2], [0.42, 0.42]] as const) {
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.34, 0.035), siteAccentMaterial);
+          post.position.set(x, 0.12, z); antenna.add(post); geometries.push(post.geometry as THREE.BufferGeometry);
+        }
+      } else if (keyName === "rail_yard") {
+        for (const x of [-0.42, 0.12]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.045, 1.08), siteAccentMaterial);
+          rail.position.set(x, 0.03, 0); antenna.add(rail); geometries.push(rail.geometry as THREE.BufferGeometry);
+        }
+        for (const z of [-0.36, -0.08, 0.2, 0.48]) {
+          const sleeper = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.035, 0.06), siteShadowMaterial);
+          sleeper.position.set(-0.15, 0.02, z); antenna.add(sleeper); geometries.push(sleeper.geometry as THREE.BufferGeometry);
+        }
+        const container = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.34, 0.62), siteShadowMaterial);
+        const containerLight = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.64), siteAccentMaterial);
+        container.position.set(0.45, 0.22, -0.22); containerLight.position.set(0.45, 0.24, -0.22);
+        antenna.add(container, containerLight); geometries.push(container.geometry as THREE.BufferGeometry, containerLight.geometry as THREE.BufferGeometry);
+      } else if (keyName === "radio_ridge") {
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.07, 1.16, 8), siteShadowMaterial);
+        const dish = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), siteAccentMaterial);
+        mast.position.set(-0.12, 0.52, 0); dish.position.set(-0.12, 1.1, 0); dish.rotation.x = -1.14;
+        antenna.add(mast, dish, new THREE.PointLight(point.colour, 1.85, 3.2, 2)); geometries.push(mast.geometry as THREE.BufferGeometry, dish.geometry as THREE.BufferGeometry);
+        for (const angle of [0, Math.PI * 2 / 3, Math.PI * 4 / 3]) {
+          const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.05, 0.66), siteAccentMaterial);
+          spoke.position.set(Math.sin(angle) * 0.42, 0.08, Math.cos(angle) * 0.42); spoke.rotation.y = angle; antenna.add(spoke); geometries.push(spoke.geometry as THREE.BufferGeometry);
+        }
+      } else {
+        const bunker = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.38, 0.62), siteShadowMaterial);
+        const bunkerDoor = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.22, 0.035), siteAccentMaterial);
+        const scanTower = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 0.76, 6), siteShadowMaterial);
+        bunker.position.set(-0.1, 0.16, 0.12); bunkerDoor.position.set(-0.1, 0.17, 0.45); scanTower.position.set(0.46, 0.42, -0.28);
+        antenna.add(bunker, bunkerDoor, scanTower, new THREE.PointLight(point.colour, 1.65, 3.1, 2));
+        geometries.push(bunker.geometry as THREE.BufferGeometry, bunkerDoor.geometry as THREE.BufferGeometry, scanTower.geometry as THREE.BufferGeometry);
+      }
+      node.add(antenna);
+      sectorRings.push({ ring, antenna, key: keyName });
       sectorNodes.push({ key: keyName, node, core, beacon, light });
     }
 
@@ -168,22 +262,27 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     root.add(dailyMarkerLight);
 
     const convoy = new THREE.Group();
-    const chassisGeometry = new THREE.BoxGeometry(0.42, 0.16, 0.65);
+    const chassisGeometry = new THREE.BoxGeometry(0.58, 0.18, 0.9);
     const chassisMaterial = new THREE.MeshStandardMaterial({ color: 0xffd78e, emissive: 0x925725, emissiveIntensity: 0.9, metalness: 0.72, roughness: 0.24 });
     const wheelGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.08, 6);
     const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x101a1d, roughness: 0.8 });
     geometries.push(chassisGeometry, wheelGeometry); materials.push(chassisMaterial, wheelMaterial);
     const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
-    chassis.position.y = 0.18;
+    chassis.position.y = 0.21;
     convoy.add(chassis);
-    for (const x of [-0.18, 0.18]) for (const z of [-0.24, 0.24]) {
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.37), new THREE.MeshStandardMaterial({ color: 0x183c4c, emissive: 0x0f6e80, emissiveIntensity: 1.1, roughness: 0.19, metalness: 0.82 }));
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.48, 6), chassisMaterial);
+    cabin.position.set(0, 0.42, -0.08); mast.position.set(0, 0.6, 0.18);
+    convoy.add(cabin, mast);
+    geometries.push(cabin.geometry as THREE.BufferGeometry, mast.geometry as THREE.BufferGeometry); materials.push(cabin.material as THREE.Material);
+    for (const x of [-0.27, 0.27]) for (const z of [-0.32, 0.32]) {
       const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
       wheel.position.set(x, 0.1, z);
       wheel.rotation.z = Math.PI / 2;
       convoy.add(wheel);
     }
     const convoyLight = new THREE.PointLight(0xffb65f, 1.2, 2.2, 2);
-    convoyLight.position.set(0, 0.33, -0.34);
+    convoyLight.position.set(0, 0.41, -0.51);
     convoy.add(convoyLight);
     convoy.visible = false;
     root.add(convoy);
@@ -281,15 +380,15 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
     root.add(directiveLight);
 
     const particleGeometry = new THREE.BufferGeometry();
-    const particlePositions = new Float32Array(140 * 3);
+    const particlePositions = new Float32Array(220 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
       const sample = index / 3;
       particlePositions[index] = ((sample * 17) % 53) * 0.205 - 5.35;
-      particlePositions[index + 1] = ((sample * 11) % 31) * 0.105 + 0.03;
+      particlePositions[index + 1] = ((sample * 11) % 37) * 0.12 + 0.03;
       particlePositions[index + 2] = ((sample * 7) % 47) * 0.215 - 4.95;
     }
     particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
-    const particleMaterial = new THREE.PointsMaterial({ color: 0xb5f6eb, size: 0.025, transparent: true, opacity: 0.46, depthWrite: false });
+    const particleMaterial = new THREE.PointsMaterial({ color: 0xb5f6eb, size: 0.032, transparent: true, opacity: 0.54, depthWrite: false });
     geometries.push(particleGeometry); materials.push(particleMaterial);
     const particles = new THREE.Points(particleGeometry, particleMaterial);
     root.add(particles);
@@ -305,6 +404,12 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
         (entry.beacon.material as THREE.MeshBasicMaterial).opacity = selected ? 0.98 : active ? 0.8 : 0.35;
         entry.light.intensity = selected ? 2.8 : active ? 2.2 : 0.52;
         routeLines.get(entry.key)!.material = selected || active ? selectedRouteMaterial : routeMaterial;
+      }
+      for (const detail of sectorRings) {
+        const selected = detail.key === state.selectedSector;
+        const active = detail.key === state.expedition?.sector;
+        detail.ring.visible = selected || active;
+        detail.antenna.scale.setScalar(selected ? 1.08 : active ? 1.04 : 1);
       }
       const dailyTarget = state.dailyDirective ? sectorLayout[state.dailyDirective.sector] : null;
       dailyMarker.visible = Boolean(dailyTarget);
@@ -368,6 +473,13 @@ export function SurvivalCommandScene({ selectedSector, selectedLoadout, expediti
       for (const entry of sectorNodes) {
         entry.beacon.rotation.y = elapsed * 0.8;
         entry.beacon.position.y = 0.75 + Math.sin(elapsed * 1.35 + entry.node.position.x) * 0.035;
+      }
+      for (const detail of sectorRings) {
+        const selected = detail.key === stateRef.current.selectedSector;
+        const active = detail.key === stateRef.current.expedition?.sector;
+        detail.ring.rotation.z = elapsed * (selected ? 1.25 : active ? 0.82 : 0.28);
+        detail.ring.scale.setScalar(selected ? 1.05 + Math.sin(elapsed * 2.2) * 0.1 : active ? 1.02 + Math.sin(elapsed * 1.4) * 0.045 : 1);
+        if (detail.key === "radio_ridge") detail.antenna.rotation.y = Math.sin(elapsed * 0.75) * 0.14;
       }
       if (dailyMarker.visible) {
         dailyMarkerRing.rotation.z = elapsed * 0.92;
