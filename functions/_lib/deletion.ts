@@ -308,6 +308,8 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
     ["dzn_command_centre_profiles", "user_id"],
     ["dzn_survival_command_resolution_ledger", "user_id"],
     ["dzn_survival_command_expeditions", "user_id"],
+      ["dzn_survival_command_loadout_unlocks", "user_id"],
+      ["dzn_survival_command_spend_ledger", "user_id"],
     ["dzn_survival_command_profiles", "user_id"],
     ["player_saved_servers", "user_id"],
     ["player_discord_community_memberships", "user_id"],

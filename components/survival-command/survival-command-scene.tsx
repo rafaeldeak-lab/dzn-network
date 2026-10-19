@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { SurvivalCommandExpedition, SurvivalCommandSector } from "../../lib/survival-command";
+import type { SurvivalCommandExpedition, SurvivalCommandLoadout, SurvivalCommandSector } from "../../lib/survival-command";
 
-type SceneState = { selectedSector: SurvivalCommandSector; expedition: SurvivalCommandExpedition | null };
+type SceneState = { selectedSector: SurvivalCommandSector; selectedLoadout: SurvivalCommandLoadout; expedition: SurvivalCommandExpedition | null };
 type Props = SceneState & { motionRunning: boolean; onUnavailable: () => void };
 
 const sectorLayout: Record<SurvivalCommandSector, { x: number; z: number; colour: number }> = {
@@ -14,20 +14,20 @@ const sectorLayout: Record<SurvivalCommandSector, { x: number; z: number; colour
   blacksite: { x: 2.35, z: -1.85, colour: 0xec71a8 },
 };
 
-export function SurvivalCommandScene({ selectedSector, expedition, motionRunning, onUnavailable }: Props) {
+export function SurvivalCommandScene({ selectedSector, selectedLoadout, expedition, motionRunning, onUnavailable }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef<SceneState>({ selectedSector, expedition });
+  const stateRef = useRef<SceneState>({ selectedSector, selectedLoadout, expedition });
   const applyStateRef = useRef<((state: SceneState) => void) | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
   const unavailableRef = useRef(onUnavailable);
 
   useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
   useEffect(() => {
-    const next = { selectedSector, expedition };
+    const next = { selectedSector, selectedLoadout, expedition };
     stateRef.current = next;
     applyStateRef.current?.(next);
     renderRef.current?.();
-  }, [expedition, selectedSector]);
+  }, [expedition, selectedLoadout, selectedSector]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -167,6 +167,66 @@ export function SurvivalCommandScene({ selectedSector, expedition, motionRunning
     convoy.visible = false;
     root.add(convoy);
 
+    const loadoutColours: Record<SurvivalCommandLoadout, number> = {
+      field_kit: 0x6debd1,
+      signal_scanner: 0x91a7ff,
+      recovery_kit: 0xffb65f,
+      convoy_plating: 0xec71a8,
+    };
+    const loadoutNodes = {} as Record<SurvivalCommandLoadout, THREE.Group>;
+    const loadoutMaterial = new THREE.MeshStandardMaterial({ color: 0xb7e7df, emissive: 0x173e40, emissiveIntensity: 1.25, roughness: 0.35, metalness: 0.78 });
+    const loadoutAccent = new THREE.MeshBasicMaterial({ color: 0x6debd1, transparent: true, opacity: 0.86 });
+    const crateGeometry = new THREE.BoxGeometry(0.46, 0.3, 0.4);
+    const mastGeometry = new THREE.CylinderGeometry(0.035, 0.05, 0.78, 8);
+    const ringGeometry = new THREE.TorusGeometry(0.22, 0.028, 8, 18);
+    geometries.push(crateGeometry, mastGeometry, ringGeometry); materials.push(loadoutMaterial, loadoutAccent);
+    const fieldKit = new THREE.Group();
+    const fieldCrate = new THREE.Mesh(crateGeometry, loadoutMaterial);
+    fieldCrate.position.set(-0.75, 0.05, 0.92);
+    fieldKit.add(fieldCrate);
+    const fieldBeacon = new THREE.Mesh(ringGeometry, loadoutAccent);
+    fieldBeacon.position.set(-0.75, 0.34, 0.92);
+    fieldBeacon.rotation.x = Math.PI / 2;
+    fieldKit.add(fieldBeacon);
+    loadoutNodes.field_kit = fieldKit;
+    root.add(fieldKit);
+
+    const scanner = new THREE.Group();
+    const scannerMast = new THREE.Mesh(mastGeometry, loadoutMaterial);
+    scannerMast.position.set(-0.75, 0.42, 0.92);
+    scanner.add(scannerMast);
+    const scannerRing = new THREE.Mesh(ringGeometry, loadoutAccent);
+    scannerRing.position.set(-0.75, 0.84, 0.92);
+    scannerRing.rotation.x = Math.PI / 2;
+    scanner.add(scannerRing);
+    loadoutNodes.signal_scanner = scanner;
+    root.add(scanner);
+
+    const recoveryKit = new THREE.Group();
+    for (const [x, z] of [[-0.94, 0.8], [-0.57, 0.92], [-0.77, 1.13]]) {
+      const crate = new THREE.Mesh(crateGeometry, loadoutMaterial);
+      crate.position.set(x, 0.05, z);
+      crate.scale.set(.76, .75, .72);
+      recoveryKit.add(crate);
+    }
+    loadoutNodes.recovery_kit = recoveryKit;
+    root.add(recoveryKit);
+
+    const plating = new THREE.Group();
+    const plateGeometry = new THREE.BoxGeometry(0.64, 0.34, 0.055);
+    geometries.push(plateGeometry);
+    for (const [x, z, rotation] of [[-0.76, 0.66, 0], [-0.76, 1.18, 0], [-1.03, 0.92, Math.PI / 2], [-0.49, 0.92, Math.PI / 2]]) {
+      const plate = new THREE.Mesh(plateGeometry, loadoutMaterial);
+      plate.position.set(x, 0.15, z);
+      plate.rotation.y = rotation;
+      plating.add(plate);
+    }
+    loadoutNodes.convoy_plating = plating;
+    root.add(plating);
+    const loadoutLight = new THREE.PointLight(loadoutColours.field_kit, 1.45, 3.6, 2.1);
+    loadoutLight.position.set(-0.75, 0.8, 0.92);
+    root.add(loadoutLight);
+
     const particleGeometry = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(140 * 3);
     for (let index = 0; index < particlePositions.length; index += 3) {
@@ -183,6 +243,7 @@ export function SurvivalCommandScene({ selectedSector, expedition, motionRunning
 
     const applyState = (state: SceneState) => {
       const travel = state.expedition?.state === "in-transit" ? state.expedition : null;
+      const activeLoadout = state.expedition?.loadout ?? state.selectedLoadout;
       for (const entry of sectorNodes) {
         const selected = entry.key === state.selectedSector;
         const active = entry.key === state.expedition?.sector;
@@ -196,6 +257,9 @@ export function SurvivalCommandScene({ selectedSector, expedition, motionRunning
       convoy.visible = Boolean(end);
       if (end) convoy.userData.route = end;
       (tower.material as THREE.MeshStandardMaterial).emissiveIntensity = state.expedition?.state === "ready" ? 2.35 : 1.45;
+      for (const [key, node] of Object.entries(loadoutNodes) as Array<[SurvivalCommandLoadout, THREE.Group]>) node.visible = key === activeLoadout;
+      loadoutLight.color.setHex(loadoutColours[activeLoadout]);
+      loadoutLight.intensity = state.expedition?.state === "ready" ? 2.8 : 1.45;
     };
     applyStateRef.current = applyState;
     applyState(stateRef.current);

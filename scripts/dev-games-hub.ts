@@ -35,6 +35,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0105_games_hub_night_run_recon.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0107_dzn_command_centre.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0108_dzn_survival_command_expeditions.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0109_dzn_survival_command_loadouts.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
