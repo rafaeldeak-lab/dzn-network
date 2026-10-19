@@ -44,11 +44,11 @@ switch (command) {
   case "verify-write-quiesce":
     verifyWriteQuiesce(required("--config"));
     break;
-  case "print-account-deletion-lease-query":
-    console.log("SELECT COUNT(*) AS active_account_deletion_lease_count FROM dzn_owner_discord_access_role_mutations WHERE operation = 'account_deletion' AND julianday(expires_at) > julianday('now');");
+  case "print-account-deletion-operation-query":
+    console.log("SELECT COUNT(*) AS active_account_deletion_operation_count FROM user_notifications WHERE type = 'internal_account_deletion_operation';");
     break;
-  case "verify-account-deletion-leases":
-    verifyAccountDeletionLeases(required("--leases"));
+  case "verify-account-deletion-operations":
+    verifyAccountDeletionOperations(required("--operations"));
     break;
   case "fingerprint":
     fingerprint(required("--rows"));
@@ -75,7 +75,7 @@ switch (command) {
     console.log(`SELECT COUNT(*) AS row_count FROM ${TABLE};`);
     break;
   default:
-    throw new Error("Expected one of: prepare, verify-ledger, verify-before, verify-write-quiesce, print-account-deletion-lease-query, verify-account-deletion-leases, fingerprint, verify-after, print-objects-query, print-rows-query, print-row-count-query.");
+    throw new Error("Expected one of: prepare, verify-ledger, verify-before, verify-write-quiesce, print-account-deletion-operation-query, verify-account-deletion-operations, fingerprint, verify-after, print-objects-query, print-rows-query, print-row-count-query.");
 }
 
 function required(name: string) {
@@ -136,17 +136,17 @@ function verifyWriteQuiesce(configPath: string) {
   console.log("Production Cipher Grid and account-deletion write paths are source-configured as disabled.");
 }
 
-function verifyAccountDeletionLeases(leasesPath: string) {
-  const rows = readRows(leasesPath);
-  if (rows.length !== 1) throw new Error("Expected exactly one aggregate account-deletion lease row.");
-  const activeLeaseCount = Number(rows[0]?.active_account_deletion_lease_count ?? -1);
-  if (!Number.isInteger(activeLeaseCount) || activeLeaseCount < 0) {
-    throw new Error("Expected a non-negative active_account_deletion_lease_count.");
+function verifyAccountDeletionOperations(operationsPath: string) {
+  const rows = readRows(operationsPath);
+  if (rows.length !== 1) throw new Error("Expected exactly one aggregate account-deletion operation row.");
+  const activeOperationCount = Number(rows[0]?.active_account_deletion_operation_count ?? -1);
+  if (!Number.isInteger(activeOperationCount) || activeOperationCount < 0) {
+    throw new Error("Expected a non-negative active_account_deletion_operation_count.");
   }
-  if (activeLeaseCount !== 0) {
-    throw new Error(`Account-deletion leases are still active (${activeLeaseCount}); refusing to capture the state-preservation baseline.`);
+  if (activeOperationCount !== 0) {
+    throw new Error(`Account-deletion operations are still active (${activeOperationCount}); refusing to capture the state-preservation baseline.`);
   }
-  console.log("No active account-deletion leases remain.");
+  console.log("No active account-deletion operations remain.");
 }
 
 function prepareMigrationStage(stageInput: string) {

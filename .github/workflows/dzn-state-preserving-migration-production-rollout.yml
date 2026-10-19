@@ -150,26 +150,27 @@ jobs:
           console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
           NODE
 
-      - name: Drain in-flight account-deletion leases before the preservation baseline
+      - name: Drain in-flight account-deletion operations before the preservation baseline
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
         run: |
           set -euo pipefail
-          # Requests that entered before maintenance was deployed cannot begin again, but a held
-          # account-closure lease may legitimately be renewed while Discord cleanup completes.
+          # The deployed account-closure path writes a durable marker before any asynchronous
+          # cleanup. Maintenance blocks new work; wait for the old runtime grace window, then
+          # require two empty read-only observations of every account-deletion operation.
           sleep 90
-          LEASE_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-account-deletion-lease-query)"
-          LEASES_FILE="${MIGRATION_STAGE}/account-deletion-leases.json"
+          OPERATION_QUERY="$(npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts print-account-deletion-operation-query)"
+          OPERATIONS_FILE="${MIGRATION_STAGE}/account-deletion-operations.json"
           DRAIN_ATTEMPTS=30
           REQUIRED_CONSECUTIVE_EMPTY_READS=2
           consecutive_empty_reads=0
           for attempt in $(seq 1 "${DRAIN_ATTEMPTS}"); do
-            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${LEASE_QUERY}" > "${LEASES_FILE}"
-            if npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-account-deletion-leases --leases "${LEASES_FILE}" >/dev/null 2>&1; then
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${OPERATION_QUERY}" > "${OPERATIONS_FILE}"
+            if npx tsx scripts/dzn-state-preserving-migration-production-rollout.ts verify-account-deletion-operations --operations "${OPERATIONS_FILE}" >/dev/null 2>&1; then
               consecutive_empty_reads=$((consecutive_empty_reads + 1))
               if [ "${consecutive_empty_reads}" -ge "${REQUIRED_CONSECUTIVE_EMPTY_READS}" ]; then
-                rm -f "${LEASES_FILE}"
-                echo "Account-deletion leases drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
+                rm -f "${OPERATIONS_FILE}"
+                echo "Account-deletion operations drained across ${REQUIRED_CONSECUTIVE_EMPTY_READS} consecutive read-only checks."
                 exit 0
               fi
             else
@@ -177,8 +178,8 @@ jobs:
             fi
             sleep 15
           done
-          echo "::error::Account-deletion leases did not drain before the protected state baseline. No migration was applied."
-          rm -f "${LEASES_FILE}"
+          echo "::error::Account-deletion operations did not drain before the protected state baseline. No migration was applied."
+          rm -f "${OPERATIONS_FILE}"
           exit 1
 
       - name: Record D1 recovery bookmark
