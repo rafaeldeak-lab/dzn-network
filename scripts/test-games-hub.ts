@@ -113,6 +113,7 @@ async function run() {
       DZN_GAMES_CIRCUIT_FORGE_ENABLED: "true",
       DZN_GAMES_RANGER_RANGE_ENABLED: "true",
       DZN_GAMES_NIGHT_RUN_ENABLED: "true",
+      DZN_GAMES_NIGHT_RUN_RECON_ENABLED: "true",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
