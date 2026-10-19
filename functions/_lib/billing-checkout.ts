@@ -14,6 +14,16 @@ type Attempt = {
   first_requested_at: number | null; stripe_session_id: string | null;
 };
 type BillingAccount = { stripe_customer_id: string | null; stripe_subscription_id: string | null; plan_status: string };
+type StripeCheckoutAccount = {
+  charges_enabled?: boolean;
+  payouts_enabled?: boolean;
+  details_submitted?: boolean;
+  requirements?: {
+    disabled_reason?: string | null;
+    currently_due?: unknown[];
+    past_due?: unknown[];
+  } | null;
+};
 export class CheckoutRecoveryError extends Error {
   constructor(message: string, readonly code: string, readonly status = 409, readonly offer?: ReturningStarterOffer) { super(message); }
 }
@@ -35,6 +45,7 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
   }
   const fingerprint = await keyFingerprint(env.STRIPE_SECRET_KEY!);
   const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
+  await verifyLiveCheckoutAccount(env, mode);
   const verifiedPrices = new Set<string>();
   async function checkPrice(planKey: PurchasablePlanKey, priceId: unknown) {
     if (typeof priceId !== "string" || !/^price_[a-zA-Z0-9_]+$/.test(priceId)) throw priceError();
@@ -246,6 +257,22 @@ function offerChanged() {
 function priceError() {
   return new CheckoutRecoveryError("Plan pricing needs a support check before checkout. No new payment has been started.", "CHECKOUT_PRICE_REVIEW_REQUIRED", 503);
 }
+
+async function verifyLiveCheckoutAccount(env: Env, mode: "live" | "test") {
+  if (mode !== "live") return;
+  const account = await stripeGetRequest<StripeCheckoutAccount>(env, "/account").catch(() => {
+    throw new CheckoutRecoveryError("Payments are temporarily unavailable while the payment provider is checked. No payment has been started.", "LIVE_ACCOUNT_UNAVAILABLE", 503);
+  });
+  const requirements = account?.requirements;
+  const requirementsClear = requirements != null
+    && requirements.disabled_reason == null
+    && Array.isArray(requirements.currently_due) && requirements.currently_due.length === 0
+    && Array.isArray(requirements.past_due) && requirements.past_due.length === 0;
+  if (account?.charges_enabled !== true || account.payouts_enabled !== true || account.details_submitted !== true || !requirementsClear) {
+    throw new CheckoutRecoveryError("Payments are temporarily unavailable while the payment provider is checked. No payment has been started.", "LIVE_ACCOUNT_UNAVAILABLE", 503);
+  }
+}
+
 export async function verifyCheckoutPrice(env: Env, priceId: string, planKey: PurchasablePlanKey, mode: string) {
   const price = await stripeGetRequest<{
     id: string; active: boolean; livemode: boolean; currency: string; unit_amount: number; type: string;
