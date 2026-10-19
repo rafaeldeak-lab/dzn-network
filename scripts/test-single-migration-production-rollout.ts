@@ -14,6 +14,7 @@ const migrations = [
   "0100_games_hub_signal_shift.sql",
   "0101_games_hub_circuit_forge.sql",
   "0102_games_hub_ranger_range.sql",
+  "0105_games_hub_night_run_recon.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
