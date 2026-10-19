@@ -210,6 +210,22 @@ async function run() {
     assert.equal(value.db.sqlite.prepare("SELECT field_order FROM dzn_survival_command_expeditions WHERE id = ?").get(started.expedition!.id)?.field_order, "intercept");
   }, true, true);
 
+  await test("a locked field order remains visible and authoritative after its rollout flag is disabled", async value => {
+    await establish(value);
+    const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
+    value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET started_at = 0, ready_at = 1 WHERE id = ?").run(started.expedition!.id);
+    const ready = await payload(await request(value));
+    const ordered = await payload(await request(value, { action: "set-field-order", expeditionId: started.expedition!.id, version: ready.expedition!.version, order: "intercept", requestId: randomUUID() }));
+    const decision = ordered.expedition!.incident!.actions[0]!;
+    value.env.DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED = "false";
+    const rolledBack = await payload(await request(value));
+    assert.equal(rolledBack.fieldOrdersAvailable, false);
+    assert.equal(rolledBack.expedition?.fieldOrder, "intercept");
+    assert.ok(rolledBack.expedition?.incident?.actions.length);
+    const resolved = await payload(await request(value, { action: "resolve", expeditionId: started.expedition!.id, version: rolledBack.expedition!.version, requestId: randomUUID(), decision }));
+    assert.equal(resolved.history[0]?.fieldOrder, "intercept");
+  }, true, true);
+
   await test("expeditions and dossiers remain scoped to their initiating player", async value => {
     await establish(value);
     const started = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "balanced", loadout: "field_kit", requestId: randomUUID() }));
