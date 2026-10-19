@@ -80,7 +80,8 @@ async function run() {
   assert.match(gamesHubSource, /game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS\)\);/, "Relay Rush must end the client run when its server pulse deadline passes.");
   assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");
   assert.match(gamesHubSource, /response\.status === 429\) \{ startCooldown/, "Outpost Run must preserve a live run during its brief command cooldown.");
-  assert.match(gamesHubSource, /game\.scanAvailable \? game\.objective === "beacon" \? "Use beacon scanner" : "Use relay scanner" : "Scanner spent"/, "Outpost Run must show an unused scanner as available after the beacon unlocks the relay objective.");
+  assert.match(gamesHubSource, /OUTPOST_RUN_CONTRACTS\.map\(item =>/, "Outpost Run must expose each server-supported contract before a new run begins.");
+  assert.match(gamesHubSource, /game\.scanAvailable \? objectiveMeta\?\.command : "Scanner spent"/, "Outpost Run must present the scanner command for the current server-owned objective, including recovery cache stages.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(ECHO_ARRAY_COOLDOWN_MS\)/, "Echo Array must preserve active puzzles through a transient rate limit.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(SIGNAL_SHIFT_COOLDOWN_MS\)/, "Signal Shift must preserve active puzzles through a transient rate limit.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(CIRCUIT_FORGE_COOLDOWN_MS\)/, "Circuit Forge must preserve active puzzles through a transient rate limit.");

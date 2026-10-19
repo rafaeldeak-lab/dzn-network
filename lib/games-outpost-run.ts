@@ -7,11 +7,14 @@ export const OUTPOST_RUN_START_COOLDOWN_MS = 5_000;
 export const OUTPOST_RUN_MIN_MOVE_INTERVAL_MS = 180;
 
 export const OUTPOST_RUN_DIRECTIONS = ["north", "east", "south", "west"] as const;
+export const OUTPOST_RUN_CONTRACTS = ["survey", "intercept", "recovery"] as const;
 export type OutpostRunDirection = (typeof OUTPOST_RUN_DIRECTIONS)[number];
-export type OutpostRunCellKind = "start" | "clear" | "hazard" | "beacon" | "relay";
+export type OutpostRunContract = (typeof OUTPOST_RUN_CONTRACTS)[number];
+export type OutpostRunCellKind = "start" | "clear" | "hazard" | "beacon" | "cache" | "relay";
 export type OutpostRunStatus = "playing" | "won" | "failed" | "expired";
 export type OutpostRunIntensity = "calibration" | "pressure" | "blackout";
 export type OutpostRunSupport = "recon" | "shield";
+export type OutpostRunObjective = "beacon" | "cache" | "relay";
 
 export function outpostRunIntensity(moves: number): OutpostRunIntensity {
   if (moves >= 7) return "blackout";
@@ -37,8 +40,12 @@ export type OutpostRunGame = {
   moves: number;
   maxMoves: number;
   intensity: OutpostRunIntensity;
-  objective: "beacon" | "relay";
+  contract: OutpostRunContract | "legacy";
+  objective: OutpostRunObjective;
+  objectivesCompleted: number;
+  objectivesTotal: number;
   beaconSecured: boolean;
+  cacheSecured: boolean;
   scanHint: string | null;
   scanAvailable: boolean;
   reconAvailable: boolean;

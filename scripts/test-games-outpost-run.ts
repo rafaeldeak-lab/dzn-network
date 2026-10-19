@@ -6,13 +6,13 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesOutpostRun } from "../functions/_lib/games-outpost-run";
 import type { Env } from "../functions/_lib/types";
-import { OUTPOST_RUN_MAX_ENERGY, OUTPOST_RUN_MAX_MOVES, OUTPOST_RUN_REWARD, OUTPOST_RUN_TTL_MS, type OutpostRunDirection, type OutpostRunPayload } from "../lib/games-outpost-run";
+import { OUTPOST_RUN_MAX_ENERGY, OUTPOST_RUN_MAX_MOVES, OUTPOST_RUN_REWARD, OUTPOST_RUN_TTL_MS, type OutpostRunContract, type OutpostRunDirection, type OutpostRunPayload } from "../lib/games-outpost-run";
 import { scanVector } from "../components/games/outpost-run-3d";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof outpostFixture>>;
 type Coordinate = { row: number; column: number };
-type Layout = { target: Coordinate; hazards: Coordinate[]; beacon?: Coordinate; beaconSecured?: boolean };
+type Layout = { contract?: OutpostRunContract; target: Coordinate; hazards: Coordinate[]; beacon?: Coordinate; beaconSecured?: boolean; cache?: Coordinate; cacheSecured?: boolean };
 let passed = 0;
 
 async function outpostFixture(migrate = true) {
@@ -39,7 +39,7 @@ async function payload(response: Response) {
   return response.json() as Promise<OutpostRunPayload>;
 }
 
-async function start(fixture: Fixture) { return payload(await call(fixture, { action: "start" })); }
+async function start(fixture: Fixture, contract?: OutpostRunContract) { return payload(await call(fixture, contract ? { action: "start", contract } : { action: "start" })); }
 
 function layoutFor(fixture: Fixture): Layout {
   const row = fixture.db.sqlite.prepare("SELECT layout_json FROM dzn_outpost_run_sessions WHERE user_id = 'local-player'").get();
@@ -84,9 +84,13 @@ function safePath(start: Coordinate, target: Coordinate, hazards: Coordinate[]):
 async function completeRun(fixture: Fixture, initial: OutpostRunPayload, stopBeforeFinal = false) {
   let state = initial;
   const layout = layoutFor(fixture);
-  const beaconPath = layout.beacon ? safePath({ row: 2, column: 2 }, layout.beacon, layout.hazards) : [];
-  const relayPath = safePath(layout.beacon ?? { row: 2, column: 2 }, layout.target, layout.hazards);
-  const moves = [...beaconPath, ...relayPath];
+  const checkpoints = [layout.beacon, layout.cache, layout.target].filter((cell): cell is Coordinate => Boolean(cell));
+  let position = { row: 2, column: 2 };
+  const moves = checkpoints.flatMap(checkpoint => {
+    const path = safePath(position, checkpoint, layout.hazards);
+    position = checkpoint;
+    return path;
+  });
   const count = stopBeforeFinal ? moves.length - 1 : moves.length;
   for (let index = 0; index < count; index++) {
     settle(fixture);
@@ -158,9 +162,59 @@ async function run() {
     assert.equal(gameIds.size, 36);
   });
 
+  await test("contract selection changes the authoritative route, objectives and recovery budget", async fixture => {
+    const contracts: Array<[OutpostRunContract, number, number, number]> = [
+      ["survey", 2, 3, 10], ["intercept", 1, 3, 8], ["recovery", 3, 4, 12],
+    ];
+    for (const [contract, totalObjectives, maxEnergy, maxMoves] of contracts) {
+      let state = await start(fixture, contract);
+      const layout = layoutFor(fixture);
+      assert.equal(state.game?.contract, contract);
+      assert.equal(state.game?.objectivesTotal, totalObjectives);
+      assert.equal(state.game?.maxEnergy, maxEnergy);
+      assert.equal(state.game?.maxMoves, maxMoves);
+      assert.equal(layout.contract, contract);
+      assert.equal(layout.hazards.length, contract === "intercept" ? 6 : 5);
+      assert.equal(Boolean(layout.beacon), contract !== "intercept");
+      assert.equal(Boolean(layout.cache), contract === "recovery");
+
+      let completed: OutpostRunPayload;
+      if (contract === "recovery") {
+        assert.equal(state.game?.objective, "beacon");
+        settle(fixture);
+        state = await payload(await call(fixture, command(state, "scan")));
+        assert.equal(state.game?.scanAvailable, false);
+        for (const direction of safePath({ row: 2, column: 2 }, layout.beacon!, layout.hazards)) {
+          settle(fixture);
+          state = await payload(await call(fixture, command(state, "move", direction)));
+        }
+        assert.equal(state.game?.objective, "cache");
+        assert.equal(state.game?.scanAvailable, true, "Securing an objective must issue a fresh bearing for the next stage.");
+        settle(fixture);
+        state = await payload(await call(fixture, command(state, "scan")));
+        for (const direction of safePath(layout.beacon!, layout.cache!, layout.hazards)) {
+          settle(fixture);
+          state = await payload(await call(fixture, command(state, "move", direction)));
+        }
+        assert.equal(state.game?.objective, "relay");
+        assert.equal(state.game?.cacheSecured, true);
+        assert.equal(state.game?.scanAvailable, true, "The final extraction stage must receive its own scanner opportunity.");
+        for (const direction of safePath(layout.cache!, layout.target, layout.hazards)) {
+          settle(fixture);
+          state = await payload(await call(fixture, command(state, "move", direction)));
+        }
+        completed = state;
+      } else {
+        completed = (await completeRun(fixture, state)).state;
+      }
+      assert.equal(completed.game?.status, "won", `${contract} must remain completable through its server-issued objective order.`);
+      fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET started_at = started_at - 6000 WHERE user_id = 'local-player'").run();
+    }
+  });
+
   await test("strict request validation rejects forged shapes, rewards, early movement and repeat scans", async fixture => {
     const state = await start(fixture);
-    for (const body of [null, [], { action: "start", reward: 100 }, { action: "move" },
+    for (const body of [null, [], { action: "start", reward: 100 }, { action: "start", contract: "shortcut" }, { action: "move" },
       { ...command(state, "move", "north"), direction: "up" }, { ...command(state, "move", "north"), version: 1.5 },
       { ...command(state, "move", "north"), reward: OUTPOST_RUN_REWARD.xp },
       { ...supportCommand(state, "recon"), support: "teleport" }, { ...supportCommand(state, "shield"), direction: "north" }]) {
