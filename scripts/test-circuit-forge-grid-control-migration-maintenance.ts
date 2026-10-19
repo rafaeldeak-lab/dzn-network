@@ -11,7 +11,7 @@ assert.match(productionBlock, /^DZN_GAMES_CIRCUIT_FORGE_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE = /m);
 assert.match(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE = "true"$/m);
 assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "false"$/m);
-assert.doesNotMatch(productionBlock, /^DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "true"$/m);
+assert.match(productionBlock, /^DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED = "true"$/m);
 
 async function run() {
   const fixture = await gamesFixture();
