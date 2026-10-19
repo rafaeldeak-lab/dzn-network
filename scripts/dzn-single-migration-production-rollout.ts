@@ -28,7 +28,7 @@ type StatePreservationPlan = {
   afterSqlFragments: string[];
   addedColumns: Array<{
     name: string;
-    expectedValue: string;
+    expectedValue: string | null;
   }>;
 };
 
@@ -201,6 +201,36 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
         { name: "decoy_used", expectedValue: "0" },
         { name: "burst_used", expectedValue: "0" },
         { name: "gate_extension_ms", expectedValue: "0" },
+      ],
+    },
+  },
+  "0111_games_hub_circuit_forge_grid_control.sql": {
+    migration: "0111_games_hub_circuit_forge_grid_control.sql",
+    predecessor: "0110_games_hub_night_run_route_control.sql",
+    tables: [],
+    indexes: ["idx_dzn_circuit_forge_grid_control"],
+    statePreservation: {
+      table: playerOwnedTable("dzn_circuit_forge_sessions", ["user_id", "id", "rotations_json", "rotations", "status", "version", "started_at", "updated_at"]),
+      beforeColumns: ["user_id", "id", "rotations_json", "rotations", "status", "version", "started_at", "updated_at"],
+      afterColumns: ["user_id", "id", "rotations_json", "rotations", "status", "version", "started_at", "updated_at", "diagnostic_used", "phase_used", "diagnostic_index"],
+      rowColumns: ["user_id", "id", "rotations_json", "rotations", "status", "version", "started_at", "updated_at"],
+      sourceHash: "dbe9a7164829adac8d0b520ea49c159816eb30cb86d865a7f1cda2c0854abcc6",
+      beforeSqlFragments: [
+        "CHECK (JSON_VALID(ROTATIONS_JSON) AND JSON_TYPE(ROTATIONS_JSON) = 'ARRAY')",
+        "CHECK (ROTATIONS BETWEEN 0 AND 64)",
+        "CHECK (STATUS IN ('PLAYING', 'WON', 'FAILED'))",
+        "CHECK (VERSION BETWEEN 0 AND 64)",
+        "ID TEXT NOT NULL UNIQUE",
+      ],
+      afterSqlFragments: [
+        "DIAGNOSTIC_USED INTEGER NOT NULL DEFAULT 0 CHECK (DIAGNOSTIC_USED IN (0, 1))",
+        "PHASE_USED INTEGER NOT NULL DEFAULT 0 CHECK (PHASE_USED IN (0, 1))",
+        "DIAGNOSTIC_INDEX INTEGER CHECK (DIAGNOSTIC_INDEX IS NULL OR (DIAGNOSTIC_INDEX BETWEEN 0 AND 24 AND DIAGNOSTIC_INDEX <> 12))",
+      ],
+      addedColumns: [
+        { name: "diagnostic_used", expectedValue: "0" },
+        { name: "phase_used", expectedValue: "0" },
+        { name: "diagnostic_index", expectedValue: null },
       ],
     },
   },
@@ -678,8 +708,12 @@ function verifyStatePreservationAfter(
     throw new Error(`${state.table.name} default-initialization query returned ${initializedDefaults.length} rows for ${afterCount} preserved rows.`);
   }
   for (const addedColumn of state.addedColumns) {
-    if (initializedDefaults.some((row) => String(row[addedColumn.name] ?? "") !== addedColumn.expectedValue)) {
-      throw new Error(`${state.table.name}.${addedColumn.name} was not initialized to ${addedColumn.expectedValue} for every preserved row.`);
+    const invalid = initializedDefaults.some((row) => addedColumn.expectedValue === null
+      ? row[addedColumn.name] !== null
+      : String(row[addedColumn.name] ?? "") !== addedColumn.expectedValue);
+    if (invalid) {
+      const expected = addedColumn.expectedValue === null ? "NULL" : addedColumn.expectedValue;
+      throw new Error(`${state.table.name}.${addedColumn.name} was not initialized to ${expected} for every preserved row.`);
     }
   }
   console.log(`Production state preservation, default initialization, constraints, and foreign keys passed for ${migrationName}; ${beforeCount} ${state.table.name} rows retained.`);

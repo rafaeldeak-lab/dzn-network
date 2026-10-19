@@ -126,6 +126,9 @@ export async function handleGamesCircuitForge(request: Request, env: Env): Promi
     if (env.DZN_GAMES_HUB_ENABLED !== "true" || env.DZN_GAMES_CIRCUIT_FORGE_ENABLED !== "true") {
       return reply({ error: "DZN Circuit Forge is not open yet." }, 404);
     }
+    if (request.method === "POST" && env.DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE === "true") {
+      return reply({ error: "DZN Circuit Forge is temporarily unavailable during protected maintenance. Your board is unchanged." }, 503);
+    }
     const db = requireDb(env);
     const now = Date.now();
     const gridControlEnabled = env.DZN_GAMES_CIRCUIT_FORGE_GRID_CONTROL_ENABLED === "true";

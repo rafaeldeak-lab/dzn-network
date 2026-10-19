@@ -19,6 +19,7 @@ const migrations = [
   "0108_dzn_survival_command_expeditions.sql",
   "0109_dzn_survival_command_loadouts.sql",
   "0110_games_hub_night_run_route_control.sql",
+  "0111_games_hub_circuit_forge_grid_control.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -80,23 +81,29 @@ assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
 assert.match(workflow, /survival-command-loadout-migration/);
 assert.match(workflow, /night-run-route-control-migration/);
+assert.match(workflow, /circuit-forge-grid-control-migration/);
 assert.match(workflow, /Drain protected writes before the preservation baseline/);
 assert.equal(
   (workflow.match(/MIGRATION_NAME.*0109_dzn_survival_command_loadouts\.sql/g) ?? []).length,
   1,
   "The 0109 migration must remain explicitly gated by protected-write maintenance and draining.",
 );
-assert.equal(
-  (workflow.match(/MIGRATION_NAME.*0110_games_hub_night_run_route_control\.sql/g) ?? []).length,
-  2,
+assert.ok(
+  (workflow.match(/MIGRATION_NAME.*0110_games_hub_night_run_route_control\.sql/g) ?? []).length >= 2,
   "The 0110 migration must remain explicitly gated by protected-write maintenance and draining.",
+);
+assert.ok(
+  (workflow.match(/MIGRATION_NAME.*0111_games_hub_circuit_forge_grid_control\.sql/g) ?? []).length >= 2,
+  "The 0111 migration must remain explicitly gated by protected-write maintenance and draining.",
 );
 assert.match(workflow, /0109_dzn_survival_command_loadouts\.sql\)[\s\S]*?survival-command-loadout-maintenance/);
 assert.match(workflow, /0110_games_hub_night_run_route_control\.sql\)[\s\S]*?night-run-route-control-maintenance/);
 assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
 assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
 assert.match(workflow, /test:night-run-route-control-migration-maintenance/);
-assert.match(workflow, /Night Run session writes quiesced across two private read-only fingerprints/);
+assert.match(workflow, /test:circuit-forge-grid-control-migration-maintenance/);
+assert.match(workflow, /SESSION_LABEL="Night Run"/);
+assert.match(workflow, /SESSION_LABEL="Circuit Forge"/);
 assert.match(workflow, /migrations apply/);
 assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflow must have exactly one migration application command.");
 assert.match(workflow, /--config "\$\{MIGRATION_STAGE\}\/wrangler\.toml"/);
@@ -528,6 +535,109 @@ try {
   assert.match(`${incorrectDefault.stdout ?? ""}${incorrectDefault.stderr ?? ""}`, /decoy_used was not initialized to 0/);
 } finally {
   rmSync(nightRunRouteControlDirectory, { force: true, recursive: true });
+}
+
+const circuitForgeGridControlDirectory = mkdtempSync(join(process.cwd(), ".dzn-circuit-forge-grid-control-migration-test-"));
+try {
+  const run = (args: string[]) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/dzn-single-migration-production-rollout.ts", ...args], { encoding: "utf8" });
+  const wrappedRows = (rows: unknown[]) => JSON.stringify([{ results: rows }]);
+  const write = (name: string, value: string) => {
+    const path = join(circuitForgeGridControlDirectory, name);
+    writeFileSync(path, value, "utf8");
+    return path;
+  };
+  const gridControlIndex = migrationNames.indexOf("0111_games_hub_circuit_forge_grid_control.sql");
+  assert.equal(migrationNames[gridControlIndex - 1], "0110_games_hub_night_run_route_control.sql");
+  const ledger = write("ledger.json", wrappedRows(migrationNames.slice(0, gridControlIndex).map((name) => ({ name }))));
+  const verifiedLedger = run(["verify-ledger", "--migration", "0111_games_hub_circuit_forge_grid_control.sql", "--ledger", ledger, "--phase", "before"]);
+  assert.equal(verifiedLedger.status, 0, `${verifiedLedger.stdout ?? ""}${verifiedLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(circuitForgeGridControlDirectory, "stage");
+  const preparedStage = run(["prepare", "--migration", "0111_games_hub_circuit_forge_grid_control.sql", "--stage-dir", stageDirectory]);
+  assert.equal(preparedStage.status, 0, `${preparedStage.stdout ?? ""}${preparedStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    migration: { predecessor: string; statePreservation?: { sourceHash: string; addedColumns: Array<{ name: string; expectedValue: string | null }> } };
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.equal(prepared.migration.predecessor, "0110_games_hub_night_run_route_control.sql");
+  assert.equal(prepared.migration.statePreservation?.sourceHash, "dbe9a7164829adac8d0b520ea49c159816eb30cb86d865a7f1cda2c0854abcc6");
+  assert.deepEqual(prepared.migration.statePreservation?.addedColumns, [
+    { name: "diagnostic_used", expectedValue: "0" },
+    { name: "phase_used", expectedValue: "0" },
+    { name: "diagnostic_index", expectedValue: null },
+  ]);
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql), ["idx_dzn_circuit_forge_grid_control"]);
+
+  const row = {
+    user_id: "user-a",
+    id: "circuit-forge-a",
+    rotations_json: "[0,1,2]",
+    rotations: 3,
+    status: "playing",
+    version: 3,
+    started_at: 1,
+    updated_at: 2,
+  };
+  const beforeSql = "CREATE TABLE dzn_circuit_forge_sessions (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL UNIQUE, rotations_json TEXT NOT NULL CHECK (json_valid(rotations_json) AND json_type(rotations_json) = 'array'), rotations INTEGER NOT NULL DEFAULT 0 CHECK (rotations BETWEEN 0 AND 64), status TEXT NOT NULL DEFAULT 'playing' CHECK (status IN ('playing', 'won', 'failed')), version INTEGER NOT NULL DEFAULT 0 CHECK (version BETWEEN 0 AND 64), started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)";
+  const afterSql = `${beforeSql.slice(0, -1)}, diagnostic_used INTEGER NOT NULL DEFAULT 0 CHECK (diagnostic_used IN (0, 1)), phase_used INTEGER NOT NULL DEFAULT 0 CHECK (phase_used IN (0, 1)), diagnostic_index INTEGER CHECK (diagnostic_index IS NULL OR (diagnostic_index BETWEEN 0 AND 24 AND diagnostic_index <> 12)))`;
+  const columns = ["user_id", "id", "rotations_json", "rotations", "status", "version", "started_at", "updated_at"];
+  const foreignKeys = write("foreign-keys.json", wrappedRows([{ from: "user_id", table: "users", to: "id", on_delete: "CASCADE" }]));
+  const foreignKeyCheck = write("foreign-key-check.json", wrappedRows([]));
+  const baseline = run([
+    "verify-state-preservation-before",
+    "--migration", "0111_games_hub_circuit_forge_grid_control.sql",
+    "--objects", write("before-objects.json", wrappedRows([{ type: "table", name: "dzn_circuit_forge_sessions", tbl_name: "dzn_circuit_forge_sessions", sql: beforeSql }])),
+    "--table-info", write("before-info.json", wrappedRows(columns.map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+  ]);
+  assert.equal(baseline.status, 0, `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`);
+
+  const beforeRows = write("before-rows.json", wrappedRows([row]));
+  const afterRows = write("after-rows.json", wrappedRows([row]));
+  const beforeFingerprint = join(circuitForgeGridControlDirectory, "before.sha256");
+  const afterFingerprint = join(circuitForgeGridControlDirectory, "after.sha256");
+  const beforeHash = run(["fingerprint", "--rows", beforeRows]);
+  const afterHash = run(["fingerprint", "--rows", afterRows]);
+  assert.equal(beforeHash.status, 0, beforeHash.stderr);
+  assert.equal(afterHash.status, 0, afterHash.stderr);
+  writeFileSync(beforeFingerprint, beforeHash.stdout.trim(), "utf8");
+  writeFileSync(afterFingerprint, afterHash.stdout.trim(), "utf8");
+  const defaultQuery = run(["print-state-preservation-defaults-query", "--migration", "0111_games_hub_circuit_forge_grid_control.sql"]);
+  assert.equal(defaultQuery.status, 0, defaultQuery.stderr);
+  assert.match(defaultQuery.stdout, /SELECT id, diagnostic_used, phase_used, diagnostic_index FROM dzn_circuit_forge_sessions/);
+  const verified = run([
+    "verify-state-preservation-after",
+    "--migration", "0111_games_hub_circuit_forge_grid_control.sql",
+    "--objects", write("after-objects.json", wrappedRows([{ type: "table", name: "dzn_circuit_forge_sessions", tbl_name: "dzn_circuit_forge_sessions", sql: afterSql }])),
+    "--table-info", write("after-info.json", wrappedRows([...columns, "diagnostic_used", "phase_used", "diagnostic_index"].map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", write("before-count.json", wrappedRows([{ row_count: 1 }])),
+    "--after-row-count", write("after-count.json", wrappedRows([{ row_count: 1 }])),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("defaults.json", wrappedRows([{ id: "circuit-forge-a", diagnostic_used: 0, phase_used: 0, diagnostic_index: null }])),
+  ]);
+  assert.equal(verified.status, 0, `${verified.stdout ?? ""}${verified.stderr ?? ""}`);
+  assert.match(verified.stdout, /1 dzn_circuit_forge_sessions rows retained/);
+  const invalidNullDefault = run([
+    "verify-state-preservation-after",
+    "--migration", "0111_games_hub_circuit_forge_grid_control.sql",
+    "--objects", join(circuitForgeGridControlDirectory, "after-objects.json"),
+    "--table-info", join(circuitForgeGridControlDirectory, "after-info.json"),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", join(circuitForgeGridControlDirectory, "before-count.json"),
+    "--after-row-count", join(circuitForgeGridControlDirectory, "after-count.json"),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("invalid-defaults.json", wrappedRows([{ id: "circuit-forge-a", diagnostic_used: 0, phase_used: 0, diagnostic_index: 3 }])),
+  ]);
+  assert.notEqual(invalidNullDefault.status, 0, "The verifier must reject a non-null diagnostic index on every preserved Circuit Forge session.");
+  assert.match(`${invalidNullDefault.stdout ?? ""}${invalidNullDefault.stderr ?? ""}`, /diagnostic_index was not initialized to NULL/);
+} finally {
+  rmSync(circuitForgeGridControlDirectory, { force: true, recursive: true });
 }
 
 console.log("Single-migration production rollout safety tests passed.");

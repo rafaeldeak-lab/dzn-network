@@ -23,6 +23,7 @@ on:
           - 0108_dzn_survival_command_expeditions.sql
           - 0109_dzn_survival_command_loadouts.sql
           - 0110_games_hub_night_run_route_control.sql
+          - 0111_games_hub_circuit_forge_grid_control.sql
       confirm_production_migration:
         description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
         required: true
@@ -83,7 +84,7 @@ jobs:
             exit 1
           fi
           case "${MIGRATION_NAME_INPUT}" in
-            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql|0110_games_hub_night_run_route_control.sql) ;;
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql|0110_games_hub_night_run_route_control.sql|0111_games_hub_circuit_forge_grid_control.sql) ;;
             *)
               echo "::error::migration_name is not an approved single-migration target."
               exit 1
@@ -119,6 +120,7 @@ jobs:
           npm run test:single-migration-production-rollout
           npm run test:survival-command-loadout-migration-maintenance
           npm run test:night-run-route-control-migration-maintenance
+          npm run test:circuit-forge-grid-control-migration-maintenance
           npm run test:games-hub
           git diff --check
 
@@ -133,6 +135,10 @@ jobs:
             0110_games_hub_night_run_route_control.sql)
               MAINTENANCE_URL="https://dayz-network.com/api/health/night-run-route-control-migration"
               EXPECTED_STATUS="night-run-route-control-maintenance"
+              ;;
+            0111_games_hub_circuit_forge_grid_control.sql)
+              MAINTENANCE_URL="https://dayz-network.com/api/health/circuit-forge-grid-control-migration"
+              EXPECTED_STATUS="circuit-forge-grid-control-maintenance"
               ;;
             *)
               echo "Protected write maintenance is not required for ${MIGRATION_NAME}."
@@ -187,7 +193,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
         run: |
           set -euo pipefail
-          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ] && [ "${MIGRATION_NAME}" != "0110_games_hub_night_run_route_control.sql" ]; then
+          if [ "${MIGRATION_NAME}" != "0109_dzn_survival_command_loadouts.sql" ] && [ "${MIGRATION_NAME}" != "0110_games_hub_night_run_route_control.sql" ] && [ "${MIGRATION_NAME}" != "0111_games_hub_circuit_forge_grid_control.sql" ]; then
             echo "Protected-write drain is not required for ${MIGRATION_NAME}."
             exit 0
           fi
@@ -223,12 +229,19 @@ jobs:
             exit 1
           fi
 
-          if [ "${MIGRATION_NAME}" = "0110_games_hub_night_run_route_control.sql" ]; then
+          if [ "${MIGRATION_NAME}" = "0110_games_hub_night_run_route_control.sql" ] || [ "${MIGRATION_NAME}" = "0111_games_hub_circuit_forge_grid_control.sql" ]; then
+            if [ "${MIGRATION_NAME}" = "0110_games_hub_night_run_route_control.sql" ]; then
+              SESSION_LABEL="Night Run"
+              FINGERPRINT_PREFIX="night-run"
+            else
+              SESSION_LABEL="Circuit Forge"
+              FINGERPRINT_PREFIX="circuit-forge"
+            fi
             STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
-            FIRST_ROWS="${MIGRATION_STAGE}/night-run-quiesce-one.json"
-            SECOND_ROWS="${MIGRATION_STAGE}/night-run-quiesce-two.json"
-            FIRST_FINGERPRINT="${MIGRATION_STAGE}/night-run-quiesce-one.sha256"
-            SECOND_FINGERPRINT="${MIGRATION_STAGE}/night-run-quiesce-two.sha256"
+            FIRST_ROWS="${MIGRATION_STAGE}/${FINGERPRINT_PREFIX}-quiesce-one.json"
+            SECOND_ROWS="${MIGRATION_STAGE}/${FINGERPRINT_PREFIX}-quiesce-two.json"
+            FIRST_FINGERPRINT="${MIGRATION_STAGE}/${FINGERPRINT_PREFIX}-quiesce-one.sha256"
+            SECOND_FINGERPRINT="${MIGRATION_STAGE}/${FINGERPRINT_PREFIX}-quiesce-two.sha256"
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json --command "${STATE_ROWS_QUERY}" > "${FIRST_ROWS}"
             npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint --rows "${FIRST_ROWS}" > "${FIRST_FINGERPRINT}"
             rm -f "${FIRST_ROWS}"
@@ -237,12 +250,12 @@ jobs:
             npx tsx scripts/dzn-single-migration-production-rollout.ts fingerprint --rows "${SECOND_ROWS}" > "${SECOND_FINGERPRINT}"
             rm -f "${SECOND_ROWS}"
             if ! cmp -s "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"; then
-              echo "::error::Night Run sessions changed while protected maintenance was active. No migration was applied."
+              echo "::error::${SESSION_LABEL} sessions changed while protected maintenance was active. No migration was applied."
               rm -f "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"
               exit 1
             fi
             rm -f "${FIRST_FINGERPRINT}" "${SECOND_FINGERPRINT}"
-            echo "Night Run session writes quiesced across two private read-only fingerprints."
+            echo "${SESSION_LABEL} session writes quiesced across two private read-only fingerprints."
           fi
 
       - name: Record D1 recovery bookmark
