@@ -12,10 +12,11 @@ The order is part of the deterministic outcome fingerprint. Browser input never 
 
 ## Release Boundary
 
-- Source ships with `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED` absent from `wrangler.toml`; therefore production and preview keep the existing Survival Command flow.
+- Source keeps `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED` absent from `wrangler.toml`; therefore production and preview keep the existing Survival Command flow.
+- This release enables only `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE=true` with `DZN_ACCOUNT_DELETE_ENABLED=false` in production. Authenticated reads remain available, while Survival Command writes and account closure are paused before the retained expedition rows are fingerprinted.
 - Existing expeditions continue to use the pre-field-order decision flow while the flag is absent or `false`.
 - The Field Order interface appears only when both the flag is exactly `true` and the isolated schema is present.
-- There is no migration, flag, customer, Discord, Nitrado, or billing action in this source release.
+- There is no migration, customer, Discord, Nitrado, or billing action in this source release. The maintenance flag is removed by a separately reviewed cleanup release after the isolated D1 operation succeeds.
 
 ## Controlled Production Activation
 

@@ -429,6 +429,9 @@ export async function handleSurvivalCommand(request: Request, env: Env): Promise
     if (env.DZN_SURVIVAL_COMMAND_ENABLED !== "true" || env.DZN_COMMAND_CENTRE_ENABLED !== "true") {
       return reply({ error: "Survival Command is not open on this environment yet." }, 503);
     }
+    if (request.method === "POST" && env.DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE === "true") {
+      return reply({ error: "Survival Command is temporarily unavailable while protected field-order maintenance is in progress." }, 503);
+    }
     const db = requireDb(env);
     if (!(await schemaIsReady(db))) return reply({ error: "Survival Command is preparing secure expedition storage. Try again shortly." }, 503);
     const fieldOrdersSchemaReady = await fieldOrdersSchemaIsReady(db);
