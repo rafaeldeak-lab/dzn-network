@@ -121,6 +121,7 @@ export function SurvivalCommand() {
   const activeSector = expedition ? payload?.sectors.find(sector => sector.key === expedition.sector) ?? null : null;
   const directiveTarget = expedition ? { sector: expedition.sector, approach: expedition.approach } : { sector: selectedSector, approach };
   const directiveMatch = payload ? survivalCommandDirectiveMatches(payload.dailyDirective, directiveTarget.sector, directiveTarget.approach) : false;
+  const activeDirective = Boolean(expedition && payload && payload.dailyDirective.dayKey !== payload.deployment.dayKey);
   return <main className={styles.page} data-motion={motionRunning ? "running" : "paused"}>
     <SiteHeaderAuthState authenticated={Boolean(payload)} checkingAccount={!payload && !error} returnTo="/survival-command" />
     <div className={styles.shell}>
@@ -150,7 +151,7 @@ export function SurvivalCommand() {
               <div><dt>HQ level</dt><dd>{payload?.buildings?.headquarters ?? "--"}</dd></div>
             </dl>
             {payload && <div className={styles.dailyDirective} data-completed={payload.dailyDirective.completed} data-locked={!payload.dailyDirective.sectorUnlocked}>
-              <div className={styles.directiveHeading}><span><Zap size={14} />Daily directive</span><em>{payload.dailyDirective.completed ? "Secured" : payload.dailyDirective.sectorUnlocked ? "Live" : "Locked"}</em></div>
+              <div className={styles.directiveHeading}><span><Zap size={14} />{activeDirective ? "Active directive" : "Daily directive"}</span><em>{payload.dailyDirective.completed ? "Secured" : payload.dailyDirective.sectorUnlocked ? "Live" : "Locked"}</em></div>
               <strong>{payload.dailyDirective.name}</strong>
               <p>{payload.dailyDirective.detail}</p>
               <div className={styles.directiveMeta}><span>{payload.sectors.find(sector => sector.key === payload.dailyDirective.sector)?.name ?? payload.dailyDirective.sector}</span><span>{SURVIVAL_COMMAND_APPROACHES[payload.dailyDirective.approach].name}</span></div>

@@ -296,7 +296,7 @@ async function run() {
     assert.ok(protectedSeed, "Overwatch should reduce the deterministic strained-return range.");
   });
 
-  await test("daily directives are deterministic, server-owned and paid only once per deployment day", async value => {
+  await test("daily directives stay aligned to active deployment days and are paid only once", async value => {
     await establish(value);
     const directiveDay = Array.from({ length: 180 }, (_, index) => `2034-05-${String((index % 28) + 1).padStart(2, "0")}`)
       .find(day => {
@@ -322,6 +322,8 @@ async function run() {
     const first = await payload(await request(value, { action: "deploy", sector: "perimeter", approach: "scout", loadout: "field_kit", requestId: randomUUID() }));
     value.db.sqlite.prepare("UPDATE dzn_survival_command_expeditions SET deployment_day = ?, started_at = 0, ready_at = 1 WHERE id = ?").run(directiveDay, first.expedition!.id);
     const ready = await payload(await request(value));
+    assert.equal(ready.dailyDirective?.dayKey, directiveDay, "An expedition crossing UTC rollover must retain its deployment-day directive.");
+    assert.equal(ready.dailyDirective?.key, directive.key, "The active directive must remain aligned to the route being resolved.");
     const action = ready.expedition!.incident!.actions[0]! as SurvivalCommandAction;
     const firstSeed = (value.db.sqlite.prepare("SELECT seed FROM dzn_survival_command_expeditions WHERE id = ?").get(first.expedition!.id) as { seed: string } | undefined)?.seed;
     assert.ok(firstSeed);

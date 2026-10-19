@@ -160,8 +160,7 @@ function visibleExpedition(row: ExpeditionRow, now: number, fieldOrdersAvailable
 
 async function readPayload(db: D1Database, user: SessionUser, now: number, fieldOrdersAvailable: boolean, fieldOrdersSchemaReady: boolean): Promise<SurvivalCommandPayload> {
   const currentDay = dayKey(now);
-  const dailyDirective = survivalCommandDailyDirectiveFor(user.id, currentDay);
-  const [profile, buildings, resources, used, active, history, unlocked, directiveCompletion] = await Promise.all([
+  const [profile, buildings, resources, used, active, history, unlocked] = await Promise.all([
     db.prepare("SELECT established_at FROM dzn_survival_command_profiles WHERE user_id = ?").bind(user.id).first<ProfileRow>(),
     readBuildingLevels(db, user.id),
     readResources(db, user.id),
@@ -174,12 +173,16 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
       JOIN dzn_survival_command_resolution_ledger AS ledger ON ledger.expedition_id = expedition.id
       WHERE expedition.user_id = ? ORDER BY ledger.resolved_at DESC, ledger.id DESC LIMIT 5`).bind(user.id).all<HistoryRow>(),
     db.prepare("SELECT loadout FROM dzn_survival_command_loadout_unlocks WHERE user_id = ?").bind(user.id).all<{ loadout: SurvivalCommandLoadout }>(),
-    db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
-      JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
-      WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
-        AND substr(ledger.outcome_fingerprint, 1, 2) = ?
-      LIMIT 1`).bind(user.id, currentDay, dailyDirective.sector, dailyDirective.approach, survivalCommandDirectiveFingerprintMarker(dailyDirective)).first<{ id: string }>(),
   ]);
+  // Missions can cross UTC midnight. Keep an active mission's briefing, map
+  // marker and settlement aligned to its immutable deployment day.
+  const directiveDay = active?.deployment_day ?? currentDay;
+  const dailyDirective = survivalCommandDailyDirectiveFor(user.id, directiveDay);
+  const directiveCompletion = await db.prepare(`SELECT ledger.id FROM dzn_survival_command_resolution_ledger AS ledger
+    JOIN dzn_survival_command_expeditions AS expedition ON expedition.id = ledger.expedition_id
+    WHERE ledger.user_id = ? AND expedition.deployment_day = ? AND expedition.sector = ? AND expedition.approach = ?
+      AND substr(ledger.outcome_fingerprint, 1, 2) = ?
+    LIMIT 1`).bind(user.id, directiveDay, dailyDirective.sector, dailyDirective.approach, survivalCommandDirectiveFingerprintMarker(dailyDirective)).first<{ id: string }>();
   const sectors = SURVIVAL_COMMAND_SECTOR_KEYS.map(key => {
     const sector = SURVIVAL_COMMAND_SECTORS[key];
     const lockReason = sectorLockReason(key, buildings);
@@ -216,7 +219,7 @@ async function readPayload(db: D1Database, user: SessionUser, now: number, field
     sectors,
     dailyDirective: {
       ...dailyDirective,
-      dayKey: currentDay,
+      dayKey: directiveDay,
       sectorUnlocked: !sectorLockReason(dailyDirective.sector, buildings),
       completed: Boolean(directiveCompletion),
     },
