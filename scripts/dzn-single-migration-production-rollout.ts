@@ -34,11 +34,11 @@ type PreparedPlan = {
   expectedObjectSql: Record<string, string>;
 };
 
-function playerOwnedTable(name: string, columns: string[]): TablePlan {
+function playerOwnedTable(name: string, columns: string[], additionalForeignKeys: ForeignKey[] = []): TablePlan {
   return {
     name,
     columns,
-    foreignKeys: [{ from: "user_id", table: "users", to: "id", onDelete: "CASCADE" }],
+    foreignKeys: [{ from: "user_id", table: "users", to: "id", onDelete: "CASCADE" }, ...additionalForeignKeys],
   };
 }
 
@@ -123,6 +123,25 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       playerOwnedTable("dzn_command_centre_spend_ledger", ["id", "user_id", "request_id", "building", "from_level", "to_level", "parts_spent", "created_at"]),
     ],
     indexes: ["idx_dzn_command_centre_buildings_state", "idx_dzn_command_centre_spend_history"],
+  },
+  "0108_dzn_survival_command_expeditions.sql": {
+    migration: "0108_dzn_survival_command_expeditions.sql",
+    predecessor: "0107_dzn_command_centre.sql",
+    tables: [
+      playerOwnedTable("dzn_survival_command_profiles", ["user_id", "established_at", "updated_at"]),
+      playerOwnedTable("dzn_survival_command_expeditions", ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version"]),
+      playerOwnedTable(
+        "dzn_survival_command_resolution_ledger",
+        ["id", "user_id", "expedition_id", "request_id", "action", "outcome", "salvage", "intel", "outcome_fingerprint", "resolved_at"],
+        [{ from: "expedition_id", table: "dzn_survival_command_expeditions", to: "id", onDelete: "CASCADE" }],
+      ),
+    ],
+    indexes: [
+      "idx_dzn_survival_command_one_active_expedition",
+      "idx_dzn_survival_command_expeditions_user_recent",
+      "idx_dzn_survival_command_expeditions_daily",
+      "idx_dzn_survival_command_resolution_history",
+    ],
   },
 };
 
@@ -241,7 +260,7 @@ function expectedObjectSql(plan: MigrationPlan) {
       continue;
     }
 
-    const indexMatch = statement.match(/^CREATE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
+    const indexMatch = statement.match(/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
     if (indexMatch) {
       const name = indexMatch[1];
       const tableName = indexMatch[2];

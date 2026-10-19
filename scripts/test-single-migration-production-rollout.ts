@@ -16,6 +16,7 @@ const migrations = [
   "0102_games_hub_ranger_range.sql",
   "0105_games_hub_night_run_recon.sql",
   "0107_dzn_command_centre.sql",
+  "0108_dzn_survival_command_expeditions.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -115,6 +116,8 @@ const relayRushIndex = migrationNames.indexOf("0096_games_hub_relay_rush.sql");
 assert.ok(relayRushIndex > 0, "Relay Rush must have an established predecessor.");
 const commandCentreIndex = migrationNames.indexOf("0107_dzn_command_centre.sql");
 assert.ok(commandCentreIndex > 0, "Command Centre must have an established predecessor.");
+const survivalExpeditionsIndex = migrationNames.indexOf("0108_dzn_survival_command_expeditions.sql");
+assert.ok(survivalExpeditionsIndex > commandCentreIndex, "Survival Command expeditions must follow Command Centre.");
 
 function verifyLedger(names: string[]) {
   const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));
@@ -211,6 +214,71 @@ try {
   ]);
 } finally {
   rmSync(commandCentreDirectory, { force: true, recursive: true });
+}
+
+const survivalExpeditionsDirectory = mkdtempSync(join(process.cwd(), ".dzn-survival-expeditions-migration-test-"));
+try {
+  const ledgerPath = join(survivalExpeditionsDirectory, "ledger.json");
+  writeFileSync(ledgerPath, JSON.stringify([{ results: migrationNames.slice(0, survivalExpeditionsIndex).map((name) => ({ name })) }]), "utf8");
+  const survivalExpeditionsLedger = spawnSync(
+    process.execPath,
+    [
+      "node_modules/tsx/dist/cli.mjs",
+      "scripts/dzn-single-migration-production-rollout.ts",
+      "verify-ledger",
+      "--migration",
+      "0108_dzn_survival_command_expeditions.sql",
+      "--ledger",
+      ledgerPath,
+      "--phase",
+      "before",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(survivalExpeditionsLedger.status, 0, `${survivalExpeditionsLedger.stdout ?? ""}${survivalExpeditionsLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(survivalExpeditionsDirectory, "stage");
+  const survivalExpeditionsStage = spawnSync(
+    process.execPath,
+    [
+      "node_modules/tsx/dist/cli.mjs",
+      "scripts/dzn-single-migration-production-rollout.ts",
+      "prepare",
+      "--migration",
+      "0108_dzn_survival_command_expeditions.sql",
+      "--stage-dir",
+      stageDirectory,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(survivalExpeditionsStage.status, 0, `${survivalExpeditionsStage.stdout ?? ""}${survivalExpeditionsStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    migration: { predecessor: string; tables: Array<{ name: string; foreignKeys: Array<{ from: string; table: string; to: string; onDelete: string }> }> };
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.equal(prepared.migration.predecessor, "0107_dzn_command_centre.sql");
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql).sort(), [
+    "dzn_survival_command_expeditions",
+    "dzn_survival_command_profiles",
+    "dzn_survival_command_resolution_ledger",
+    "idx_dzn_survival_command_expeditions_daily",
+    "idx_dzn_survival_command_expeditions_user_recent",
+    "idx_dzn_survival_command_one_active_expedition",
+    "idx_dzn_survival_command_resolution_history",
+  ]);
+  assert.match(
+    prepared.expectedObjectSql.idx_dzn_survival_command_one_active_expedition,
+    /^CREATE UNIQUE INDEX idx_dzn_survival_command_one_active_expedition /,
+  );
+  assert.deepEqual(
+    prepared.migration.tables.find((table) => table.name === "dzn_survival_command_resolution_ledger")?.foreignKeys,
+    [
+      { from: "user_id", table: "users", to: "id", onDelete: "CASCADE" },
+      { from: "expedition_id", table: "dzn_survival_command_expeditions", to: "id", onDelete: "CASCADE" },
+    ],
+  );
+} finally {
+  rmSync(survivalExpeditionsDirectory, { force: true, recursive: true });
 }
 
 console.log("Single-migration production rollout safety tests passed.");
