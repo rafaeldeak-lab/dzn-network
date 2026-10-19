@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { unstable_readConfig } from "wrangler";
-import { hasMine, hasFlag, isRevealed, setIsRevealed, setHasFlag } from "@taros-minesweeper/lib";
+import { getSurroundingMineCount, hasMine, hasFlag, isRevealed, setIsRevealed, setHasFlag } from "@taros-minesweeper/lib";
 import { handleGamesHub, readHub } from "../functions/_lib/games-hub";
-import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/_lib/games-hub-engine";
+import { createGameBoard, gameView, moveGame, scanGame, type GameRow } from "../functions/_lib/games-hub-engine";
 import { GAME_MODES, HUB_EQUIPMENT, hubEquipmentUnlocked, type GameMode, type HubPayload } from "../lib/games-hub";
 import { gamesFixture } from "./lib/games-hub-local";
 
@@ -58,11 +58,11 @@ async function run() {
   assert.match(gamesHubSource, /Every result below is checked by the DZN game service/, "Operations Command must describe the server-verified reward boundary truthfully.");
   assert.match(gamesHubStyles, /\.operationsCommand/, "Games Hub must retain the compact Operations Command layout.");
   assert.match(gamesHubStyles, /grid-auto-flow: column/, "Narrow Games Hub layouts must use a compact browseable operations rail instead of a twelve-card vertical stack.");
-  assert.match(gamesHubSource, /minefield-night-recon-v2\.png/, "Minefield must use the dedicated reconnaissance briefing artwork rather than a generic scanner placeholder.");
-  assert.match(gamesHubStyles, /minefield-command-table-v1\.webp/, "The 3D Minefield field must use the original demining command-table environment.");
-  assert.match(minefieldSceneSource, /alpha: true/, "The Minefield tactical tiles must render transparently above the command-table environment.");
-  assert.match(minefieldSceneSource, /onUnsupported/, "Minefield must retain the tactical-grid fallback when WebGL is unavailable.");
-  assert.match(gamesHubSource, /Clear every safe sector before the window closes\./, "Minefield briefing must communicate the actual objective before the player starts.");
+  assert.match(gamesHubSource, /sector-sweep-command-v1\.png/, "Sector Sweep must use its dedicated original tactical briefing artwork.");
+  assert.match(gamesHubStyles, /sector-sweep-command-v1\.png/, "The 3D Sector Sweep field must retain the original clearance command environment.");
+  assert.match(minefieldSceneSource, /scanMarkers/, "Sector Sweep must visibly render server-confirmed scanner pings in the 3D field.");
+  assert.match(minefieldSceneSource, /onUnsupported/, "Sector Sweep must retain the tactical-grid fallback when WebGL is unavailable.");
+  assert.match(gamesHubSource, /Local drone scans show density, never a solution\./, "Sector Sweep briefing must describe the non-spoiling scanner boundary before the player starts.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
   assert.match(gamesHubSource, /game\.recoveredSignals\.map/, "Signal Hunt may render only server-confirmed recovered markers.");
@@ -193,6 +193,30 @@ async function run() {
     assert.equal(moveGame(row, 0, 0, "reveal"), null);
     assert.equal(hasFlag(moveGame(row, 0, 0, "flag")!.board[0][0]), false);
   });
+  await test("Sector Sweep scans persist bounded local density without exposing a solution", async f => {
+    const started = await payload(await call(f, { action: "start", mode: "recon" }));
+    assert.equal((await call(f, { action: "scan", gameId: started.game!.id, version: started.game!.version, x: 0, y: 0 })).status, 409);
+    const initial = f.db.sqlite.prepare("SELECT board_json FROM dzn_game_sessions WHERE user_id = 'local-player'").get() as { board_json: string };
+    const initialBoard = (JSON.parse(initial.board_json) as { cells: number[][] }).cells;
+    const openingIndex = initialBoard.flat().findIndex((cell, index) => !hasMine(cell) && getSurroundingMineCount(initialBoard, index % GAME_MODES.recon.size, Math.floor(index / GAME_MODES.recon.size)) > 0);
+    assert.ok(openingIndex >= 0);
+    const opening = await payload(await call(f, { action: "move", gameId: started.game!.id, version: started.game!.version, x: openingIndex % GAME_MODES.recon.size, y: Math.floor(openingIndex / GAME_MODES.recon.size), tool: "reveal" }));
+    const scanTarget = opening.game!.cells.flat().findIndex(cell => cell === "hidden");
+    const scan = await payload(await call(f, { action: "scan", gameId: opening.game!.id, version: opening.game!.version, x: scanTarget % GAME_MODES.recon.size, y: Math.floor(scanTarget / GAME_MODES.recon.size) }));
+    assert.equal(scan.game?.scans.length, 1);
+    assert.equal(scan.game?.scans[0]?.x, scanTarget % GAME_MODES.recon.size);
+    assert.equal(scan.game?.scans[0]?.y, Math.floor(scanTarget / GAME_MODES.recon.size));
+    assert.ok((scan.game?.scans[0]?.threats ?? -1) >= 0 && (scan.game?.scans[0]?.threats ?? 10) <= 9);
+    assert.ok(scan.game?.cells.flat().some(cell => typeof cell === "number"));
+    assert.equal((await call(f, { action: "scan", gameId: scan.game!.id, version: scan.game!.version, x: scanTarget % GAME_MODES.recon.size, y: Math.floor(scanTarget / GAME_MODES.recon.size) })).status, 409);
+
+    const stored = f.db.sqlite.prepare("SELECT * FROM dzn_game_sessions WHERE user_id = 'local-player'").get() as GameRow;
+    const secondTarget = scan.game!.cells.flat().findIndex((cell, index) => cell === "hidden" && index !== scanTarget);
+    assert.ok(secondTarget >= 0);
+    const next = scanGame(stored, secondTarget % GAME_MODES.recon.size, Math.floor(secondTarget / GAME_MODES.recon.size))!;
+    assert.equal(next.state.scans.length, 2);
+    assert.equal(next.board.flat().filter(hasMine).length, GAME_MODES.recon.mines);
+  });
   await test("verified victory grants once; duplicate, replay and second daily win grant nothing extra", async f => {
     const move = almostWon(f);
     const won = await payload(await call(f, move));
@@ -243,7 +267,8 @@ async function run() {
     const move = almostWon(f);
     assert.equal((await call(f, { ...move, version: 2 })).status, 409);
     const row = f.db.sqlite.prepare("SELECT * FROM dzn_game_sessions").get()!;
-    const board = JSON.parse(row.board_json as string) as number[][];
+    const storedState = JSON.parse(row.board_json as string) as { cells?: number[][] } | number[][];
+    const board = Array.isArray(storedState) ? storedState : storedState.cells!;
     const mine = board.flat().findIndex(hasMine);
     const lost = await payload(await call(f, { ...move, x: mine % 10, y: Math.floor(mine / 10) }));
     assert.equal(lost.game?.status, "lost"); assert.equal(lost.summary.xp, 0);

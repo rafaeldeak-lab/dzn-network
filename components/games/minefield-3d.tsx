@@ -6,10 +6,10 @@ import type { GameView } from "@/lib/games-hub";
 
 type Minefield3DProps = {
   game: GameView;
-  tool: "reveal" | "flag";
+  tool: "reveal" | "flag" | "scan";
   disabled: boolean;
   motionRunning: boolean;
-  onMove: (x: number, y: number, tool: "reveal" | "flag") => void;
+  onMove: (x: number, y: number, tool: "reveal" | "flag" | "scan") => void;
   onUnsupported: () => void;
 };
 
@@ -122,6 +122,7 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
     const markerGeometries: THREE.BufferGeometry[] = [];
     const markerMaterials: THREE.Material[] = [];
 
+    const scanKeys = new Set(game.scans.map(scan => `${scan.x}:${scan.y}`));
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const value = game.cells[y][x];
@@ -136,7 +137,7 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
         tileMaterials.push(material);
         const tile = new THREE.Mesh(tileGeometry, material);
         tile.position.set(x - (size - 1) / 2, value === "hidden" || value === "flag" ? 0.04 : -0.03, y - (size - 1) / 2);
-        tile.userData = { x, y, selectable: value === "hidden" || value === "flag" };
+        tile.userData = { x, y, state, selectable: value === "hidden" || value === "flag", scanUsed: scanKeys.has(`${x}:${y}`) };
         field.add(tile);
         tileMeshes.push(tile);
 
@@ -164,6 +165,41 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
         }
       }
     }
+
+    const scanMarkers = new THREE.Group();
+    const scanMarkerGeometry = new THREE.RingGeometry(0.24, 0.29, 32);
+    const scanMarkerMaterials: THREE.MeshBasicMaterial[] = [];
+    for (const scan of game.scans) {
+      const intensity = scan.threats / 9;
+      const color = intensity > 0.55 ? 0xff8a57 : intensity > 0.22 ? 0xffd166 : 0x4cf4d8;
+      const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      scanMarkerMaterials.push(material);
+      const marker = new THREE.Mesh(scanMarkerGeometry, material);
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.set(scan.x - (size - 1) / 2, 0.2, scan.y - (size - 1) / 2);
+      marker.userData = { scan, seed: scan.x * 13 + scan.y * 7 };
+      scanMarkers.add(marker);
+    }
+    field.add(scanMarkers);
+
+    const drone = new THREE.Group();
+    const droneBodyMaterial = new THREE.MeshStandardMaterial({ color: 0x182b34, emissive: 0x0b8fa9, emissiveIntensity: 1.1, metalness: 0.8, roughness: 0.22 });
+    const droneGlowMaterial = new THREE.MeshBasicMaterial({ color: 0x66f5ff, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false });
+    const droneBody = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.24, 0.16, 12), droneBodyMaterial);
+    droneBody.rotation.x = Math.PI / 2;
+    drone.add(droneBody);
+    const droneArmGeometry = new THREE.BoxGeometry(0.72, 0.025, 0.04);
+    const droneArms = new THREE.Mesh(droneArmGeometry, droneBodyMaterial);
+    droneArms.rotation.y = Math.PI / 4;
+    drone.add(droneArms);
+    const droneLens = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), droneGlowMaterial);
+    droneLens.position.y = -0.1;
+    drone.add(droneLens);
+    const droneLight = new THREE.PointLight(0x50ecff, 3.8, size * 0.68, 2);
+    drone.add(droneLight);
+    const latestScan = game.scans[game.scans.length - 1];
+    drone.position.set(latestScan ? latestScan.x - (size - 1) / 2 : 0, 1.2, latestScan ? latestScan.y - (size - 1) / 2 : 0);
+    field.add(drone);
 
     const scanMaterial = new THREE.MeshBasicMaterial({ color: 0x3cecff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false });
     const scanGeometry = new THREE.PlaneGeometry(size, 0.12);
@@ -213,10 +249,13 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
       pointerY = pointer.y;
     }
 
-    function hitTile(event: PointerEvent) {
+    function hitTile(event: PointerEvent, action = toolRef.current) {
       setPointer(event);
       raycaster.setFromCamera(pointer, camera);
-      return raycaster.intersectObjects(tileMeshes, false).find(hit => hit.object.userData.selectable)?.object as THREE.Mesh | undefined;
+      return raycaster.intersectObjects(tileMeshes, false).find(hit => {
+        const tile = hit.object as THREE.Mesh;
+        return tile.userData.selectable && (action !== "scan" || (tile.userData.state === "hidden" && !tile.userData.scanUsed));
+      })?.object as THREE.Mesh | undefined;
     }
 
     function onPointerMove(event: PointerEvent) {
@@ -244,7 +283,7 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
     function onContextMenu(event: MouseEvent) {
       event.preventDefault();
       if (disabledRef.current) return;
-      const tile = hitTile(event as PointerEvent);
+      const tile = hitTile(event as PointerEvent, "flag");
       if (tile) moveRef.current(tile.userData.x, tile.userData.y, "flag");
     }
 
@@ -279,6 +318,16 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
         perimeterMaterial.opacity = 0.3 + Math.sin(elapsed * 1.7) * 0.12;
         sectorBeacons.rotation.y = elapsed * 0.1;
         beaconLights.forEach((light, index) => { light.intensity = 1.9 + Math.sin(elapsed * 2.5 + index * 0.9) * 0.7; });
+        drone.position.y = 1.04 + Math.sin(elapsed * 3.2) * 0.08;
+        drone.rotation.y = elapsed * 0.76;
+        droneLens.scale.setScalar(0.9 + Math.sin(elapsed * 4.8) * 0.12);
+        scanMarkers.children.forEach((child) => {
+          const marker = child as THREE.Mesh;
+          const seed = marker.userData.seed as number;
+          const pulse = 0.94 + Math.sin(elapsed * 2.8 + seed) * 0.12;
+          marker.scale.setScalar(pulse);
+          (marker.material as THREE.MeshBasicMaterial).opacity = 0.56 + Math.sin(elapsed * 2.2 + seed) * 0.2;
+        });
         for (let index = 0; index < driftPositions.length; index += 3) {
           driftPositions[index] += 0.004 + ((index / 3) % 3) * 0.001;
           driftPositions[index + 2] += 0.007;
@@ -300,10 +349,10 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove, onUns
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
-      tileGeometry.dispose(); scanGeometry.dispose(); scanner.geometry.dispose(); platform.geometry.dispose(); platformEdges.geometry.dispose(); beaconGeometry.dispose(); perimeterGeometry.dispose(); driftGeometry.dispose();
+      tileGeometry.dispose(); scanGeometry.dispose(); scanner.geometry.dispose(); platform.geometry.dispose(); platformEdges.geometry.dispose(); beaconGeometry.dispose(); perimeterGeometry.dispose(); driftGeometry.dispose(); scanMarkerGeometry.dispose(); droneBody.geometry.dispose(); droneArmGeometry.dispose(); droneLens.geometry.dispose();
       tileMaterials.forEach(material => material.dispose()); markerMaterials.forEach(material => material.dispose());
-      markerGeometries.forEach(geometry => geometry.dispose()); labelTextures.forEach(texture => texture.dispose());
-      (platform.material as THREE.Material).dispose(); (platformEdges.material as THREE.Material).dispose(); beaconMaterial.dispose(); scanMaterial.dispose(); scannerMaterial.dispose(); perimeterMaterial.dispose(); driftMaterial.dispose(); renderer.dispose(); renderer.domElement.remove();
+      markerGeometries.forEach(geometry => geometry.dispose()); labelTextures.forEach(texture => texture.dispose()); scanMarkerMaterials.forEach(material => material.dispose());
+      (platform.material as THREE.Material).dispose(); (platformEdges.material as THREE.Material).dispose(); beaconMaterial.dispose(); scanMaterial.dispose(); scannerMaterial.dispose(); perimeterMaterial.dispose(); driftMaterial.dispose(); droneBodyMaterial.dispose(); droneGlowMaterial.dispose(); renderer.dispose(); renderer.domElement.remove();
     };
   }, [game, motionRunning]);
 

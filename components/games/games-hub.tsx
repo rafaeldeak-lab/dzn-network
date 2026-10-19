@@ -8,7 +8,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, Circ
   LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Satellite, ScanSearch, Search, Settings2, Shield, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
-  hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
+  hubEquipmentUnlocked, type GameMode, type GamePhase, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
 import { HUB_OPERATIONS, buildOperationsRecord, operationForGame } from "@/lib/games-operations";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
@@ -25,6 +25,7 @@ import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
+type MinefieldTool = "reveal" | "flag" | "scan";
 type PlayGame = HubGameId;
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const NightRun3D = dynamic(() => import("./night-run-3d").then(module => module.NightRun3D), { ssr: false });
@@ -81,6 +82,11 @@ const RANGER_RANGE_TARGET_META: Record<RangerRangeTarget, { label: string; key: 
   tower: { label: "Tower", key: "5", detail: "Watchtower plate", range: "114 m" },
   ravine: { label: "Ravine", key: "6", detail: "Ravine plate", range: "72 m" },
 };
+const MINEFIELD_PHASE_META: Record<GamePhase, { label: string; command: string; detail: string }> = {
+  triangulate: { label: "Triangulate", command: "Establish a safe opening", detail: "Clear one safe sector first, then use the scanner when the grid offers no clean read." },
+  contain: { label: "Contain", command: "Box in the threat field", detail: "Translate the revealed counts and scan pings into a reliable containment line." },
+  extract: { label: "Extract", command: "Clear the final route", detail: "The field is mapped. Finish every remaining safe sector before the window closes." },
+};
 const ARCADE_CATALOGUE = [
   { name: "Minefield", detail: "3D tactical sweep", icon: Target },
   { name: "Relay Rush", detail: "Server-timed reactions", icon: Zap },
@@ -128,7 +134,7 @@ export function GamesHub() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<View>("play");
   const [mode, setMode] = useState<GameMode>("recon");
-  const [tool, setTool] = useState<"reveal" | "flag">("reveal");
+  const [tool, setTool] = useState<MinefieldTool>("reveal");
   const [boardView, setBoardView] = useState<BoardView>("field");
   const [playGame, setPlayGame] = useState<PlayGame>("minefield");
   const [help, setHelp] = useState(false);
@@ -232,6 +238,13 @@ export function GamesHub() {
     void mutate({ action: "start", mode });
   }
 
+  function minefieldMove(x: number, y: number, selectedTool: MinefieldTool) {
+    if (!game) return;
+    void mutate(selectedTool === "scan"
+      ? { action: "scan", gameId: game.id, version: game.version, x, y }
+      : { action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool });
+  }
+
   const motionRunning = motionReady && pageVisible && !motionPaused && !reducedMotion;
 
   return <main className={styles.hub} data-motion={motionRunning ? "running" : "paused"}>
@@ -268,33 +281,34 @@ export function GamesHub() {
         <div className={styles.mainColumn}>
           {view === "play" && <div className={styles.activeGamePanel}>
           {availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
-            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
+            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">DZN Sector Sweep</h2></div><button className={styles.iconButton} title="Sector Sweep rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
             <div className={styles.gameTools}>
               <label>Difficulty<select aria-label="Difficulty" value={mode} disabled={busy} onChange={event => setMode(event.target.value as GameMode)}>{modes.map(key => <option value={key} key={key}>{GAME_MODES[key].label} / {GAME_MODES[key].size} x {GAME_MODES[key].size}</option>)}</select></label>
-              <div className={styles.toolSwitch} aria-label="Cell action"><button title="Reveal cell" aria-pressed={tool === "reveal"} disabled={busy} onClick={() => setTool("reveal")}><MousePointer2 size={18} /></button><button title="Place or remove flag" aria-pressed={tool === "flag"} disabled={busy} onClick={() => setTool("flag")}><Flag size={18} /></button></div>
+              <div className={styles.toolSwitch} aria-label="Sector action"><button title="Clear sector" aria-pressed={tool === "reveal"} disabled={busy} onClick={() => setTool("reveal")}><MousePointer2 size={18} /></button><button title="Place or remove containment marker" aria-pressed={tool === "flag"} disabled={busy} onClick={() => setTool("flag")}><Flag size={18} /></button><button title={game?.safeCleared ? "Deploy a local threat scan" : "Clear an opening sector before scanner deployment"} aria-pressed={tool === "scan"} disabled={busy || !game || !game.safeCleared || game.scans.length >= game.scanCharges} onClick={() => setTool("scan")}><ScanSearch size={18} /></button></div>
               <button className={styles.primary} disabled={busy || newBoardCoolingDown} title={newBoardCoolingDown ? "New board available five seconds after the last start" : undefined} onClick={() => active ? setReplace(true) : start()}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{game ? "New board" : "Start mission"}</button>
             </div>
             {game ? <>
-              <div className={styles.boardStatus}><span><Target size={15} />{GAME_MODES[game.mode].label}</span><span><Flag size={15} />{game.cells.flat().filter(cell => cell === "flag").length} / {GAME_MODES[game.mode].mines}</span><span><Clock3 size={15} />{clock(game.expiresAt - (now || game.startedAt))}</span></div>
-              <div className={styles.boardViewSwitch} role="group" aria-label="Minefield view">
+              <div className={styles.boardStatus}><span><Target size={15} />{GAME_MODES[game.mode].label}</span><span><Radio size={15} />{MINEFIELD_PHASE_META[game.phase].label}</span><span><ScanSearch size={15} />{game.scanCharges - game.scans.length} scans</span><span><Flag size={15} />{game.cells.flat().filter(cell => cell === "flag").length} / {GAME_MODES[game.mode].mines}</span><span><Clock3 size={15} />{clock(game.expiresAt - (now || game.startedAt))}</span></div>
+              <div className={styles.minefieldCommand} data-phase={game.phase}><div><span>ACTIVE FIELD ORDER</span><strong>{MINEFIELD_PHASE_META[game.phase].command}</strong><p>{MINEFIELD_PHASE_META[game.phase].detail}</p></div><div className={styles.minefieldReadout}><span>SAFE ROUTE</span><strong>{game.safeCleared} / {game.safeTotal}</strong><i><b style={{ width: `${Math.round(game.safeCleared / game.safeTotal * 100)}%` }} /></i></div></div>
+              <div className={styles.boardViewSwitch} role="group" aria-label="Sector Sweep view">
                 <button aria-pressed={boardView === "field"} onClick={() => setBoardView("field")}><Sparkles size={16} />3D field</button>
                 <button aria-pressed={boardView === "grid"} onClick={() => setBoardView("grid")}><Target size={16} />Tactical grid</button>
               </div>
               {boardView === "field" ? <Minefield3D game={game} tool={tool} disabled={busy || !active} motionRunning={motionRunning}
-                onMove={(x, y, selectedTool) => void mutate({ action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool })}
+                onMove={minefieldMove}
                 onUnsupported={() => setBoardView("grid")} />
-                : <MineBoard game={game} tool={tool} disabled={busy || !active} onMove={(x, y, selectedTool) => void mutate({ action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool })} />}
+                : <MineBoard game={game} tool={tool} disabled={busy || !active} onMove={minefieldMove} />}
               <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
-                {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Sector secured</strong><span>{summary?.today.includes(game.mode) ? `${GAME_MODES[game.mode].label} reward recorded for today. Further wins today are practice.` : "Daily rewards have reset. Start a new mission for today's reward."}</span></div></> : game.status === "lost" ? <><Target size={22} /><div><strong>Mine triggered</strong><span>Mission ended. Your earned XP and parts are unchanged.</span></div></> : !active ? <><Clock3 size={22} /><div><strong>Mission expired</strong><span>Start a new board when you are ready.</span></div></> : <><Radio size={20} /><div><strong>Mission in progress</strong><span>{tool === "flag" ? "Flag mode" : "Reveal mode"} / {game.cells.flat().filter(cell => typeof cell === "number").length} safe cells cleared</span></div></>}
+                {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Sector secured</strong><span>{summary?.today.includes(game.mode) ? `${GAME_MODES[game.mode].label} reward recorded for today. Further wins today are practice.` : "Daily rewards have reset. Start a new mission for today's reward."}</span></div></> : game.status === "lost" ? <><Target size={22} /><div><strong>Mine triggered</strong><span>Mission ended. Your earned XP and parts are unchanged.</span></div></> : !active ? <><Clock3 size={22} /><div><strong>Mission expired</strong><span>Start a new board when you are ready.</span></div></> : <><Radio size={20} /><div><strong>{tool === "scan" ? "Scanner staged" : "Sector sweep in progress"}</strong><span>{tool === "scan" ? "Select one hidden sector to return a local 3 x 3 threat count. Scan results reveal density, never exact mine locations." : `${MINEFIELD_PHASE_META[game.phase].label} phase / ${game.safeCleared} of ${game.safeTotal} safe sectors cleared / ${game.scanCharges - game.scans.length} scanner charges remaining.`}</span></div></>}
               </div>
             </> : <div className={styles.readyBoard}>
-              <Image className={styles.minefieldBriefingArt} src="/images/games/minefield-night-recon-v2.png" alt="Night reconnaissance terrain with a DZN minefield scanner and survey markers" fill sizes="(max-width: 760px) 100vw, 760px" priority />
+              <Image className={styles.minefieldBriefingArt} src="/images/games/sector-sweep-command-v1.png" alt="Night tactical clearance sector with a reconnaissance drone and survey beacons" fill sizes="(max-width: 760px) 100vw, 760px" priority />
               <div className={styles.minefieldBriefingScrim} aria-hidden="true" />
               <div className={styles.minefieldBriefingCopy}>
-                <span className={styles.eyebrow}>FIELD SCAN / {mode.toUpperCase()}</span>
-                <h3>{GAME_MODES[mode].label} sector standing by</h3>
-                <p>{GAME_MODES[mode].mines} threats across a {GAME_MODES[mode].size} x {GAME_MODES[mode].size} search grid. Clear every safe sector before the window closes.</p>
-                <div className={styles.rewardPills}><span>{GAME_MODES[mode].mines} mines</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div>
+                <span className={styles.eyebrow}>SECTOR SWEEP / {mode.toUpperCase()}</span>
+                <h3>{GAME_MODES[mode].label} clearance window standing by</h3>
+                <p>Triangulate {GAME_MODES[mode].mines} concealed threats across a {GAME_MODES[mode].size} x {GAME_MODES[mode].size} sector, then clear the safe route before extraction. Local drone scans show density, never a solution.</p>
+                <div className={styles.rewardPills}><span>{GAME_MODES[mode].scans} scanner charges</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div>
               </div>
             </div>}
           </section>}
@@ -377,7 +391,7 @@ export function GamesHub() {
         try { localStorage.setItem("dzn.games.motion", paused ? "paused" : "running"); } catch { /* The preference still applies for this visit. */ }
       }} /><span>Animated scenery{reducedMotion && <small>Off in your device motion settings</small>}</span></label>
     </details>
-    {help && <Dialog title="Minesweeper rules" onClose={() => setHelp(false)}><p>Reveal every safe cell without triggering a mine. Numbers count mines in the eight neighbouring cells. Flags mark suspected mines. The first revealed cell is safe.</p><p>Each difficulty awards XP and parts once per UTC day. Boards expire after 30 minutes. Further wins are practice; rewards cannot be bought, transferred or exchanged for money.</p><p>Arrow keys move between cells. Enter reveals or flags with the selected tool; F toggles a flag.</p><button className={styles.primary} onClick={() => setHelp(false)}>Back to mission</button></Dialog>}
+    {help && <Dialog title="Sector Sweep rules" onClose={() => setHelp(false)}><p>Clear every safe sector without triggering a threat. Numbers count threats in the eight neighbouring sectors. Containment markers flag suspected threats. The first cleared sector is safe.</p><p>Each difficulty includes a limited set of scanner charges after the opening clear. A scan returns only the threat density across its local 3 x 3 area, never exact locations. Keyboard players can press S to scan a focused hidden sector and F to add or remove a containment marker.</p><p>Each difficulty awards XP and parts once per UTC day. Boards expire after 30 minutes. Further wins are practice; rewards cannot be bought, transferred or exchanged for money.</p><button className={styles.primary} onClick={() => setHelp(false)}>Back to mission</button></Dialog>}
     {replace && <Dialog title="Start a new board?" onClose={() => setReplace(false)}><p>The current unfinished board will be replaced. Earned XP and parts are kept.</p><div className={styles.dialogActions}><button onClick={() => setReplace(false)}>Keep playing</button><button className={styles.primary} onClick={start}><RefreshCw size={17} />New board</button></div></Dialog>}
     </div>
   </main>;
@@ -1759,7 +1773,7 @@ function Insignia({ position, small = false }: { position: string; small?: boole
   return <span aria-hidden="true" className={`${styles.insignia} ${small ? styles.smallInsignia : ""}`} style={{ backgroundPosition: position }} />;
 }
 
-function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: "reveal" | "flag"; disabled: boolean; onMove: (x: number, y: number, tool: "reveal" | "flag") => void }) {
+function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: MinefieldTool; disabled: boolean; onMove: (x: number, y: number, tool: MinefieldTool) => void }) {
   const [focus, setFocus] = useState(0);
   const grid = useRef<HTMLDivElement>(null);
   const size = GAME_MODES[game.mode].size;
@@ -1770,12 +1784,13 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: "re
     else if (event.key === "ArrowDown") target = Math.min(size * size - 1, index + size);
     else if (event.key === "ArrowUp") target = Math.max(0, index - size);
     else if (event.key.toLowerCase() === "f") { event.preventDefault(); if (!disabled) onMove(index % size, Math.floor(index / size), "flag"); return; }
+    else if (event.key.toLowerCase() === "s") { event.preventDefault(); if (!disabled) onMove(index % size, Math.floor(index / size), "scan"); return; }
     else return;
     event.preventDefault(); setFocus(target); grid.current?.querySelector<HTMLButtonElement>(`[data-index="${target}"]`)?.focus();
   }
   return <div className={styles.boardScroll} tabIndex={-1}><div className={styles.boardChassis} data-field-board="dzn" style={{ minWidth: size * 28, maxWidth: size * 44 }}>
     <div className={styles.boardPlate}><Image src="/media/dzn-logo.png" alt="DZN Network" width={610} height={445} /><div><strong>FIELD OPERATIONS</strong><span>{GAME_MODES[game.mode].label.toUpperCase()} / {size} x {size}</span></div><Target size={20} aria-hidden="true" /></div>
-    <div className={styles.board} ref={grid} role="group" aria-label={`${GAME_MODES[game.mode].label} Minesweeper board`} aria-busy={disabled && game.status === "playing"}
+    <div className={styles.board} ref={grid} role="group" aria-label={`${GAME_MODES[game.mode].label} Sector Sweep board. Press F to place a containment marker or S to scan an unrevealed sector.`} aria-busy={disabled && game.status === "playing"}
     style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
     {game.cells.flatMap((line, y) => line.map((cell, x) => { const index = y * size + x; const label = cell === "hidden" ? "Unrevealed" : cell === "flag" ? "Flagged" : cell === "mine" ? "Mine" : `${cell} nearby mines`;
       return <button key={index} className={styles.cell} data-state={typeof cell === "number" ? "open" : cell} data-number={cell} data-index={index}
@@ -1785,7 +1800,7 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: "re
         {cell === "flag" ? <Flag size={15} /> : cell === "mine" ? <Target size={17} /> : typeof cell === "number" && cell > 0 ? cell : null}
       </button>;
     }))}
-  </div><div className={styles.boardRail} aria-hidden="true"><span />DZN / MINEFIELD<span /></div></div></div>;
+  </div><div className={styles.boardRail} aria-hidden="true"><span />DZN / SECTOR SWEEP<span /></div></div></div>;
 }
 
 function Dialog({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {

@@ -43,17 +43,16 @@ try {
   checks.push("Signed-out visitors can stop scenery without a game, account or header pause button");
   await page.goto(`${base}/__local-login`);
   await page.getByLabel("Difficulty", { exact: true }).waitFor();
-  const gamePicker = page.getByRole("group", { name: "Choose a game" });
+  const gamePicker = page.getByRole("group", { name: "Choose an operation" });
   const pickerCards = gamePicker.getByRole("button");
   assert.equal(await pickerCards.count(), 12);
-  const pickerArt = await pickerCards.evaluateAll(cards => cards.map(card => getComputedStyle(card, "::before").backgroundImage));
-  assert.ok(pickerArt.every(background => /\/images\/games\/cards\//.test(background)), `Game picker must use compact card artwork: ${JSON.stringify(pickerArt)}`);
+  const operationIds = await pickerCards.evaluateAll(cards => cards.map(card => card.getAttribute("data-game")));
+  assert.deepEqual(operationIds, ["minefield", "trivia", "word-chain", "hide-seek", "relay-rush", "cipher-grid", "echo-array", "outpost-run", "signal-shift", "circuit-forge", "ranger-range", "night-run"]);
+  assert.equal(await gamePicker.locator('[aria-pressed="true"]').count(), 1);
   for (const card of ["minefield", "trivia", "word-chain", "hide-seek", "relay-rush", "cipher-grid", "echo-array", "outpost-run", "signal-shift", "circuit-forge", "ranger-range", "night-run"]) {
-    const thumbnail = await context.request.get(`${base}/images/games/cards/${card}-card-v1.webp`);
-    assert.equal(thumbnail.status(), 200);
-    assert.ok((await thumbnail.body()).length < 30_000, `${card} picker artwork must remain thumbnail-sized`);
+    assert.ok(await gamePicker.locator(`button[data-game="${card}"]`).innerText());
   }
-  checks.push("Each game card has compact, game-specific artwork without eager full-resolution environment downloads");
+  checks.push("Twelve game disciplines are available through the compact Operations Command selector without an oversized card wall");
   const homeLink = page.getByRole("link", { name: "DZN Network home", exact: true });
   assert.equal(await homeLink.getAttribute("href"), "/");
   await homeLink.locator("img").evaluate(image => image.decode());
@@ -152,13 +151,13 @@ try {
     if (await page.getByRole("dialog").count()) await page.getByRole("dialog").getByRole("button", { name: "New board" }).click();
   }
   await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
-  await page.getByRole("group", { name: "Recon Minesweeper board" }).waitFor();
+  await page.getByRole("group", { name: /Recon Sector Sweep board/ }).waitFor();
   const before = await (await context.request.get(`${base}/api/games/hub`)).json();
   assert.equal(before.game.cells.flat().every(cell => cell === "hidden"), true);
   await page.getByRole("button", { name: "Row 1, column 1: Unrevealed", exact: true }).click();
   await page.getByRole("button", { name: /Row 1, column 1: [0-8] nearby mines/ }).waitFor();
   const hidden = page.locator('button[data-state="hidden"]').last();
-  await page.getByRole("button", { name: "Place or remove flag", exact: true }).click();
+  await page.getByRole("button", { name: "Place or remove containment marker", exact: true }).click();
   await hidden.click();
   await page.locator('button[data-state="flag"]').waitFor();
   const saved = await (await context.request.get(`${base}/api/games/hub`)).json();
@@ -194,7 +193,7 @@ try {
   await page.getByRole("button", { name: "Keep playing" }).click();
   assert.equal((await (await context.request.get(`${base}/api/games/hub`)).json()).game.id, before.game.id);
   checks.push("New board confirmation can be cancelled without losing progress");
-  await page.getByRole("button", { name: "Game rules", exact: true }).click();
+  await page.getByRole("button", { name: "Sector Sweep rules", exact: true }).click();
   await page.getByRole("dialog").waitFor();
   await page.keyboard.press("Escape");
   assert.equal(await page.getByRole("dialog").count(), 0);
@@ -235,7 +234,7 @@ try {
   await page.getByRole("button", { name: "New board", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "New board" }).click();
   await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
-  await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
+  await page.getByRole("group", { name: /Survival Sector Sweep board/ }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${output}/mobile-survival.png`, fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -260,12 +259,12 @@ try {
   await page.screenshot({ path: `${output}/offline.png`, fullPage: true });
   await page.unroute("**/api/games/hub"); await page.getByRole("button", { name: "Retry", exact: true }).click();
   await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
-  await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
+  await page.getByRole("group", { name: /Survival Sector Sweep board/ }).waitFor();
   checks.push("Disconnected read has an honest retry state and restores saved board");
   await page.addInitScript(() => { const original = Date.now; Date.now = () => original() + 3600000; });
   await page.reload();
   await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
-  await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
+  await page.getByRole("group", { name: /Survival Sector Sweep board/ }).waitFor();
   await page.waitForTimeout(1200);
   assert.equal(await page.locator('[data-index="0"]').getAttribute("aria-disabled"), "false");
   assert.equal(await page.getByText("Mission expired", { exact: true }).count(), 0);
