@@ -82,6 +82,8 @@ async function run() {
   assert.match(gamesHubSource, /response\.status === 429\) \{ startCooldown/, "Outpost Run must preserve a live run during its brief command cooldown.");
   assert.match(gamesHubSource, /OUTPOST_RUN_CONTRACTS\.map\(item =>/, "Outpost Run must expose each server-supported contract before a new run begins.");
   assert.match(gamesHubSource, /game\.scanAvailable \? objectiveMeta\?\.command : "Scanner spent"/, "Outpost Run must present the scanner command for the current server-owned objective, including recovery cache stages.");
+  assert.match(gamesHubSource, /game\?\.contract === "legacy"/, "Outpost Run must detect preserved sessions instead of assigning them the new-run selection.");
+  assert.match(gamesHubSource, /OUTPOST_RUN_LEGACY_DIRECT_META/, "A preserved direct relay session must receive its own truthful route briefing.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(ECHO_ARRAY_COOLDOWN_MS\)/, "Echo Array must preserve active puzzles through a transient rate limit.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(SIGNAL_SHIFT_COOLDOWN_MS\)/, "Signal Shift must preserve active puzzles through a transient rate limit.");
   assert.match(gamesHubSource, /useTransientActionCooldown\(CIRCUIT_FORGE_COOLDOWN_MS\)/, "Circuit Forge must preserve active puzzles through a transient rate limit.");

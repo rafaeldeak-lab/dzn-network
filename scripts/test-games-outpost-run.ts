@@ -288,7 +288,9 @@ async function run() {
     fixture.db.sqlite.prepare("UPDATE dzn_outpost_run_sessions SET layout_json = ? WHERE user_id = 'local-player'")
       .run(JSON.stringify({ target: layout.target, hazards: layout.hazards }));
     const legacy = await payload(await call(fixture));
+    assert.equal(legacy.game?.contract, "legacy");
     assert.equal(legacy.game?.objective, "relay", "Existing sessions without a beacon must remain playable as direct relay runs.");
+    assert.equal(legacy.game?.objectivesTotal, 1);
     assert.equal(legacy.game?.beaconSecured, false);
   });
 

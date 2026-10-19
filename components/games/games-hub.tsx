@@ -66,6 +66,8 @@ const OUTPOST_RUN_CONTRACT_META: Record<OutpostRunContract, { label: string; det
   intercept: { label: "Relay Intercept", detail: "Direct extraction", route: "One objective / six hazards", briefing: "Skip the beacon and force the emergency relay before the fast route closes." },
   recovery: { label: "Recovery Claim", detail: "Beacon, cache, relay", route: "Three objectives / extended pack", briefing: "Recover the sealed field cache after the beacon, then bring the relay online with an expanded field pack." },
 };
+const OUTPOST_RUN_LEGACY_DIRECT_META = { label: "Legacy relay run", detail: "Direct extraction", route: "One preserved objective", briefing: "This active route predates contract selection. Trace the emergency relay and complete the extraction." };
+const OUTPOST_RUN_LEGACY_SURVEY_META = { label: "Legacy field run", detail: "Beacon then relay", route: "Two preserved objectives", briefing: "This active route predates contract selection. Secure the field beacon, then trace its relay bearing." };
 const OUTPOST_RUN_OBJECTIVE_META: Record<OutpostRunObjective, { label: string; command: string; readout: string; detail: string }> = {
   beacon: { label: "field beacon", command: "Use beacon scanner", readout: "FIELD BEACON", detail: "Secure the field beacon before the next objective activates." },
   cache: { label: "recovery cache", command: "Use cache scanner", readout: "RECOVERY CACHE", detail: "Recover the sealed cache before the relay can accept an extraction signal." },
@@ -959,7 +961,9 @@ function OutpostRunPanel({ now, motionRunning, onProgress }: { now: number; moti
   }, [busy, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
-  const contractMeta = OUTPOST_RUN_CONTRACT_META[game?.contract === "legacy" || !game ? contract : game.contract];
+  const contractMeta = game?.contract === "legacy"
+    ? game.objectivesTotal === 1 ? OUTPOST_RUN_LEGACY_DIRECT_META : OUTPOST_RUN_LEGACY_SURVEY_META
+    : OUTPOST_RUN_CONTRACT_META[game ? game.contract : contract];
   const objectiveMeta = game ? OUTPOST_RUN_OBJECTIVE_META[game.objective] : null;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
