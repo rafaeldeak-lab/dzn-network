@@ -2,6 +2,7 @@ import { requireDb } from "./db";
 import { ensureBillingSchema, ensureStarterTrialClaimSchema, findStarterTrialClaim } from "./plans";
 import type { PurchasablePlanKey } from "../../lib/billing/plans";
 import { billingRedirectUrl, STRIPE_API_VERSION, stripeFormRequest, stripeGetRequest, stripeId, type StripeCheckoutSession } from "./stripe";
+import { hasClearStripeAccountRequirements, type StripeAccountRequirements } from "./stripe-account-requirements";
 import type { Env } from "./types";
 import { RETURNING_STARTER_OFFER, RETURNING_STARTER_COPY, returningStarterOffer, type ReturningStarterOffer } from "../../lib/billing/returning-starter";
 
@@ -18,11 +19,7 @@ type StripeCheckoutAccount = {
   charges_enabled?: boolean;
   payouts_enabled?: boolean;
   details_submitted?: boolean;
-  requirements?: {
-    disabled_reason?: string | null;
-    currently_due?: unknown[];
-    past_due?: unknown[];
-  } | null;
+  requirements?: StripeAccountRequirements;
 };
 export class CheckoutRecoveryError extends Error {
   constructor(message: string, readonly code: string, readonly status = 409, readonly offer?: ReturningStarterOffer) { super(message); }
@@ -264,12 +261,8 @@ async function verifyLiveCheckoutAccount(env: Env, mode: "live" | "test") {
   const account = await stripeGetRequest<StripeCheckoutAccount>(env, "/account").catch(() => {
     throw new CheckoutRecoveryError("Payments are temporarily unavailable while the payment provider is checked. No payment has been started.", "LIVE_ACCOUNT_UNAVAILABLE", 503);
   });
-  const requirements = account?.requirements;
-  const requirementsClear = requirements != null
-    && requirements.disabled_reason == null
-    && Array.isArray(requirements.currently_due) && requirements.currently_due.length === 0
-    && Array.isArray(requirements.past_due) && requirements.past_due.length === 0;
-  if (account?.charges_enabled !== true || account.payouts_enabled !== true || account.details_submitted !== true || !requirementsClear) {
+  if (account?.charges_enabled !== true || account.payouts_enabled !== true || account.details_submitted !== true ||
+      !hasClearStripeAccountRequirements(account.requirements)) {
     throw new CheckoutRecoveryError("Payments are temporarily unavailable while the payment provider is checked. No payment has been started.", "LIVE_ACCOUNT_UNAVAILABLE", 503);
   }
 }

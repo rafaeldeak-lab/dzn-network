@@ -175,10 +175,9 @@ async function run() {
   assert.equal(posts.length, liveBeforePosts, "Outstanding live account requirements must fail before Stripe Checkout creation");
   assert.ok(live.db.statements.slice(requirementsStatements).every(sql => /^\s*SELECT\s/i.test(sql)), "Outstanding requirements must fail before any billing or schema write");
   assert.deepEqual(ledgerRows(live), [[], []], "Outstanding live account requirements must not reserve a checkout or trial");
-  liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true,
-    requirements: { disabled_reason: null, currently_due: [], past_due: [] } };
+  liveAccount = { charges_enabled: true, payouts_enabled: true, details_submitted: true, requirements: undefined };
   await request(live, "pro", 200);
-  assert.equal(posts.length, liveBeforePosts + 1, "A healthy live account may continue to the exact verified Checkout request");
+  assert.equal(posts.length, liveBeforePosts + 1, "A healthy account with omitted requirements may continue to the exact verified Checkout request");
   const missingLiveBase = createCheckoutFixture({ migration: false });
   missingLiveBase.db.sqlite.exec("INSERT INTO users(id, discord_id) VALUES ('owner', 'discord-owner')");
   const missingLive: Fixture = { ...missingLiveBase, token: (await createSession(missingLiveBase.env, "owner")).token };
