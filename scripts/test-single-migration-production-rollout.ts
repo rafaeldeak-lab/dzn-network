@@ -21,6 +21,7 @@ const migrations = [
   "0110_games_hub_night_run_route_control.sql",
   "0111_games_hub_circuit_forge_grid_control.sql",
   "0112_dzn_survival_command_field_orders.sql",
+  "0113_dzn_server_status_evidence.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -80,6 +81,16 @@ assert.match(workflow, /verify-schema/);
 assert.match(workflow, /verify-state-preservation-before/);
 assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
+assert.equal(
+  (workflow.match(/trap cleanup_state_rows EXIT/g) ?? []).length,
+  1,
+  "The pre-migration baseline must survive into the post-migration verification step; only that later step may remove it on exit.",
+);
+assert.equal(
+  (workflow.match(/cleanup_state_rows\(\)/g) ?? []).length,
+  1,
+  "The state-row cleanup function belongs only to the post-migration verification step.",
+);
 assert.match(workflow, /survival-command-loadout-migration/);
 assert.match(workflow, /night-run-route-control-migration/);
 assert.match(workflow, /circuit-forge-grid-control-migration/);
@@ -109,6 +120,7 @@ assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
 assert.match(workflow, /test:night-run-route-control-migration-maintenance/);
 assert.match(workflow, /test:circuit-forge-grid-control-migration-maintenance/);
 assert.match(workflow, /test:survival-command-field-orders-migration-maintenance/);
+assert.match(workflow, /test:server-status-evidence-migration/);
 assert.match(workflow, /SESSION_LABEL="Night Run"/);
 assert.match(workflow, /SESSION_LABEL="Circuit Forge"/);
 assert.match(workflow, /SESSION_LABEL="Survival Command"/);
@@ -165,6 +177,8 @@ const survivalLoadoutsIndex = migrationNames.indexOf("0109_dzn_survival_command_
 assert.equal(migrationNames[survivalLoadoutsIndex - 1], "0108_dzn_survival_command_expeditions.sql");
 const survivalFieldOrdersIndex = migrationNames.indexOf("0112_dzn_survival_command_field_orders.sql");
 assert.equal(migrationNames[survivalFieldOrdersIndex - 1], "0111_games_hub_circuit_forge_grid_control.sql");
+const serverStatusEvidenceIndex = migrationNames.indexOf("0113_dzn_server_status_evidence.sql");
+assert.equal(serverStatusEvidenceIndex, survivalFieldOrdersIndex + 1, "Per-server status evidence must follow the field-order migration.");
 
 function verifyLedger(names: string[]) {
   const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));

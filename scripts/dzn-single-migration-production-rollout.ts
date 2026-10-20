@@ -21,8 +21,11 @@ type TablePlan = {
 type StatePreservationPlan = {
   table: TablePlan;
   beforeColumns: string[];
+  beforeColumnVariants?: string[][];
   afterColumns: string[];
+  afterColumnVariants?: string[][];
   rowColumns: string[];
+  allowConcurrentInserts?: boolean;
   sourceHash: string;
   beforeSqlFragments: string[];
   afterSqlFragments: string[];
@@ -264,6 +267,18 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       ],
     },
   },
+  "0113_dzn_server_status_evidence.sql": {
+    migration: "0113_dzn_server_status_evidence.sql",
+    predecessor: "0112_dzn_survival_command_field_orders.sql",
+    tables: [
+      {
+        name: "dzn_server_status_evidence",
+        columns: ["server_id", "server_status_confirmed_at"],
+        foreignKeys: [{ from: "server_id", table: "linked_servers", to: "id", onDelete: "CASCADE" }],
+      },
+    ],
+    indexes: [],
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
@@ -323,6 +338,8 @@ switch (command) {
       required("--before-fingerprint"),
       required("--after-fingerprint"),
       required("--defaults"),
+      argumentsByName.get("--before-rows"),
+      argumentsByName.get("--after-rows"),
     );
     break;
   case "fingerprint":
@@ -645,10 +662,11 @@ function statePreservationFor(migrationName: string) {
   return statePreservation;
 }
 
-function verifyStateColumns(tableName: string, actualRowsPath: string, expectedColumns: string[]) {
+function verifyStateColumns(tableName: string, actualRowsPath: string, expectedColumns: string[], acceptedVariants: string[][] = []) {
   const actualColumns = readRows(actualRowsPath).map((row) => String(row.name ?? ""));
-  if (JSON.stringify(actualColumns) !== JSON.stringify(expectedColumns)) {
-    throw new Error(`Column verification failed for ${tableName}. Expected ${expectedColumns.join(", ")}; received ${actualColumns.join(", ")}.`);
+  const acceptedOrders = [expectedColumns, ...acceptedVariants];
+  if (!acceptedOrders.some((expected) => JSON.stringify(actualColumns) === JSON.stringify(expected))) {
+    throw new Error(`Column verification failed for ${tableName}. Expected one of: ${acceptedOrders.map((columns) => columns.join(", ")).join(" | ")}; received ${actualColumns.join(", ")}.`);
   }
 }
 
@@ -684,7 +702,7 @@ function verifyStatePreservationBefore(migrationName: string, objectsPath: strin
   for (const fragment of state.beforeSqlFragments) {
     if (!sql.includes(fragment)) throw new Error(`${state.table.name} is missing the required pre-migration constraint ${fragment}.`);
   }
-  verifyStateColumns(state.table.name, tableInfoPath, state.beforeColumns);
+  verifyStateColumns(state.table.name, tableInfoPath, state.beforeColumns, state.beforeColumnVariants);
   verifyStateForeignKeys(state, foreignKeysPath);
   if (readRows(foreignKeyCheckPath).length > 0) throw new Error("Production foreign_key_check returned violations before migration.");
   console.log(`Production state-preservation baseline passed for ${migrationName}.`);
@@ -717,27 +735,49 @@ function verifyStatePreservationAfter(
   beforeFingerprintPath: string,
   afterFingerprintPath: string,
   defaultsPath: string,
+  beforeRowsPath?: string,
+  afterRowsPath?: string,
 ) {
   const state = statePreservationFor(migrationName);
   const sql = stateTableSql(state, objectsPath);
   for (const fragment of [...state.beforeSqlFragments, ...state.afterSqlFragments]) {
     if (!sql.includes(fragment)) throw new Error(`${state.table.name} is missing the required post-migration constraint ${fragment}.`);
   }
-  verifyStateColumns(state.table.name, tableInfoPath, state.afterColumns);
+  verifyStateColumns(state.table.name, tableInfoPath, state.afterColumns, state.afterColumnVariants);
   verifyStateForeignKeys(state, foreignKeysPath);
   if (readRows(foreignKeyCheckPath).length > 0) throw new Error("Production foreign_key_check returned violations after migration.");
 
   const beforeCount = readCount(beforeRowCountPath);
   const afterCount = readCount(afterRowCountPath);
-  if (beforeCount !== afterCount) throw new Error(`${state.table.name} row count changed from ${beforeCount} to ${afterCount}.`);
-  if (readFingerprint(beforeFingerprintPath) !== readFingerprint(afterFingerprintPath)) {
-    throw new Error(`${state.table.name} fingerprint changed during the state-preserving migration.`);
+  if (state.allowConcurrentInserts) {
+    if (!beforeRowsPath || !afterRowsPath) {
+      throw new Error(`${state.table.name} requires pre- and post-migration identity rows when concurrent inserts are allowed.`);
+    }
+    if (afterCount < beforeCount) throw new Error(`${state.table.name} row count decreased from ${beforeCount} to ${afterCount}.`);
+    const afterRows = new Set(readRows(afterRowsPath).map((row) => JSON.stringify(row)));
+    const missingRows = readRows(beforeRowsPath).filter((row) => !afterRows.has(JSON.stringify(row)));
+    if (missingRows.length > 0) {
+      throw new Error(`${state.table.name} lost or changed ${missingRows.length} pre-existing identity rows during the state-preserving migration.`);
+    }
+  } else {
+    if (beforeCount !== afterCount) throw new Error(`${state.table.name} row count changed from ${beforeCount} to ${afterCount}.`);
+    if (readFingerprint(beforeFingerprintPath) !== readFingerprint(afterFingerprintPath)) {
+      throw new Error(`${state.table.name} fingerprint changed during the state-preserving migration.`);
+    }
   }
   const initializedDefaults = readRows(defaultsPath);
-  if (initializedDefaults.length !== afterCount) {
+  const preexistingIdentityRows = state.allowConcurrentInserts && beforeRowsPath ? readRows(beforeRowsPath) : [];
+  if (!state.allowConcurrentInserts && initializedDefaults.length !== afterCount) {
     throw new Error(`${state.table.name} default-initialization query returned ${initializedDefaults.length} rows for ${afterCount} preserved rows.`);
   }
   for (const addedColumn of state.addedColumns) {
+    if (state.allowConcurrentInserts) {
+      const observedDefaultById = new Map(initializedDefaults.map((row) => [String(row.id ?? ""), row[addedColumn.name]]));
+      const missingPreexistingDefault = preexistingIdentityRows.some((row) => !observedDefaultById.has(String(row.id ?? "")));
+      if (missingPreexistingDefault) {
+        throw new Error(`${state.table.name} default-initialization query did not retain every pre-existing row.`);
+      }
+    }
     const invalid = initializedDefaults.some((row) => addedColumn.expectedValue === null
       ? row[addedColumn.name] !== null
       : String(row[addedColumn.name] ?? "") !== addedColumn.expectedValue);
