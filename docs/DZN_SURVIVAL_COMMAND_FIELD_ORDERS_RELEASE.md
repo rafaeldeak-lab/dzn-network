@@ -12,11 +12,12 @@ The order is part of the deterministic outcome fingerprint. Browser input never 
 
 ## Release Boundary
 
+- `0112_dzn_survival_command_field_orders.sql` was applied by itself in [production workflow run #16](https://github.com/rafaeldeak-lab/dzn-network/actions/runs/39346130218). The run recorded a private D1 recovery bookmark and passed its ledger, schema, index, constraint, foreign-key, retained-state, and default-initialization checks.
+- The temporary maintenance switch is removed and `DZN_ACCOUNT_DELETE_ENABLED=true` is restored in production. The maintenance health route returns its normal `404` response once this cleanup deployment is live.
 - Source keeps `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED` absent from `wrangler.toml`; therefore production and preview keep the existing Survival Command flow.
-- This release enables only `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE=true` with `DZN_ACCOUNT_DELETE_ENABLED=false` in production. Authenticated reads remain available, while Survival Command writes and account closure are paused before the retained expedition rows are fingerprinted.
 - Existing expeditions continue to use the pre-field-order decision flow while the flag is absent or `false`.
 - The Field Order interface appears only when both the flag is exactly `true` and the isolated schema is present.
-- There is no migration, customer, Discord, Nitrado, or billing action in this source release. The maintenance flag is removed by a separately reviewed cleanup release after the isolated D1 operation succeeds.
+- There is no feature activation, customer, Discord, Nitrado, or billing action in this cleanup release. Field Orders still require a separate production-only activation after normal writes are proven restored.
 
 ## Controlled Production Activation
 
