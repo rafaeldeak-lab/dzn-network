@@ -10,7 +10,11 @@ assert.match(
   /UPDATE linked_servers SET[\s\S]*?\.run\(\);[\s\S]*?await recordServerStatusEvidence\(db, linkedServer\.id, metadata\)/,
   "A complete metadata update must record evidence only after the linked-server write succeeds.",
 );
-assert.match(metadataSource, /if \(!metadata\.server_status\) return;/, "An incomplete provider status must not produce public status evidence.");
+assert.match(
+  metadataSource,
+  /if \(!metadata\.server_status\) \{\s*await db\.prepare\("DELETE FROM dzn_server_status_evidence WHERE server_id = \?"\)\.bind\(linkedServerId\)\.run\(\);\s*return;/,
+  "An incomplete provider status must clear prior confirmation evidence before returning.",
+);
 assert.match(metadataSource, /INSERT INTO dzn_server_status_evidence/, "Successful full metadata refreshes must write isolated status evidence.");
 assert.match(metadataSource, /ON CONFLICT\(server_id\) DO UPDATE SET server_status_confirmed_at/, "A later complete refresh must replace only its own confirmation timestamp.");
 

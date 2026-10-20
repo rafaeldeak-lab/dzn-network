@@ -392,7 +392,10 @@ async function recordServerStatusEvidence(db: D1Database, linkedServerId: string
   // A full metadata response without a provider status remains insufficient to
   // label a public server Online or Offline. Player-count-only refreshes never
   // reach this path.
-  if (!metadata.server_status) return;
+  if (!metadata.server_status) {
+    await db.prepare("DELETE FROM dzn_server_status_evidence WHERE server_id = ?").bind(linkedServerId).run();
+    return;
+  }
   await db
     .prepare(
       `INSERT INTO dzn_server_status_evidence (server_id, server_status_confirmed_at)
