@@ -7,16 +7,21 @@ const publicServersSource = readFileSync("functions/api/public/servers.ts", "utf
 
 assert.match(
   metadataSource,
-  /UPDATE linked_servers SET[\s\S]*?\.run\(\);[\s\S]*?await recordServerStatusEvidence\(db, linkedServer\.id, metadata\)/,
-  "A complete metadata update must record evidence only after the linked-server write succeeds.",
+  /const refreshLinkedServer = db[\s\S]*?UPDATE linked_servers SET/,
+  "A complete metadata update must be prepared for the shared status-evidence transaction.",
 );
 assert.match(
   metadataSource,
-  /if \(!metadata\.server_status\) \{\s*await db\.prepare\("DELETE FROM dzn_server_status_evidence WHERE server_id = \?"\)\.bind\(linkedServerId\)\.run\(\);\s*return;/,
-  "An incomplete provider status must clear prior confirmation evidence before returning.",
+  /const refreshStatusEvidence = metadata\.server_status[\s\S]*?: db\.prepare\("DELETE FROM dzn_server_status_evidence WHERE server_id = \?"\)\.bind\(linkedServer\.id\);/,
+  "An incomplete provider status must clear prior confirmation evidence in the same transaction.",
 );
 assert.match(metadataSource, /INSERT INTO dzn_server_status_evidence/, "Successful full metadata refreshes must write isolated status evidence.");
 assert.match(metadataSource, /ON CONFLICT\(server_id\) DO UPDATE SET server_status_confirmed_at/, "A later complete refresh must replace only its own confirmation timestamp.");
+assert.match(
+  metadataSource,
+  /await db\.batch\(\[refreshLinkedServer, refreshStatusEvidence\]\);/,
+  "Status and confirmation evidence must commit atomically so public reads cannot pair different refreshes.",
+);
 
 assert.doesNotMatch(publicServersSource, /COALESCE\(server_public_cache\.server_status, linked_servers\.server_status\)/, "Public status must not be taken from a lagging cache.");
 assert.doesNotMatch(publicServersSource, /COALESCE\(server_public_cache\.server_online, linked_servers\.is_online\)/, "Public online state must not be taken from a lagging cache.");

@@ -212,7 +212,7 @@ export async function refreshNitradoServerMetadata(
   const changed = changes.length > 0 || linkedServer.metadata_hash !== metadata.metadata_hash;
   const previousHash = linkedServer.metadata_hash;
 
-  await db
+  const refreshLinkedServer = db
     .prepare(
       `UPDATE linked_servers SET
         display_name = ?,
@@ -303,16 +303,20 @@ export async function refreshNitradoServerMetadata(
       geo ? 1 : 0,
       geo ? now : null,
       linkedServer.id,
-    )
-    .run();
-
-  await recordServerStatusEvidence(db, linkedServer.id, metadata).catch((error) => {
-    // No status evidence is safer than presenting a status that has not been confirmed.
-    console.warn("DZN SERVER STATUS EVIDENCE WRITE SKIPPED", {
-      linkedServerId: linkedServer.id,
-      message: error instanceof Error ? error.message : "unknown error",
-    });
-  });
+    );
+  // Keep the provider status and the proof that permits its public display in
+  // one D1 transaction. A public read cannot combine a later status with an
+  // earlier confirmation timestamp, even when an incomplete response arrives.
+  const refreshStatusEvidence = metadata.server_status
+    ? db
+        .prepare(
+          `INSERT INTO dzn_server_status_evidence (server_id, server_status_confirmed_at)
+           VALUES (?, ?)
+           ON CONFLICT(server_id) DO UPDATE SET server_status_confirmed_at = excluded.server_status_confirmed_at`,
+        )
+        .bind(linkedServer.id, metadata.metadata_last_checked_at)
+    : db.prepare("DELETE FROM dzn_server_status_evidence WHERE server_id = ?").bind(linkedServer.id);
+  await db.batch([refreshLinkedServer, refreshStatusEvidence]);
 
   if (geo) {
     console.log("DZN SERVER GEO LOCATION UPDATED", {
@@ -386,24 +390,6 @@ export async function refreshNitradoServerMetadata(
       changed_fields: changes.map((change) => change.field),
     },
   };
-}
-
-async function recordServerStatusEvidence(db: D1Database, linkedServerId: string, metadata: LinkedServerMetadata) {
-  // A full metadata response without a provider status remains insufficient to
-  // label a public server Online or Offline. Player-count-only refreshes never
-  // reach this path.
-  if (!metadata.server_status) {
-    await db.prepare("DELETE FROM dzn_server_status_evidence WHERE server_id = ?").bind(linkedServerId).run();
-    return;
-  }
-  await db
-    .prepare(
-      `INSERT INTO dzn_server_status_evidence (server_id, server_status_confirmed_at)
-       VALUES (?, ?)
-       ON CONFLICT(server_id) DO UPDATE SET server_status_confirmed_at = excluded.server_status_confirmed_at`,
-    )
-    .bind(linkedServerId, metadata.metadata_last_checked_at)
-    .run();
 }
 
 async function syncPublicCacheFromMetadataRefresh(
