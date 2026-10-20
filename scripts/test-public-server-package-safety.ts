@@ -166,6 +166,14 @@ async function main() {
     assert.equal(publicServerStatusPresentation(pending).label, "Setup incomplete");
     assert.equal(publicServerStatusPresentation({ ...pending, status: "live" }).label, "Status not checked");
     assert.equal(publicServerStatusPresentation({ ...pending, status: "live", metadata_last_checked_at: "invalid" }).label, "Status not checked");
+    const confirmedAt = new Date().toISOString();
+    assert.deepEqual(publicServerStatusPresentation({ ...pending, status: "live", is_online: true, server_status_confirmed_at: confirmedAt }), { label: "Online", tone: "emerald" });
+    assert.deepEqual(publicServerStatusPresentation({ ...pending, status: "live", is_online: false, server_status_confirmed_at: confirmedAt }), { label: "Offline", tone: "zinc" });
+    assert.deepEqual(
+      publicServerStatusPresentation({ ...pending, status: "live", is_online: true, server_status_confirmed_at: new Date(Date.now() - 16 * 60 * 1000).toISOString() }),
+      { label: "Status not checked", tone: "zinc" },
+      "Expired status evidence cannot be presented as Online.",
+    );
     for (const is_online of [true, false]) {
       for (const player_count_source of ["nitrado", "adm_playerlist", null]) {
         for (const player_count_status of ["fresh", "stale", "unavailable", null]) {
