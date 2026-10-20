@@ -11,7 +11,7 @@ The owner onboarding audit found a saved Nitrado association and token, an exist
 ## Fixed boundaries
 
 - Public profile/card presentation no longer makes unconditional Verified Owner, DZN Verified, Live or Network online claims. A saved token or the default `active_live` lifecycle is not proof of verification or an online server.
-- Incomplete setup is labelled explicitly. Missing check evidence shows Status not checked. Existing check timestamps are not dedicated successful online-status evidence, so checked live records show Status unavailable rather than reusing an old online/offline boolean. Historical lifecycle presentation takes precedence.
+- Incomplete setup is labelled explicitly. Missing metadata evidence shows Status not checked. A public Online or Offline badge requires a fresh metadata check and a consistent explicit provider state; an old boolean, an unknown provider state, or conflicting values remain Status unavailable. Player-count availability is independent, so a current provider state can remain visible when only the player-count lookup fails. Historical lifecycle presentation takes precedence.
 - The public server mapper distinguishes pending setup from an active lifecycle default. The admin lifecycle description no longer asserts that a configured lifecycle guarantees sync is running.
 - Per-server advanced summaries redact build/raid/travel/exploration values for Free/Starter and inactive paid packages. Existing numeric fields stay zero when locked for compatibility; access flags remain authoritative and UI values say Pro required.
 - Exploration redaction clears all activity-derived values, top explorer identity, last activity and map overlay cells, preserving only static map configuration.
@@ -34,7 +34,7 @@ No ranking, discovery, review, badge, season, event, Server Wars, CTF, XP, calli
 
 ## Tests and review evidence
 
-- Release review correction: metadata failure, ADM player-list fallback, and even successful Nitrado player-count-only refreshes advance check timestamps without updating online state. Without a dedicated successful status timestamp, the presentation must remain unconfirmed. Regression cases cover both retained boolean states, all three source variants and four count-status variants; the rendered Pro case also denies both old online/offline labels. No ingestion or public payload changes are needed for this conservative fix.
+- Release review correction: failed metadata and player-count-only refreshes must not revive a retained online/offline boolean. The public mapper now requires the metadata timestamp together with a matching explicit Nitrado service state before it renders Online or Offline. Regression cases cover retained booleans, all three player-count sources, four player-count states, verified started/stopped states, unknown provider states, and conflicting values. No ingestion or public payload changes are needed for this presentation-only fix.
 
 - `npm run test:public-access-gating` now includes premium-showcase and advanced-leaderboard checks, ensuring CI runs the regression.
 - New actual in-memory SQLite/route tests cover 11 package states, populated build/travel/exploration fixtures, basic kills/deaths/player parity, owner-mode denial, forged query flags, aliases, cached downgrade, hidden cached profiles, DB cache isolation and unavailable reads.

@@ -19,7 +19,7 @@ function sampleServer(state) {
     nitrado_service_name: "Example community server", guild_name: "Example community", guild_icon_url: null,
     adm_status: live ? "Connected" : "Needs Review", stats_sync: live ? "Active" : "Not Started", stats_sync_active: live,
     player_slots: null, max_players: null, current_players: null, platform: "Xbox", map_name: "chernarus", mission: null,
-    server_status: null, is_online: live, last_sync_at: null, metadata_last_checked_at: live ? "2026-09-07T00:00:00Z" : null,
+    server_status: live ? "started" : null, is_online: live, last_sync_at: null, metadata_last_checked_at: live ? "2026-09-07T00:00:00Z" : null,
     player_count_last_checked_at: null, player_count_source: null, player_count_status: null,
     public_short_description: "A public community server.", public_description: "A public community server.", public_discord_invite: null, public_website_url: null,
     public_rules: null, public_language: "English", public_region_label: "Europe", public_listing_updated_at: null, created_at: null,
@@ -87,7 +87,7 @@ if (process.argv.includes("--serve")) {
       await page.screenshot({ path: path.join(output, "latest-diagnostic.png"), fullPage: true });
       await writeFile(path.join(output, "latest-diagnostic.json"), JSON.stringify({ errors, prohibited, text: await page.locator("body").innerText() }, null, 2));
       await page.getByText("Example community server", { exact: true }).first().waitFor();
-      const expected = state === "live-pro" ? "Status unavailable" : "Setup incomplete";
+      const expected = state === "live-pro" ? "Online" : "Setup incomplete";
       await page.getByText(expected, { exact: true }).first().waitFor();
       const body = await page.locator("body").innerText();
       assert.doesNotMatch(body, /Verified Owner|DZN Verified|Network online|Online at last check|Offline at last check/);

@@ -165,17 +165,26 @@ async function main() {
     const pending = { status: "pending", is_online: true, metadata_last_checked_at: null };
     assert.equal(publicServerStatusPresentation(pending).label, "Setup incomplete");
     assert.equal(publicServerStatusPresentation({ ...pending, status: "live" }).label, "Status not checked");
-    assert.equal(publicServerStatusPresentation({ ...pending, status: "live", metadata_last_checked_at: "invalid" }).label, "Status not checked");
+    assert.equal(publicServerStatusPresentation({ ...pending, status: "live", server_status: "started", metadata_last_checked_at: "invalid" }).label, "Status not checked");
     for (const is_online of [true, false]) {
       for (const player_count_source of ["nitrado", "adm_playerlist", null]) {
         for (const player_count_status of ["fresh", "stale", "unavailable", null]) {
           const checked = { ...pending, status: "live", is_online, player_count_source, player_count_status,
             metadata_last_checked_at: "2026-01-01T10:00:00Z", player_count_last_checked_at: "2026-01-01T10:00:00Z" };
           assert.deepEqual(publicServerStatusPresentation(checked), { label: "Status unavailable", tone: "zinc" },
-            "Failures, ADM fallbacks and Nitrado player-count-only refreshes cannot confirm retained online state");
+            "A retained boolean without a consistent explicit provider status cannot confirm a public online state");
         }
       }
     }
+    const freshMetadata = { ...pending, status: "live", metadata_last_checked_at: "2026-01-01T10:00:00Z" };
+    assert.deepEqual(publicServerStatusPresentation({ ...freshMetadata, is_online: true, server_status: "started", player_count_status: "unavailable" }),
+      { label: "Online", tone: "emerald" }, "A successful Nitrado server-state response remains useful when only player count is unavailable");
+    assert.deepEqual(publicServerStatusPresentation({ ...freshMetadata, is_online: false, server_status: "stopped", player_count_status: "unavailable" }),
+      { label: "Offline", tone: "zinc" }, "A successful stopped-state response can be shown independently of player count");
+    assert.deepEqual(publicServerStatusPresentation({ ...freshMetadata, is_online: false, server_status: "started" }),
+      { label: "Status unavailable", tone: "zinc" }, "Conflicting provider state must not make a public availability claim");
+    assert.deepEqual(publicServerStatusPresentation({ ...freshMetadata, is_online: true, server_status: "unknown" }),
+      { label: "Status unavailable", tone: "zinc" }, "Unknown provider state must not make a public availability claim");
     assert.equal(publicServerStatusPresentation({ ...pending, lifecycle: { historical: true, label: "Legacy / Offline" } }).label, "Legacy / Offline");
     assert.equal(getPublicServerLifecycleDisplay("active_live", "pending").label, "Setup incomplete");
     assert.doesNotMatch(getServerLifecycleDisplay("active_live").message, /Full sync is enabled/);
