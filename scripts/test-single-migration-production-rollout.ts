@@ -81,6 +81,16 @@ assert.match(workflow, /verify-schema/);
 assert.match(workflow, /verify-state-preservation-before/);
 assert.match(workflow, /verify-state-preservation-after/);
 assert.match(workflow, /Private state-preservation baseline captured/);
+assert.equal(
+  (workflow.match(/trap cleanup_state_rows EXIT/g) ?? []).length,
+  1,
+  "The pre-migration baseline must survive into the post-migration verification step; only that later step may remove it on exit.",
+);
+assert.equal(
+  (workflow.match(/cleanup_state_rows\(\)/g) ?? []).length,
+  1,
+  "The state-row cleanup function belongs only to the post-migration verification step.",
+);
 assert.match(workflow, /survival-command-loadout-migration/);
 assert.match(workflow, /night-run-route-control-migration/);
 assert.match(workflow, /circuit-forge-grid-control-migration/);

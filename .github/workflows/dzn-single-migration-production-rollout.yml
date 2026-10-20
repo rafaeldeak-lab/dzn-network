@@ -312,8 +312,9 @@ jobs:
 
           STATE_TABLE="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-table --migration "${MIGRATION_NAME}")"
           if [ -n "${STATE_TABLE}" ]; then
-            cleanup_state_rows() { rm -f "${MIGRATION_STAGE}/state-rows-before.json" "${MIGRATION_STAGE}/state-rows-after.json"; }
-            trap cleanup_state_rows EXIT
+            # The post-migration verifier runs in a later GitHub Actions step.
+            # Keep this private baseline in the job workspace until it has used
+            # it, then remove it in that later step. No stage artifacts upload.
             STATE_OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-objects-query --migration "${MIGRATION_NAME}")"
             STATE_ROWS_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-state-preservation-rows-query --migration "${MIGRATION_NAME}")"
             npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
