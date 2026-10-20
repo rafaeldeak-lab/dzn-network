@@ -306,6 +306,14 @@ export async function refreshNitradoServerMetadata(
     )
     .run();
 
+  await recordServerStatusEvidence(db, linkedServer.id, metadata).catch((error) => {
+    // No status evidence is safer than presenting a status that has not been confirmed.
+    console.warn("DZN SERVER STATUS EVIDENCE WRITE SKIPPED", {
+      linkedServerId: linkedServer.id,
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+  });
+
   if (geo) {
     console.log("DZN SERVER GEO LOCATION UPDATED", {
       linkedServerId: linkedServer.id,
@@ -378,6 +386,21 @@ export async function refreshNitradoServerMetadata(
       changed_fields: changes.map((change) => change.field),
     },
   };
+}
+
+async function recordServerStatusEvidence(db: D1Database, linkedServerId: string, metadata: LinkedServerMetadata) {
+  // A full metadata response without a provider status remains insufficient to
+  // label a public server Online or Offline. Player-count-only refreshes never
+  // reach this path.
+  if (!metadata.server_status) return;
+  await db
+    .prepare(
+      `INSERT INTO dzn_server_status_evidence (server_id, server_status_confirmed_at)
+       VALUES (?, ?)
+       ON CONFLICT(server_id) DO UPDATE SET server_status_confirmed_at = excluded.server_status_confirmed_at`,
+    )
+    .bind(linkedServerId, metadata.metadata_last_checked_at)
+    .run();
 }
 
 async function syncPublicCacheFromMetadataRefresh(

@@ -62,6 +62,7 @@ type PublicServerRow = {
   server_status: string | null;
   is_online: number | null;
   metadata_last_checked_at: string | null;
+  server_status_confirmed_at: string | null;
   player_count_last_checked_at: string | null;
   player_count_source: string | null;
   player_count_status: string | null;
@@ -181,6 +182,7 @@ type SafePublicServer = {
   is_online: boolean;
   last_sync_at: string | null;
   metadata_last_checked_at: string | null;
+  server_status_confirmed_at?: string | null;
   player_count_last_checked_at: string | null;
   player_count_source: string | null;
   player_count_status: string | null;
@@ -505,9 +507,10 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
         linked_servers.map_name,
         linked_servers.mission,
         linked_servers.server_mode,
-        COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
-        COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
-        COALESCE(linked_servers.metadata_last_checked_at, server_public_cache.last_status_update_at) AS metadata_last_checked_at,
+        linked_servers.server_status AS server_status,
+        linked_servers.is_online AS is_online,
+        linked_servers.metadata_last_checked_at AS metadata_last_checked_at,
+        dzn_server_status_evidence.server_status_confirmed_at,
         ${PUBLIC_PLAYER_COUNT_CHECKED_AT_SQL} AS player_count_last_checked_at,
         linked_servers.player_count_source,
         ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status,
@@ -585,6 +588,7 @@ async function querySinglePublicServer(env: Env, whereClause: string, value: str
        LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN dzn_server_status_evidence ON dzn_server_status_evidence.server_id = linked_servers.id
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
@@ -662,9 +666,10 @@ async function queryPublicServersPreview(env: Env) {
         linked_servers.map_name,
         linked_servers.mission,
         linked_servers.server_mode,
-        COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
-        COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
-        COALESCE(linked_servers.metadata_last_checked_at, server_public_cache.last_status_update_at) AS metadata_last_checked_at,
+        linked_servers.server_status AS server_status,
+        linked_servers.is_online AS is_online,
+        linked_servers.metadata_last_checked_at AS metadata_last_checked_at,
+        dzn_server_status_evidence.server_status_confirmed_at,
         ${PUBLIC_PLAYER_COUNT_CHECKED_AT_SQL} AS player_count_last_checked_at,
         linked_servers.player_count_source,
         ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status,
@@ -738,6 +743,7 @@ async function queryPublicServersPreview(env: Env) {
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+       LEFT JOIN dzn_server_status_evidence ON dzn_server_status_evidence.server_id = linked_servers.id
        LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
@@ -806,9 +812,10 @@ async function queryPublicServers(env: Env) {
       linked_servers.map_name,
       linked_servers.mission,
       linked_servers.server_mode,
-      COALESCE(server_public_cache.server_status, linked_servers.server_status) AS server_status,
-      COALESCE(server_public_cache.server_online, linked_servers.is_online) AS is_online,
-      COALESCE(linked_servers.metadata_last_checked_at, server_public_cache.last_status_update_at) AS metadata_last_checked_at,
+      linked_servers.server_status AS server_status,
+      linked_servers.is_online AS is_online,
+      linked_servers.metadata_last_checked_at AS metadata_last_checked_at,
+      dzn_server_status_evidence.server_status_confirmed_at,
       ${PUBLIC_PLAYER_COUNT_CHECKED_AT_SQL} AS player_count_last_checked_at,
       linked_servers.player_count_source,
       ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status,
@@ -896,6 +903,7 @@ async function queryPublicServers(env: Env) {
     LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
+    LEFT JOIN dzn_server_status_evidence ON dzn_server_status_evidence.server_id = linked_servers.id
     LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
     LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
     LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
@@ -1187,6 +1195,7 @@ async function toSafePublicServer(
     is_online: publicIsOnline,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
+    server_status_confirmed_at: row.server_status_confirmed_at,
     player_count_last_checked_at: row.player_count_last_checked_at,
     player_count_source: row.player_count_source,
     player_count_status: row.player_count_status,
@@ -1453,6 +1462,7 @@ async function toSafePublicServerPreview(
     is_online: publicIsOnline,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
+    server_status_confirmed_at: row.server_status_confirmed_at,
     player_count_last_checked_at: row.player_count_last_checked_at,
     player_count_source: row.player_count_source,
     player_count_status: row.player_count_status,
