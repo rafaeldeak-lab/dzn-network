@@ -61,21 +61,6 @@ function playerOwnedTable(name: string, columns: string[], additionalForeignKeys
   };
 }
 
-const LINKED_SERVER_COLUMNS = [
-  "id", "user_id", "guild_id", "discord_guild_id", "nitrado_service_id", "nitrado_service_name", "server_name", "server_type", "tags_json", "region", "status", "public_slug", "created_at", "updated_at", "game", "platform", "ip_address", "player_slots", "display_name", "hostname", "description", "max_players", "current_players", "game_port", "query_port", "map_name", "mission", "server_status", "is_online", "server_mode", "server_mode_source", "metadata_hash", "metadata_last_checked_at", "metadata_last_changed_at", "raw_metadata_json", "merged_into_server_id", "merged_at", "geo_latitude", "geo_longitude", "geo_country", "geo_region", "geo_city", "geo_timezone", "geo_source", "geo_last_checked_at", "public_short_description", "public_description", "public_discord_invite", "public_website_url", "public_rules", "public_language", "public_region_label", "public_listing_updated_at", "player_count_last_checked_at", "player_count_source", "player_count_status", "bot_access_token", "tournament_channel_id", "bot_installed_at", "is_searching_for_match", "matchmaking_opt_in_at", "dynamic_visibility_score", "server_category", "competitive_enabled", "verified_server", "event_mmr", "season_points", "event_wins", "event_losses", "event_draws", "last_event_at", "category_changed_at", "category_cooldown_until", "category_effective_at", "category_first_set_at", "category_first_grace_used_at", "category_locked_until", "category_lock_reason", "listing_visibility", "tags_changed_at", "tags_cooldown_until", "advert_banner_url", "advert_banner_alt", "owner_announcement", "fresh_wipe_promo", "discord_embed_banner_url", "discord_embed_accent_color", "lifecycle_status", "lifecycle_reason", "lifecycle_updated_at", "owner_action_required", "owner_action_reason", "stale_since", "expired_detected_at", "final_sync_attempted_at", "final_sync_completed_at", "final_sync_result", "final_adm_filename", "latest_imported_event_at", "auto_archive_after",
-];
-
-const LINKED_SERVER_LEGACY_COLUMNS = [
-  ...LINKED_SERVER_COLUMNS.slice(0, 12),
-  "merged_into_server_id",
-  "merged_at",
-  ...LINKED_SERVER_COLUMNS.slice(12).filter((column) => column !== "merged_into_server_id" && column !== "merged_at"),
-];
-
-const LINKED_SERVER_STATUS_EVIDENCE_ROW_COLUMNS = [
-  "id", "user_id", "guild_id", "discord_guild_id", "nitrado_service_id",
-];
-
 const MIGRATION_PLANS: Record<string, MigrationPlan> = {
   "0096_games_hub_relay_rush.sql": {
     migration: "0096_games_hub_relay_rush.sql",
@@ -285,25 +270,14 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
   "0113_dzn_server_status_evidence.sql": {
     migration: "0113_dzn_server_status_evidence.sql",
     predecessor: "0112_dzn_survival_command_field_orders.sql",
-    tables: [],
-    indexes: [],
-    statePreservation: {
-      table: {
-        name: "linked_servers",
-        columns: LINKED_SERVER_COLUMNS,
-        foreignKeys: [{ from: "user_id", table: "users", to: "id", onDelete: "NO ACTION" }],
+    tables: [
+      {
+        name: "dzn_server_status_evidence",
+        columns: ["server_id", "server_status_confirmed_at"],
+        foreignKeys: [{ from: "server_id", table: "linked_servers", to: "id", onDelete: "CASCADE" }],
       },
-      beforeColumns: LINKED_SERVER_COLUMNS,
-      beforeColumnVariants: [LINKED_SERVER_LEGACY_COLUMNS],
-      afterColumns: [...LINKED_SERVER_COLUMNS, "server_status_confirmed_at"],
-      afterColumnVariants: [[...LINKED_SERVER_LEGACY_COLUMNS, "server_status_confirmed_at"]],
-      rowColumns: LINKED_SERVER_STATUS_EVIDENCE_ROW_COLUMNS,
-      allowConcurrentInserts: true,
-      sourceHash: "15dcc0e10a7237f011c233d0634e6102626a44bce0f2ed46c2d26bea59c8560b",
-      beforeSqlFragments: [],
-      afterSqlFragments: ["SERVER_STATUS_CONFIRMED_AT TEXT"],
-      addedColumns: [{ name: "server_status_confirmed_at", expectedValue: null }],
-    },
+    ],
+    indexes: [],
   },
 };
 
