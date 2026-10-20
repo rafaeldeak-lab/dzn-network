@@ -792,10 +792,18 @@ function verifyStatePreservationAfter(
     }
   }
   const initializedDefaults = readRows(defaultsPath);
-  if (initializedDefaults.length !== afterCount) {
+  const preexistingIdentityRows = state.allowConcurrentInserts && beforeRowsPath ? readRows(beforeRowsPath) : [];
+  if (!state.allowConcurrentInserts && initializedDefaults.length !== afterCount) {
     throw new Error(`${state.table.name} default-initialization query returned ${initializedDefaults.length} rows for ${afterCount} preserved rows.`);
   }
   for (const addedColumn of state.addedColumns) {
+    if (state.allowConcurrentInserts) {
+      const observedDefaultById = new Map(initializedDefaults.map((row) => [String(row.id ?? ""), row[addedColumn.name]]));
+      const missingPreexistingDefault = preexistingIdentityRows.some((row) => !observedDefaultById.has(String(row.id ?? "")));
+      if (missingPreexistingDefault) {
+        throw new Error(`${state.table.name} default-initialization query did not retain every pre-existing row.`);
+      }
+    }
     const invalid = initializedDefaults.some((row) => addedColumn.expectedValue === null
       ? row[addedColumn.name] !== null
       : String(row[addedColumn.name] ?? "") !== addedColumn.expectedValue);
