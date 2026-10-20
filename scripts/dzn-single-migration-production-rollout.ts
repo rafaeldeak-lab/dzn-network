@@ -234,6 +234,36 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       ],
     },
   },
+  "0112_dzn_survival_command_field_orders.sql": {
+    migration: "0112_dzn_survival_command_field_orders.sql",
+    predecessor: "0111_games_hub_circuit_forge_grid_control.sql",
+    tables: [],
+    indexes: ["idx_dzn_survival_command_field_order_request", "idx_dzn_survival_command_field_order_active"],
+    statePreservation: {
+      table: playerOwnedTable("dzn_survival_command_expeditions", ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout"]),
+      beforeColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout"],
+      afterColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout", "field_order", "field_order_request_id", "field_order_at"],
+      rowColumns: ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout"],
+      sourceHash: "9426b2732c208119ebf5bbdf5f82bebeb998b478c34e1180cb5fbf02ca7d400c",
+      beforeSqlFragments: [
+        "CHECK (SECTOR IN ('PERIMETER', 'RAIL_YARD', 'RADIO_RIDGE', 'BLACKSITE'))",
+        "CHECK (APPROACH IN ('SCOUT', 'BALANCED', 'BREACH'))",
+        "UNIQUE (USER_ID, REQUEST_ID)",
+        "LOADOUT TEXT NOT NULL DEFAULT 'FIELD_KIT'",
+        "CHECK (LOADOUT IN ('FIELD_KIT', 'SIGNAL_SCANNER', 'RECOVERY_KIT', 'CONVOY_PLATING'))",
+      ],
+      afterSqlFragments: [
+        "FIELD_ORDER TEXT CHECK (FIELD_ORDER IS NULL OR FIELD_ORDER IN ('OVERWATCH', 'INTERCEPT', 'RECOVERY'))",
+        "FIELD_ORDER_REQUEST_ID TEXT",
+        "FIELD_ORDER_AT INTEGER",
+      ],
+      addedColumns: [
+        { name: "field_order", expectedValue: null },
+        { name: "field_order_request_id", expectedValue: null },
+        { name: "field_order_at", expectedValue: null },
+      ],
+    },
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
