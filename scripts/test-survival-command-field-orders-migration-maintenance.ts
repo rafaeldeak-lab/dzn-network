@@ -10,7 +10,9 @@ const wrangler = readFileSync("wrangler.toml", "utf8");
 const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
 assert.doesNotMatch(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE = /m);
 assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m);
-assert.doesNotMatch(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED = "true"$/m);
+assert.match(productionBlock, /^DZN_COMMAND_CENTRE_ENABLED = "true"$/m);
+assert.match(productionBlock, /^DZN_SURVIVAL_COMMAND_ENABLED = "true"$/m);
+assert.match(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED = "true"$/m);
 
 async function run() {
   const fixture = await gamesFixture();
