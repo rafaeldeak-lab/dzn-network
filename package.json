@@ -12,6 +12,7 @@
     "test:survival-command": "tsx scripts/test-survival-command.ts",
     "test:survival-command-field-orders-production-activation": "tsx scripts/test-survival-command-field-orders-production-activation.ts",
     "test:survival-command-field-orders-migration-maintenance": "tsx scripts/test-survival-command-field-orders-migration-maintenance.ts",
+    "test:server-status-evidence-migration": "tsx scripts/test-server-status-evidence-migration.ts",
     "qa:survival-command": "next build --webpack && node scripts/patch-pages-routes.mjs && node scripts/qa-survival-command.mjs",
     "test:games-relay-rush": "tsx scripts/test-games-relay-rush.ts",
     "test:games-relay-rush-production-activation": "tsx scripts/test-games-relay-rush-production-activation.ts",
