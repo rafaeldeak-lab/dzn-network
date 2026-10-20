@@ -10,8 +10,8 @@ const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n
 assert.match(productionBlock, /^DZN_GAMES_NIGHT_RUN_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = /m);
 assert.doesNotMatch(productionBlock, /^DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE = /m);
-assert.match(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE = "true"$/m);
-assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "false"$/m);
+assert.doesNotMatch(productionBlock, /^DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE = /m);
+assert.match(productionBlock, /^DZN_ACCOUNT_DELETE_ENABLED = "true"$/m);
 
 async function run() {
   const fixture = await gamesFixture();
