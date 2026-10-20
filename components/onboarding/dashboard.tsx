@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { isPersistedDashboardActionActive, shouldDiscardPersistedDashboardAction } from "@/lib/dashboard-action-recovery";
 
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
@@ -265,10 +266,16 @@ function dashboardActionStorageKey(serverId: string) {
 function loadDashboardActionState(serverId: string): DashboardActionProgress | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(dashboardActionStorageKey(serverId)) ?? window.sessionStorage.getItem(dashboardActionStorageKey(serverId));
+    const key = dashboardActionStorageKey(serverId);
+    const raw = window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as DashboardActionProgress;
     if (!parsed?.actionKey || !parsed.title || !parsed.status) return null;
+    if (shouldDiscardPersistedDashboardAction(parsed)) {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -293,7 +300,7 @@ function saveDashboardActionState(serverId: string, action: DashboardActionProgr
 }
 
 function isActiveDashboardActionStatus(status?: DashboardActionStatus | null) {
-  return status === "queued" || status === "running" || status === "polling";
+  return isPersistedDashboardActionActive(status);
 }
 
 function clampActionProgress(progress: number | null | undefined) {
