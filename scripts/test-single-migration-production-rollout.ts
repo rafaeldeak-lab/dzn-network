@@ -20,6 +20,7 @@ const migrations = [
   "0109_dzn_survival_command_loadouts.sql",
   "0110_games_hub_night_run_route_control.sql",
   "0111_games_hub_circuit_forge_grid_control.sql",
+  "0112_dzn_survival_command_field_orders.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -96,14 +97,21 @@ assert.ok(
   (workflow.match(/MIGRATION_NAME.*0111_games_hub_circuit_forge_grid_control\.sql/g) ?? []).length >= 2,
   "The 0111 migration must remain explicitly gated by protected-write maintenance and draining.",
 );
+assert.ok(
+  (workflow.match(/MIGRATION_NAME.*0112_dzn_survival_command_field_orders\.sql/g) ?? []).length >= 2,
+  "The 0112 migration must remain explicitly gated by protected-write maintenance and draining.",
+);
 assert.match(workflow, /0109_dzn_survival_command_loadouts\.sql\)[\s\S]*?survival-command-loadout-maintenance/);
 assert.match(workflow, /0110_games_hub_night_run_route_control\.sql\)[\s\S]*?night-run-route-control-maintenance/);
+assert.match(workflow, /0112_dzn_survival_command_field_orders\.sql\)[\s\S]*?survival-command-field-orders-maintenance/);
 assert.match(workflow, /REQUIRED_CONSECUTIVE_EMPTY_READS=2/);
 assert.match(workflow, /test:survival-command-loadout-migration-maintenance/);
 assert.match(workflow, /test:night-run-route-control-migration-maintenance/);
 assert.match(workflow, /test:circuit-forge-grid-control-migration-maintenance/);
+assert.match(workflow, /test:survival-command-field-orders-migration-maintenance/);
 assert.match(workflow, /SESSION_LABEL="Night Run"/);
 assert.match(workflow, /SESSION_LABEL="Circuit Forge"/);
+assert.match(workflow, /SESSION_LABEL="Survival Command"/);
 assert.match(workflow, /migrations apply/);
 assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflow must have exactly one migration application command.");
 assert.match(workflow, /--config "\$\{MIGRATION_STAGE\}\/wrangler\.toml"/);
@@ -155,6 +163,8 @@ const survivalExpeditionsIndex = migrationNames.indexOf("0108_dzn_survival_comma
 assert.ok(survivalExpeditionsIndex > commandCentreIndex, "Survival Command expeditions must follow Command Centre.");
 const survivalLoadoutsIndex = migrationNames.indexOf("0109_dzn_survival_command_loadouts.sql");
 assert.equal(migrationNames[survivalLoadoutsIndex - 1], "0108_dzn_survival_command_expeditions.sql");
+const survivalFieldOrdersIndex = migrationNames.indexOf("0112_dzn_survival_command_field_orders.sql");
+assert.equal(migrationNames[survivalFieldOrdersIndex - 1], "0111_games_hub_circuit_forge_grid_control.sql");
 
 function verifyLedger(names: string[]) {
   const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));
@@ -638,6 +648,126 @@ try {
   assert.match(`${invalidNullDefault.stdout ?? ""}${invalidNullDefault.stderr ?? ""}`, /diagnostic_index was not initialized to NULL/);
 } finally {
   rmSync(circuitForgeGridControlDirectory, { force: true, recursive: true });
+}
+
+const survivalFieldOrdersDirectory = mkdtempSync(join(process.cwd(), ".dzn-survival-command-field-orders-migration-test-"));
+try {
+  const run = (args: string[]) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/dzn-single-migration-production-rollout.ts", ...args], { encoding: "utf8" });
+  const wrappedRows = (rows: unknown[]) => JSON.stringify([{ results: rows }]);
+  const write = (name: string, value: string) => {
+    const path = join(survivalFieldOrdersDirectory, name);
+    writeFileSync(path, value, "utf8");
+    return path;
+  };
+
+  const ledger = write("ledger.json", wrappedRows(migrationNames.slice(0, survivalFieldOrdersIndex).map((name) => ({ name }))));
+  const verifiedLedger = run(["verify-ledger", "--migration", "0112_dzn_survival_command_field_orders.sql", "--ledger", ledger, "--phase", "before"]);
+  assert.equal(verifiedLedger.status, 0, `${verifiedLedger.stdout ?? ""}${verifiedLedger.stderr ?? ""}`);
+
+  const stageDirectory = join(survivalFieldOrdersDirectory, "stage");
+  const preparedStage = run(["prepare", "--migration", "0112_dzn_survival_command_field_orders.sql", "--stage-dir", stageDirectory]);
+  assert.equal(preparedStage.status, 0, `${preparedStage.stdout ?? ""}${preparedStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    migration: { predecessor: string; statePreservation?: { sourceHash: string; addedColumns: Array<{ name: string; expectedValue: null }> } };
+    expectedObjectSql: Record<string, string>;
+  };
+  assert.equal(prepared.migration.predecessor, "0111_games_hub_circuit_forge_grid_control.sql");
+  assert.equal(prepared.migration.statePreservation?.sourceHash, "9426b2732c208119ebf5bbdf5f82bebeb998b478c34e1180cb5fbf02ca7d400c");
+  assert.deepEqual(prepared.migration.statePreservation?.addedColumns, [
+    { name: "field_order", expectedValue: null },
+    { name: "field_order_request_id", expectedValue: null },
+    { name: "field_order_at", expectedValue: null },
+  ]);
+  assert.deepEqual(Object.keys(prepared.expectedObjectSql).sort(), [
+    "idx_dzn_survival_command_field_order_active",
+    "idx_dzn_survival_command_field_order_request",
+  ]);
+  assert.match(prepared.expectedObjectSql.idx_dzn_survival_command_field_order_request, /^CREATE UNIQUE INDEX idx_dzn_survival_command_field_order_request /);
+
+  const row = {
+    id: "expedition-a",
+    user_id: "user-a",
+    request_id: "request-a",
+    sector: "perimeter",
+    approach: "scout",
+    status: "deployed",
+    seed: "0123456789abcdef",
+    deployment_day: "2026-10-20",
+    deployment_cost: 1,
+    started_at: 1,
+    ready_at: 2,
+    resolved_at: null,
+    version: 0,
+    loadout: "field_kit",
+  };
+  const beforeSql = "CREATE TABLE dzn_survival_command_expeditions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, request_id TEXT NOT NULL, sector TEXT NOT NULL CHECK (sector IN ('perimeter', 'rail_yard', 'radio_ridge', 'blacksite')), approach TEXT NOT NULL CHECK (approach IN ('scout', 'balanced', 'breach')), status TEXT NOT NULL CHECK (status IN ('deployed', 'resolved')), seed TEXT NOT NULL CHECK (length(seed) >= 16), deployment_day TEXT NOT NULL CHECK (length(deployment_day) = 10), deployment_cost INTEGER NOT NULL CHECK (deployment_cost BETWEEN 1 AND 3), started_at INTEGER NOT NULL, ready_at INTEGER NOT NULL CHECK (ready_at > started_at), resolved_at INTEGER, version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0), loadout TEXT NOT NULL DEFAULT 'field_kit' CHECK (loadout IN ('field_kit', 'signal_scanner', 'recovery_kit', 'convoy_plating')), UNIQUE (user_id, request_id), CHECK ((status = 'deployed' AND resolved_at IS NULL) OR (status = 'resolved' AND resolved_at IS NOT NULL)))";
+  const afterSql = `${beforeSql.slice(0, -1)}, field_order TEXT CHECK (field_order IS NULL OR field_order IN ('overwatch', 'intercept', 'recovery')), field_order_request_id TEXT, field_order_at INTEGER)`;
+  const columns = ["id", "user_id", "request_id", "sector", "approach", "status", "seed", "deployment_day", "deployment_cost", "started_at", "ready_at", "resolved_at", "version", "loadout"];
+  const foreignKeys = write("foreign-keys.json", wrappedRows([{ from: "user_id", table: "users", to: "id", on_delete: "CASCADE" }]));
+  const foreignKeyCheck = write("foreign-key-check.json", wrappedRows([]));
+  const baseline = run([
+    "verify-state-preservation-before",
+    "--migration", "0112_dzn_survival_command_field_orders.sql",
+    "--objects", write("before-objects.json", wrappedRows([{ type: "table", name: "dzn_survival_command_expeditions", tbl_name: "dzn_survival_command_expeditions", sql: beforeSql }])),
+    "--table-info", write("before-info.json", wrappedRows(columns.map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+  ]);
+  assert.equal(baseline.status, 0, `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`);
+
+  const schema = run([
+    "verify-schema",
+    "--stage-dir", stageDirectory,
+    "--objects", write("after-indexes.json", wrappedRows(Object.entries(prepared.expectedObjectSql).map(([name, sql]) => ({ type: "index", name, tbl_name: "dzn_survival_command_expeditions", sql })))),
+    "--foreign-key-check", foreignKeyCheck,
+  ]);
+  assert.equal(schema.status, 0, `${schema.stdout ?? ""}${schema.stderr ?? ""}`);
+
+  const beforeRows = write("before-rows.json", wrappedRows([row]));
+  const afterRows = write("after-rows.json", wrappedRows([row]));
+  const beforeFingerprint = join(survivalFieldOrdersDirectory, "before.sha256");
+  const afterFingerprint = join(survivalFieldOrdersDirectory, "after.sha256");
+  const beforeHash = run(["fingerprint", "--rows", beforeRows]);
+  const afterHash = run(["fingerprint", "--rows", afterRows]);
+  assert.equal(beforeHash.status, 0, beforeHash.stderr);
+  assert.equal(afterHash.status, 0, afterHash.stderr);
+  writeFileSync(beforeFingerprint, beforeHash.stdout.trim(), "utf8");
+  writeFileSync(afterFingerprint, afterHash.stdout.trim(), "utf8");
+  const defaultQuery = run(["print-state-preservation-defaults-query", "--migration", "0112_dzn_survival_command_field_orders.sql"]);
+  assert.equal(defaultQuery.status, 0, defaultQuery.stderr);
+  assert.match(defaultQuery.stdout, /SELECT id, field_order, field_order_request_id, field_order_at FROM dzn_survival_command_expeditions/);
+  const verified = run([
+    "verify-state-preservation-after",
+    "--migration", "0112_dzn_survival_command_field_orders.sql",
+    "--objects", write("after-objects.json", wrappedRows([{ type: "table", name: "dzn_survival_command_expeditions", tbl_name: "dzn_survival_command_expeditions", sql: afterSql }])),
+    "--table-info", write("after-info.json", wrappedRows([...columns, "field_order", "field_order_request_id", "field_order_at"].map((name) => ({ name })))),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", write("before-count.json", wrappedRows([{ row_count: 1 }])),
+    "--after-row-count", write("after-count.json", wrappedRows([{ row_count: 1 }])),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("defaults.json", wrappedRows([{ id: "expedition-a", field_order: null, field_order_request_id: null, field_order_at: null }])),
+  ]);
+  assert.equal(verified.status, 0, `${verified.stdout ?? ""}${verified.stderr ?? ""}`);
+  assert.match(verified.stdout, /1 dzn_survival_command_expeditions rows retained/);
+  const invalidNullDefault = run([
+    "verify-state-preservation-after",
+    "--migration", "0112_dzn_survival_command_field_orders.sql",
+    "--objects", join(survivalFieldOrdersDirectory, "after-objects.json"),
+    "--table-info", join(survivalFieldOrdersDirectory, "after-info.json"),
+    "--foreign-keys", foreignKeys,
+    "--foreign-key-check", foreignKeyCheck,
+    "--before-row-count", join(survivalFieldOrdersDirectory, "before-count.json"),
+    "--after-row-count", join(survivalFieldOrdersDirectory, "after-count.json"),
+    "--before-fingerprint", beforeFingerprint,
+    "--after-fingerprint", afterFingerprint,
+    "--defaults", write("invalid-defaults.json", wrappedRows([{ id: "expedition-a", field_order: "overwatch", field_order_request_id: null, field_order_at: null }])),
+  ]);
+  assert.notEqual(invalidNullDefault.status, 0, "The verifier must reject a non-null field order on every preserved Survival Command expedition.");
+  assert.match(`${invalidNullDefault.stdout ?? ""}${invalidNullDefault.stderr ?? ""}`, /field_order was not initialized to NULL/);
+} finally {
+  rmSync(survivalFieldOrdersDirectory, { force: true, recursive: true });
 }
 
 console.log("Single-migration production rollout safety tests passed.");

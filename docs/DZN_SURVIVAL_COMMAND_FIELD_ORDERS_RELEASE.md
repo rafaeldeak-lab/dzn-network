@@ -28,15 +28,16 @@ Perform this separately from the source merge and from every other migration:
 4. Verify the three `dzn_survival_command_expeditions` columns: `field_order`, `field_order_request_id`, and `field_order_at`.
 5. Verify both indexes: `idx_dzn_survival_command_field_order_request` and `idx_dzn_survival_command_field_order_active`.
 6. Verify foreign keys with `PRAGMA foreign_key_check`, the new field-order check constraint, and the expected zero-row baseline before the feature is enabled.
-7. Set only `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED=true` on the server runtime. Keep other flags unchanged.
-8. With an authenticated test account, establish a Command Centre and Operations profile, dispatch a mission, wait for the normal server-ready state, choose each field order in separate controlled missions, and verify:
+7. Merge and deploy a separately reviewed cleanup release that removes `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_MIGRATION_MAINTENANCE` and restores `DZN_ACCOUNT_DELETE_ENABLED=true`. Verify the maintenance health route has returned its normal `404` response and existing authenticated Survival Command writes are available again before proceeding.
+8. Only after that cleanup is live and verified, set `DZN_SURVIVAL_COMMAND_FIELD_ORDERS_ENABLED=true` on the server runtime. Keep every unrelated feature flag unchanged.
+9. With an authenticated test account, establish a Command Centre and Operations profile, dispatch a mission, wait for the normal server-ready state, choose each field order in separate controlled missions, and verify:
    - no order is shown before the migration plus flag;
    - one order can be chosen exactly once;
    - stale, replayed, forged, cross-account, and early requests are rejected without changing the expedition;
    - the subsequent incident decision resolves once and records the selected field order in private history;
    - the resulting resources are server-side values only;
    - no DayZ, server, leaderboard, entitlement, payment, raw-location, or competitive record changes.
-9. Keep the flag off if any verification fails; investigate from the recovery reference rather than combining a repair with another migration.
+10. Keep the flag off if any verification fails; investigate from the recovery reference rather than combining a repair with another migration.
 
 ## Local Evidence
 
