@@ -202,7 +202,12 @@ for (const snippet of [
   assert.equal(dashboardSource.includes(snippet), true, `Dashboard checkout warning should include: ${snippet}`);
 }
 assert.equal(
-  dashboardSource.includes("const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;"),
+  dashboardSource.includes("const configuredPlanBlocked = plans.some((plan) => plan.configured && plan.checkout_enabled === false);"),
+  true,
+  "The owner warning must use the owner-safe plan response when the protected readiness endpoint is unavailable.",
+);
+assert.equal(
+  dashboardSource.includes("const checkoutUnavailable = readiness?.checkoutSessionCreationAllowed === false || configuredPlanBlocked;"),
   true,
   "The owner warning must follow the actual checkout-creation gate so test checkout is not labelled unavailable.",
 );

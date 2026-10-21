@@ -5646,7 +5646,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
         <MiniInfo {...dashboardBillingPeriod(billing)} />
       </div>
 
-      <BillingReadinessWarning readiness={readiness} />
+      <BillingReadinessWarning readiness={readiness} plans={plans} />
       <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
         <p>{PAYMENT_COPY.starterTerms}</p>
         <p>{PAYMENT_COPY.returningStarter}</p>
@@ -5765,13 +5765,12 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
     };
   }
 
-  const liveCheckoutPaused = readiness?.checkoutSafetyMode === "live_checkout_paused" || plan.checkout_blocked_reason?.toLowerCase().includes("live checkout is paused");
   const checkoutEnabled = plan.checkout_enabled !== false && readiness?.checkoutSessionCreationAllowed !== false;
   if (!checkoutEnabled) {
     return {
       enabled: false,
-      statusLabel: liveCheckoutPaused ? "Live checkout paused for sandbox testing" : "Checkout temporarily paused",
-      buttonLabel: "Paused",
+      statusLabel: "Checkout unavailable",
+      buttonLabel: "Unavailable",
     };
   }
 
@@ -5782,13 +5781,13 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
   };
 }
 
-function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
-  if (!readiness) return null;
-  const intentionallyPaused = readiness.checkoutSafetyMode === "live_checkout_paused"
+function BillingReadinessWarning({ readiness, plans }: { readiness: BillingReadinessResponse | null; plans: BillingPlanSummary[] }) {
+  const configuredPlanBlocked = plans.some((plan) => plan.configured && plan.checkout_enabled === false);
+  const checkoutUnavailable = readiness?.checkoutSessionCreationAllowed === false || configuredPlanBlocked;
+  if (!checkoutUnavailable) return null;
+  const intentionallyPaused = readiness?.checkoutSafetyMode === "live_checkout_paused"
     && !readiness.liveCheckoutEnabled
     && readiness.liveConfigurationReady;
-  const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;
-  if (!checkoutUnavailable) return null;
 
   return (
     <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
