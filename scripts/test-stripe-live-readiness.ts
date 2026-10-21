@@ -195,23 +195,26 @@ for (const snippet of [
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 for (const snippet of [
-  "Live billing is not ready yet.",
-  "Live checkout is paused for sandbox verification.",
-  "Secret values and Price IDs are never shown here.",
-  "Live Stripe changes still require explicit human approval.",
-  "Billing readiness note",
+  "Checkout unavailable",
+  "Checkout is temporarily paused. Please try again later.",
+  "Billing setup needs attention before checkout can continue. Please contact DZN support.",
 ]) {
-  assert.equal(dashboardSource.includes(snippet), true, `Dashboard readiness warning should include: ${snippet}`);
+  assert.equal(dashboardSource.includes(snippet), true, `Dashboard checkout warning should include: ${snippet}`);
 }
 assert.match(
   dashboardSource,
   /const actionableFailedChecks = readiness\.readinessChecks\?\.filter\(\(check\) => !check\.ok && check\.severity !== "info"\) \?\? \[\];/,
-  "Informational readiness notes must not be rendered as checkout warnings.",
+  "Only actionable readiness failures should affect checkout messaging.",
 );
 assert.equal(
-  dashboardSource.includes('renderReadinessMetadata("note")'),
-  true,
-  "Informational readiness notes must retain the safe Stripe mode and legacy-variable context.",
+  dashboardSource.includes("Billing readiness note"),
+  false,
+  "A healthy checkout must not show internal readiness notes to server owners.",
+);
+assert.equal(
+  dashboardSource.includes("Secret values and Price IDs are never shown here."),
+  false,
+  "Internal billing implementation details must not be shown in the owner checkout flow.",
 );
 
 const configCheckSource = readFileSync("scripts/check-billing-config.ts", "utf8");
