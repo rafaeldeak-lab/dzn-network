@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRailLoader } from "../components/servers/live-server-rail";
 import { onRequest } from "../functions/api/public/server-rail";
-import { formatPublicServerName } from "../lib/public-display-text";
+import { formatPublicServerName, formatPublicServerNameFromCandidates } from "../lib/public-display-text";
 
 void main();
 
@@ -44,6 +44,7 @@ assert.equal(source.includes("formatPublicServerName(item.name)"), true, "The ra
 assert.equal(formatPublicServerName("NUKETOWN DEATHMATCH- HTTPS://DAYZ-NETWORK.COM"), "NukeTown Deathmatch");
 assert.equal(formatPublicServerName("NukeTown | discord.gg/dzn-network"), "NukeTown");
 assert.equal(formatPublicServerName("DAYZ US 1PP HARDCORE RP"), "DayZ US 1PP HARDCORE RP");
+assert.equal(formatPublicServerNameFromCandidates(["https://dayz-network.com", "NukeTown Deathmatch"], "DZN server"), "NukeTown Deathmatch", "A malformed preferred name must fall through to the next valid server identity.");
 
 let stalledRequestCount = 0;
 let unavailableCount = 0;
@@ -215,13 +216,15 @@ assert.equal(css.includes("@keyframes dznLiveServerRailSingle"), true, "A single
 assert.match(css, /\.dzn-live-server-card__title\s*\{[\s\S]*white-space:\s*nowrap/, "Live rail names must stay on one compact line.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes('import { formatPublicServerName } from "@/lib/public-display-text";'), true, "Owner dashboard labels must use the shared public server-name formatter.");
-assert.equal(dashboardSource.includes('const serverDisplayName = formatPublicServerName('), true, "The selected dashboard server name must not expose pasted URLs.");
-assert.equal(dashboardSource.includes('formatPublicServerName(item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name, "DZN server")'), true, "The server selector must not expose pasted URLs.");
+assert.equal(dashboardSource.includes('formatPublicServerNameFromCandidates'), true, "Owner dashboard labels must use the shared public server-name formatter.");
+assert.equal(dashboardSource.includes('const serverDisplayName = formatPublicServerNameFromCandidates('), true, "The selected dashboard server name must not expose pasted URLs.");
+assert.equal(dashboardSource.includes('formatPublicServerNameFromCandidates([item.display_name, item.hostname, item.server_name, item.nitrado_service_name], "DZN server")'), true, "The server selector must not expose pasted URLs.");
 assert.equal(dashboardSource.includes('const selectedServerLabel = serverDisplayName;'), true, "The selected-server card must retain the DayZ server name rather than substituting the Discord guild name.");
 assert.equal(dashboardSource.includes('connectedServerName={formatPublicServerName(server.guild_name, serverDisplayName)}'), true, "The Discord panel must retain the sanitized Discord guild name while channel data is loading.");
 assert.equal(dashboardSource.includes('value={formatPublicServerName(channelsResponse?.guild_name ?? connectedServerName, "Unknown")}'), true, "Discord response labels must be sanitized at the render boundary.");
 assert.equal(dashboardSource.includes('statusLabel: "Checking checkout"'), true, "The billing panel must not show an unconfigured error while live plan configuration is still loading.");
+assert.equal(dashboardSource.includes('Type the exact public server name'), false, "Server deletion must not accept a display-only name that the protected API will reject.");
+assert.equal(dashboardSource.includes('confirmationText.trim() === requiredText'), true, "Server deletion must use the stable DELETE SERVER confirmation accepted by the protected API.");
 const dashboardApiSource = readFileSync("components/onboarding/api.ts", "utf8");
 assert.equal(dashboardApiSource.includes('return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans", { cache: "no-store" });'), true, "Dashboard billing plans must bypass stale browser responses.");
 

@@ -24,3 +24,15 @@ export function formatPublicServerName(value: string | null | undefined, fallbac
     .replace(/\s+/g, " ")
     .trim();
 }
+
+export function formatPublicServerNameFromCandidates(
+  values: ReadonlyArray<string | null | undefined>,
+  fallback = "DZN Server",
+) {
+  for (const value of values) {
+    const formatted = formatPublicServerName(value, "");
+    if (formatted) return formatted;
+  }
+
+  return fallback;
+}

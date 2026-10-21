@@ -54,7 +54,7 @@ import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
-import { formatPublicServerName } from "@/lib/public-display-text";
+import { formatPublicServerName, formatPublicServerNameFromCandidates } from "@/lib/public-display-text";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDashboardLiveStats, getDashboardServerWars, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
@@ -1508,8 +1508,8 @@ function ServerDashboard({
     });
   }
 
-  const serverDisplayName = formatPublicServerName(
-    server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name,
+  const serverDisplayName = formatPublicServerNameFromCandidates(
+    [server.display_name, server.hostname, server.server_name, server.nitrado_service_name],
     "DZN server",
   );
   const effectiveServerMode = server.server_mode ?? server.server_type;
@@ -3656,7 +3656,7 @@ function ServerDashboard({
               >
                 {servers.map((item) => (
                   <option key={item.id} value={item.id} className="bg-[#080b16] text-white">
-                    {formatPublicServerName(item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name, "DZN server")}
+                    {formatPublicServerNameFromCandidates([item.display_name, item.hostname, item.server_name, item.nitrado_service_name], "DZN server")}
                   </option>
                 ))}
               </select>
@@ -4437,7 +4437,6 @@ function ServerDashboard({
       {dangerAction ? (
         <DangerZoneModal
           action={dangerAction}
-          serverName={serverDisplayName || "DZN server"}
           deleting={deletingDangerAction}
           onClose={() => {
             if (!deletingDangerAction) setDangerAction(null);
@@ -5252,14 +5251,12 @@ function DangerZonePanel({
 
 function DangerZoneModal({
   action,
-  serverName,
   deleting,
   onClose,
   onDownloadSummary,
   onConfirm,
 }: {
   action: "server" | "account";
-  serverName: string;
   deleting: boolean;
   onClose: () => void;
   onDownloadSummary: () => void;
@@ -5270,9 +5267,7 @@ function DangerZoneModal({
   const [finalConfirmed, setFinalConfirmed] = useState(false);
   const isServerDelete = action === "server";
   const requiredText = isServerDelete ? "DELETE SERVER" : "DELETE MY DZN ACCOUNT";
-  const confirmationValid = isServerDelete
-    ? confirmationText.trim() === "DELETE SERVER" || confirmationText.trim() === serverName
-    : confirmationText.trim() === requiredText;
+  const confirmationValid = confirmationText.trim() === requiredText;
   const canDelete = confirmationValid && finalConfirmed && !deleting;
   const deletedItems = isServerDelete ? SERVER_DELETE_ITEMS : ACCOUNT_DELETE_ITEMS;
   const preservedItems = isServerDelete ? SERVER_NOT_DELETED_ITEMS : ACCOUNT_NOT_DELETED_ITEMS;
@@ -5328,7 +5323,7 @@ function DangerZoneModal({
             </label>
             <p className="mt-2 text-sm leading-6 text-zinc-300">
               {isServerDelete ? (
-                <>Type the exact public server name <span className="font-black text-white">{serverName}</span> or <span className="font-black text-white">DELETE SERVER</span>.</>
+                <>Type <span className="font-black text-white">DELETE SERVER</span>.</>
               ) : (
                 <>Type <span className="font-black text-white">DELETE MY DZN ACCOUNT</span>.</>
               )}
