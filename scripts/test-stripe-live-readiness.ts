@@ -212,7 +212,12 @@ assert.equal(
   "The owner warning must follow the actual checkout-creation gate so test checkout is not labelled unavailable.",
 );
 assert.equal(
-  dashboardSource.includes('&& readiness.liveConfigurationReady;'),
+  dashboardSource.includes('plans.some((plan) => plan.checkout_availability === "temporarily_paused")'),
+  true,
+  "The owner warning must use the plan API's safe pause state when private readiness data is unavailable.",
+);
+assert.equal(
+  dashboardSource.includes('&& readiness.liveConfigurationReady'),
   true,
   "A missing live prerequisite must not be presented as an intentional temporary pause.",
 );

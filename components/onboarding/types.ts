@@ -502,6 +502,7 @@ export type BillingPlanSummary = {
   monthly_price_gbp: number;
   configured: boolean;
   checkout_enabled: boolean;
+  checkout_availability: "available" | "temporarily_paused" | "unavailable" | "not_configured";
   checkout_blocked_reason: string | null;
   features: string[];
   max_linked_servers: number;

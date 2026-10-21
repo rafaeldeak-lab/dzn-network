@@ -5785,9 +5785,10 @@ function BillingReadinessWarning({ readiness, plans }: { readiness: BillingReadi
   const configuredPlanBlocked = plans.some((plan) => plan.configured && plan.checkout_enabled === false);
   const checkoutUnavailable = readiness?.checkoutSessionCreationAllowed === false || configuredPlanBlocked;
   if (!checkoutUnavailable) return null;
-  const intentionallyPaused = readiness?.checkoutSafetyMode === "live_checkout_paused"
-    && !readiness.liveCheckoutEnabled
-    && readiness.liveConfigurationReady;
+  const intentionallyPaused = plans.some((plan) => plan.checkout_availability === "temporarily_paused")
+    || (readiness?.checkoutSafetyMode === "live_checkout_paused"
+      && !readiness.liveCheckoutEnabled
+      && readiness.liveConfigurationReady);
 
   return (
     <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
@@ -9655,6 +9656,7 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     monthly_price_gbp: base.monthly_price_gbp,
     configured: false,
     checkout_enabled: false,
+    checkout_availability: "not_configured",
     checkout_blocked_reason: "Plan checkout is not configured yet.",
     features: [plan.detail],
     max_linked_servers: base.max_linked_servers,

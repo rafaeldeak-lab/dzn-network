@@ -14,6 +14,7 @@ import { onRequest as billingReadinessHandler } from "../functions/api/billing/r
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const publicSeller = {
@@ -168,6 +169,7 @@ assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true }
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_enabled, false);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_availability, "unavailable");
 assert.match(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_blocked_reason ?? "", /not configured/i);
 assert.equal(planSummaries.some((plan) => String(plan.plan_key) === "premium"), false);
 assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro"]);
@@ -197,6 +199,17 @@ const pausedLiveCheckoutSafety = getCheckoutSafetyStatus({
 } as Env);
 assert.equal(pausedLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
 assert.equal(pausedLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
+
+const intentionallyPausedPlans = getBillingPlanSummaries({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_live_checkout_safety",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_checkout_safety",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLISHED_SELLER.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLISHED_SELLER.addressLines.join(" | "),
+} as Env);
+assert.ok(intentionallyPausedPlans.every((plan) => plan.checkout_availability === "temporarily_paused"), "A fully configured but intentionally paused live checkout must publish a safe owner-facing pause state.");
 
 const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
   ...publicSeller,
