@@ -54,6 +54,7 @@ import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
+import { formatPublicServerName } from "@/lib/public-display-text";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDashboardLiveStats, getDashboardServerWars, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
@@ -1507,7 +1508,10 @@ function ServerDashboard({
     });
   }
 
-  const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
+  const serverDisplayName = formatPublicServerName(
+    server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name,
+    "DZN server",
+  );
   const effectiveServerMode = server.server_mode ?? server.server_type;
   const admState = getAdmState(server);
   const effectiveDiscordPostingChannels = discordPostingChannels.length ? discordPostingChannels : discordChannelCache?.channels ?? [];
@@ -3414,7 +3418,7 @@ function ServerDashboard({
     });
   }
 
-  const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
+  const selectedServerLabel = formatPublicServerName(server.guild_name ?? serverDisplayName, "DZN server");
   const currentPlanName = effectivePlanLabel;
   const selectedServerHealth = effectiveDashboardHealth?.source === "local_fallback"
     ? null
@@ -3652,7 +3656,7 @@ function ServerDashboard({
               >
                 {servers.map((item) => (
                   <option key={item.id} value={item.id} className="bg-[#080b16] text-white">
-                    {item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name}
+                    {formatPublicServerName(item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name, "DZN server")}
                   </option>
                 ))}
               </select>
@@ -4289,7 +4293,7 @@ function ServerDashboard({
             channelFetchFailure={discordChannelFetchFailure}
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
-            connectedServerName={server.guild_name ?? serverDisplayName}
+            connectedServerName={formatPublicServerName(server.guild_name ?? serverDisplayName, "DZN server")}
             planName={effectivePlanLabel}
             onChannelsRefresh={() => refreshDiscordChannels({ live: true })}
             runDashboardAction={runDashboardAction}

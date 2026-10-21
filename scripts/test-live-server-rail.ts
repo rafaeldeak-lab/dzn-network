@@ -214,6 +214,11 @@ assert.match(css, /\.dzn-live-server-rail__track\s*\{[\s\S]*animation:\s*dznLive
 assert.equal(css.includes("@keyframes dznLiveServerRailSingle"), true, "A single real server should keep subtle movement without cloning.");
 assert.match(css, /\.dzn-live-server-card__title\s*\{[\s\S]*white-space:\s*nowrap/, "Live rail names must stay on one compact line.");
 
+const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.equal(dashboardSource.includes('import { formatPublicServerName } from "@/lib/public-display-text";'), true, "Owner dashboard labels must use the shared public server-name formatter.");
+assert.equal(dashboardSource.includes('const serverDisplayName = formatPublicServerName('), true, "The selected dashboard server name must not expose pasted URLs.");
+assert.equal(dashboardSource.includes('formatPublicServerName(item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name, "DZN server")'), true, "The server selector must not expose pasted URLs.");
+
 console.log("Live server rail truthfulness tests passed.");
 }
 
