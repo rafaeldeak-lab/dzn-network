@@ -1593,6 +1593,16 @@ function ServerDashboard({
   const recentFeedStatus = getRecentFeedStatus(effectiveSyncData, effectiveSyncStatus, effectiveRecentEvents.length);
   const recentFeedBadge = getRecentFeedBadge(recentEventsAreMock, effectiveSyncStatus);
   const overviewAdmSyncStatus = getOverviewAdmSyncStatus(effectiveSyncStatus, Boolean(syncStatusActiveAdmImportJob), statsSyncActive);
+  const gameServerStatus = formatNitradoServerStatus(
+    server.server_status,
+    server.is_online,
+    server.metadata_last_checked_at,
+  );
+  const gameServerStatusTone = getGameServerStatusTone(
+    server.server_status,
+    server.is_online,
+    server.metadata_last_checked_at,
+  );
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(effectiveSyncData);
   const nextScheduledSync = getNextScheduledSync(effectiveSyncData?.last_scheduled_sync_at ?? null);
@@ -3594,7 +3604,7 @@ function ServerDashboard({
           <p className="mt-1 truncate text-sm font-black text-white">{selectedServerLabel}</p>
           <div className="mt-2 flex items-center gap-2 text-[11px] font-bold text-emerald-200">
             <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
-            {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
+            {statsSyncActive ? "ADM Synced" : `Listing ${formatServerStatus(server.status)}`}
           </div>
         </div>
         <DashboardPackageGuide
@@ -3680,7 +3690,7 @@ function ServerDashboard({
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="truncate text-3xl font-black text-white">{serverDisplayName}</h1>
                     <span className="rounded-md border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">
-                      {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
+                      {statsSyncActive ? "ADM Synced" : `Listing ${formatServerStatus(server.status)}`}
                     </span>
                     {server.public_slug ? (
                       <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
@@ -3727,7 +3737,7 @@ function ServerDashboard({
 
         <div className="grid content-start gap-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <HealthCard icon={<Server className="h-4 w-4" />} label="Server" value={formatServerStatus(server.status)} tone="emerald" />
+            <HealthCard icon={<Server className="h-4 w-4" />} label="Game Server" value={gameServerStatus} tone={gameServerStatusTone} />
             <HealthCard icon={<Gamepad2 className="h-4 w-4" />} label="Discord" value="Connected" tone="violet" />
             <HealthCard icon={<DatabaseZap className="h-4 w-4" />} label="Nitrado" value="Connected" tone="amber" />
             <HealthCard icon={<ListChecks className="h-4 w-4" />} label="ADM" value={overviewAdmSyncStatus} tone="cyan" />
@@ -3939,7 +3949,7 @@ function ServerDashboard({
                 <CompactRow label="Server Type" value={effectiveServerMode} />
                 <CompactRow label="Game" value={server.game ?? "DayZ"} />
                 <CompactRow label="Player Slots" value={playerSlotsLabel} />
-                <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+                <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online, server.metadata_last_checked_at)} />
                 <CompactRow label="Player Count Freshness" value={`${playerCountStatusLabel} · ${playerCountCheckedLabel}`} />
                 <CompactRow label="Live Count Detail" value={playerCountFreshnessDetail} />
                 <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Not checked"} />
@@ -8450,7 +8460,7 @@ function ServerOverviewAutoCard({
         <MiniInfo label="Service ID" value={server.nitrado_service_id ?? "Not linked"} />
         <MiniInfo label="Server Type" value={serverCategoryLabel !== "Not set" ? serverCategoryLabel : formatStatusLabel(String(effectiveServerMode ?? "Unknown"))} />
         <MiniInfo label="Game" value={server.game ?? "dayzps"} />
-        <MiniInfo label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+        <MiniInfo label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online, server.metadata_last_checked_at)} />
         <MiniInfo label="Player Slots" value={playerSlotsLabel} />
         <MiniInfo label="Player Count Freshness" value={`${playerCountStatusLabel} / ${playerCountCheckedLabel}`} />
         <MiniInfo label="Latest Server Check" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Waiting for first check"} />
@@ -9841,11 +9851,27 @@ function formatPlayerSlots(current: number | null | undefined, max: number | nul
   return "Unknown";
 }
 
-function formatNitradoServerStatus(status: string | null | undefined, online: boolean | number | null | undefined) {
+function formatNitradoServerStatus(
+  status: string | null | undefined,
+  online: boolean | number | null | undefined,
+  metadataLastCheckedAt: string | null | undefined,
+) {
   if (typeof status === "string" && status.trim()) return status.trim();
+  if (!metadataLastCheckedAt) return "Unknown";
   if (online === true || online === 1) return "Online";
   if (online === false || online === 0) return "Offline";
   return "Unknown";
+}
+
+function getGameServerStatusTone(
+  status: string | null | undefined,
+  online: boolean | number | null | undefined,
+  metadataLastCheckedAt: string | null | undefined,
+): "emerald" | "violet" | "amber" | "cyan" {
+  if (!metadataLastCheckedAt && !(typeof status === "string" && status.trim())) return "cyan";
+  if (online === true || online === 1 || /^(online|started|running|active)$/i.test(String(status ?? "").trim())) return "emerald";
+  if (online === false || online === 0 || /update|restart|start|stop|offline|maintenance|unavailable|unknown/i.test(String(status ?? ""))) return "amber";
+  return "cyan";
 }
 
 function formatPlayerCountStatus(value: string | null | undefined, checkedAt?: string | null | undefined) {

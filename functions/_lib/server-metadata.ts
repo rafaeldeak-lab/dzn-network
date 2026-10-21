@@ -1994,9 +1994,9 @@ function normalizeIpAddress(value: string | null) {
   return withoutPort || null;
 }
 
-function detectPlatform(value: string) {
-  if (/ps4|ps5|playstation/i.test(value)) return "PlayStation";
-  if (/xbox|xb/i.test(value)) return "Xbox";
+export function detectPlatform(value: string) {
+  if (/ps4|ps5|playstation|\bdayzps\b/i.test(value)) return "PlayStation";
+  if (/xbox|\bdayzxb\b|\bxb\b/i.test(value)) return "Xbox";
   if (/pc|steam|standalone/i.test(value)) return "PC";
   return null;
 }
