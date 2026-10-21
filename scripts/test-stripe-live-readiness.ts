@@ -201,10 +201,10 @@ for (const snippet of [
 ]) {
   assert.equal(dashboardSource.includes(snippet), true, `Dashboard checkout warning should include: ${snippet}`);
 }
-assert.match(
-  dashboardSource,
-  /const actionableFailedChecks = readiness\.readinessChecks\?\.filter\(\(check\) => !check\.ok && check\.severity !== "info"\) \?\? \[\];/,
-  "Only actionable readiness failures should affect checkout messaging.",
+assert.equal(
+  dashboardSource.includes("const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;"),
+  true,
+  "The owner warning must follow the actual checkout-creation gate so test checkout is not labelled unavailable.",
 );
 assert.equal(
   dashboardSource.includes("Billing readiness note"),

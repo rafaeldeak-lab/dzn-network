@@ -5784,12 +5784,9 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
   if (!readiness) return null;
-  const actionableFailedChecks = readiness.readinessChecks?.filter((check) => !check.ok && check.severity !== "info") ?? [];
-  const missingRequiredVars = readiness.missingRequiredVars ?? [];
-  const missingLiveRequiredVars = readiness.missingLiveRequiredVars ?? [];
   const liveCheckoutPaused = readiness.checkoutSafetyMode === "live_checkout_paused";
-  const shouldShowWarning = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || actionableFailedChecks.length > 0 || readiness.liveConfigurationReady === false || liveCheckoutPaused;
-  if (!shouldShowWarning) return null;
+  const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;
+  if (!checkoutUnavailable) return null;
 
   return (
     <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
