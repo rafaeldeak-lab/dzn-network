@@ -42,7 +42,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { isPersistedDashboardActionActive, shouldDiscardPersistedDashboardAction } from "@/lib/dashboard-action-recovery";
+import {
+  getPersistedDashboardActionExpiryDelay,
+  isPersistedDashboardActionActive,
+  shouldDiscardPersistedDashboardAction,
+} from "@/lib/dashboard-action-recovery";
 
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
@@ -851,6 +855,23 @@ function ServerDashboard({
       saveDashboardActionState(server.id, dashboardAction);
     }
   }, [dashboardAction, server.id]);
+
+  useEffect(() => {
+    if (!dashboardAction || !isActiveDashboardActionStatus(dashboardAction.status)) return;
+    const expiryDelay = getPersistedDashboardActionExpiryDelay(dashboardAction);
+    if (expiryDelay === false) return;
+
+    const expiryTimer = window.setTimeout(() => {
+      const current = dashboardActionRef.current;
+      if (!current || !shouldDiscardPersistedDashboardAction(current)) return;
+      dashboardActionRef.current = null;
+      saveDashboardActionState(server.id, null);
+      setDashboardAction(null);
+      setActionMessage("The earlier dashboard action stopped updating. You can start a new action.");
+    }, expiryDelay);
+
+    return () => window.clearTimeout(expiryTimer);
+  }, [dashboardAction?.actionKey, dashboardAction?.lastUpdatedAt, dashboardAction?.startedAt, dashboardAction?.status, server.id]);
 
   const refreshAdvancedStats = useCallback(async () => {
     const requestServerId = server.id;

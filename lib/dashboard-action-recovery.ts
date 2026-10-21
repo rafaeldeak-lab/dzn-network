@@ -13,15 +13,21 @@ export function isPersistedDashboardActionActive(status?: string | null) {
   return Boolean(status && ACTIVE_DASHBOARD_ACTION_STATUSES.has(status));
 }
 
-export function shouldDiscardPersistedDashboardAction(action: PersistedDashboardAction, now = Date.now()) {
+export function getPersistedDashboardActionExpiryDelay(action: PersistedDashboardAction, now = Date.now()) {
   if (!isPersistedDashboardActionActive(action.status)) return false;
 
   const checkpoints = [action.startedAt, action.lastUpdatedAt]
     .map((value) => Date.parse(value ?? ""))
     .filter((value) => Number.isFinite(value));
 
-  if (!checkpoints.length) return true;
+  if (!checkpoints.length) return 0;
 
   const mostRecentCheckpoint = Math.max(...checkpoints);
-  return mostRecentCheckpoint > now + 5 * 60 * 1000 || now - mostRecentCheckpoint > DASHBOARD_ACTION_RESUME_MAX_AGE_MS;
+  if (mostRecentCheckpoint > now + 5 * 60 * 1000) return 0;
+  return Math.max(0, mostRecentCheckpoint + DASHBOARD_ACTION_RESUME_MAX_AGE_MS - now);
+}
+
+export function shouldDiscardPersistedDashboardAction(action: PersistedDashboardAction, now = Date.now()) {
+  const expiryDelay = getPersistedDashboardActionExpiryDelay(action, now);
+  return expiryDelay === 0;
 }

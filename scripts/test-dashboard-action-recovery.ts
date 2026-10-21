@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   DASHBOARD_ACTION_RESUME_MAX_AGE_MS,
+  getPersistedDashboardActionExpiryDelay,
   isPersistedDashboardActionActive,
   shouldDiscardPersistedDashboardAction,
 } from "../lib/dashboard-action-recovery";
@@ -14,6 +15,12 @@ assert.equal(isPersistedDashboardActionActive("queued"), true);
 assert.equal(isPersistedDashboardActionActive("running"), true);
 assert.equal(isPersistedDashboardActionActive("polling"), true);
 assert.equal(isPersistedDashboardActionActive("completed"), false);
+assert.equal(getPersistedDashboardActionExpiryDelay({ status: "completed", startedAt: fresh, lastUpdatedAt: fresh }, now), false);
+assert.equal(
+  getPersistedDashboardActionExpiryDelay({ status: "running", startedAt: fresh, lastUpdatedAt: fresh }, now),
+  DASHBOARD_ACTION_RESUME_MAX_AGE_MS - 15 * 60 * 1000,
+  "An active action must be re-checked when its resume window expires.",
+);
 
 assert.equal(
   shouldDiscardPersistedDashboardAction({ status: "running", startedAt: fresh, lastUpdatedAt: fresh }, now),

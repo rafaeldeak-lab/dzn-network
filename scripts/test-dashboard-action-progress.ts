@@ -18,6 +18,8 @@ includesAll([
   "function refreshDashboardDataAfterAction",
   "dzn:activeDashboardAction:",
   "shouldDiscardPersistedDashboardAction(parsed)",
+  "getPersistedDashboardActionExpiryDelay(dashboardAction)",
+  "The earlier dashboard action stopped updating.",
   "window.localStorage.removeItem(key)",
   "window.sessionStorage.removeItem(key)",
   "saveDashboardActionState(server.id, initialAction)",
