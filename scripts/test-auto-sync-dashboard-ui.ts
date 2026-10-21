@@ -65,6 +65,9 @@ for (const required of [
 }
 
 assert.equal(autoSurface.includes("Nitrado Logs: Monitoring"), true);
+assert.equal(dashboardSource.includes('label="Game Server" value={gameServerStatus} tone={gameServerStatusTone}'), true, "Dashboard overview must show the current Nitrado game-server state rather than the DZN listing state as the server signal.");
+assert.equal(dashboardSource.includes('statsSyncActive ? "ADM Synced" : `Listing ${formatServerStatus(server.status)}`'), true, "Dashboard must distinguish ADM sync health from public-listing state.");
+assert.equal(dashboardSource.includes("function getGameServerStatusTone"), true, "Game-server state must use an explicit presentation tone.");
 assert.equal(dashboardSource.includes("NITRADO_UPSTREAM_DOWN"), true);
 assert.equal(dashboardSource.includes("formatDueOrDashboardDate"), true);
 assert.equal(dashboardSource.includes("isAdmSuccessActivityMessage"), true);
