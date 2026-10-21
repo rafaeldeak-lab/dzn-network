@@ -81,10 +81,11 @@ export function DznAssist() {
     try {
       const response = await fetch("/api/public/leaderboards", {
         cache: "no-store",
-        credentials: "omit",
+        credentials: "include",
         headers: { accept: "application/json" },
       });
       const rankings = response.ok ? parseDznAssistRankings(await response.json()) : null;
+      if (!rankings || rankings.unavailable) throw new Error("Public standings are unavailable.");
       if (requestId !== requestRef.current) return;
       const players = reply.showPlayers ? rankings?.players ?? [] : [];
       const servers = reply.showServers ? rankings?.servers ?? [] : [];
@@ -93,7 +94,9 @@ export function DznAssist() {
         id: `assist-rankings-${requestId}`,
         role: "assist",
         text: hasRows
-          ? "Here are the latest public standings available from DZN right now."
+          ? rankings.stale
+            ? "Live standings are refreshing. Here are the last known public standings from DZN."
+            : "Here are the latest public standings available from DZN right now."
           : "No public standings are available right now. You can check the full public leaderboard again shortly.",
         links: [{ href: "/leaderboards", label: "Open full leaderboards" }],
         players,
@@ -151,7 +154,7 @@ export function DznAssist() {
           </div>
           <form onSubmit={onSubmit} className="mt-3 flex items-center gap-2 border border-white/12 bg-black/25 p-2" aria-label="Ask DZN Assist">
             <CircleHelp className="ml-1 h-5 w-5 shrink-0 text-violet-200" aria-hidden="true" />
-            <input value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={loadingRankings} placeholder="Ask about DZN, a server, your next step, or public rankings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
+            <input aria-label="Ask DZN Assist a question" value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={loadingRankings} placeholder="Ask about DZN, a server, your next step, or public rankings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
             <button type="submit" disabled={!draft.trim() || loadingRankings} className="grid h-10 w-10 shrink-0 place-items-center border border-violet-300/30 bg-violet-300/12 text-violet-100 transition enabled:hover:border-violet-200 enabled:hover:bg-violet-300/20 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send question to DZN Assist"><Send className="h-4 w-4" aria-hidden="true" /></button>
           </form>
           <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">Questions stay in this browser. DZN Assist requests the existing public leaderboard only when you ask for rankings.</p>

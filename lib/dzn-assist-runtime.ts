@@ -10,6 +10,8 @@ export type DznAssistRankings = {
   players: DznAssistRankingRow[];
   servers: DznAssistRankingRow[];
   updatedAt: string | null;
+  unavailable: boolean;
+  stale: boolean;
 };
 
 export type DznAssistReply = {
@@ -29,6 +31,8 @@ const PRIVATE_REQUEST = /\b(account|my account|my payment|my bill|invoice|receip
 const PLAYER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(player|players|survivor|survivors|kills?)\b|\b(top player|top players|player leaderboard)\b/i;
 const SERVER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(server|servers|community|communities)\b|\b(top server|top servers|server leaderboard)\b/i;
 const RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b/i;
+const COMMON_QUERY_TERMS = new Set(["a", "an", "and", "are", "can", "do", "for", "from", "help", "how", "i", "in", "is", "it", "me", "my", "need", "of", "on", "or", "please", "show", "the", "to", "want", "what", "when", "where", "with", "you", "your"]);
+const UNAVAILABLE_LEADERBOARD_SOURCES = new Set(["empty_no_cache", "fallback_empty", "empty_no_db"]);
 
 export function isPublicRankingRequest(question: string) {
   return RANKING_REQUEST.test(question);
@@ -73,16 +77,13 @@ export function answerDznAssist(question: string, options: DznAssistOptions = {}
     };
   }
 
-  const terms = normalized.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((term) => term.length > 1);
+  const terms = [...new Set(tokenize(normalized).filter((term) => term.length > 1 && !COMMON_QUERY_TERMS.has(term)))];
   const rankedGuides = guides
     .map((guide) => ({
       guide,
-      score: terms.reduce((score, term) => score + ([guide.title, guide.summary, guide.category, ...guide.keywords]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(term) ? 1 : 0), 0),
+      score: terms.reduce((score, term) => score + (guideTerms(guide).has(term) ? 1 : 0), 0),
     }))
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score >= 2)
     .sort((left, right) => right.score - left.score || left.guide.title.localeCompare(right.guide.title));
   const match = rankedGuides[0]?.guide;
 
@@ -110,11 +111,22 @@ export function answerDznAssist(question: string, options: DznAssistOptions = {}
 export function parseDznAssistRankings(value: unknown): DznAssistRankings {
   const record = asRecord(value);
   const payload = asRecord(record?.data) ?? record;
+  const source = stringValue(payload?.source);
   return {
     players: parseRows(payload?.top_players, "player"),
     servers: parseRows(payload?.top_servers, "server"),
     updatedAt: normalizedTimestamp(payload?.updated_at),
+    unavailable: UNAVAILABLE_LEADERBOARD_SOURCES.has(source),
+    stale: payload?.stale === true || source === "snapshot",
   };
+}
+
+function guideTerms(guide: DznAssistGuide) {
+  return new Set(tokenize([guide.title, guide.category, ...guide.keywords].join(" ")));
+}
+
+function tokenize(value: string) {
+  return value.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 }
 
 function parseRows(value: unknown, kind: "player" | "server") {

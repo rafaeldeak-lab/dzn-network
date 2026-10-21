@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { chromium } from "playwright";
 
-const baseUrl = process.env.DZN_QA_BASE_URL ?? "http://127.0.0.1:3011";
+const baseUrl = process.env.DZN_QA_BASE_URL ?? "http://localhost:3011";
 const outputDir = path.resolve("artifacts/dzn-assist-qa");
 await mkdir(outputDir, { recursive: true });
 
@@ -24,8 +24,9 @@ try {
       const rect = document.querySelector("#dzn-assist")?.getBoundingClientRect();
       return Boolean(rect && rect.top < window.innerHeight && rect.bottom > 0);
     });
-    await page.locator("#dzn-assist-search").fill("link stats");
-    await page.getByRole("heading", { name: "Connect your DayZ stats" }).waitFor({ state: "visible" });
+    await page.getByLabel("Ask DZN Assist a question").fill("link stats");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("Choose the server you play on and submit the exact gamertag", { exact: false }).waitFor({ state: "visible" });
 
     const layout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
@@ -43,7 +44,7 @@ try {
   await homePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await homePage.getByRole("link", { name: /Chat & Help/i }).waitFor({ state: "visible" });
   await homePage.getByRole("link", { name: /Join DZN Discord/i }).waitFor({ state: "visible" });
-  if (await homePage.getByLabel("Chat and Help").isVisible()) {
+  if (await homePage.getByLabel("Open DZN Comms").isVisible()) {
     throw new Error("phone homepage: the floating launcher must not cover the primary Discord action");
   }
   await homePage.screenshot({ path: path.join(outputDir, "phone-home-actions.png"), fullPage: false });
@@ -51,12 +52,12 @@ try {
 
   const launcherPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await launcherPage.goto(`${baseUrl}/pricing`, { waitUntil: "domcontentloaded" });
-  await launcherPage.getByLabel("Chat and Help").click();
+  await launcherPage.getByLabel("Open DZN Comms").click();
   await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "visible" });
   await launcherPage.screenshot({ path: path.join(outputDir, "phone-launcher.png"), fullPage: false });
   await launcherPage.keyboard.press("Escape");
   await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "hidden" });
-  await launcherPage.getByLabel("Chat and Help").waitFor({ state: "visible" });
+  await launcherPage.getByLabel("Open DZN Comms").waitFor({ state: "visible" });
   await launcherPage.close();
 } finally {
   await browser.close();

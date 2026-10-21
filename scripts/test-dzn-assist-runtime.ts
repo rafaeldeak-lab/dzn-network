@@ -28,5 +28,8 @@ assert.deepEqual(rankings.servers, [{ rank: 1, name: "NukeTown", detail: "Deathm
 assert.equal(rankings.updatedAt, "2026-10-21T20:00:00.000Z");
 assert.deepEqual(parseDznAssistRankings({ top_players: [{ player_name: "" }] }).players, []);
 assert.equal(parseDznAssistRankings({ updated_at: "not a timestamp" }).updatedAt, null);
+assert.equal(answerDznAssist("How are you?").kind, "fallback");
+assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
+assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 
 console.log("DZN Assist runtime checks passed.");
