@@ -4293,7 +4293,7 @@ function ServerDashboard({
             channelFetchFailure={discordChannelFetchFailure}
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
-            connectedServerName={serverDisplayName}
+            connectedServerName={formatPublicServerName(server.guild_name, serverDisplayName)}
             planName={effectivePlanLabel}
             onChannelsRefresh={() => refreshDiscordChannels({ live: true })}
             runDashboardAction={runDashboardAction}
