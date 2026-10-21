@@ -1593,8 +1593,16 @@ function ServerDashboard({
   const recentFeedStatus = getRecentFeedStatus(effectiveSyncData, effectiveSyncStatus, effectiveRecentEvents.length);
   const recentFeedBadge = getRecentFeedBadge(recentEventsAreMock, effectiveSyncStatus);
   const overviewAdmSyncStatus = getOverviewAdmSyncStatus(effectiveSyncStatus, Boolean(syncStatusActiveAdmImportJob), statsSyncActive);
-  const gameServerStatus = formatNitradoServerStatus(server.server_status, server.is_online);
-  const gameServerStatusTone = getGameServerStatusTone(server.server_status, server.is_online);
+  const gameServerStatus = formatNitradoServerStatus(
+    server.server_status,
+    server.is_online,
+    server.metadata_last_checked_at,
+  );
+  const gameServerStatusTone = getGameServerStatusTone(
+    server.server_status,
+    server.is_online,
+    server.metadata_last_checked_at,
+  );
   const syncHealthPercent = syncHealth.status === "error" ? 72 : effectiveSyncStatus === "read_pending" ? 76 : 100;
   const processedPercent = getProcessedPercent(effectiveSyncData);
   const nextScheduledSync = getNextScheduledSync(effectiveSyncData?.last_scheduled_sync_at ?? null);
@@ -3941,7 +3949,7 @@ function ServerDashboard({
                 <CompactRow label="Server Type" value={effectiveServerMode} />
                 <CompactRow label="Game" value={server.game ?? "DayZ"} />
                 <CompactRow label="Player Slots" value={playerSlotsLabel} />
-                <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+                <CompactRow label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online, server.metadata_last_checked_at)} />
                 <CompactRow label="Player Count Freshness" value={`${playerCountStatusLabel} · ${playerCountCheckedLabel}`} />
                 <CompactRow label="Live Count Detail" value={playerCountFreshnessDetail} />
                 <CompactRow label="Metadata Last Checked" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Not checked"} />
@@ -8452,7 +8460,7 @@ function ServerOverviewAutoCard({
         <MiniInfo label="Service ID" value={server.nitrado_service_id ?? "Not linked"} />
         <MiniInfo label="Server Type" value={serverCategoryLabel !== "Not set" ? serverCategoryLabel : formatStatusLabel(String(effectiveServerMode ?? "Unknown"))} />
         <MiniInfo label="Game" value={server.game ?? "dayzps"} />
-        <MiniInfo label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online)} />
+        <MiniInfo label="Server Status" value={formatNitradoServerStatus(server.server_status, server.is_online, server.metadata_last_checked_at)} />
         <MiniInfo label="Player Slots" value={playerSlotsLabel} />
         <MiniInfo label="Player Count Freshness" value={`${playerCountStatusLabel} / ${playerCountCheckedLabel}`} />
         <MiniInfo label="Latest Server Check" value={server.metadata_last_checked_at ? formatRelativeTime(String(server.metadata_last_checked_at)) : "Waiting for first check"} />
@@ -9843,8 +9851,13 @@ function formatPlayerSlots(current: number | null | undefined, max: number | nul
   return "Unknown";
 }
 
-function formatNitradoServerStatus(status: string | null | undefined, online: boolean | number | null | undefined) {
+function formatNitradoServerStatus(
+  status: string | null | undefined,
+  online: boolean | number | null | undefined,
+  metadataLastCheckedAt: string | null | undefined,
+) {
   if (typeof status === "string" && status.trim()) return status.trim();
+  if (!metadataLastCheckedAt) return "Unknown";
   if (online === true || online === 1) return "Online";
   if (online === false || online === 0) return "Offline";
   return "Unknown";
@@ -9853,7 +9866,9 @@ function formatNitradoServerStatus(status: string | null | undefined, online: bo
 function getGameServerStatusTone(
   status: string | null | undefined,
   online: boolean | number | null | undefined,
+  metadataLastCheckedAt: string | null | undefined,
 ): "emerald" | "violet" | "amber" | "cyan" {
+  if (!metadataLastCheckedAt && !(typeof status === "string" && status.trim())) return "cyan";
   if (online === true || online === 1 || /^(online|started|running|active)$/i.test(String(status ?? "").trim())) return "emerald";
   if (online === false || online === 0 || /update|restart|start|stop|offline|maintenance|unavailable|unknown/i.test(String(status ?? ""))) return "amber";
   return "cyan";
