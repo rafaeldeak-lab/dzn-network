@@ -54,6 +54,7 @@ import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
+import { formatPublicServerName, formatPublicServerNameFromCandidates } from "@/lib/public-display-text";
 import { backfillMissingAdm, bulkImportAdmFiles, bumpServer, cancelAdmImportJob, clearClientAuthState, clearMockTestSyncData, clearOldFailedSyncRuns, continueAdmImportJob, createCheckoutSession, createPortalSession, deleteAccount, deleteLinkedServer, finishAdmImportJob, getAdmAutomationStatus, getAdmFileDiscoveryDebug, getAdmImportJobStatus, getAutomationHealth, getBillingPlans, getBillingReadiness, getBillingStatus, getDashboardAdvancedStats, getDashboardHealth, getDashboardLiveStats, getDashboardServerWars, getDiscordPostingChannels, getLatestAdmImportJob, getMe, getNitradoLogSettings, getPostingDestinations, getPublicCacheDebug, getRecentSyncEvents, getServerAdvertisingStatus, getServerBadgeStatus, getSyncStatus, importManualAdmText, logoutAndRedirect, previewManualAdmText, rebuildPublicCache, recoverStuckSyncLocks, refreshServerMetadata, runAutoPostDispatcherNow, runLogAccessDiagnostics, runManualSync, runScopedAdmAutoSyncNow, saveNitradoLogSettings, savePostingDestination, sendAdmImportJobChunk, startAdmImportJob, testOnboarding, updateServerPublicListing } from "./api";
 import type { ServerBadgeStatusResponse } from "./api";
 import { getServerCategoryOption } from "./server-category-options";
@@ -1507,7 +1508,10 @@ function ServerDashboard({
     });
   }
 
-  const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
+  const serverDisplayName = formatPublicServerNameFromCandidates(
+    [server.display_name, server.hostname, server.server_name, server.nitrado_service_name],
+    "DZN server",
+  );
   const effectiveServerMode = server.server_mode ?? server.server_type;
   const admState = getAdmState(server);
   const effectiveDiscordPostingChannels = discordPostingChannels.length ? discordPostingChannels : discordChannelCache?.channels ?? [];
@@ -3414,7 +3418,7 @@ function ServerDashboard({
     });
   }
 
-  const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
+  const selectedServerLabel = serverDisplayName;
   const currentPlanName = effectivePlanLabel;
   const selectedServerHealth = effectiveDashboardHealth?.source === "local_fallback"
     ? null
@@ -3652,7 +3656,7 @@ function ServerDashboard({
               >
                 {servers.map((item) => (
                   <option key={item.id} value={item.id} className="bg-[#080b16] text-white">
-                    {item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name}
+                    {formatPublicServerNameFromCandidates([item.display_name, item.hostname, item.server_name, item.nitrado_service_name], "DZN server")}
                   </option>
                 ))}
               </select>
@@ -4289,7 +4293,7 @@ function ServerDashboard({
             channelFetchFailure={discordChannelFetchFailure}
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
-            connectedServerName={server.guild_name ?? serverDisplayName}
+            connectedServerName={formatPublicServerName(server.guild_name, serverDisplayName)}
             planName={effectivePlanLabel}
             onChannelsRefresh={() => refreshDiscordChannels({ live: true })}
             runDashboardAction={runDashboardAction}
@@ -4433,7 +4437,6 @@ function ServerDashboard({
       {dangerAction ? (
         <DangerZoneModal
           action={dangerAction}
-          serverName={serverDisplayName || "DZN server"}
           deleting={deletingDangerAction}
           onClose={() => {
             if (!deletingDangerAction) setDangerAction(null);
@@ -5248,14 +5251,12 @@ function DangerZonePanel({
 
 function DangerZoneModal({
   action,
-  serverName,
   deleting,
   onClose,
   onDownloadSummary,
   onConfirm,
 }: {
   action: "server" | "account";
-  serverName: string;
   deleting: boolean;
   onClose: () => void;
   onDownloadSummary: () => void;
@@ -5266,9 +5267,7 @@ function DangerZoneModal({
   const [finalConfirmed, setFinalConfirmed] = useState(false);
   const isServerDelete = action === "server";
   const requiredText = isServerDelete ? "DELETE SERVER" : "DELETE MY DZN ACCOUNT";
-  const confirmationValid = isServerDelete
-    ? confirmationText.trim() === "DELETE SERVER" || confirmationText.trim() === serverName
-    : confirmationText.trim() === requiredText;
+  const confirmationValid = confirmationText.trim() === requiredText;
   const canDelete = confirmationValid && finalConfirmed && !deleting;
   const deletedItems = isServerDelete ? SERVER_DELETE_ITEMS : ACCOUNT_DELETE_ITEMS;
   const preservedItems = isServerDelete ? SERVER_NOT_DELETED_ITEMS : ACCOUNT_NOT_DELETED_ITEMS;
@@ -5324,7 +5323,7 @@ function DangerZoneModal({
             </label>
             <p className="mt-2 text-sm leading-6 text-zinc-300">
               {isServerDelete ? (
-                <>Type the exact public server name <span className="font-black text-white">{serverName}</span> or <span className="font-black text-white">DELETE SERVER</span>.</>
+                <>Type <span className="font-black text-white">DELETE SERVER</span>.</>
               ) : (
                 <>Type <span className="font-black text-white">DELETE MY DZN ACCOUNT</span>.</>
               )}
@@ -5659,7 +5658,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
 
       <div className="mt-4 grid gap-2">
         {visiblePlans.map((plan) => {
-          const checkoutState = billingPlanCheckoutState(plan, readiness);
+          const checkoutState = billingPlanCheckoutState(plan, readiness, plans.length > 0);
           return (
             <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
               <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
@@ -5749,7 +5748,15 @@ function billingPlanListingSummary(plan: BillingPlanSummary) {
     : "Public listing, basic discovery, reviews, and standard listing visuals";
 }
 
-function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingReadinessResponse | null) {
+function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingReadinessResponse | null, hasLoadedPlans: boolean) {
+  if (!hasLoadedPlans) {
+    return {
+      enabled: false,
+      statusLabel: "Checking checkout",
+      buttonLabel: "Checking...",
+    };
+  }
+
   if (!plan.configured) {
     return {
       enabled: false,
@@ -6253,7 +6260,7 @@ function DiscordAutoPostsPanel({
       ) : null}
 
       <div className="mt-4 grid gap-3 rounded-xl border border-cyan-300/15 bg-cyan-400/5 p-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MiniInfo label="Discord Server" value={channelsResponse?.guild_name ?? connectedServerName ?? "Unknown"} />
+        <MiniInfo label="Discord Server" value={formatPublicServerName(channelsResponse?.guild_name ?? connectedServerName, "Unknown")} />
         <MiniInfo label="Bot status" value={botStatus} />
         <MiniInfo label="Channels Found" value={channelCountLabel} />
         <MiniInfo label="Plan" value={planName} />
@@ -6605,7 +6612,7 @@ function DiscordAutoPostsPanel({
         <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs font-bold text-zinc-300 sm:grid-cols-2 lg:grid-cols-4">
           <MiniInfo label="Selected Server ID" value={diagnostics?.selected_server_id ?? serverId} />
           <MiniInfo label="Selected Guild ID" value={diagnostics?.selected_guild_id ?? "Missing"} />
-          <MiniInfo label="Guild Name" value={diagnostics?.guild_name ?? channelsResponse?.guild_name ?? "Unknown"} />
+          <MiniInfo label="Guild Name" value={formatPublicServerName(diagnostics?.guild_name ?? channelsResponse?.guild_name, "Unknown")} />
           <MiniInfo label="Bot Token Configured" value={diagnostics?.bot_token_configured ? "Yes" : "No"} />
           <MiniInfo label="Bot Connected" value={diagnostics?.bot_connected === true ? "Yes" : diagnostics?.bot_connected === false ? "No" : "Unknown"} />
           <MiniInfo label="Channels Fetched" value={String(usingCachedChannelState && channelCache ? channelCache.last_channel_count : diagnostics?.channels_fetched_count ?? channels.length)} />
