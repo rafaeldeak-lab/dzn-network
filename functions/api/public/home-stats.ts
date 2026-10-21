@@ -1263,7 +1263,7 @@ async function getTopPlayers(db: D1Database) {
     });
 }
 
-async function getRecentActivity(db: D1Database) {
+export async function getRecentActivity(db: D1Database) {
   const result = await db
     .prepare(
       `SELECT *
@@ -1343,31 +1343,6 @@ async function getRecentActivity(db: D1Database) {
            AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
            AND ${mockNameFilterSql("build_events.player_name")}
-         UNION ALL
-         SELECT
-           'sync' AS source,
-           'sync_completed' AS event_type,
-           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-           linked_servers.public_slug,
-           NULL AS player_name,
-           NULL AS killer_name,
-           NULL AS victim_name,
-           NULL AS weapon,
-           NULL AS distance,
-           NULL AS build_part,
-           NULL AS target_object,
-           NULL AS placed_object,
-           NULL AS placed_class,
-           COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) AS occurred_at,
-           sync_runs.created_at,
-           COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) AS sort_time
-         FROM sync_runs
-         INNER JOIN linked_servers ON linked_servers.id = sync_runs.linked_server_id
-         WHERE lower(linked_servers.status) = 'live'
-           AND ${PUBLIC_LINKED_SERVER_LIFECYCLE_SQL}
-           AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-           AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
          UNION ALL
          SELECT
            'server' AS source,
