@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRailLoader } from "../components/servers/live-server-rail";
 import { onRequest } from "../functions/api/public/server-rail";
+import { formatPublicServerName } from "../lib/public-display-text";
 
 void main();
 
@@ -39,6 +40,10 @@ assert.match(source, /payload\.stale\s*===\s*true\s*&&\s*payload\.items\?\.lengt
 assert.equal(source.includes("SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000"), true, "A stalled rail request must be bounded so later refreshes can recover.");
 assert.match(source, /setTimeout\(\(\)\s*=>\s*requestController\.abort\(\),\s*timeoutMs\)/, "Each rail request must abort when its timeout expires.");
 assert.match(source, /clearTimeout\(requestTimeout\)/, "Completed rail requests must clear their timeout.");
+assert.equal(source.includes("formatPublicServerName(item.name)"), true, "The rail must defensively render a clean server name.");
+assert.equal(formatPublicServerName("NUKETOWN DEATHMATCH- HTTPS://DAYZ-NETWORK.COM"), "NukeTown Deathmatch");
+assert.equal(formatPublicServerName("NukeTown | discord.gg/dzn-network"), "NukeTown");
+assert.equal(formatPublicServerName("DAYZ US 1PP HARDCORE RP"), "DayZ US 1PP HARDCORE RP");
 
 let stalledRequestCount = 0;
 let unavailableCount = 0;
@@ -80,7 +85,7 @@ const duplicateRow = {
   id: "server-one",
   nitrado_service_id: "service-one",
   public_slug: "nuketown-deathmatch",
-  server_name: "NukeTown DEATHMATCH",
+  server_name: "NUKETOWN DEATHMATCH- HTTPS://DAYZ-NETWORK.COM",
   server_type: "Deathmatch",
   guild_icon_url: null,
   current_players: 7,
@@ -117,7 +122,7 @@ const duplicateDbResponse = await invokeRail({
         }),
 });
 const duplicatePayload = await duplicateDbResponse.json() as {
-  items?: Array<{ id: string; slug: string | null; currentPlayers: number | null }>;
+  items?: Array<{ id: string; slug: string | null; currentPlayers: number | null; name: string }>;
 };
 assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
 const canonicalDuplicateItem = duplicatePayload.items?.find(({ id }) => id === "server-one");
@@ -127,6 +132,7 @@ assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug
 });
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 assert.equal(canonicalDuplicateItem?.currentPlayers, 7, "Fresh zero and non-zero player counts must remain numeric in the public payload.");
+assert.equal(canonicalDuplicateItem?.name, "NukeTown Deathmatch", "Public rail payloads must not expose pasted URLs in server names.");
 
 const zeroPlayerResponse = await invokeRail({
   DB: createRailDb([{ ...duplicateRow, current_players: 0, max_players: 10 }]),
@@ -206,6 +212,7 @@ assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"
 const css = readFileSync("app/globals.css", "utf8");
 assert.match(css, /\.dzn-live-server-rail__track\s*\{[\s\S]*animation:\s*dznLiveServerRail/, "The unique-card rail should retain motion.");
 assert.equal(css.includes("@keyframes dznLiveServerRailSingle"), true, "A single real server should keep subtle movement without cloning.");
+assert.match(css, /\.dzn-live-server-card__title\s*\{[\s\S]*white-space:\s*nowrap/, "Live rail names must stay on one compact line.");
 
 console.log("Live server rail truthfulness tests passed.");
 }

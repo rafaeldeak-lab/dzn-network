@@ -247,6 +247,20 @@ body.dzn-pricing-modal-open {
   object-fit: cover;
 }
 
+.dzn-live-server-card__title {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 900;
+  line-height: 1.15;
+  letter-spacing: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
 @keyframes dznLiveServerRail {
   from {
     transform: translateX(0);

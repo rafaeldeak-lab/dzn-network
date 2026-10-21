@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { formatPublicServerName } from "@/lib/public-display-text";
 
 const SERVER_RAIL_REFRESH_MS = 30_000;
 const SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000;
@@ -217,6 +218,7 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 }
 
 function RailCard({ item }: { item: RailItem }) {
+  const displayName = formatPublicServerName(item.name);
   const content = (
     <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
       <div className="dzn-live-server-card__icon">
@@ -224,7 +226,7 @@ function RailCard({ item }: { item: RailItem }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-sm font-black uppercase text-white">{item.name}</h3>
+          <h3 className="dzn-live-server-card__title">{displayName}</h3>
           {item.isPro ? <span className="rounded border border-violet-300/30 bg-violet-400/12 px-1.5 py-0.5 text-[9px] font-black uppercase text-violet-100">Pro</span> : null}
         </div>
         <p className="mt-1 truncate text-[11px] font-bold uppercase tracking-[0.08em] text-zinc-400">{item.category}</p>
