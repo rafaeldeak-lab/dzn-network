@@ -121,16 +121,24 @@ export function DznAssist() {
       if (requestId !== requestRef.current) return;
       const players = reply.showPlayers ? rankings.players : [];
       const servers = reply.showServers ? rankings.servers : [];
+      const playersLocked = reply.showPlayers && rankings.playersLocked;
       const hasRows = players.length > 0 || servers.length > 0;
       setMessages((current) => [...current, {
         id: `assist-rankings-${requestId}`,
         role: "assist",
-        text: hasRows
-          ? rankings.stale
-            ? "Live standings are refreshing. Here are the last known public standings from DZN."
-            : "Here are the latest public standings available from DZN right now."
-          : "No public standings are available right now. You can check the full public leaderboard again shortly.",
-        links: [{ href: "/leaderboards", label: "Open full leaderboards" }],
+        text: playersLocked
+          ? hasRows
+            ? "Player standings require Discord sign-in. Here are the public server standings available right now."
+            : "Player standings require Discord sign-in. Sign in to view the current player leaderboard."
+          : hasRows
+            ? rankings.stale
+              ? "Live standings are refreshing. Here are the last known public standings from DZN."
+              : "Here are the latest public standings available from DZN right now."
+            : "No public standings are available right now. You can check the full public leaderboard again shortly.",
+        links: [
+          { href: "/leaderboards", label: "Open full leaderboards" },
+          ...(playersLocked ? [{ href: "/login?returnTo=%2Fleaderboards", label: "Sign in to view players" }] : []),
+        ],
         suggestedPrompts: ["How do I link my DayZ stats?", "How do I add my server?"],
         players,
         servers,

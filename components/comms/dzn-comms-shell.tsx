@@ -187,17 +187,25 @@ export function DznCommsShell() {
   }, [selectedChannel, liveHistoryRuntimeEnabled]);
 
   useEffect(() => {
-    const selectUpdatesFromHash = () => {
-      if (window.location.hash !== "#dzn-updates" || selectedChannelRef.current === "dzn-updates") return;
+    const selectChannelFromHash = () => {
+      const nextChannel = window.location.hash === "#dzn-updates" ? "dzn-updates" : "global-chat";
+      if (selectedChannelRef.current === nextChannel) return;
       historyRequestGenerationRef.current += 1;
       setDraft("");
       setComposerMessage("");
-      selectedChannelRef.current = "dzn-updates";
-      setSelectedChannel("dzn-updates");
+      selectedChannelRef.current = nextChannel;
+      if (nextChannel === "global-chat") {
+        setHistory({
+          status: historyProbeEnabled ? "loading" : "static",
+          payload: staticPayload,
+          message: historyProbeEnabled ? "Opening Global Chat." : "Message history is not active here. No messages are shown.",
+        });
+      }
+      setSelectedChannel(nextChannel);
     };
-    selectUpdatesFromHash();
-    window.addEventListener("hashchange", selectUpdatesFromHash);
-    return () => window.removeEventListener("hashchange", selectUpdatesFromHash);
+    selectChannelFromHash();
+    window.addEventListener("hashchange", selectChannelFromHash);
+    return () => window.removeEventListener("hashchange", selectChannelFromHash);
   }, []);
 
   useEffect(() => {

@@ -55,6 +55,7 @@ assert.equal(launcherSource.includes('disclosure.open = false'), true, "The pane
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
 assert.equal(commsSource.includes('selectedChannel === "dzn-updates"'), true, "Comms must present DZN Updates as a distinct channel state.");
+assert.equal(commsSource.includes('window.location.hash === "#dzn-updates" ? "dzn-updates" : "global-chat"'), true, "Comms history navigation must restore Global Chat whenever the updates hash is no longer active.");
 assert.equal(commsSource.includes('<DznUpdatesFeed />'), true, "Comms must render the official release feed inside its Updates channel.");
 assert.equal(commsSource.includes('DZN Updates'), true, "Comms must name the official updates channel clearly.");
 assert.equal(commsSource.includes('selectedChannelAccessLabel = isUpdatesChannel\n    ? "Official updates"'), true, "The selected Comms channel must identify the official update feed separately from live sending.");

@@ -13,6 +13,9 @@ assert.ok(setupReply.links.some((link) => link.href === "/setup"));
 assert.equal(setupReply.workflows[0]?.id, "server-setup");
 assert.equal(setupReply.workflows[0]?.steps.length, 3);
 
+assert.equal(answerDznAssist("How do I create my account?").kind, "guidance");
+assert.equal(answerDznAssist("Where can I view payment plans?").kind, "guidance");
+
 const combinedReply = answerDznAssist("How do I add my DayZ server and see player stats?");
 assert.equal(combinedReply.kind, "guidance");
 assert.deepEqual(combinedReply.guideIds, ["server-setup", "player-stats-link"]);
@@ -37,12 +40,28 @@ const rankings = parseDznAssistRankings({
 assert.deepEqual(rankings.players, [{ rank: 1, name: "Northbound", detail: "NukeTown · 23 kills · 2.30" }]);
 assert.deepEqual(rankings.servers, [{ rank: 1, name: "NukeTown", detail: "Deathmatch · 2,400 score · 88 players" }]);
 assert.equal(rankings.updatedAt, "2026-10-21T20:00:00.000Z");
+const lockedRankings = parseDznAssistRankings({
+  data: {
+    is_locked: true,
+    top_players: [],
+    top_servers: [{ rank: 1, server_name: "NukeTown", mode: "Deathmatch", score: 2400, unique_players: 88 }],
+  },
+});
+assert.equal(lockedRankings.playersLocked, true);
+assert.equal(lockedRankings.players.length, 0);
+assert.equal(lockedRankings.servers.length, 1);
 assert.deepEqual(parseDznAssistRankings({ top_players: [{ player_name: "" }] }).players, []);
 assert.equal(parseDznAssistRankings({ updated_at: "not a timestamp" }).updatedAt, null);
 assert.equal(answerDznAssist("How are you?").kind, "fallback");
 assert.equal(answerDznAssist("How do I set up my server?").kind, "guidance");
 assert.equal(answerDznAssist("How do I sign in?").kind, "guidance");
 assert.equal(answerDznAssist("How do I log into my account?").kind, "guidance");
+const playerRankingsReply = answerDznAssist("Show player rankings");
+assert.equal(playerRankingsReply.showPlayers, true);
+assert.equal(playerRankingsReply.showServers, false);
+const serverRankingsReply = answerDznAssist("Show server rankings");
+assert.equal(serverRankingsReply.showPlayers, false);
+assert.equal(serverRankingsReply.showServers, true);
 assert.equal(answerDznAssist("refund policy").kind, "guidance");
 assert.equal(answerDznAssist("Which plan is best?").kind, "guidance");
 assert.equal(answerDznAssist("What are the community rules?").kind, "guidance");

@@ -3,7 +3,7 @@
 import { BellRing, ChevronRight, Gamepad2, MessageCircle, MonitorUp, Server, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
-import { officialDznUpdates, type DznUpdateCategory } from "@/lib/dzn-updates";
+import { formatDznUpdateDate, officialDznUpdates, type DznUpdateCategory } from "@/lib/dzn-updates";
 
 const categoryIcons = {
   Community: MessageCircle,
@@ -55,7 +55,7 @@ export function DznUpdatesFeed({ standalone = false }: { standalone?: boolean })
                   <span className="mt-1.5 block max-w-3xl text-sm leading-6 text-zinc-400">{update.summary}</span>
                 </span>
                 <span className="flex items-center gap-2 text-xs font-bold text-zinc-500 sm:pt-1">
-                  <time dateTime={update.publishedAt}>{formatPublishedDate(update.publishedAt)}</time>
+                  <time dateTime={update.publishedAt}>{formatDznUpdateDate(update.publishedAt)}</time>
                   <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
                 </span>
               </Link>
@@ -65,9 +65,4 @@ export function DznUpdatesFeed({ standalone = false }: { standalone?: boolean })
       </ol>
     </section>
   );
-}
-
-function formatPublishedDate(value: string) {
-  const date = new Date(`${value}T12:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }

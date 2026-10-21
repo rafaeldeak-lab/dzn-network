@@ -9,6 +9,7 @@ export type DznAssistRankingRow = {
 export type DznAssistRankings = {
   players: DznAssistRankingRow[];
   servers: DznAssistRankingRow[];
+  playersLocked: boolean;
   updatedAt: string | null;
   unavailable: boolean;
   stale: boolean;
@@ -43,9 +44,12 @@ type DznAssistOptions = {
 
 const SENSITIVE_PRIVATE_REQUEST = /\b(card number|cvv|cvc|password|passcode|token|secret|credential|api key|bank|account number|private message|dm|server file)\b/i;
 const ACCOUNT_SPECIFIC_REQUEST = /\b(my account|my payment|my bill|my invoice|my receipt|my subscription|my discord|reported me|reporter|appeal|ban)\b/i;
-const PUBLIC_ACCOUNT_ROUTE_REQUEST = /\b(sign in|log in(?:to)?|login|create (?:an )?account|join dzn)\b/i;
-const PLAYER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(player|players|survivor|survivors|kills?)\b|\b(top player|top players|player leaderboard)\b/i;
-const SERVER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(server|servers|community|communities)\b|\b(top server|top servers|server leaderboard)\b/i;
+const PUBLIC_ACCOUNT_ROUTE_REQUEST = /\b(sign in|log in(?:to)?|login|create (?:(?:an|my) )?account|join dzn)\b|\b(?:view|show|see|compare|learn about)\b[\s\S]{0,24}\b(?:plans?|pricing|subscriptions?)\b/i;
+const RANKING_TERMS = "(?:top|leaderboard|rankings?|ranked|best)";
+const PLAYER_RANKING_TERMS = "(?:players?|survivors?|kills?)";
+const SERVER_RANKING_TERMS = "(?:servers?|communities)";
+const PLAYER_RANKING_REQUEST = new RegExp(`\\b${RANKING_TERMS}\\b[\\s\\S]*?\\b${PLAYER_RANKING_TERMS}\\b|\\b${PLAYER_RANKING_TERMS}\\b[\\s\\S]*?\\b${RANKING_TERMS}\\b`, "i");
+const SERVER_RANKING_REQUEST = new RegExp(`\\b${RANKING_TERMS}\\b[\\s\\S]*?\\b${SERVER_RANKING_TERMS}\\b|\\b${SERVER_RANKING_TERMS}\\b[\\s\\S]*?\\b${RANKING_TERMS}\\b`, "i");
 const RANKING_REQUEST = /\b(leaderboard|ranking|rankings|ranked)\b|\btop\s*(?:10|ten)\b|\btop\b[\s\S]*\b(player|players|server|servers|community|communities|survivor|survivors|kills?)\b/i;
 const FOLLOW_UP_REQUEST = /^(?:and\s+)?(?:(?:what\s+)?(?:should\s+i\s+)?do\s+next|what\s+should\s+i\s+do|where\s+do\s+i\s+(?:go|start)|how\s+do\s+i\s+(?:continue|start)|next|continue|more|details|tell\s+me\s+more|how\s+does\s+that\s+work)\??$/i;
 const COMMON_QUERY_TERMS = new Set(["a", "an", "and", "are", "can", "do", "for", "from", "help", "how", "i", "in", "is", "it", "me", "my", "need", "of", "on", "or", "please", "show", "the", "to", "want", "what", "when", "where", "with", "you", "your"]);
@@ -119,9 +123,11 @@ export function parseDznAssistRankings(value: unknown): DznAssistRankings {
   const record = asRecord(value);
   const payload = asRecord(record?.data) ?? record;
   const source = stringValue(payload?.source);
+  const players = parseRows(payload?.top_players, "player");
   return {
-    players: parseRows(payload?.top_players, "player"),
+    players,
     servers: parseRows(payload?.top_servers, "server"),
+    playersLocked: payload?.is_locked === true,
     updatedAt: normalizedTimestamp(payload?.updated_at),
     unavailable: UNAVAILABLE_LEADERBOARD_SOURCES.has(source),
     stale: payload?.stale === true || source === "snapshot",
@@ -172,7 +178,7 @@ function workflowOrder(guideId: string) {
 
 function phraseScore(question: string, guideId: string) {
   const matches: Record<string, RegExp> = {
-    "account-access": /\b(sign in|log in|login|create (?:an )?account|join dzn)\b/i,
+    "account-access": /\b(sign in|log in|login|create (?:(?:an|my) )?account|join dzn)\b/i,
     "player-stats-link": /\b(link|claim|connect).{0,24}\b(dayz|stats|gamertag|profile)\b|\b(dayz stats|player stats|game stats)\b/i,
     "server-setup": /\b(add|set up|setup|connect|register).{0,30}\b(server|nitrado|adm)\b|\b(add my server|server setup)\b/i,
     "server-owner-discord-access": /\b(server owner|owner access|verified owner|owner role|private owner)\b/i,

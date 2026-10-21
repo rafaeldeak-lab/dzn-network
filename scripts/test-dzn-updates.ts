@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { DZN_OFFICIAL_UPDATES, officialDznUpdates } from "../lib/dzn-updates";
+import { DZN_OFFICIAL_UPDATES, formatDznUpdateDate, officialDznUpdates } from "../lib/dzn-updates";
 
 assert.ok(DZN_OFFICIAL_UPDATES.length >= 3, "The public DZN Updates feed needs an initial verified release history.");
 assert.equal(new Set(DZN_OFFICIAL_UPDATES.map((update) => update.id)).size, DZN_OFFICIAL_UPDATES.length, "Official DZN update IDs must be unique.");
@@ -15,10 +15,10 @@ for (const update of DZN_OFFICIAL_UPDATES) {
 }
 
 const ordered = officialDznUpdates();
-assert.deepEqual(ordered.map((update) => update.id), [...ordered].sort((left, right) => {
-  const leftUpdate = DZN_OFFICIAL_UPDATES.find((update) => update.id === left.id)!;
-  const rightUpdate = DZN_OFFICIAL_UPDATES.find((update) => update.id === right.id)!;
-  return Date.parse(`${rightUpdate.publishedAt}T12:00:00.000Z`) - Date.parse(`${leftUpdate.publishedAt}T12:00:00.000Z`) || left.id.localeCompare(right.id);
-}).map((update) => update.id), "Official updates must have a deterministic newest-first order.");
+assert.deepEqual(ordered.map((update) => update.id), DZN_OFFICIAL_UPDATES
+  .map((update, index) => ({ update, index }))
+  .sort((left, right) => Date.parse(`${right.update.publishedAt}T12:00:00.000Z`) - Date.parse(`${left.update.publishedAt}T12:00:00.000Z`) || left.index - right.index)
+  .map(({ update }) => update.id), "Official updates must keep a deterministic newest-first order while preserving source order on the same day.");
+assert.equal(formatDznUpdateDate("2026-10-21"), "21 Oct 2026", "Official update dates must be stable across viewer time zones.");
 
 console.log("DZN official updates checks passed.");

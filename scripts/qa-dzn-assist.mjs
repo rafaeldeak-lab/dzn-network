@@ -17,6 +17,18 @@ const viewports = [
 try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
+    await page.route("**/api/public/leaderboards", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          is_locked: true,
+          top_players: [],
+          top_servers: [{ rank: 1, server_name: "NukeTown", mode: "Deathmatch", score: 2400, unique_players: 88 }],
+          updated_at: "2026-10-21T20:00:00.000Z",
+        },
+      }),
+    }));
     await page.goto(`${baseUrl}/community#dzn-assist`, { waitUntil: "domcontentloaded" });
     const assist = page.locator("#dzn-assist");
     await assist.waitFor({ state: "visible" });
@@ -24,6 +36,8 @@ try {
       const rect = document.querySelector("#dzn-assist")?.getBoundingClientRect();
       return Boolean(rect && rect.top < window.innerHeight && rect.bottom > 0);
     });
+    const initialAssistTop = await page.locator("#dzn-assist").evaluate((element) => element.getBoundingClientRect().top);
+    if (initialAssistTop >= viewport.height || initialAssistTop < -100) throw new Error(`${viewport.name}: direct anchor did not place DZN Assist in view`);
     await page.getByLabel("Ask DZN Assist a question").fill("link stats");
     await page.getByLabel("Ask DZN Assist a question").press("Enter");
     await page.getByText("Choose the server you play on and submit the exact gamertag", { exact: false }).waitFor({ state: "visible" });
@@ -58,13 +72,16 @@ try {
     await page.getByRole("button", { name: "Clear DZN Assist conversation" }).click();
     await page.getByText("I am DZN Assist, your public DZN support guide.", { exact: false }).waitFor({ state: "visible" });
 
+    await page.getByLabel("Ask DZN Assist a question").fill("Show player rankings");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("Player standings require Discord sign-in.", { exact: false }).last().waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Sign in to view players" }).last().waitFor({ state: "visible" });
+
     const layout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
       viewportWidth: window.innerWidth,
-      assistTop: document.querySelector("#dzn-assist")?.getBoundingClientRect().top ?? -1,
     }));
     if (layout.bodyWidth > layout.viewportWidth + 1) throw new Error(`${viewport.name}: horizontal overflow (${layout.bodyWidth} > ${layout.viewportWidth})`);
-    if (layout.assistTop >= viewport.height || layout.assistTop < -100) throw new Error(`${viewport.name}: direct anchor did not place DZN Assist in view`);
 
     await page.screenshot({ path: path.join(outputDir, `${viewport.name}-assist.png`), fullPage: true });
     await page.close();

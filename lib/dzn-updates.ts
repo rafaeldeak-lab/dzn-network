@@ -45,8 +45,15 @@ export const DZN_OFFICIAL_UPDATES: readonly DznOfficialUpdate[] = [
 ] as const;
 
 export function officialDznUpdates() {
-  return [...DZN_OFFICIAL_UPDATES].sort((left, right) => {
-    const byDate = Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
-    return byDate || left.id.localeCompare(right.id);
-  });
+  return DZN_OFFICIAL_UPDATES
+    .map((update, index) => ({ update, index }))
+    .sort((left, right) => Date.parse(right.update.publishedAt) - Date.parse(left.update.publishedAt) || left.index - right.index)
+    .map(({ update }) => update);
+}
+
+export function formatDznUpdateDate(value: string) {
+  const date = new Date(`${value}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
