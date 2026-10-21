@@ -155,7 +155,7 @@
     "test:nav-access-visibility": "tsx scripts/test-nav-access-visibility.ts",
     "test:dashboard-package-visibility": "tsx scripts/test-dashboard-package-visibility.ts",
     "test:dashboard-loading": "tsx scripts/test-dashboard-loading.ts",
-    "test:dashboard-action-progress": "tsx scripts/test-dashboard-action-progress.ts",
+    "test:dashboard-action-progress": "tsx scripts/test-dashboard-action-recovery.ts && tsx scripts/test-dashboard-action-progress.ts",
     "test:auto-sync-dashboard": "tsx scripts/test-auto-sync-dashboard-ui.ts",
     "test:server-settings": "tsx scripts/test-server-settings.ts && npm run test:server-showcase-grants",
     "test:server-showcase-grants": "tsx scripts/test-server-showcase-grants.ts",
