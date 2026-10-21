@@ -36,6 +36,7 @@ export function DznAssist() {
   const [messages, setMessages] = useState<AssistMessage[]>([initialMessage]);
   const [loadingRankings, setLoadingRankings] = useState(false);
   const requestRef = useRef(0);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
   const visibleGuides = useMemo(
     () => DZN_ASSIST_GUIDES.filter((guide) => guide.id !== "server-owner-discord-access" || ownerDiscordAccessUiEnabled),
     [],
@@ -64,6 +65,12 @@ export function DznAssist() {
       window.removeEventListener("click", onAssistLinkClick);
     };
   }, []);
+
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    transcript.scrollTo({ top: transcript.scrollHeight, behavior: "auto" });
+  }, [loadingRankings, messages]);
 
   async function sendQuestion(question: string) {
     const text = question.trim().slice(0, 360);
@@ -148,7 +155,7 @@ export function DznAssist() {
         </aside>
 
         <div className="min-w-0 p-3 sm:p-4">
-          <div role="log" aria-live="polite" aria-relevant="additions text" className="h-[min(32rem,48svh)] min-h-72 space-y-4 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+          <div ref={transcriptRef} role="log" aria-live="polite" aria-relevant="additions text" className="h-[min(32rem,48svh)] min-h-72 space-y-4 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
             {messages.map((message) => <AssistMessageRow key={message.id} message={message} />)}
             {loadingRankings ? <div className="flex items-center gap-2 text-xs font-bold text-violet-100"><span className="h-2 w-2 animate-pulse rounded-full bg-violet-300" aria-hidden="true" />Checking the public standings…</div> : null}
           </div>

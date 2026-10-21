@@ -27,6 +27,20 @@ try {
     await page.getByLabel("Ask DZN Assist a question").fill("link stats");
     await page.getByLabel("Ask DZN Assist a question").press("Enter");
     await page.getByText("Choose the server you play on and submit the exact gamertag", { exact: false }).waitFor({ state: "visible" });
+    for (const [question, reply] of [
+      ["How do I set up my server?", "Start from the setup page."],
+      ["How do I sign in?", "Use Discord sign-in to reach your private Player Hub."],
+      ["refund policy", "Compare owner plans on Pricing."],
+      ["What are the community rules?", "Global Chat is moderated."],
+    ]) {
+      await page.getByLabel("Ask DZN Assist a question").fill(question);
+      await page.getByLabel("Ask DZN Assist a question").press("Enter");
+      await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
+    }
+    await page.waitForFunction(() => {
+      const transcript = document.querySelector("#dzn-assist [role='log']");
+      return Boolean(transcript && (transcript.scrollHeight <= transcript.clientHeight + 1 || transcript.scrollTop + transcript.clientHeight >= transcript.scrollHeight - 2));
+    });
 
     const layout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
@@ -53,10 +67,10 @@ try {
   const launcherPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await launcherPage.goto(`${baseUrl}/pricing`, { waitUntil: "domcontentloaded" });
   await launcherPage.getByLabel("Open DZN Comms").click();
-  await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "visible" });
+  await launcherPage.getByRole("link", { name: /DZN Assist/ }).waitFor({ state: "visible" });
   await launcherPage.screenshot({ path: path.join(outputDir, "phone-launcher.png"), fullPage: false });
   await launcherPage.keyboard.press("Escape");
-  await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "hidden" });
+  await launcherPage.getByRole("link", { name: /DZN Assist/ }).waitFor({ state: "hidden" });
   await launcherPage.getByLabel("Open DZN Comms").waitFor({ state: "visible" });
   await launcherPage.close();
 } finally {

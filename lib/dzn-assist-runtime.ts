@@ -30,7 +30,7 @@ type DznAssistOptions = {
 const PRIVATE_REQUEST = /\b(account|my account|my payment|my bill|invoice|receipt|card|email address|discord id|token|secret|password|credential|moderation|reporter|ban|appeal|private message|dm|server file)\b/i;
 const PLAYER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(player|players|survivor|survivors|kills?)\b|\b(top player|top players|player leaderboard)\b/i;
 const SERVER_RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b[\s\S]*\b(server|servers|community|communities)\b|\b(top server|top servers|server leaderboard)\b/i;
-const RANKING_REQUEST = /\b(top|leaderboard|ranking|rankings|ranked|best)\b/i;
+const RANKING_REQUEST = /\b(leaderboard|ranking|rankings|ranked)\b|\btop\s*(?:10|ten)\b|\btop\b[\s\S]*\b(player|players|server|servers|community|communities|survivor|survivors|kills?)\b/i;
 const COMMON_QUERY_TERMS = new Set(["a", "an", "and", "are", "can", "do", "for", "from", "help", "how", "i", "in", "is", "it", "me", "my", "need", "of", "on", "or", "please", "show", "the", "to", "want", "what", "when", "where", "with", "you", "your"]);
 const UNAVAILABLE_LEADERBOARD_SOURCES = new Set(["empty_no_cache", "fallback_empty", "empty_no_db"]);
 
@@ -77,13 +77,18 @@ export function answerDznAssist(question: string, options: DznAssistOptions = {}
     };
   }
 
-  const terms = [...new Set(tokenize(normalized).filter((term) => term.length > 1 && !COMMON_QUERY_TERMS.has(term)))];
+  const terms = questionTerms(normalized);
+  const guideTermCounts = termCounts(guides);
   const rankedGuides = guides
-    .map((guide) => ({
-      guide,
-      score: terms.reduce((score, term) => score + (guideTerms(guide).has(term) ? 1 : 0), 0),
-    }))
-    .filter((item) => item.score >= 2)
+    .map((guide) => {
+      const matches = terms.filter((term) => guideTerms(guide).has(term));
+      return {
+        guide,
+        score: matches.reduce((score, term) => score + (guideTermCounts.get(term) === 1 ? 2 : 1), 0),
+        confident: matches.length >= 2 || matches.some((term) => guideTermCounts.get(term) === 1),
+      };
+    })
+    .filter((item) => item.confident)
     .sort((left, right) => right.score - left.score || left.guide.title.localeCompare(right.guide.title));
   const match = rankedGuides[0]?.guide;
 
@@ -123,6 +128,20 @@ export function parseDznAssistRankings(value: unknown): DznAssistRankings {
 
 function guideTerms(guide: DznAssistGuide) {
   return new Set(tokenize([guide.title, guide.category, ...guide.keywords].join(" ")));
+}
+
+function questionTerms(value: string) {
+  const terms = tokenize(value).filter((term) => term.length > 1 && !COMMON_QUERY_TERMS.has(term));
+  if (/\bset\s+up\b/i.test(value)) terms.push("setup");
+  return [...new Set(terms)];
+}
+
+function termCounts(guides: readonly DznAssistGuide[]) {
+  const counts = new Map<string, number>();
+  for (const guide of guides) {
+    for (const term of guideTerms(guide)) counts.set(term, (counts.get(term) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function tokenize(value: string) {

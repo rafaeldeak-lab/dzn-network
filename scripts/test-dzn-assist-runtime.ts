@@ -29,6 +29,11 @@ assert.equal(rankings.updatedAt, "2026-10-21T20:00:00.000Z");
 assert.deepEqual(parseDznAssistRankings({ top_players: [{ player_name: "" }] }).players, []);
 assert.equal(parseDznAssistRankings({ updated_at: "not a timestamp" }).updatedAt, null);
 assert.equal(answerDznAssist("How are you?").kind, "fallback");
+assert.equal(answerDznAssist("How do I set up my server?").kind, "guide");
+assert.equal(answerDznAssist("How do I sign in?").kind, "guide");
+assert.equal(answerDznAssist("refund policy").kind, "guide");
+assert.equal(answerDznAssist("Which plan is best?").kind, "guide");
+assert.equal(answerDznAssist("What are the community rules?").kind, "guide");
 assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
 assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 

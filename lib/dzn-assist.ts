@@ -67,7 +67,7 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     category: "Community",
     title: "Use Global Chat safely",
     summary: "Global Chat is moderated. Sign in with Discord to use enabled member actions, report abuse with the message controls, and never post tokens, payment details or personal information.",
-    keywords: ["abuse", "chat", "comms", "discord", "message", "moderation", "report", "safety"],
+    keywords: ["abuse", "chat", "comms", "community rules", "discord", "message", "moderation", "report", "rules", "safety"],
     links: [{ href: "/community#global-chat", label: "Open Global Chat" }],
   },
   {
