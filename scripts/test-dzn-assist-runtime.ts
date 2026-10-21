@@ -8,8 +8,19 @@ assert.equal(privateReply.wantsRankings, false);
 assert.match(privateReply.message, /cannot view or disclose account, payment/i);
 
 const setupReply = answerDznAssist("How do I set up my Nitrado server?");
-assert.equal(setupReply.kind, "guide");
+assert.equal(setupReply.kind, "guidance");
 assert.ok(setupReply.links.some((link) => link.href === "/setup"));
+assert.equal(setupReply.workflows[0]?.id, "server-setup");
+assert.equal(setupReply.workflows[0]?.steps.length, 3);
+
+const combinedReply = answerDznAssist("How do I add my DayZ server and see player stats?");
+assert.equal(combinedReply.kind, "guidance");
+assert.deepEqual(combinedReply.guideIds, ["server-setup", "player-stats-link"]);
+assert.match(combinedReply.message, /both parts/i);
+
+const followUpReply = answerDznAssist("What should I do next?", { previousGuideIds: ["server-setup"] });
+assert.equal(followUpReply.kind, "guidance");
+assert.deepEqual(followUpReply.guideIds, ["server-setup"]);
 
 const rankingsReply = answerDznAssist("Who are the top players and servers?");
 assert.equal(rankingsReply.kind, "ranking");
@@ -29,11 +40,12 @@ assert.equal(rankings.updatedAt, "2026-10-21T20:00:00.000Z");
 assert.deepEqual(parseDznAssistRankings({ top_players: [{ player_name: "" }] }).players, []);
 assert.equal(parseDznAssistRankings({ updated_at: "not a timestamp" }).updatedAt, null);
 assert.equal(answerDznAssist("How are you?").kind, "fallback");
-assert.equal(answerDznAssist("How do I set up my server?").kind, "guide");
-assert.equal(answerDznAssist("How do I sign in?").kind, "guide");
-assert.equal(answerDznAssist("refund policy").kind, "guide");
-assert.equal(answerDznAssist("Which plan is best?").kind, "guide");
-assert.equal(answerDznAssist("What are the community rules?").kind, "guide");
+assert.equal(answerDznAssist("How do I set up my server?").kind, "guidance");
+assert.equal(answerDznAssist("How do I sign in?").kind, "guidance");
+assert.equal(answerDznAssist("How do I log into my account?").kind, "guidance");
+assert.equal(answerDznAssist("refund policy").kind, "guidance");
+assert.equal(answerDznAssist("Which plan is best?").kind, "guidance");
+assert.equal(answerDznAssist("What are the community rules?").kind, "guidance");
 assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
 assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 

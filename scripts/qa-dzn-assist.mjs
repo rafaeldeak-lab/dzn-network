@@ -37,10 +37,26 @@ try {
       await page.getByLabel("Ask DZN Assist a question").press("Enter");
       await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
     }
+    await page.getByLabel("Ask DZN Assist a question").fill("How do I add my DayZ server and see player stats?");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("I can help with both parts.", { exact: false }).last().waitFor({ state: "visible" });
+    await page.getByText("Add or resume a server setup", { exact: true }).last().waitFor({ state: "visible" });
+    await page.getByText("Connect your DayZ stats", { exact: true }).last().waitFor({ state: "visible" });
     await page.waitForFunction(() => {
       const transcript = document.querySelector("#dzn-assist [role='log']");
       return Boolean(transcript && (transcript.scrollHeight <= transcript.clientHeight + 1 || transcript.scrollTop + transcript.clientHeight >= transcript.scrollHeight - 2));
     });
+    await page.getByRole("button", { name: "Clear DZN Assist conversation" }).click();
+    await page.getByText("I am DZN Assist, your public DZN support guide.", { exact: false }).waitFor({ state: "visible" });
+    if (await page.getByText("I can help with both parts.", { exact: false }).count()) {
+      throw new Error(`${viewport.name}: clear conversation did not reset the transcript`);
+    }
+    await page.getByLabel("Ask DZN Assist a question").fill("How do I add my DayZ server and see player stats?");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("I can help with both parts.", { exact: false }).waitFor({ state: "visible" });
+    await page.screenshot({ path: path.join(outputDir, `${viewport.name}-conversation.png`), fullPage: true });
+    await page.getByRole("button", { name: "Clear DZN Assist conversation" }).click();
+    await page.getByText("I am DZN Assist, your public DZN support guide.", { exact: false }).waitFor({ state: "visible" });
 
     const layout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
