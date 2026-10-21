@@ -3418,7 +3418,7 @@ function ServerDashboard({
     });
   }
 
-  const selectedServerLabel = formatPublicServerName(server.guild_name ?? serverDisplayName, "DZN server");
+  const selectedServerLabel = serverDisplayName;
   const currentPlanName = effectivePlanLabel;
   const selectedServerHealth = effectiveDashboardHealth?.source === "local_fallback"
     ? null
@@ -4293,7 +4293,7 @@ function ServerDashboard({
             channelFetchFailure={discordChannelFetchFailure}
             channelsLoading={discordChannelsLoading}
             channelsWarning={discordChannelsWarning}
-            connectedServerName={formatPublicServerName(server.guild_name ?? serverDisplayName, "DZN server")}
+            connectedServerName={serverDisplayName}
             planName={effectivePlanLabel}
             onChannelsRefresh={() => refreshDiscordChannels({ live: true })}
             runDashboardAction={runDashboardAction}
@@ -5663,7 +5663,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
 
       <div className="mt-4 grid gap-2">
         {visiblePlans.map((plan) => {
-          const checkoutState = billingPlanCheckoutState(plan, readiness);
+          const checkoutState = billingPlanCheckoutState(plan, readiness, plans.length > 0);
           return (
             <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
               <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
@@ -5753,7 +5753,15 @@ function billingPlanListingSummary(plan: BillingPlanSummary) {
     : "Public listing, basic discovery, reviews, and standard listing visuals";
 }
 
-function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingReadinessResponse | null) {
+function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingReadinessResponse | null, hasLoadedPlans: boolean) {
+  if (!hasLoadedPlans) {
+    return {
+      enabled: false,
+      statusLabel: "Checking checkout",
+      buttonLabel: "Checking...",
+    };
+  }
+
   if (!plan.configured) {
     return {
       enabled: false,
@@ -6257,7 +6265,7 @@ function DiscordAutoPostsPanel({
       ) : null}
 
       <div className="mt-4 grid gap-3 rounded-xl border border-cyan-300/15 bg-cyan-400/5 p-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MiniInfo label="Discord Server" value={channelsResponse?.guild_name ?? connectedServerName ?? "Unknown"} />
+        <MiniInfo label="Discord Server" value={formatPublicServerName(channelsResponse?.guild_name ?? connectedServerName, "Unknown")} />
         <MiniInfo label="Bot status" value={botStatus} />
         <MiniInfo label="Channels Found" value={channelCountLabel} />
         <MiniInfo label="Plan" value={planName} />
@@ -6609,7 +6617,7 @@ function DiscordAutoPostsPanel({
         <div className="mt-3 grid gap-2 rounded-lg border border-white/10 bg-black/24 p-3 text-xs font-bold text-zinc-300 sm:grid-cols-2 lg:grid-cols-4">
           <MiniInfo label="Selected Server ID" value={diagnostics?.selected_server_id ?? serverId} />
           <MiniInfo label="Selected Guild ID" value={diagnostics?.selected_guild_id ?? "Missing"} />
-          <MiniInfo label="Guild Name" value={diagnostics?.guild_name ?? channelsResponse?.guild_name ?? "Unknown"} />
+          <MiniInfo label="Guild Name" value={formatPublicServerName(diagnostics?.guild_name ?? channelsResponse?.guild_name, "Unknown")} />
           <MiniInfo label="Bot Token Configured" value={diagnostics?.bot_token_configured ? "Yes" : "No"} />
           <MiniInfo label="Bot Connected" value={diagnostics?.bot_connected === true ? "Yes" : diagnostics?.bot_connected === false ? "No" : "Unknown"} />
           <MiniInfo label="Channels Fetched" value={String(usingCachedChannelState && channelCache ? channelCache.last_channel_count : diagnostics?.channels_fetched_count ?? channels.length)} />

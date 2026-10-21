@@ -218,6 +218,11 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes('import { formatPublicServerName } from "@/lib/public-display-text";'), true, "Owner dashboard labels must use the shared public server-name formatter.");
 assert.equal(dashboardSource.includes('const serverDisplayName = formatPublicServerName('), true, "The selected dashboard server name must not expose pasted URLs.");
 assert.equal(dashboardSource.includes('formatPublicServerName(item.display_name ?? item.hostname ?? item.server_name ?? item.nitrado_service_name, "DZN server")'), true, "The server selector must not expose pasted URLs.");
+assert.equal(dashboardSource.includes('const selectedServerLabel = serverDisplayName;'), true, "The selected-server card must retain the DayZ server name rather than substituting the Discord guild name.");
+assert.equal(dashboardSource.includes('value={formatPublicServerName(channelsResponse?.guild_name ?? connectedServerName, "Unknown")}'), true, "Discord response labels must be sanitized at the render boundary.");
+assert.equal(dashboardSource.includes('statusLabel: "Checking checkout"'), true, "The billing panel must not show an unconfigured error while live plan configuration is still loading.");
+const dashboardApiSource = readFileSync("components/onboarding/api.ts", "utf8");
+assert.equal(dashboardApiSource.includes('return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans", { cache: "no-store" });'), true, "Dashboard billing plans must bypass stale browser responses.");
 
 console.log("Live server rail truthfulness tests passed.");
 }

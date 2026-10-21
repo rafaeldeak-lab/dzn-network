@@ -198,7 +198,7 @@ export async function getBillingStatus() {
 }
 
 export async function getBillingPlans() {
-  return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans");
+  return request<{ plans: BillingPlanSummary[] }>("/api/billing/plans", { cache: "no-store" });
 }
 
 export async function getBillingReadiness() {
