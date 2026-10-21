@@ -89,6 +89,7 @@ export type BillingPlanSummary = PlanEntitlements & {
   public_contract: SubscriptionPlanPublicContract;
   configured: boolean;
   checkout_enabled: boolean;
+  checkout_availability: "available" | "temporarily_paused" | "unavailable" | "not_configured";
   checkout_blocked_reason: string | null;
   features: string[];
 };
@@ -376,6 +377,10 @@ export function getCheckoutSafetyStatus(env: Env): CheckoutSafetyStatus {
 export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
   const configured = getCheckoutConfigured(env);
   const checkoutSafety = getCheckoutSafetyStatus(env);
+  const intentionalLivePause = checkoutSafety.checkoutSafetyMode === "live_checkout_paused"
+    && !checkoutSafety.liveCheckoutEnabled
+    && getStripeModeHint(env) === "live"
+    && getLiveCheckoutPrerequisitesReady(env);
   return PAID_PLAN_KEYS.map((planKey) => ({
     ...PLAN_CONFIG[planKey],
     ...PLAN_MARKETING[planKey],
@@ -383,6 +388,13 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
     public_contract: getSubscriptionPlanPublicContract(planKey)!,
     configured: configured[planKey],
     checkout_enabled: configured[planKey] && checkoutSafety.checkoutSessionCreationAllowed,
+    checkout_availability: !configured[planKey]
+      ? "not_configured"
+      : checkoutSafety.checkoutSessionCreationAllowed
+        ? "available"
+        : intentionalLivePause
+          ? "temporarily_paused"
+          : "unavailable",
     checkout_blocked_reason: configured[planKey] ? checkoutSafety.checkoutBlockedReason : "Plan checkout is not configured yet.",
   }));
 }

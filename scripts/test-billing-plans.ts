@@ -14,6 +14,7 @@ import { onRequest as billingReadinessHandler } from "../functions/api/billing/r
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const publicSeller = {
@@ -168,6 +169,7 @@ assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true }
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_enabled, false);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_availability, "unavailable");
 assert.match(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_blocked_reason ?? "", /not configured/i);
 assert.equal(planSummaries.some((plan) => String(plan.plan_key) === "premium"), false);
 assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro"]);
@@ -197,6 +199,17 @@ const pausedLiveCheckoutSafety = getCheckoutSafetyStatus({
 } as Env);
 assert.equal(pausedLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
 assert.equal(pausedLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
+
+const intentionallyPausedPlans = getBillingPlanSummaries({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_live_checkout_safety",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_checkout_safety",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLISHED_SELLER.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLISHED_SELLER.addressLines.join(" | "),
+} as Env);
+assert.ok(intentionallyPausedPlans.every((plan) => plan.checkout_availability === "temporarily_paused"), "A fully configured but intentionally paused live checkout must publish a safe owner-facing pause state.");
 
 const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
   ...publicSeller,
@@ -289,7 +302,9 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes("Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
 assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
-assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
+assert.equal(dashboardSource.includes("Checkout unavailable"), true, "Owner dashboard should show a concise checkout warning only when the checkout-creation gate is closed.");
+assert.equal(dashboardSource.includes("Admin billing readiness warning"), false, "Owner billing should not expose internal readiness labels during ordinary checkout.");
+assert.equal(dashboardSource.includes("Live checkout paused for sandbox testing"), false, "Owner billing should not expose internal checkout operating modes.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 3"), false, "Dashboard fallback plans must not keep stale Pro 3 promotion credits.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 12"), false, "Dashboard fallback plans must not keep stale Premium 12 promotion credits.");
 
