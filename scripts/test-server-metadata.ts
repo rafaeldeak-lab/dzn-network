@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveAdmPlayerListFallback, resolveLivePlayerCounts, resolveNitradoCurrentPlayerCount } from "../functions/_lib/server-metadata";
+import { detectPlatform, detectServerModeFromText, extractNitradoOnlinePlayerCount, parseNitradoPlayerCountPair, resolveAdmPlayerListFallback, resolveLivePlayerCounts, resolveNitradoCurrentPlayerCount } from "../functions/_lib/server-metadata";
 
 assert.equal(detectServerModeFromText(["NukeTown DEATHMATCH"]), "DEATHMATCH");
 assert.equal(detectServerModeFromText(["Weekend raids KOS faction wars"]), "PVP");
 assert.equal(detectServerModeFromText(["No KOS roleplay survival"]), "PVE");
 assert.equal(detectServerModeFromText(["PvP weekdays and PvE safe zones"]), "PVP / PVE");
 assert.equal(detectServerModeFromText(["quiet community server"]), "SURVIVAL");
+assert.equal(detectPlatform("dayzps"), "PlayStation", "Nitrado's DayZ PlayStation game code must populate the public platform label.");
+assert.equal(detectPlatform("dayzxb"), "Xbox", "Nitrado's DayZ Xbox game code must populate the public platform label.");
+assert.equal(detectPlatform("dayzstandalone"), "PC", "DayZ standalone metadata must retain its PC platform label.");
 
 assert.deepEqual(parseNitradoPlayerCountPair("2/10"), { current: 2, max: 10 });
 assert.deepEqual(parseNitradoPlayerCountPair("0 / 22"), { current: 0, max: 22 });
