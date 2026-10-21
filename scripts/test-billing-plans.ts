@@ -289,7 +289,8 @@ const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf
 assert.equal(dashboardSource.includes("Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
 assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
-assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
+assert.equal(dashboardSource.includes("Checkout unavailable"), true, "Owner dashboard should show a concise checkout warning only when the checkout-creation gate is closed.");
+assert.equal(dashboardSource.includes("Admin billing readiness warning"), false, "Owner billing should not expose internal readiness labels during ordinary checkout.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 3"), false, "Dashboard fallback plans must not keep stale Pro 3 promotion credits.");
 assert.equal(dashboardSource.includes("included_bumps_per_month: 12"), false, "Dashboard fallback plans must not keep stale Premium 12 promotion credits.");
 
