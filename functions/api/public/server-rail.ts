@@ -14,6 +14,7 @@ import {
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
 } from "../../../lib/server-lifecycle";
+import { formatPublicServerName } from "../../../lib/public-display-text";
 
 type RailRow = {
   id: string;
@@ -218,7 +219,7 @@ function toRailItem(row: RailRow) {
   return {
     id: row.id,
     slug: row.public_slug,
-    name: row.server_name ?? "DZN Server",
+    name: formatPublicServerName(row.server_name),
     logoUrl: row.guild_icon_url,
     category: row.server_type ?? "DayZ",
     currentPlayers: numberOrNull(row.current_players),
