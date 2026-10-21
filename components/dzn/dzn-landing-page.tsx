@@ -8,7 +8,6 @@ import {
   Crosshair,
   Crown,
   Flag,
-  Globe2,
   Hammer,
   Lock,
   Radio,
@@ -43,6 +42,7 @@ import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
+import { stripPublicUrl } from "@/lib/public-display-text";
 import { DznLogo } from "./dzn-logo";
 import type { DznOperationalGlobeNode } from "./dzn-operational-globe";
 
@@ -2306,7 +2306,10 @@ function scoreBreakdownTitle(breakdown: ScoreBreakdown | null | undefined) {
 }
 
 function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {
-  const liveRows = homeStats.recentActivity.slice(0, 5).map<ActivityPanelRow>((activity) => {
+  const liveRows = homeStats.recentActivity
+    .filter((activity) => activity.source !== "sync")
+    .slice(0, 5)
+    .map<ActivityPanelRow>((activity) => {
     const display = formatActivityDisplay(activity);
     return {
       title: display.title,
@@ -2326,45 +2329,14 @@ function buildActivityRows(homeStats: HomeStats): ActivityPanelRow[] {
     };
   });
 
-  if (liveRows.length > 0) return liveRows;
-
-  return [
-    {
-      title: "Server sync active",
-      detail: "DZN sync network online",
-      time: "Live",
-      icon: Radio,
-      tone: "border-cyan-300/18 bg-cyan-300/10 text-cyan-100",
-    },
-    {
-      title: "Waiting for first PvP kill",
-      detail: "Kills appear once detected",
-      time: "Queued",
-      icon: Crosshair,
-      tone: "border-violet-300/18 bg-violet-300/10 text-violet-100",
-    },
-    {
-      title: "New server activity syncing",
-      detail: "Public events will appear here",
-      time: "Ready",
-      icon: Zap,
-      tone: "border-emerald-300/18 bg-emerald-300/10 text-emerald-100",
-    },
-    {
-      title: "Public servers connected",
-      detail: "Server reputation graph building",
-      time: "Online",
-      icon: Globe2,
-      tone: "border-orange-300/18 bg-orange-300/10 text-orange-100",
-    },
-  ];
+  return liveRows;
 }
 
 function formatActivityDisplay(activity: HomeStats["recentActivity"][number]) {
   if (activity.source === "kill") return formatKillActivityDisplay(activity);
   return {
-    title: cleanActivityText(activity.title, "Server activity synced"),
-    detail: cleanActivityText(activity.serverName, "DZN Network"),
+    title: formatActivityTitle(activity.title),
+    detail: formatServerDisplayName(cleanActivityText(activity.serverName, "DZN Network")),
   };
 }
 
@@ -2375,7 +2347,7 @@ function formatKillActivityDisplay(activity: HomeStats["recentActivity"][number]
   const weapon = cleanActivityText(activity.weapon, parsed.weapon ?? "");
   const distance = finiteNumberOrNull(activity.distance);
   const detailParts = [
-    cleanActivityText(activity.serverName, "DZN Network"),
+    formatServerDisplayName(cleanActivityText(activity.serverName, "DZN Network")),
     weapon,
     distance && distance > 0 ? `${formatDecimal(distance)}m` : "",
   ].filter(Boolean);
@@ -2402,17 +2374,46 @@ function cleanActivityText(value: string | null | undefined, fallback: string) {
   return cleaned || fallback;
 }
 
+function formatActivityTitle(value: string | null | undefined) {
+  const cleaned = stripPublicUrl(cleanActivityText(value, "Server activity"))
+    .replace(/\s*[-|:]\s*(?=(?:activity|build|connect(?:ed|ing)?|disconnect(?:ed|ing)?|kill|player|server|sync)\b)/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return toReadablePublicText(cleaned || "Server activity");
+}
+
 function formatServerDisplayName(value: string) {
-  const cleaned = value.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const cleaned = stripPublicUrl(value)
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (/^dayzquestbottestserver$/i.test(cleaned.replace(/\s+/g, ""))) {
     return "DayZQuest Bot Test Server";
   }
 
-  return cleaned
+  return toReadablePublicText(cleaned || "DZN Server")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\bDay Z\b/g, "DayZ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function toReadablePublicText(value: string) {
+  const normalized = value.trim();
+  const titleCased = /[A-Z]/.test(normalized) && normalized === normalized.toUpperCase()
+    ? normalized.toLowerCase().replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+    : normalized;
+
+  return titleCased
+    .replace(/\bDayz\b/g, "DayZ")
+    .replace(/\bDzn\b/g, "DZN")
+    .replace(/\bNuketown\b/g, "NukeTown")
+    .replace(/\bPvp\b/g, "PvP")
+    .replace(/\bPve\b/g, "PvE")
+    .replace(/\bEu\b/g, "EU")
+    .replace(/\bUk\b/g, "UK")
+    .replace(/\bUsa\b/g, "USA");
 }
 
 function formatNumber(value: number) {

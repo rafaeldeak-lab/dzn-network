@@ -5937,7 +5937,7 @@ button.dzn-header-action {
   font-weight: 950;
   line-height: 1.22;
   overflow-wrap: anywhere;
-  text-transform: uppercase;
+  text-transform: none;
   white-space: normal;
   word-break: normal;
 }
@@ -7391,7 +7391,7 @@ button.dzn-header-action {
   font-size: clamp(1rem, 1.6vw, 1.35rem);
   font-weight: 950;
   line-height: 1.08;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .dzn-pulse-detail {

@@ -1,10 +1,80 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
-import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows } from "../functions/api/public/home-stats";
+import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows, getRecentActivity } from "../functions/api/public/home-stats";
 import { applyServerReviewsAccess } from "../functions/api/public/server-reviews";
 import { applyPublicServerAccess, publicListingStatus, resolvePublicStatsActive } from "../functions/api/public/servers";
+import { stripPublicUrl } from "../lib/public-display-text";
+
+type Sqlite = {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...values: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    get(...values: unknown[]): Record<string, unknown> | undefined;
+    all(...values: unknown[]): Record<string, unknown>[];
+  };
+  close(): void;
+};
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (file: string) => Sqlite };
+
+async function assertRecentActivityIgnoresSyncRows() {
+  const sqlite = new DatabaseSync(":memory:");
+  const db = {
+    prepare(sql: string) {
+      const statement = (values: unknown[]) => ({
+        bind: (...bindings: unknown[]) => statement(bindings),
+        all: async () => ({ results: sqlite.prepare(sql).all(...values), success: true }),
+      });
+      return statement([]);
+    },
+  } as Parameters<typeof getRecentActivity>[0];
+
+  sqlite.exec(`
+    CREATE TABLE linked_servers (
+      id TEXT PRIMARY KEY, display_name TEXT, hostname TEXT, server_name TEXT, nitrado_service_name TEXT,
+      public_slug TEXT, status TEXT, lifecycle_status TEXT, listing_visibility TEXT, merged_into_server_id TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE kill_events (
+      id TEXT PRIMARY KEY, linked_server_id TEXT, killer_name TEXT, victim_name TEXT, weapon TEXT, distance REAL,
+      occurred_at TEXT, created_at TEXT
+    );
+    CREATE TABLE player_events (
+      id TEXT PRIMARY KEY, linked_server_id TEXT, event_type TEXT, player_name TEXT, occurred_at TEXT, created_at TEXT
+    );
+    CREATE TABLE build_events (
+      id TEXT PRIMARY KEY, linked_server_id TEXT, event_type TEXT, player_name TEXT, tool TEXT, build_part TEXT,
+      target_object TEXT, placed_object TEXT, placed_class TEXT, occurred_at TEXT, created_at TEXT
+    );
+    CREATE TABLE sync_runs (
+      id TEXT PRIMARY KEY, linked_server_id TEXT, status TEXT, finished_at TEXT
+    );
+    INSERT INTO linked_servers VALUES (
+      'live-server', 'NukeTown Deathmatch', NULL, NULL, NULL, 'nuketown', 'live', 'active_live', 'public', NULL,
+      '2026-01-01T00:00:00.000Z'
+    );
+    INSERT INTO player_events VALUES (
+      'genuine-player-event', 'live-server', 'player_connected', 'Real Player', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+    );
+  `);
+  for (let index = 0; index < 9; index += 1) {
+    sqlite.prepare("INSERT INTO sync_runs VALUES (?, 'live-server', 'completed', ?)")
+      .run(`newer-sync-${index}`, `2026-01-01T00:0${index + 1}:00.000Z`);
+  }
+
+  try {
+    const recentActivity = await getRecentActivity(db);
+    assert.equal(recentActivity.length, 2, "Genuine activity must remain available even when newer sync runs exist.");
+    assert.deepEqual(recentActivity.map((activity) => activity.source).sort(), ["player", "server"]);
+    assert.equal(recentActivity.some((activity) => activity.title === "Real Player connected"), true);
+  } finally {
+    sqlite.close();
+  }
+}
+
 
 const baseServer = {
   linked_server_id: "pandora",
@@ -544,6 +614,10 @@ const activityRowsBlock = homepageSource.slice(
   homepageSource.indexOf("function buildActivityRows"),
   homepageSource.indexOf("function formatServerDisplayName"),
 );
+const publicDisplayFormattingBlock = homepageSource.slice(
+  homepageSource.indexOf("function formatActivityDisplay"),
+  homepageSource.indexOf("function formatNumber"),
+);
 const bottomCtaBlock = homepageSource.slice(
   homepageSource.indexOf("function BottomCta"),
   homepageSource.indexOf("function PanelShell"),
@@ -586,6 +660,7 @@ const recentActivityCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-game-modes-section"),
 );
 const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8");
+const publicDisplayTextSource = readFileSync("lib/public-display-text.ts", "utf8");
 const pageMiddlewareSource = readFileSync("functions/_middleware.ts", "utf8");
 const routesPatchSource = readFileSync("scripts/patch-pages-routes.mjs", "utf8");
 const staticRoutesSource = readFileSync("public/_routes.json", "utf8");
@@ -873,6 +948,14 @@ assert.equal(activityRowsBlock.includes("killerName"), true);
 assert.equal(activityRowsBlock.includes("victimName"), true);
 assert.equal(activityRowsBlock.includes("weapon"), true);
 assert.equal(activityRowsBlock.includes("distance"), true);
+assert.equal(activityRowsBlock.includes('activity.source !== "sync"'), true, "Public activity must omit repeated internal sync-completed noise.");
+assert.equal(activityRowsBlock.includes("Server sync active"), false, "Public activity must not fabricate operational filler when no player or server activity exists.");
+assert.equal(publicDisplayTextSource.includes("function stripPublicUrl"), true, "Public server names must remove pasted URLs before rendering.");
+assert.equal(publicDisplayFormattingBlock.includes("function toReadablePublicText"), true, "Public server names must be normalized into readable text.");
+assert.equal(publicDisplayFormattingBlock.includes("formatServerDisplayName(cleanActivityText(activity.serverName"), true, "Activity metadata must use the same server-name formatter as the leaderboard.");
+assert.equal(stripPublicUrl("NukeTown Deathmatch - https://dayz-network.com"), "NukeTown Deathmatch");
+assert.equal(stripPublicUrl("NukeTown Deathmatch - discord.gg/dzn-network"), "NukeTown Deathmatch");
+assert.equal(stripPublicUrl("NukeTown Deathmatch - www.example.org/rules"), "NukeTown Deathmatch");
 assert.equal(recentActivityCssBlock.includes("grid-template-columns: 2.375rem minmax(0, 1fr) auto;"), true);
 assert.equal(recentActivityCssBlock.includes("min-width: 0;"), true);
 assert.equal(recentActivityCssBlock.includes("-webkit-line-clamp: 2;"), true);
@@ -886,4 +969,9 @@ assert.equal(bottomCtaBlock.includes("href=\"#features\""), true);
 assert.equal(bottomCtaBlock.includes("/login?returnTo=/setup"), false);
 assert.equal(homepageSource.includes("dzn-preview-locked-panel__button"), false);
 
-console.log("Public access gating tests passed.");
+assertRecentActivityIgnoresSyncRows()
+  .then(() => console.log("Public access gating tests passed."))
+  .catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
