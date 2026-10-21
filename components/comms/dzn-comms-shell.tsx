@@ -4,7 +4,6 @@ import Image from "next/image";
 import {
   AlertTriangle,
   Bot,
-  ChevronRight,
   Flag,
   Hash,
   LockKeyhole,
@@ -365,22 +364,20 @@ export function DznCommsShell() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
-      <section className="mx-auto flex w-full max-w-[84rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="DZN communication tools" className={`grid gap-2 rounded-md border border-white/10 bg-[#060a15]/95 p-2 ${ownerDiscordAccessUiEnabled ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
-          <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Comms</span><span className="block text-xs font-bold text-emerald-200">{selectedChannelAccessLabel}</span></span>
-            <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+      <section className="mx-auto flex w-full max-w-[92rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
+        <nav aria-label="DZN communication tools" className="flex flex-wrap items-center gap-x-1 gap-y-2 border-y border-white/10 bg-[#050812]/92 px-2 py-2">
+          <a href="#global-chat" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-cyan-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-cyan-300/8">
+            <MessageCircle className="h-4 w-4 text-cyan-200" aria-hidden="true" />
+            <span>DZN Comms</span>
+            <span className="text-[10px] tracking-[0.14em] text-emerald-200">{selectedChannelAccessLabel}</span>
           </a>
-          <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100"><Bot className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-emerald-200">Guided help live</span></span>
-            <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          <a href="#dzn-assist" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-violet-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-violet-300/8">
+            <Bot className="h-4 w-4 text-violet-200" aria-hidden="true" />
+            <span>DZN Assist</span>
           </a>
-          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group flex min-h-14 items-center gap-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 transition hover:border-amber-200/45">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-amber-300/25 bg-amber-300/10 text-amber-100"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Server owners</span><span className="block text-xs font-bold text-amber-100">Request private access</span></span>
-            <ChevronRight className="h-4 w-4 text-amber-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-amber-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-amber-300/8">
+            <ShieldCheck className="h-4 w-4 text-amber-200" aria-hidden="true" />
+            <span>Owner access</span>
           </a> : null}
         </nav>
 
@@ -412,7 +409,7 @@ export function DznCommsShell() {
             </div>
           </div>
 
-          <div className="grid gap-0 lg:grid-cols-[200px_minmax(0,1fr)_226px]">
+          <div className="grid gap-0 lg:grid-cols-[14.5rem_minmax(0,1fr)_15rem]">
             <aside className="border-b border-white/10 bg-black/18 p-3 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-3 space-y-2">
@@ -469,7 +466,7 @@ export function DznCommsShell() {
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
-                className="mt-3 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
+                className="mt-3 h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
               >
                 {visibleMessages.length > 0 ? visibleMessages.map((message) => (
                   <MessageRow
@@ -528,7 +525,7 @@ export function DznCommsShell() {
             </section>
 
             <aside className="bg-black/18 p-3">
-              <PanelTitle icon={ShieldCheck} label="Safety Contract" />
+              <PanelTitle icon={ShieldCheck} label="Channel details" />
               <div className="mt-3 space-y-2">
                 <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
                 <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
@@ -708,13 +705,13 @@ function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { 
       disabled={!onSelect || active}
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left ${
-        active ? "border-cyan-300/40 bg-cyan-400/12 text-white" : "border-white/8 bg-white/4 text-zinc-400"
-      } disabled:cursor-default enabled:hover:border-cyan-300/30 enabled:hover:text-white`}
+      className={`flex w-full items-center justify-between gap-2 border-l-2 px-3 py-3 text-left ${
+        active ? "border-cyan-300 bg-cyan-400/12 text-white" : "border-transparent bg-white/[0.025] text-zinc-400"
+      } disabled:cursor-default enabled:hover:border-cyan-300/55 enabled:hover:bg-cyan-300/6 enabled:hover:text-white`}
     >
       <span className="flex min-w-0 items-center gap-2">
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="truncate text-sm font-black uppercase">{label}</span>
+        <span className="text-sm font-black uppercase leading-4">{label}</span>
       </span>
       <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{meta}</span>
     </button>
@@ -723,7 +720,7 @@ function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { 
 
 function SafetyCard({ id, icon: Icon, label, value }: { id?: string; icon: typeof ShieldCheck; label: string; value: string }) {
   return (
-    <div id={id} className="scroll-mt-6 rounded-lg border border-white/10 bg-white/5 p-3">
+    <div id={id} className="scroll-mt-6 border-l-2 border-white/10 px-3 py-2">
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-cyan-200" aria-hidden="true" />
         <span className="text-xs font-black uppercase tracking-[0.14em] text-white">{label}</span>
