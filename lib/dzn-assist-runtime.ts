@@ -164,7 +164,8 @@ function workflowOrder(guideId: string) {
     "server-owner-discord-access": 50,
     "plans-and-billing": 60,
     "comms-safety": 70,
-    "events-and-leaderboards": 80,
+    "dzn-updates": 80,
+    "events-and-leaderboards": 90,
   };
   return order[guideId] ?? 100;
 }
@@ -178,6 +179,7 @@ function phraseScore(question: string, guideId: string) {
     "server-data": /\b(sync|import|server data|missing data|old data|adm files?)\b/i,
     "plans-and-billing": /\b(plan|pricing|refund policy|cancel(?:lation)?|subscription|billing)\b/i,
     "comms-safety": /\b(chat|comms|community rules|report abuse|moderation|safety)\b/i,
+    "dzn-updates": /\b(what(?:'s| is) new|latest|release notes?|changelog|updates?|announcements?|news)\b/i,
     "events-and-leaderboards": /\b(event|competition|tournament)\b/i,
   };
   return matches[guideId]?.test(question) ? 6 : 0;

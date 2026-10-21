@@ -250,6 +250,7 @@
     "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live",
     "test:comms-discoverability": "tsx scripts/test-comms-discoverability.ts",
     "test:dzn-assist": "tsx scripts/test-dzn-assist-runtime.ts",
+    "test:dzn-updates": "tsx scripts/test-dzn-updates.ts",
     "qa:dzn-assist": "node scripts/qa-dzn-assist.mjs",
     "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts && npm run test:dzn-comms-history-client",
     "test:dzn-comms-history-client": "tsx --test scripts/test-dzn-comms-history-client.ts",

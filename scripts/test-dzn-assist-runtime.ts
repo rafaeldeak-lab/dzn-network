@@ -46,6 +46,10 @@ assert.equal(answerDznAssist("How do I log into my account?").kind, "guidance");
 assert.equal(answerDznAssist("refund policy").kind, "guidance");
 assert.equal(answerDznAssist("Which plan is best?").kind, "guidance");
 assert.equal(answerDznAssist("What are the community rules?").kind, "guidance");
+const updatesReply = answerDznAssist("What is new on DZN?");
+assert.equal(updatesReply.kind, "guidance");
+assert.deepEqual(updatesReply.guideIds, ["dzn-updates"]);
+assert.ok(updatesReply.links.some((link) => link.href === "/updates"));
 assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
 assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 

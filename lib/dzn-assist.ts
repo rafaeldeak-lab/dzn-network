@@ -87,6 +87,16 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     links: [{ href: "/community#global-chat", label: "Open Global Chat" }],
   },
   {
+    id: "dzn-updates",
+    category: "Community",
+    title: "Find verified DZN updates",
+    summary: "DZN Updates is the read-only release log for material website, community, player and server-owner changes. It is separate from Global Chat, so official notices never pretend to be player activity.",
+    steps: ["Open DZN Updates for the latest verified release notes.", "Use the attached route to open the related DZN area.", "Use Global Chat for player conversation and DZN Assist for guided help."],
+    nextPrompts: ["How do I use Global Chat safely?", "How do I add my server?"],
+    keywords: ["announcement", "change", "changelog", "latest", "news", "release", "updates", "what is new", "whats new"],
+    links: [{ href: "/updates", label: "Open DZN Updates" }, { href: "/community#dzn-updates", label: "Open updates in Comms" }],
+  },
+  {
     id: "events-and-leaderboards",
     category: "Community",
     title: "Find events and rankings",

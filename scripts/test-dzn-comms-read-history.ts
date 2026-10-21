@@ -96,7 +96,7 @@ assert.match(shell, /const historyProbeEnabled = historyUiEnabled \|\| liveUiEna
 assert.doesNotMatch(historyClient, /cdn\.discordapp\.com/, "The history client must reject raw Discord CDN avatar URLs.");
 assert.match(shell, /historyReady \? recentVisibleSpeakers\(visibleMessages\) : \[\]/, "Static and fallback sample rows must never be presented as recent live speakers.");
 assert.match(shell, /failedAvatarUrl !== message\.author_avatar_url/, "A recovered or updated consented avatar URL must be retried for the same chat row.");
-assert.match(shell, /if \(!historyProbeEnabled\) return;/, "The history route must remain dormant outside an explicit local switch or deployed client.");
+assert.match(shell, /if \(!historyProbeEnabled \|\| selectedChannel === "dzn-updates"\) return;/, "The history route must remain dormant outside an explicit local switch or deployed client, and never request player history for the official update feed.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED/, "Private channel controls must have a separate public UI switch.");
 assert.match(shell, /loadCommsHistory\(controller.signal, \{ channelSlug: selectedChannel \}\)/, "The UI must use the bounded history client for the selected channel.");
 assert.match(shell, /if \(selectedChannel !== "global-chat"\)[\s\S]*Private group access changed\. Returning to Global Chat\.[\s\S]*setSelectedChannel\("global-chat"\)/, "A failed private refresh must clear private history and return to Global Chat.");

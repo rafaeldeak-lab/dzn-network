@@ -14,6 +14,9 @@ const staticPayloadSource = commsSource.slice(
 const assistSource = readFileSync("components/comms/dzn-assist.tsx", "utf8");
 const assistGuidesSource = readFileSync("lib/dzn-assist.ts", "utf8");
 const assistRuntimeSource = readFileSync("lib/dzn-assist-runtime.ts", "utf8");
+const updatesSource = readFileSync("lib/dzn-updates.ts", "utf8");
+const updatesFeedSource = readFileSync("components/comms/dzn-updates-feed.tsx", "utf8");
+const updatesPageSource = readFileSync("app/updates/page.tsx", "utf8");
 const publicAccessPolicy = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 
 assert.equal(layoutSource.includes("<DznCommsLauncher />"), true, "The Comms launcher must be mounted across the site.");
@@ -22,6 +25,7 @@ assert.equal(headerSource.includes('if (pathname.startsWith("/community")) retur
 
 assert.equal(launcherSource.includes('href="/community#global-chat"'), true, "The global launcher must open Global Chat directly.");
 assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The global launcher must expose the DZN Assist status location.");
+assert.equal(launcherSource.includes('href="/updates"'), true, "The global launcher must expose the official DZN Updates feed.");
 assert.equal(launcherSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "The global launcher must expose owner Discord access only after the explicit public activation flag is enabled.");
 assert.equal(launcherSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "The global launcher must provide a sign-in-safe route to the owner Discord request flow.");
 assert.equal(launcherSource.includes("Server owner access"), true, "The global launcher must name the owner-only request path clearly.");
@@ -50,7 +54,10 @@ assert.equal(launcherSource.includes("safe-area-inset-right"), true, "The compac
 assert.equal(launcherSource.includes('disclosure.open = false'), true, "The panel close control must close the native disclosure.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
-assert.equal(commsSource.includes('selectedChannelAccessLabel = sendingEnabled\n    ? "Live now"'), true, "The selected Comms channel must identify a live sending runtime.");
+assert.equal(commsSource.includes('selectedChannel === "dzn-updates"'), true, "Comms must present DZN Updates as a distinct channel state.");
+assert.equal(commsSource.includes('<DznUpdatesFeed />'), true, "Comms must render the official release feed inside its Updates channel.");
+assert.equal(commsSource.includes('DZN Updates'), true, "Comms must name the official updates channel clearly.");
+assert.equal(commsSource.includes('selectedChannelAccessLabel = isUpdatesChannel\n    ? "Official updates"'), true, "The selected Comms channel must identify the official update feed separately from live sending.");
 assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat must identify read-only history.");
 assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
@@ -78,12 +85,18 @@ assert.equal(assistSource.includes("ownerDiscordAccessUiEnabled"), true, "DZN As
 assert.equal(assistSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "DZN Assist must send a server owner through Discord sign-in before opening the private request flow.");
 assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");
 assert.equal(assistGuidesSource.includes('id: "server-owner-discord-access"'), true, "DZN Assist must include specific server-owner Discord guidance.");
+assert.equal(assistGuidesSource.includes('id: "dzn-updates"'), true, "DZN Assist must route update questions to the official release feed.");
+assert.equal(assistRuntimeSource.includes('"dzn-updates"'), true, "DZN Assist must recognize update requests.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account"'), true, "DZN Assist must preserve the game-account anchor across Discord sign-in.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fdashboard", label: "Manage billing"'), true, "DZN Assist must route cancellation and payment-recovery help to account billing controls.");
 assert.equal(publicAccessPolicy.includes("The browser-local DZN Assist may remain public"), true, "The public access policy must permit the released local-only support desk.");
 assert.equal(publicAccessPolicy.includes("Any account-aware or generative AI runtime remains a separate release"), true, "The public access policy must keep future AI runtime activation separate.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
 assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
+assert.equal(updatesPageSource.includes("DznUpdatesFeed"), true, "The official release feed must have a direct public page.");
+assert.equal(updatesSource.includes("source-controlled public release log"), true, "Official update entries must be source-controlled instead of fabricated chat activity.");
+assert.equal(updatesSource.includes("Global Chat stays for real player conversation"), true, "Official updates must remain distinct from player conversation.");
+assert.equal(updatesFeedSource.includes("Official DZN release log"), true, "The public update feed must identify its verified source.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(4, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"), true, "The signed-out mobile header must restore its two-column wrapping.");
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ChevronRight, MessageCircle, MessagesSquare, ShieldCheck, X } from "lucide-react";
+import { BellRing, Bot, ChevronRight, MessageCircle, MessagesSquare, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -104,6 +104,20 @@ export function DznCommsLauncher() {
                 <span className="mt-0.5 block text-xs font-bold text-cyan-100">Open Global Chat</span>
               </span>
               <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+            </Link>
+
+            <Link
+              href="/updates"
+              className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45 hover:bg-violet-300/10"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100">
+                <BellRing className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-black uppercase text-white">DZN Updates</span>
+                <span className="mt-0.5 block text-xs font-bold text-violet-100">Official release notes</span>
+              </span>
+              <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
 
             {ownerDiscordAccessUiEnabled ? <Link
