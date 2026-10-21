@@ -5784,7 +5784,9 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
   if (!readiness) return null;
-  const intentionallyPaused = readiness.checkoutSafetyMode === "live_checkout_paused" && !readiness.liveCheckoutEnabled;
+  const intentionallyPaused = readiness.checkoutSafetyMode === "live_checkout_paused"
+    && !readiness.liveCheckoutEnabled
+    && readiness.liveConfigurationReady;
   const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;
   if (!checkoutUnavailable) return null;
 

@@ -207,7 +207,7 @@ assert.equal(
   "The owner warning must follow the actual checkout-creation gate so test checkout is not labelled unavailable.",
 );
 assert.equal(
-  dashboardSource.includes('const intentionallyPaused = readiness.checkoutSafetyMode === "live_checkout_paused" && !readiness.liveCheckoutEnabled;'),
+  dashboardSource.includes('&& readiness.liveConfigurationReady;'),
   true,
   "A missing live prerequisite must not be presented as an intentional temporary pause.",
 );
