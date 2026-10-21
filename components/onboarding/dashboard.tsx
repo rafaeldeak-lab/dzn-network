@@ -5784,7 +5784,7 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
   if (!readiness) return null;
-  const liveCheckoutPaused = readiness.checkoutSafetyMode === "live_checkout_paused";
+  const intentionallyPaused = readiness.checkoutSafetyMode === "live_checkout_paused" && !readiness.liveCheckoutEnabled;
   const checkoutUnavailable = readiness.checkoutSessionCreationAllowed === false;
   if (!checkoutUnavailable) return null;
 
@@ -5795,7 +5795,7 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
         <div>
           <p className="text-xs font-black uppercase text-amber-100">Checkout unavailable</p>
           <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
-            {liveCheckoutPaused
+            {intentionallyPaused
               ? "Checkout is temporarily paused. Please try again later."
               : "Billing setup needs attention before checkout can continue. Please contact DZN support."}
           </p>
