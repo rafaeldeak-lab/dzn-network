@@ -32,6 +32,8 @@ export function runServiceTests() {
   assert(service.snapshot('iron-member').base.levels.hq === 2, 'two members observe the same shared base');
   assert(service.snapshot('iron-owner').member.lifetimeContributed === 0, 'leadership allocation is not counted as a personal contribution');
   assert(service.snapshot('iron-member').member.lifetimeContributed === 200, 'personal contribution lifetime total is recorded');
+  assert(service.getChronicle('iron-member').entries.some(item => item.id === `project:${hallProjectId}` && item.at === clock), 'completed Hall project enters the shared Chronicle with its real completion time');
+  assert(!service.getChronicle('iron-unverified').ok && service.getChronicle('violet-owner').entries.length === 0, 'Chronicle access is verified and scoped to one community');
   const hallLevelAfterFunding = service.snapshot('iron-owner').base.levels.hq;
   assert(!service.contributeToProject('iron-member', hallProjectId, 1, 'test-donate-after-completion').ok, 'completed projects reject new contributions');
   assert(service.snapshot('iron-owner').base.levels.hq === hallLevelAfterFunding, 'a completed project cannot advance the building a second time');
@@ -173,6 +175,7 @@ export function runServiceTests() {
   assert(!routeService.contributeRoute('iron-admin', 'timberline-depot', 20, 10, 'route-partial').ok, 'another identity cannot borrow a route action ID');
   const builtRoute = routeService.contributeRoute('iron-member', 'timberline-depot', 25, 10, 'route-complete');
   assert(builtRoute.ok && builtRoute.completed && builtRoute.routeLevel === 1 && routeService.routeNetworkBonus('iron-owner') === 5, 'shared Level 1 route adds exactly five local daily Salvage');
+  assert(routeService.getChronicle('iron-member').entries.some(item => item.id === 'land:timberline-depot') && routeService.getChronicle('iron-member').entries.some(item => item.id === 'route:timberline-depot:1'), 'completed land and supply route enter the community Chronicle');
   assert(routeService.routeNetworkBonus('violet-owner') === 0 && !routeService.contributeRoute('iron-member', 'timberline-depot', 1, 1, 'route-after-complete').ok, 'other communities cannot borrow routes and completed projects close');
   routeService = new LocalGameService({ storage: routeStorage, now: () => clock });
   assert(routeService.snapshot('iron-owner').base.landPlots[1].routeLevel === 1 && routeService.routeNetworkBonus('iron-member') === 5, 'route level and bonus survive reload');
@@ -408,11 +411,21 @@ export function runServiceTests() {
   assert(warService.snapshot('iron-owner').member.parts === ironStartParts + WAR_RULES.localRewardParts, 'war reward credits only local preview inventory');
   const repeatedResolve = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
   assert(repeatedResolve.ok && repeatedResolve.replay && warService.state.warRewardLedger.length === 4, 'same resolve action replays without a second reward ledger credit');
+  assert(warService.getChronicle('iron-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1 && warService.getChronicle('violet-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1, 'both war participants receive exactly one cosmetic Chronicle result');
   assert(!warService.resolveWar('iron-owner', challenge.warId, 'war-resolve-again').ok && warService.state.warRewardLedger.length === 4, 'a different action cannot resolve or reward an already resolved war');
   const persistedWarService = new LocalGameService({ storage: warStorage, now: () => warClock });
   const persistedWar = persistedWarService.getWar(challenge.warId);
   assert(persistedWar.state === 'resolved' && persistedWar.replay.attackIds.length === 4 && persistedWarService.state.warRewardLedger.length === 4, 'refresh/reload preserves the replay, score, resolution and once-only reward ledger');
+  assert(persistedWarService.getChronicle('iron-owner').entries.some(item => item.id === `war:${challenge.warId}`), 'war Chronicle survives reload');
   checks.push('tactical scoring, attack roster/caps, duplicate IDs, cross-community shared state, deterministic resolution, local rewards and reload');
+
+  const olderSave = JSON.parse(storage.getItem(SERVICE_STORAGE_KEY));
+  delete olderSave.communities['iron-pines'].base.chronicle;
+  const earlier = new LocalGameService({ storage: new MemoryStorage({ [SERVICE_STORAGE_KEY]: JSON.stringify(olderSave) }), now: () => clock });
+  assert(earlier.getChronicle('iron-owner').entries.some(item => item.id === `project:${hallProjectId}`), 'older saves show completed work without inventing new rewards');
+  assert(earlier.getChronicle('iron-owner').beaconLevel === earlier.snapshot('iron-owner').base.levels.hq, 'beacon stage follows the saved Hall level');
+  assert(earlier.setOwnerProActive('iron-owner', false).ok && !earlier.getChronicle('iron-member').ok, 'owner Pro suspension locks Chronicle viewing while keeping the save');
+  checks.push('Server Chronicle: completed-only milestones, verified Pro viewing, community isolation, replay, reload and older saves');
 
   const v2SourceService = new LocalGameService({ storage: new MemoryStorage(), now: () => warClock });
   v2SourceService.state.currentIdentityId = 'iron-admin';

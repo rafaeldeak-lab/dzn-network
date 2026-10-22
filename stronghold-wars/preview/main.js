@@ -210,6 +210,14 @@ function drawCompatibilityScene() {
   }
   diamond(0, 0, 15, 14, '#73766e', '#9b9e91');
   diamond(0, 0, 9.4, 8.8, 'rgba(102,112,99,.65)', 'rgba(198,202,184,.45)');
+  const beaconLevel = service.community()?.saved.base.levels.hq || 1;
+  const beacon = project(-8, -9);
+  const beaconHeight = Math.max(20, unit * (1.4 + beaconLevel * .3));
+  ctx.fillStyle = '#2a3434'; ctx.fillRect(beacon.x - 8, beacon.y - beaconHeight, 16, beaconHeight);
+  ctx.fillStyle = beaconLevel >= 4 ? '#b27aea' : '#70e59a';
+  ctx.fillRect(beacon.x - 5, beacon.y - beaconHeight + 4, 10, 5);
+  ctx.font = '700 9px Orbitron, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#f3faf4';
+  ctx.fillText(`DZN L${beaconLevel}`, beacon.x, beacon.y - beaconHeight - 5);
   for (const config of GAME_CONFIG.landPlots.slice(1)) {
     const plot = land.find(item => item.id === config.id);
     if (plot?.status !== 'claimed' || !plot.routeLevel) continue;
@@ -468,6 +476,16 @@ async function routeModel(level) {
   return sceneryTemplates.get(key);
 }
 
+async function chronicleModel(level) {
+  const key = `chronicle/${level}`;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/chronicle/chronicle_beacon_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+    sceneryTemplates.delete(key);
+    console.warn(`Chronicle Beacon Level ${level} could not load.`, error);
+    return null;
+  }));
+  return sceneryTemplates.get(key);
+}
+
 function supplyRouteEndpoints([x, z]) {
   const distance = Math.hypot(x, z);
   const sideX = z / distance, sideZ = -x / distance;
@@ -491,11 +509,18 @@ async function reconcileLandScenery() {
       ...names.map(async name => [name, await sceneryModel(name)]),
       ...facilityNames.map(async name => [name, await facilityModel(name)]),
       ...routeLevels.map(async level => [`route_l0${level}`, await routeModel(level)]),
+      [`chronicle_l0${base.levels.hq}`, await chronicleModel(base.levels.hq)],
     ]));
     if (request !== sceneryRequest) return;
     for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
     landScenery.clear();
     landTreePicks = [];
+    const beacon = models[`chronicle_l0${base.levels.hq}`]?.clone(true);
+    if (beacon) {
+      beacon.position.set(-8, .1, -9);
+      beacon.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+      landScenery.add(beacon);
+    }
     for (const config of GAME_CONFIG.landPlots.slice(1)) {
       const plot = base.landPlots.find(item => item.id === config.id);
       if (plot?.status !== 'claimed' || !plot.routeLevel || !models[`route_l0${plot.routeLevel}`]) continue;
@@ -978,6 +1003,10 @@ function startReveal(key) {
   building.scaffold.visible = true;
   revealEffects.set(key, Date.now() + GAME_CONFIG.revealSeconds * 1000);
   celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
+  if (key === 'hq') {
+    reconcileLandScenery();
+    celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq);
+  }
   playClank();
 }
 function showBuildingPanel(key) {
@@ -1183,6 +1212,21 @@ function showProgressionPanel() {
   $('closeBtn').onclick = closePanel;
 }
 
+function showChroniclePanel() {
+  const chronicle = service.getChronicle();
+  if (!chronicle.ok) {
+    openPanel(`<h2>Server Chronicle</h2><p class="notice warn">${escapeHTML(chronicle.error)}</p><p>Your community history stays saved while access is locked.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+    $('closeBtn').onclick = closePanel;
+    return;
+  }
+  const cards = chronicle.entries.map(item => {
+    const date = item.at ? new Date(item.at).toLocaleString() : 'Earlier progress · exact date unavailable';
+    return `<article class="project-card"><strong>${escapeHTML(item.kind.toUpperCase())}</strong><p>${escapeHTML(item.text)}</p><p class="help">${escapeHTML(date)}</p></article>`;
+  }).join('');
+  openPanel(`<h2>Server Chronicle</h2><p>The community’s construction and local war milestones. The in-world DZN beacon grows with Command Hall Level ${chronicle.beaconLevel}/5.</p><p class="notice">${chronicle.entries.length} milestones · saved with this community’s local preview</p>${cards || '<p class="help">Your first completed community project will appear here.</p>'}<p class="help">This record is cosmetic. It does not change war scoring, DZN leaderboards, live server stats, or member entitlement.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('closeBtn').onclick = closePanel;
+}
+
 function showLandPanel() {
   const access = service.getAccess();
   if (!access.allowed) {
@@ -1336,6 +1380,7 @@ $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
 $('progressionBtn').onclick = showProgressionPanel;
 $('landBtn').onclick = showLandPanel;
+$('chronicleBtn').onclick = showChroniclePanel;
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();
   const result = service.setOwnerProActive(service.state.currentIdentityId, !community.proActive);

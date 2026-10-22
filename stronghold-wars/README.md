@@ -98,6 +98,21 @@ war scores, existing DZN leaderboards, server events or DayZ data. The
 service and asset checks cover roles, replay safety, reload persistence,
 cross-community isolation, daily claims and the five distinct GLBs.
 
+## Server Chronicle and beacon
+
+`tools/generate-chronicle.mjs` creates five original DZN Chronicle Beacon GLBs
+under `preview/assets/models/chronicle/` before they are used in gameplay. The
+manifest records file hashes and bounds, and `test-assets.mjs` checks every GLB.
+The in-world beacon follows the saved Command Hall level. Hall upgrades also
+trigger a second reveal burst at the beacon; Canvas 2D has a tiered fallback.
+
+The Server Chronicle records completed Hall/support projects, land claims,
+district facilities, supply routes and resolved local wars in a bounded,
+replay-safe per-community log. Verified preview members can view their own
+community's history while owner Pro is active. Older saves display completed
+work without fabricating dates. The Chronicle is cosmetic and never changes
+funding, war scores, DZN rankings or live server data.
+
 ## Feasible next game slices
 
 1. **Server-backed shared base:** create D1 state and a ledger for Timber,

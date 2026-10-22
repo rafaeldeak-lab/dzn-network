@@ -119,7 +119,7 @@ function emptyBase(treasury = 200) {
   return {
     levels: { hq: 1, workshop: 1, tower: 1, comms: 1 },
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
-    completedProjectIds: [], actionRecords: [], raidCount: 0, lastRaidClaimed: 0,
+    completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
@@ -283,6 +283,12 @@ function normalizeLoadedState(raw) {
     normalized.nextProjectNumber = Math.max(1, safeInt(base.nextProjectNumber, 1));
     normalized.completedProjectIds = Array.isArray(base.completedProjectIds) ? [...new Set(base.completedProjectIds.filter(v => typeof v === 'string'))] : [];
     normalized.actionRecords = Array.isArray(base.actionRecords) ? base.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [];
+    const chronicleIds = new Set();
+    normalized.chronicle = Array.isArray(base.chronicle) ? base.chronicle.filter(item => {
+      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
+      chronicleIds.add(item.id);
+      return true;
+    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
     normalized.raidCount = safeInt(base.raidCount);
     normalized.lastRaidClaimed = safeInt(base.lastRaidClaimed);
     normalized.raidCount = Math.max(normalized.raidCount, normalized.lastRaidClaimed);
@@ -782,6 +788,12 @@ export class LocalGameService {
     war.replay = { version: 1, attackIds: [...war.attackIds], attacks: clone(war.attacks), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;
     war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards) } });
+    for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
+      const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+      const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
+      const outcome = war.tie ? 'draw' : war.winnerCommunityId === communityId ? 'victory' : 'defeat';
+      this._recordChronicle(this.state.communities[communityId].base, `war:${war.id}`, 'war', `War against ${opponent}: ${outcome}. ${war.score[communityId]}–${war.score[opponentId]}.`, now);
+    }
     const result = { ok: true, warId, state: war.state, winnerCommunityId: war.winnerCommunityId, tie: war.tie, score: clone(war.score), rewards };
     this._recordWarAction(identityId, actionId, 'resolve', result);
     this.save();
@@ -812,6 +824,41 @@ export class LocalGameService {
     const member = this.member(identityId);
     if (!profile || !entry || !member) return null;
     return clone({ profile, community: { id: entry.definition.id, name: entry.definition.name, eligible: entry.definition.eligible, proActive: entry.saved.proActive }, access: this.getAccess(identityId), base: entry.saved.base, member });
+  }
+
+  _recordChronicle(base, id, kind, text, at = this.now()) {
+    if (!base.chronicle) base.chronicle = [];
+    if (base.chronicle.some(item => item.id === id)) return;
+    base.chronicle.push({ id, kind, text, at });
+    if (base.chronicle.length > 120) base.chronicle.splice(0, base.chronicle.length - 120);
+  }
+
+  getChronicle(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError, entries: [] };
+    const entry = this.community(identityId);
+    const base = entry.saved.base;
+    const events = [...(base.chronicle || [])];
+    const addEarlier = (id, kind, text, at = 0) => {
+      if (!events.some(item => item.id === id)) events.push({ id, kind, text, at });
+    };
+    for (const project of base.projects.filter(item => item.status === 'completed')) {
+      addEarlier(`project:${project.id}`, 'project', `${GAME_CONFIG.buildings[project.key].name} reached Level ${project.targetLevel}.`, project.completedAt);
+    }
+    for (const plot of base.landPlots.slice(1)) {
+      const config = GAME_CONFIG.landPlots.find(item => item.id === plot.id);
+      if (plot.status === 'claimed') addEarlier(`land:${plot.id}`, 'land', `${config.name} claimed for the community.`);
+      if (plot.facilityLevel) addEarlier(`facility:${plot.id}:${plot.facilityLevel}`, 'facility', `${GAME_CONFIG.facilities[plot.id].name} reached Level ${plot.facilityLevel}.`);
+      if (plot.routeLevel) addEarlier(`route:${plot.id}:${plot.routeLevel}`, 'route', `${config.name} supply route reached Level ${plot.routeLevel}.`);
+    }
+    for (const war of this.state.wars.filter(item => item.state === 'resolved' && [item.challengerCommunityId, item.defenderCommunityId].includes(entry.definition.id))) {
+      const opponentId = war.challengerCommunityId === entry.definition.id ? war.defenderCommunityId : war.challengerCommunityId;
+      const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
+      const outcome = war.tie ? 'draw' : war.winnerCommunityId === entry.definition.id ? 'victory' : 'defeat';
+      addEarlier(`war:${war.id}`, 'war', `War against ${opponent}: ${outcome}. ${war.score[entry.definition.id]}–${war.score[opponentId]}.`, war.resolvedAt);
+    }
+    events.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
+    return { ok: true, beaconLevel: base.levels.hq, entries: clone(events.slice(0, 120)) };
   }
 
   getUpgradeRequirement(identityId, key) {
@@ -925,7 +972,10 @@ export class LocalGameService {
     if (accepted < 1) return { ok: false, error: 'No Timber available for this claim.' };
     member.timber -= accepted;
     plot.timberFunded += accepted;
-    if (plot.timberFunded === config.timberCost) plot.status = 'claimed';
+    if (plot.timberFunded === config.timberCost) {
+      plot.status = 'claimed';
+      this._recordChronicle(entry.saved.base, `land:${plotId}`, 'land', `${config.name} claimed for the community.`);
+    }
     const result = { ok: true, plotId, accepted, funded: plot.timberFunded, status: plot.status };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
@@ -988,7 +1038,10 @@ export class LocalGameService {
     project.donors = project.donors.slice(-8);
     const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
     const targetLevel = project.targetLevel;
-    if (completed) { plot.facilityLevel = targetLevel; plot.facilityProject = null; }
+    if (completed) {
+      plot.facilityLevel = targetLevel; plot.facilityProject = null;
+      this._recordChronicle(entry.saved.base, `facility:${plotId}:${targetLevel}`, 'facility', `${GAME_CONFIG.facilities[plotId].name} reached Level ${targetLevel}.`);
+    }
     const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, facilityLevel: plot.facilityLevel };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
@@ -1035,7 +1088,10 @@ export class LocalGameService {
     project.donors = project.donors.slice(-8);
     const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
     const targetLevel = project.targetLevel;
-    if (completed) { plot.routeLevel = targetLevel; plot.routeProject = null; }
+    if (completed) {
+      plot.routeLevel = targetLevel; plot.routeProject = null;
+      this._recordChronicle(entry.saved.base, `route:${plotId}:${targetLevel}`, 'route', `${GAME_CONFIG.landPlots.find(item => item.id === plotId).name} supply route reached Level ${targetLevel}.`);
+    }
     const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, routeLevel: plot.routeLevel };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
@@ -1133,6 +1189,7 @@ export class LocalGameService {
     project.completedAt = this.now();
     project.pinned = false;
     base.completedProjectIds.push(project.id);
+    this._recordChronicle(base, `project:${project.id}`, 'project', `${GAME_CONFIG.buildings[project.key].name} reached Level ${project.targetLevel}.`, project.completedAt);
     return true;
   }
 

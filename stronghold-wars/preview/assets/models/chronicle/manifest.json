@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural DZN Chronicle Beacon artwork; no paid provider or third-party game art.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up",
+  "assets": {
+    "chronicle_beacon_l01": {
+      "file": "assets/models/chronicle/chronicle_beacon_l01.glb",
+      "sha256": "0f71003c1bbeaa42ad685e54b57dcef3af59cad38379fdd76a792267b683f14d",
+      "bytes": 23088,
+      "dimensions": [
+        2.7,
+        2.43,
+        2.7
+      ]
+    },
+    "chronicle_beacon_l02": {
+      "file": "assets/models/chronicle/chronicle_beacon_l02.glb",
+      "sha256": "cac8c21c5754dee3c1c99cdc2689ea1bb26e921f52bc89696ff460c0562efa3d",
+      "bytes": 31992,
+      "dimensions": [
+        2.7,
+        3,
+        2.7
+      ]
+    },
+    "chronicle_beacon_l03": {
+      "file": "assets/models/chronicle/chronicle_beacon_l03.glb",
+      "sha256": "2551fd90397f57750076bb815ecbde1bc9083b6a3ab267d2a45cca48bdeb2b02",
+      "bytes": 40832,
+      "dimensions": [
+        2.7,
+        4.335,
+        2.7
+      ]
+    },
+    "chronicle_beacon_l04": {
+      "file": "assets/models/chronicle/chronicle_beacon_l04.glb",
+      "sha256": "9af6b460ae87934204c9e5b412ae4b6d986487fbb3570771296730985088d59f",
+      "bytes": 49860,
+      "dimensions": [
+        2.7,
+        4.905,
+        2.7
+      ]
+    },
+    "chronicle_beacon_l05": {
+      "file": "assets/models/chronicle/chronicle_beacon_l05.glb",
+      "sha256": "931d7944dc42ee17065b386565749c6a7287473bc27fe1cf052e4b639b686182",
+      "bytes": 60444,
+      "dimensions": [
+        2.7,
+        6.21,
+        2.7
+      ]
+    }
+  }
+}
