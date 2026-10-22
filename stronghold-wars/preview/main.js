@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
-import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
+import { SQUAD_ROLES, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 
@@ -140,6 +140,32 @@ function getCanvasBuildingImage(key, level) {
   const record = canvasBuildingImages.get(asset.png);
   return record.ready ? record.image : null;
 }
+const canvasSquadImages = new Map();
+function getCanvasSquadImage(role, tier) {
+  const path = squadPortrait(role, tier);
+  if (!path) return null;
+  if (!canvasSquadImages.has(path)) {
+    const image = new Image();
+    const record = { image, ready: false };
+    image.onload = () => { record.ready = true; };
+    image.onerror = () => console.warn(`Canvas 2D squad artwork failed to load: ${path}`);
+    image.src = path;
+    canvasSquadImages.set(path, record);
+  }
+  const record = canvasSquadImages.get(path);
+  return record.ready ? record.image : null;
+}
+function drawCanvasSoldier(ctx, project, mesh, unit) {
+  const image = getCanvasSquadImage(mesh.userData.squadRole || 'assault', mesh.userData.squadTier || 1);
+  if (!image) return;
+  const point = project(mesh.position.x, mesh.position.z);
+  const size = Math.max(45, unit * 2.75);
+  ctx.fillStyle = 'rgba(0,0,0,.34)';
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, size * .2, size * .055, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.drawImage(image, point.x - size / 2, point.y - size * .97, size, size);
+}
 
 function drawCompatibilityScene() {
   const ctx = fallbackContext;
@@ -243,7 +269,7 @@ function drawCompatibilityScene() {
       ctx.fillStyle = i === 1 ? '#575b4d' : '#85877a'; ctx.fillRect(p.x - s / 2, p.y - s, s, s);
       if (raid && i === 0) { ctx.strokeStyle = '#ffad57'; ctx.lineWidth = 3; ctx.strokeRect(p.x - s / 2, p.y - s, s, s); }
     }
-    if (raid) raid.troops.forEach(t => { const p = project(t.position.x, t.position.z); ctx.fillStyle = '#bd83f2'; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill(); });
+    if (raid) raid.troops.forEach(t => drawCanvasSoldier(ctx, project, t, unit));
     if (warBattle) {
       for (let i = 0; i < 4; i++) {
         const p = project(55 + [-8, 0, 8, 6][i], -10 + [4, 0, 5, -8][i]);
@@ -251,12 +277,7 @@ function drawCompatibilityScene() {
         ctx.fillRect(p.x - 11, p.y - 20, 22, 24);
         ctx.strokeStyle = 'rgba(192,132,252,.8)'; ctx.strokeRect(p.x - 12, p.y - 21, 24, 26);
       }
-      const progress = Math.min(1, warBattle.time / warBattle.duration);
-      for (let i = 0; i < Math.min(8, warBattle.squadSize); i++) {
-        const p = project(34 + progress * 13, -10 + (i - 4) * 1.2);
-        ctx.fillStyle = warBattle.tactic === 'recon' ? '#c084fc' : '#ffb45f';
-        ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
-      }
+      warBattle.troops.forEach(troop => drawCanvasSoldier(ctx, project, troop.mesh, unit));
     }
     ctx.fillStyle = '#e7e2cf'; ctx.font = '700 12px Inter, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(warBattle ? `WAR ATTACK · ${warBattle.defenderName.toUpperCase()}` : 'OUTPOST DELTA · AI TRAINING', width / 2, height * .2);
@@ -286,11 +307,7 @@ function drawCompatibilityScene() {
     ctx.fillStyle = '#eff4e9'; ctx.font = '600 10px Inter, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(`${DEFS[key].name} · L${lvl}`, p.x, p.y + drawWidth * .32);
   }
-  for (let i = 0; i < 5; i++) {
-    const a = i * 1.256 + performance.now() * 0.0001;
-    const p = project(Math.cos(a) * 12, Math.sin(a) * 12);
-    ctx.fillStyle = '#495e40'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill();
-  }
+  patrols.forEach(patrol => { if (patrol.mesh.visible) drawCanvasSoldier(ctx, project, patrol.mesh, unit); });
 }
 
 const scene = new THREE.Scene();
@@ -775,7 +792,7 @@ function setRendererDiagnostic(message) {
   if (message !== undefined) rendererDiagnosticMessage = message;
   const status = document.getElementById('rendererStatus');
   if (!status) return;
-  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · source PNGs' : 'Three.js WebGL · textured GLB models');
+  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · DZN squad art' : 'Three.js WebGL · 3D base and DZN squad art');
   status.classList.toggle('error', Boolean(rendererDiagnosticMessage));
 }
 
@@ -869,19 +886,22 @@ for (const key of Object.keys(DEFS)) {
 if (!fallback2D) for (const key of Object.keys(DEFS)) requestBuildingModel(key, state.levels[key]);
 applyScaffoldState();
 
-// DZN squad kit: original five-tier GLBs, shared across base patrols and battles.
-const squadTemplates = new Map();
-function loadSquadTemplate(role, tier) {
-  const path = squadAsset(role, tier);
-  if (!path) return Promise.resolve(null);
-  if (!squadTemplates.has(path)) squadTemplates.set(path, gltfLoader.loadAsync(path).then(gltf => gltf.scene).catch(error => {
-    console.warn(`DZN ${role} Level ${tier} kit could not load; retaining a functional soldier silhouette.`, error);
+// The owner's final character sheets are used as camera-facing game sprites.
+// This keeps the detailed supplied design visible in patrols, raids and wars.
+const squadTextures = new Map();
+function loadSquadTexture(path) {
+  if (!squadTextures.has(path)) squadTextures.set(path, texLoader.loadAsync(path).then(texture => {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, renderer.capabilities?.getMaxAnisotropy?.() || 1);
+    return texture;
+  }).catch(error => {
+    console.warn(`DZN squad artwork could not load: ${path}`, error);
     return null;
   }));
-  return squadTemplates.get(path);
+  return squadTextures.get(path);
 }
 function equipSoldier(soldier, role, tier) {
-  const path = squadAsset(role, tier);
+  const path = squadPortrait(role, tier);
   if (soldier.userData.squadAsset === path) return;
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
@@ -889,15 +909,22 @@ function equipSoldier(soldier, role, tier) {
   const token = (soldier.userData.loadToken || 0) + 1;
   soldier.userData.loadToken = token;
   soldier.clear();
-  const silhouette = new THREE.Group();
-  const color = role === 'recon' ? MAT.purple : role === 'engineer' || role === 'medic' ? MAT.metal : MAT.olive;
-  box(silhouette, 0.45, 0.65, 0.3, color, 0, 0.93);
-  cyl(silhouette, 0.21, 0.21, 0.25, color, 0, 1.43);
-  soldier.add(silhouette);
-  loadSquadTemplate(role, tier).then(template => {
-    if (!template || soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
-    soldier.clear();
-    soldier.add(template.clone(true));
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.37, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.025;
+  soldier.add(shadow);
+  const portrait = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.03, depthWrite: false }));
+  portrait.name = 'squad_art';
+  portrait.center.set(0.5, 0.03);
+  portrait.scale.set(2.65, 2.65, 1);
+  portrait.visible = false;
+  soldier.add(portrait);
+  loadSquadTexture(path).then(texture => {
+    if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
+    if (!texture) { shadow.visible = false; return; }
+    portrait.material.map = texture;
+    portrait.material.needsUpdate = true;
+    portrait.visible = true;
   });
 }
 function makeSoldier(role, levels) {
@@ -907,6 +934,12 @@ function makeSoldier(role, levels) {
 }
 function animateSoldier(soldier, phase, pace = 1) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const portrait = soldier.getObjectByName('squad_art');
+  if (portrait) {
+    portrait.position.y = Math.abs(Math.sin(phase)) * 0.045 * pace;
+    portrait.material.rotation = Math.sin(phase) * 0.015 * pace;
+    return;
+  }
   const swing = Math.sin(phase) * 0.42 * pace;
   for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
     const limb = soldier.getObjectByName(name);
@@ -1260,10 +1293,26 @@ function showSquadPanel() {
     const tier = profile.tier;
     const sourceName = GAME_CONFIG.buildings[definition.source].name;
     const unlock = profile.unlocked ? `DEPLOYED · L${tier}` : `LOCKED · Hall L${definition.unlockHall} + ${escapeHTML(sourceName)} L${definition.unlockSource}`;
-    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<img class="${level === tier ? 'current' : ''}" src="${squadPortrait(role, level)}" loading="lazy" alt="Level ${level} gear preview" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}">`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
+    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
   }).join('');
   const away = currentAwaySquads().length;
-  openPanel(`<h2>DZN Squad Armoury</h2><p>Five original DZN roles, each with five outfits and gear stages. Command Hall and specialist buildings determine the active kit. Sentinel and Lifeline join the roster at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles with the owner's detailed Level 1–5 character art. Choose a thumbnail to inspect its outfit; this does not change the equipped level. Command Hall and specialist buildings determine the active kit. Sentinel and Lifeline join the roster at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.squadPreview;
+    const level = Number(button.dataset.level);
+    const definition = SQUAD_ROLES[role];
+    if (!definition || !Number.isInteger(level) || level < 1 || level > 5) return;
+    const card = button.closest('.squad-card');
+    const portrait = card.querySelector('.squad-portrait');
+    portrait.src = squadPortrait(role, level);
+    portrait.alt = `${definition.name} Level ${level} appearance preview`;
+    card.querySelector('.squad-art-preview-label').textContent = `Viewing L${level} · ${definition.equipment[level - 1]}`;
+    card.querySelectorAll('[data-squad-preview]').forEach(choice => {
+      const selected = choice === button;
+      choice.classList.toggle('selected', selected);
+      choice.setAttribute('aria-pressed', String(selected));
+    });
+  }));
   $('closeBtn').onclick = closePanel;
 }
 

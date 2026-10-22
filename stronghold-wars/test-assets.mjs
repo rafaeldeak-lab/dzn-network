@@ -120,15 +120,23 @@ for (const [name, entry] of Object.entries(squadManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(d => !Number.isFinite(d) || d <= 0)) throw new Error(`Invalid squad bounds: ${name}`);
 }
 console.log(`DZN squad kit verified: ${squadNames.length} original, distinct and animatable GLBs.`);
-const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads/manifest.json'), 'utf8'));
+const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
-if (portraits.length !== 25) throw new Error('DZN squad kit requires a close-up portrait for every GLB.');
+if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');
 const portraitHashes = new Set();
+const sourceHashes = new Map();
 for (const [name, entry] of portraits) {
   if (!squadManifest.assets[name] || entry.file !== squadPortrait(name.split('_')[0], Number(name.slice(-1)))) throw new Error(`Squad portrait does not match a model: ${name}`);
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
   const hash = createHash('sha256').update(bytes).digest('hex');
-  if (bytes.toString('latin1', 0, 4) !== '\x89PNG' || bytes.readUInt32BE(16) !== 400 || bytes.readUInt32BE(20) !== 400 || hash !== entry.sha256 || bytes.length !== entry.bytes || portraitHashes.has(hash)) throw new Error(`Invalid squad portrait: ${name}`);
+  if (bytes.toString('latin1', 0, 4) !== '\x89PNG' || bytes.readUInt32BE(16) !== 768 || bytes.readUInt32BE(20) !== 768 || bytes[25] !== 6 || hash !== entry.sha256 || bytes.length !== entry.bytes || bytes.length < 250000 || portraitHashes.has(hash)) throw new Error(`Invalid final squad portrait: ${name}`);
+  if (!/^[a-f0-9]{64}$/.test(entry.sourceSha256) || !Array.isArray(entry.bbox) || entry.bbox.length !== 4 || entry.opaquePixels < 25000) throw new Error(`Missing final squad provenance: ${name}`);
+  if (!/^DZN [\w ,_-]+\.png$/.test(entry.source)) throw new Error(`Invalid source sheet name: ${name}`);
+  const sourceHash = createHash('sha256').update(readFileSync(join(root, '..', 'source-art', 'squads', entry.source))).digest('hex');
+  if (sourceHash !== entry.sourceSha256) throw new Error(`Original character sheet changed: ${name}`);
+  if (sourceHashes.has(name.split('_')[0]) && sourceHashes.get(name.split('_')[0]) !== entry.sourceSha256) throw new Error(`Mixed character sheet source within role: ${name}`);
+  sourceHashes.set(name.split('_')[0], entry.sourceSha256);
   portraitHashes.add(hash);
 }
-console.log(`DZN squad portraits verified: ${portraits.length} distinct 400x400 PNGs rendered from the GLBs.`);
+if (sourceHashes.size !== 5 || new Set(sourceHashes.values()).size !== 5) throw new Error('Final character portraits must come from five distinct owner-supplied sheets.');
+console.log(`DZN squad portraits verified: ${portraits.length} distinct transparent 768x768 PNGs from five supplied character sheets.`);

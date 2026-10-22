@@ -115,18 +115,22 @@ funding, war scores, DZN rankings or live server data.
 
 ## DZN equipped squads
 
-`tools/generate-squads.mjs` creates 25 original low-poly GLBs: DZN Warden
-(Assault), Ghost (Recon), Fixer (construction patrol), Sentinel (heavy tactical)
-and Lifeline (field medic), each at five visibly different gear tiers. The
-Sentinel follows the supplied recording's black uniform, green optics,
-progressive armour and late purple detailing; these are original project models,
-not exports from the recording. Every model has named arm and leg pivots for
-walking motion. `tools/render-squad-portraits.mjs` renders them into 25 transparent
-400px close-up PNGs for the Armoury, so each gear tier can be inspected. The
-manifests record dimensions, mesh counts and SHA-256; `test-assets.mjs` checks
-all 50 files and the models' animatable limbs.
+`node tools/import-squad-sheets.mjs` extracts the owner's final
+transparent five-stage Warden, Ghost, Fixer, Sentinel and Lifeline lineups into
+25 individual 768px PNGs under `preview/assets/portraits/squads-final/`.
+The corrected final Sentinel and Fixer sheets are the selected sources. A
+transparent-seam extraction keeps weapons and packs in frame, and the manifest
+records source names, source and output SHA-256, pixel bounds and image sizes.
+`test-assets.mjs` validates each final portrait. The owner-supplied sheets are
+stored unchanged under `source-art/squads/` for reproducibility; this process
+does not redraw the characters. `review/squad-progression-contact.png` shows
+all 25 exported stages together.
 
-Base patrols, practice raiders and local war squads now load the actual models.
+Base patrols, practice raiders and local war squads now show the supplied art
+as camera-facing sprites in WebGL and as transparent images in Canvas 2D.
+They have subtle movement but are not rigged 3D characters. The earlier
+`tools/generate-squads.mjs` low-poly GLBs and derived portraits remain in the
+repository as a legacy kit and are no longer the visible soldier artwork.
 The Squads panel explains the current equipment; the World Map shows the
 opponent's visual gear tier from its public building levels. Command Hall caps
 gear, while Watchtower, Communications and Workshop set specialist tiers.
@@ -137,8 +141,7 @@ stats. In local preview wars, upgraded kit damage adds a bounded score bonus;
 health, armour and Lifeline support reduce casualties. The kit values are frozen
 with the pre-war base snapshot. They do not grant access or change live DZN
 competition, and preview gear never supplies ownership, membership or
-entitlement evidence. A simple silhouette
-keeps the local scene usable while GLBs load or if one fails.
+entitlement evidence.
 
 ## Feasible next game slices
 

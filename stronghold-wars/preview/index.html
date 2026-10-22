@@ -115,10 +115,13 @@
       .squad-card.medic .squad-emblem { color: #b3f8dc; }
       .squad-status { color: var(--green); font: 700 9px Orbitron, sans-serif; letter-spacing: .04em; }
       .squad-card.locked .squad-status { color: #edc78d; }
-      .squad-portrait { display: block; width: min(100%, 170px); aspect-ratio: 1; margin: 6px auto; object-fit: contain; border-radius: 9px; background: radial-gradient(circle at 50% 50%, rgba(94,132,112,.18), transparent 67%); }
+      .squad-portrait { display: block; width: min(100%, 230px); aspect-ratio: 1; margin: 6px auto; object-fit: contain; border-radius: 9px; background: radial-gradient(circle at 50% 50%, rgba(94,132,112,.18), transparent 67%); }
       .squad-tier-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
-      .squad-tier-strip img { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(255,255,255,.025); }
-      .squad-tier-strip img.current { border-color: var(--green); box-shadow: 0 0 10px rgba(112,229,154,.22); }
+      .squad-tier-strip button { min-width: 0; padding: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(255,255,255,.025); cursor: pointer; }
+      .squad-tier-strip button.selected { border-color: var(--green); box-shadow: 0 0 10px rgba(112,229,154,.22); }
+      .squad-tier-strip button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+      .squad-tier-strip img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; }
+      .squad-art-preview-label { min-height: 1.4em; margin: 3px 0 7px; color: var(--green); font-size: 10px; text-align: center; }
       .squad-card p { font-size: 11px; line-height: 1.45; }
       .squad-card ol { list-style: none; margin: 8px 0 0; padding: 0; }
       .squad-card li { padding: 3px 0; color: #a0aea4; font-size: 10px; }

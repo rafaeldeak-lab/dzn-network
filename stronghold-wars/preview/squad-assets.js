@@ -67,5 +67,5 @@ export function squadAsset(key, tier) {
 }
 
 export function squadPortrait(key, tier) {
-  return squadAsset(key, tier)?.replace('assets/models/', 'assets/portraits/').replace('.glb', '.png') || null;
+  return SQUAD_ROLES[key] ? `assets/portraits/squads-final/${key}_l0${boundedLevel(tier)}.png` : null;
 }
