@@ -1,0 +1,3 @@
+- Music: low tense military ambient loop, light drums
+- SFX: construction/upgrade clank; procedural beeps for collect/UI
+- Audio starts on first click; mute button in HUD

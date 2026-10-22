@@ -1,0 +1,4 @@
+- Stylised military base-builder, isometric, dusk forest mood
+- Palette: olive drab, dark pine green, concrete grey, neon purple (#a855f7) and toxic green (#4ade80) accents
+- Warm sun + purple fill light, soft fog, shadows
+- Generated: forest-floor ground tile, concrete pad tile
