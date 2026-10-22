@@ -34,6 +34,15 @@ export const DZN_OFFICIAL_UPDATES: readonly DznOfficialUpdate[] = [
     href: "/community#dzn-assist",
   },
   {
+    id: "games-hub-development-notice",
+    publishedAt: "2026-10-21",
+    audience: "Players",
+    category: "Games",
+    title: "Games Hub is in active development",
+    summary: "DZN is improving its games in focused releases. Finished changes will be announced here when they are ready to play, rather than being presented as complete early.",
+    href: "/games",
+  },
+  {
     id: "games-hub-maintenance-window",
     publishedAt: "2026-10-22",
     audience: "Players",
