@@ -58,6 +58,16 @@ assert.match(reviewReplyRuntime, /DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED/);
 assert.match(reviewReplyRuntime, /NULL AS owner_reply_body/);
 const publicReviewRoute = readFileSync("functions/api/public/server-reviews.ts", "utf8");
 assert.match(publicReviewRoute, /can_reply: isServerReviewOwnerRepliesEnabled/);
+assert.match(publicReviewRoute, /publicAccessCacheHeaders/);
+assert.match(publicReviewRoute, /const viewer = await getOptionalDiscordUser\(request, env\);/);
+assert.match(publicReviewRoute, /const headers = publicAccessCacheHeaders\(Boolean\(viewer\)\);/);
+assert.match(publicReviewRoute, /\}, \{ headers \}\);/);
+
+const publicNetworkSource = readFileSync("components/network/public-network.tsx", "utf8");
+assert.match(publicNetworkSource, /const reviewsLocked = data \? data\.is_locked === true : Boolean\(server\.is_locked\);/);
+assert.match(publicNetworkSource, /<ReviewsPanel key=\{server\.public_slug\} server=\{server\} \/>/);
+assert.match(publicNetworkSource, /Checking Discord review access\.\.\./);
+assert.match(publicNetworkSource, /You own this server, so you cannot review it\./);
 
 const now = new Date("2026-05-16T12:00:00.000Z");
 const recentUpdate = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
@@ -117,6 +127,21 @@ assert.equal(
     now,
   }).reason,
   "cooldown",
+);
+
+assert.deepEqual(
+  viewerReviewState({
+    viewer: { id: "reviewer-user", discord_id: "222", username: "reviewer", avatar: null },
+    serverOwnerUserId: "owner-user",
+    now,
+  }),
+  {
+    authenticated: true,
+    can_review: true,
+    reason: null,
+    cooldown_until: null,
+    existing_review_id: null,
+  },
 );
 
 console.log("Public listing and review moderation tests passed.");

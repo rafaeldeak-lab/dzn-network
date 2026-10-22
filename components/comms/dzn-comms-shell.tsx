@@ -496,11 +496,6 @@ export function DznCommsShell() {
                   meta="Official"
                   onSelect={selectUpdatesChannel}
                 />
-                <ChannelButton icon={Hash} label="New Players" meta="Future" />
-                <ChannelButton icon={Hash} label="Server Owners" meta="Future" />
-                {!privateGroupsUiEnabled || !payload.feature_flags.private_groups_enabled
-                  ? <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Unavailable" />
-                  : null}
               </div>
               <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/8 p-3">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>

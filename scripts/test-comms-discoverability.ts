@@ -62,6 +62,9 @@ assert.equal(commsSource.includes('selectedChannelAccessLabel = isUpdatesChannel
 assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat must identify read-only history.");
 assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
+assert.equal(commsSource.includes('label="New Players" meta="Future"'), false, "Comms must not advertise an unimplemented New Players channel.");
+assert.equal(commsSource.includes('label="Server Owners" meta="Future"'), false, "Comms must not advertise an unimplemented Server Owners channel.");
+assert.equal(commsSource.includes('label="Private Groups" meta="Unavailable"'), false, "Comms must only list private groups when an accessible private channel exists.");
 assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
 assert.equal(staticPayloadSource.includes("messages: []"), true, "An unavailable history route must not invent preview messages.");
 assert.equal(staticPayloadSource.includes("static-1"), false, "The fallback must not render fabricated chat rows.");

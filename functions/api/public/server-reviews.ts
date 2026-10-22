@@ -1,7 +1,7 @@
 import { requireDb } from "../../_lib/db";
 import { isDznAdminDiscordId } from "../../_lib/admin";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { getOptionalDiscordUser } from "../../_lib/public-auth";
+import { getOptionalDiscordUser, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import { getApprovedReviewSummary, getExistingActiveReview, isServerReviewOwnerRepliesEnabled, viewerReviewState } from "../../_lib/server-reviews";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -12,6 +12,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const slug = sanitizeSlug(url.searchParams.get("slug"));
   if (!slug) return json({ error: "Missing server slug" }, { status: 400 });
 
+  const viewer = await getOptionalDiscordUser(request, env);
+  const headers = publicAccessCacheHeaders(Boolean(viewer));
   const server = await resolveServerBySlug(env, slug);
   if (!server) {
     return json({
@@ -19,11 +21,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       review_count: 0,
       rating_breakdown: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
       reviews: [],
-      viewer: { authenticated: false, can_review: false, can_reply: false, reason: "server_not_found", cooldown_until: null, existing_review_id: null },
-    });
+      viewer: { authenticated: Boolean(viewer), can_review: false, can_reply: false, reason: "server_not_found", cooldown_until: null, existing_review_id: null },
+    }, { headers });
   }
 
-  const viewer = await getOptionalDiscordUser(request, env);
   const existingReview = viewer ? await getExistingActiveReview(env, server.id, viewer.discord_id) : null;
   const summary = await getApprovedReviewSummary(env, server.id, viewer);
   return json({
@@ -34,7 +35,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         viewer && (viewer.id === server.user_id || isDznAdminDiscordId(env, viewer.discord_id)),
       ),
     },
-  });
+  }, { headers });
 };
 
 async function resolveServerBySlug(env: Env, slug: string) {
