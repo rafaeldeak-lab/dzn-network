@@ -419,8 +419,18 @@ function celebrateUpgrade(x, z, name, level) {
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(.25, .8, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x9bffbb, transparent: true, opacity: .2, depthWrite: false, side: THREE.DoubleSide }));
   beam.position.y = 4.5;
   group.add(beam);
+  const chevrons = Array.from({ length: 8 }, (_, index) => {
+    const angle = index * Math.PI / 4;
+    const mesh = new THREE.Mesh(new THREE.ConeGeometry(.28, .65, 3), new THREE.MeshBasicMaterial({ color: index % 2 ? 0xc084fc : 0x70e59a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.rotation.y = angle;
+    group.add(mesh);
+    return { mesh, angle };
+  });
+  const flash = new THREE.PointLight(0x9bffbb, 0, 13, 2);
+  flash.position.y = 4;
+  group.add(flash);
   scene.add(group);
-  celebrations.push({ group, rings, sparks, beam, startedAt: performance.now() });
+  celebrations.push({ group, rings, sparks, beam, chevrons, flash, startedAt: performance.now() });
 }
 
 function updateCelebrations(now) {
@@ -437,6 +447,13 @@ function updateCelebrations(now) {
     effect.sparks.forEach(({ mesh, angle, speed, lift }) => { mesh.position.set(Math.cos(angle) * (.5 + progress * speed), .4 + Math.sin(progress * Math.PI) * lift * 3, Math.sin(angle) * (.5 + progress * speed)); mesh.rotation.y += .04; mesh.material.opacity = 1 - progress; });
     effect.beam.material.opacity = .22 * Math.sin(progress * Math.PI);
     effect.beam.scale.set(1 + progress * .8, 1, 1 + progress * .8);
+    effect.chevrons.forEach(({ mesh, angle }, index) => {
+      const rise = Math.max(0, Math.min(1, (progress - index * .035) * 1.45));
+      mesh.position.set(Math.cos(angle) * (2.1 + rise * 1.15), .35 + rise * 5.5, Math.sin(angle) * (2.1 + rise * 1.15));
+      mesh.material.opacity = Math.sin(rise * Math.PI) * .8;
+      mesh.rotation.z = rise * .35;
+    });
+    effect.flash.intensity = 4.5 * Math.sin(Math.min(1, progress * 1.5) * Math.PI);
   }
 }
 const gltfLoader = new GLTFLoader();
