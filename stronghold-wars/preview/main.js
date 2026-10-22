@@ -804,7 +804,6 @@ function showProjectsPanel() {
     return;
   }
   const base = service.community().saved.base;
-  const profile = service.profile();
   const projects = [...base.projects].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt);
   const role = isLeadership() ? 'Leadership can approve and pin up to three priorities, and allocate only existing unallocated treasury.' : 'Members can contribute personal Parts to any approved project. Members cannot approve, pin, alter layouts or allocate treasury.';
   let html = `<h2>Community Projects</h2><p>One shared Command Compound for <b>${escapeHTML(service.getCommunityInfo().name)}</b>.</p><p>Unallocated shared Treasury: <b>${base.treasury.toLocaleString()} Parts</b>. It is not project funding until leadership assigns it.</p><p class="help">${escapeHTML(role)}</p>`;
@@ -1035,8 +1034,6 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   } else if (war.state === 'active') {
     const myCap = myAttacks.length >= WAR_RULES.maxAttacksPerSide;
     const canAttack = isParticipant && readiness.eligible && hasRoster && !alreadyAttacked && !myCap && Date.now() <= war.attackEndsAt;
-    const attackerLevels = currentSide.base.levels;
-    const enemyLevels = enemySide.base.levels;
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
@@ -1063,8 +1060,6 @@ function showWarTable(errorMessage = '') {
   const leadership = WAR_LEADERSHIP.includes(profile.role);
   const otherCommunityId = community.id === 'iron-pines' ? 'violet-ridge' : 'iron-pines';
   if (!selectedWarOpponentCommunityId || selectedWarOpponentCommunityId === community.id) selectedWarOpponentCommunityId = otherCommunityId;
-  const opponentLeader = service.getIdentityOptions().find(identity => identity.communityId === otherCommunityId && identity.role === 'owner');
-  const opponentReadiness = service.getWarReadiness(otherCommunityId, opponentLeader?.id || null);
   const communities = WAR_COMMUNITY_IDS.map(communityId => {
     const leader = service.getIdentityOptions().find(identity => identity.communityId === communityId && identity.role === 'owner');
     const readiness = service.getWarReadiness(communityId, communityId === community.id ? profile.id : leader?.id || null);
@@ -1477,7 +1472,7 @@ renderer.setAnimationLoop(time => {
     p.mesh.position.set(Math.cos(a) * p.radius, Math.abs(Math.sin(elapsed * 8)) * 0.08, Math.sin(a) * p.radius);
     p.mesh.rotation.y = -a;
   });
-  Object.entries(buildings).forEach(([key, b]) => {
+  Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {
       b.scaffold.userData.crane.rotation.y = elapsed * 0.8;
       b.model.position.y = Math.sin(elapsed * 10) * 0.03;
