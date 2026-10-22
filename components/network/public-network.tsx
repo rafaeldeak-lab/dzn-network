@@ -2378,7 +2378,10 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const wordCount = countWords(body);
-  const reviewsLocked = Boolean(server.is_locked || data?.is_locked);
+  // The review endpoint is the identity-aware authority. The server card can be
+  // a cached anonymous preview while a Discord session has already been restored.
+  const reviewsLocked = data ? data.is_locked === true : Boolean(server.is_locked);
+  const reviewAccessLoading = loading && data === null;
 
   const loadReviews = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -2474,10 +2477,11 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
             ) : null}
           </div>
 
-          {reviewsLocked ? (
+          {reviewAccessLoading ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">Checking Discord review access...</p> : null}
+          {!reviewAccessLoading && reviewsLocked ? (
             <LockedInlinePanel returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in with Discord to read full reviews and leave your own review for this server." />
           ) : null}
-          {!reviewsLocked && viewerReviewMessage(data) ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">{viewerReviewMessage(data)}</p> : null}
+          {!reviewAccessLoading && !reviewsLocked && viewerReviewMessage(data) ? <p className="rounded-lg border border-white/10 bg-black/24 px-3 py-3 text-sm font-bold text-zinc-300">{viewerReviewMessage(data)}</p> : null}
           {!reviewsLocked && showForm ? (
             <div className="rounded-xl border border-violet-300/20 bg-black/30 p-4">
               <p className="text-sm font-black uppercase text-white">Leave a Review</p>
@@ -3306,7 +3310,9 @@ function viewerReviewMessage(data: ReviewsResponse | null) {
   const viewer = data?.viewer;
   if (!viewer) return "";
   if (!viewer.authenticated) return "Log in with Discord to leave a review.";
-  if (viewer.reason === "owner") return "Owners cannot review their own server.";
+  if (viewer.reason === "owner") return viewer.can_reply
+    ? "You own this server, so you cannot review it. You can reply to approved reviews below."
+    : "You own this server, so you cannot review it.";
   if (viewer.reason === "cooldown" && viewer.cooldown_until) return `You can update your review again in ${formatFutureDistance(viewer.cooldown_until)}.`;
   return "";
 }
