@@ -76,3 +76,20 @@ for (const [name, entry] of Object.entries(routeManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid route model bounds: ${name}`);
 }
 console.log(`DZN supply routes verified: ${routeNames.length} original levelled GLBs.`);
+const chronicleManifest = JSON.parse(readFileSync(join(root, 'assets/models/chronicle/manifest.json'), 'utf8'));
+const chronicleNames = Object.keys(chronicleManifest.assets);
+if (chronicleNames.length !== 5 || ![1, 2, 3, 4, 5].every(level => chronicleNames.includes(`chronicle_beacon_l0${level}`))) throw new Error('Chronicle Beacon kit must contain five visual stages.');
+const chronicleHashes = new Set();
+for (const [name, entry] of Object.entries(chronicleManifest.assets)) {
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid Chronicle GLB container: ${name}`);
+  const jsonLength = bytes.readUInt32LE(12);
+  if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing Chronicle scene JSON: ${name}`);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete Chronicle GLB scene: ${name}`);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.length !== entry.bytes || hash !== entry.sha256 || chronicleHashes.has(hash)) throw new Error(`Chronicle integrity or visual-tier mismatch: ${name}`);
+  chronicleHashes.add(hash);
+  if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid Chronicle model bounds: ${name}`);
+}
+console.log(`DZN Chronicle Beacon verified: ${chronicleNames.length} original levelled GLBs.`);
