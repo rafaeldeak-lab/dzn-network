@@ -35,6 +35,8 @@ export const GAME_CONFIG = Object.freeze({
   timberPerTree: 30,
   recycledTimber: 30,
   recycleSalvageCost: 50,
+  routeSalvageBonusPerLevel: 5,
+  routeCosts: Object.freeze([[0, 0], [45, 20], [100, 35], [180, 55], [290, 80], [440, 110]]),
   barricadeTimberCost: 30,
   maxBarricadesPerPlot: 3,
   facilities: Object.freeze({
@@ -121,7 +123,7 @@ function emptyBase(treasury = 200) {
     legacyJobs: [], completedLegacyJobIds: [],
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
-      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null,
+      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null,
     })),
   };
 }
@@ -297,6 +299,7 @@ function normalizeLoadedState(raw) {
       if (plot.status === 'claimed') plot.timberFunded = config.timberCost;
       if (plot.status !== 'claimed') plot.barricades = 0;
       plot.facilityLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.facilityLevel)) : 0;
+      plot.routeLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.routeLevel)) : 0;
       const project = savedPlot.facilityProject;
       const targetLevel = plot.facilityLevel + 1;
       const costs = GAME_CONFIG.facilities[plot.id]?.costs[targetLevel];
@@ -306,6 +309,17 @@ function normalizeLoadedState(raw) {
           partsFunded: Math.min(costs[0], safeInt(project.partsFunded)),
           timberFunded: Math.min(costs[1], safeInt(project.timberFunded)),
           donors: Array.isArray(project.donors) ? project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), parts: safeInt(d.parts), timber: safeInt(d.timber), at: safeInt(d.at) })) : [],
+        };
+      }
+      const routeProject = savedPlot.routeProject;
+      const routeTarget = plot.routeLevel + 1;
+      const routeCosts = GAME_CONFIG.routeCosts[routeTarget];
+      if (plot.status === 'claimed' && routeCosts && routeProject?.targetLevel === routeTarget) {
+        plot.routeProject = {
+          targetLevel: routeTarget, partsCost: routeCosts[0], timberCost: routeCosts[1],
+          partsFunded: Math.min(routeCosts[0], safeInt(routeProject.partsFunded)),
+          timberFunded: Math.min(routeCosts[1], safeInt(routeProject.timberFunded)),
+          donors: Array.isArray(routeProject.donors) ? routeProject.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), parts: safeInt(d.parts), timber: safeInt(d.timber), at: safeInt(d.at) })) : [],
         };
       }
     }
@@ -981,6 +995,58 @@ export class LocalGameService {
     return result;
   }
 
+  approveRoute(identityId, plotId, actionId = this.newActionId('approve-route')) {
+    const context = this._landContext(identityId, plotId, actionId, 'route-approve');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const { entry, plot, kind } = context;
+    if (plot.status !== 'claimed') return { ok: false, error: 'Claim this district before approving a supply route.' };
+    if (plot.routeProject) return { ok: false, error: 'This supply route already has an approved project.' };
+    const targetLevel = plot.routeLevel + 1;
+    const costs = GAME_CONFIG.routeCosts[targetLevel];
+    if (!costs) return { ok: false, error: 'This supply route is fully upgraded.' };
+    if (targetLevel > entry.saved.base.levels.hq) return { ok: false, error: `Command Hall Level ${targetLevel} is required for this route tier.` };
+    plot.routeProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0, donors: [] };
+    const result = { ok: true, plotId, targetLevel, partsCost: costs[0], timberCost: costs[1] };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  contributeRoute(identityId, plotId, parts, timber, actionId = this.newActionId('route-donate')) {
+    const context = this._landContext(identityId, plotId, actionId, 'route-contribute');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { entry, member, plot, kind } = context;
+    const project = plot.routeProject;
+    if (plot.status !== 'claimed' || !project) return { ok: false, error: 'Leadership must approve a claimed district route first.' };
+    if (!Number.isSafeInteger(parts) || parts < 0 || !Number.isSafeInteger(timber) || timber < 0 || parts + timber < 1) return { ok: false, error: 'Donate a positive whole amount of Parts or Timber.' };
+    const acceptedParts = Math.min(parts, member.parts, project.partsCost - project.partsFunded);
+    const acceptedTimber = Math.min(timber, member.timber, project.timberCost - project.timberFunded);
+    if (acceptedParts + acceptedTimber < 1) return { ok: false, error: 'No required Parts or Timber are available to donate.' };
+    member.parts -= acceptedParts;
+    member.timber -= acceptedTimber;
+    member.lifetimeContributed += acceptedParts;
+    project.partsFunded += acceptedParts;
+    project.timberFunded += acceptedTimber;
+    project.donors.push({ identityId, name: this.profile(identityId).name, parts: acceptedParts, timber: acceptedTimber, at: this.now() });
+    project.donors = project.donors.slice(-8);
+    const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
+    const targetLevel = project.targetLevel;
+    if (completed) { plot.routeLevel = targetLevel; plot.routeProject = null; }
+    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, routeLevel: plot.routeLevel };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  routeNetworkBonus(identityId = this.state.currentIdentityId) {
+    const plots = this.community(identityId)?.saved.base.landPlots || [];
+    return plots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.routeLevel : 0), 0) * GAME_CONFIG.routeSalvageBonusPerLevel;
+  }
+
   claimDepotTimber(identityId = this.state.currentIdentityId) {
     const accessError = this._accessError(identityId);
     if (accessError) return { ok: false, error: accessError };
@@ -1143,10 +1209,11 @@ export class LocalGameService {
     if (!member) return { ok: false, error: 'Member inventory unavailable.' };
     const now = this.now();
     if (member.nextClaimAt > now) return { ok: false, error: 'Daily Salvage resupply is not ready yet.', nextClaimAt: member.nextClaimAt };
-    member.salvage += GAME_CONFIG.dailySalvage;
+    const amount = GAME_CONFIG.dailySalvage + this.routeNetworkBonus(identityId);
+    member.salvage += amount;
     member.nextClaimAt = now + DAY_MS;
     this.save();
-    return { ok: true, amount: GAME_CONFIG.dailySalvage, nextClaimAt: member.nextClaimAt };
+    return { ok: true, amount, nextClaimAt: member.nextClaimAt };
   }
 
   forgeSlotCount(identityId = this.state.currentIdentityId) {
