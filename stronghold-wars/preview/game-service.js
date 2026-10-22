@@ -33,8 +33,16 @@ export const GAME_CONFIG = Object.freeze({
     Object.freeze({ id: 'highland-works', name: 'Highland Works', hall: 5, trees: 6, timberCost: 210, position: [16, 22] }),
   ]),
   timberPerTree: 30,
+  recycledTimber: 30,
+  recycleSalvageCost: 50,
   barricadeTimberCost: 30,
   maxBarricadesPerPlot: 3,
+  facilities: Object.freeze({
+    'timberline-depot': Object.freeze({ name: 'Timberline Lumber Yard', model: 'timberline', purpose: 'Daily personal Timber resupply', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+    'ridgewatch-range': Object.freeze({ name: 'Ridgewatch Training Range', model: 'ridgewatch', purpose: '+2 Assault score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+    'signal-marsh': Object.freeze({ name: 'Signal Marsh Relay', model: 'signal', purpose: '+2 Recon score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+    'highland-works': Object.freeze({ name: 'Highland Defence Works', model: 'highland', purpose: '-2 opposing attack score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+  }),
   forgeRecipes: Object.freeze([
     Object.freeze({ id: 'field-parts', name: 'Field Parts', input: 100, output: 80, durationSeconds: 15 }),
     Object.freeze({ id: 'precision-parts', name: 'Precision Parts', input: 250, output: 220, durationSeconds: 30 }),
@@ -72,10 +80,10 @@ export const GAME_CONFIG = Object.freeze({
   }),
   districts: Object.freeze([
     Object.freeze({ name: 'Command Compound', hall: 1, status: 'Available now' }),
-    Object.freeze({ name: 'Timberline Depot', hall: 2, status: 'Under development' }),
-    Object.freeze({ name: 'Ridgewatch Range', hall: 3, status: 'Under development' }),
-    Object.freeze({ name: 'Signal Marsh', hall: 4, status: 'Under development' }),
-    Object.freeze({ name: 'Highland Works', hall: 5, status: 'Under development' }),
+    Object.freeze({ name: 'Timberline Depot', hall: 2, status: 'Lumber Yard construction' }),
+    Object.freeze({ name: 'Ridgewatch Range', hall: 3, status: 'Training Range construction' }),
+    Object.freeze({ name: 'Signal Marsh', hall: 4, status: 'Relay construction' }),
+    Object.freeze({ name: 'Highland Works', hall: 5, status: 'Defence Works construction' }),
   ]),
 });
 
@@ -113,13 +121,13 @@ function emptyBase(treasury = 200) {
     legacyJobs: [], completedLegacyJobIds: [],
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
-      timberFunded: 0, barricades: 0,
+      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null,
     })),
   };
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], muted: false };
+  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], muted: false };
 }
 
 function createFreshState() {
@@ -203,15 +211,18 @@ function normalizeWarRecord(war) {
     const hq = levels.hq;
     const landPlots = GAME_CONFIG.landPlots.map(config => {
       const saved = Array.isArray(source?.base?.landPlots) ? source.base.landPlots.find(plot => plot?.id === config.id) : null;
-      return { id: config.id, status: saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild', barricades: Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) };
+      const status = saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild';
+      return { id: config.id, status, barricades: status === 'claimed' ? Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) : 0, facilityLevel: status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.facilityLevel)) : 0 };
     });
     const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0);
+    const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
     return {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
       base: { levels, treasury: safeInt(source?.base?.treasury), landPlots },
-      stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification },
+      stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
     };
   };
   const snapshots = { challenger: side(war.snapshots?.challenger), defender: side(war.snapshots?.defender) };
@@ -285,6 +296,18 @@ function normalizeLoadedState(raw) {
       if (plot.treesRemaining > 0) plot.status = 'wild';
       if (plot.status === 'claimed') plot.timberFunded = config.timberCost;
       if (plot.status !== 'claimed') plot.barricades = 0;
+      plot.facilityLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.facilityLevel)) : 0;
+      const project = savedPlot.facilityProject;
+      const targetLevel = plot.facilityLevel + 1;
+      const costs = GAME_CONFIG.facilities[plot.id]?.costs[targetLevel];
+      if (plot.status === 'claimed' && costs && project?.targetLevel === targetLevel) {
+        plot.facilityProject = {
+          targetLevel, partsCost: costs[0], timberCost: costs[1],
+          partsFunded: Math.min(costs[0], safeInt(project.partsFunded)),
+          timberFunded: Math.min(costs[1], safeInt(project.timberFunded)),
+          donors: Array.isArray(project.donors) ? project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), parts: safeInt(d.parts), timber: safeInt(d.timber), at: safeInt(d.at) })) : [],
+        };
+      }
     }
     normalized.legacyJobs = Array.isArray(base.legacyJobs) ? base.legacyJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.buildings[j.key] && Number.isFinite(Number(j.end))).map(j => ({ id: j.id, key: j.key, targetLevel: normalizeLevel(j.targetLevel, 1), end: Number(j.end), migratedPaid: true })) : [];
     fresh.communities[community.id] = { proActive: community.eligible ? Boolean(savedCommunity.proActive) : false, base: normalized };
@@ -294,7 +317,7 @@ function normalizeLoadedState(raw) {
     if (!saved) continue;
     fresh.members[profile.id] = {
       parts: safeInt(saved.parts), stored: Number.isFinite(Number(saved.stored)) ? Math.max(0, Number(saved.stored)) : 0,
-      salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt),
+      salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt), nextTimberClaimAt: safeInt(saved.nextTimberClaimAt),
       timber: safeInt(saved.timber),
       lifetimeContributed: safeInt(saved.lifetimeContributed),
       forgeJobs: Array.isArray(saved.forgeJobs) ? saved.forgeJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.forgeRecipes.some(r => r.id === j.recipeId)).map(j => ({
@@ -523,12 +546,14 @@ export class LocalGameService {
     const base = this.state.communities[communityId].base;
     const levels = { ...base.levels };
     const hall = levels.hq;
-    const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0 }));
+    const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0, facilityLevel: plot.status === 'claimed' ? plot.facilityLevel : 0 }));
     const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0);
+    const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
       base: { levels, treasury: safeInt(base.treasury), landPlots },
-      stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification },
+      stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
     };
   }
 
@@ -694,13 +719,13 @@ export class LocalGameService {
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
     const a = attacker.base.levels; const d = defender.base.levels;
     const rawScore = tactic === 'assault'
-      ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3
-      : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification;
+      ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
+      : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
     const score = Math.max(0, Math.min(100, Math.round(rawScore)));
     const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0))));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower} and ${defender.stats.fortification} built barricades withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} scored ${score}.`;
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} gained +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support and scored ${score}.`;
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, score, casualties, feedback };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
@@ -833,7 +858,7 @@ export class LocalGameService {
     if (!entry || !member) return { error: 'Community or member unavailable.' };
     if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
     const prior = this._findAction(entry.saved.base.actionRecords, actionId);
-    if (prior) return prior.kind === `land-${kind}-${identityId}`
+    if (prior) return prior.kind === `land-${kind}-${identityId}` && prior.result.plotId === plotId
       ? { replay: { ...clone(prior.result), replay: true } }
       : { error: 'This action ID was already used for another action or identity.' };
     const accessError = this._accessError(identityId);
@@ -905,6 +930,84 @@ export class LocalGameService {
     plot.barricades += 1;
     const result = { ok: true, plotId, barricades: plot.barricades };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  approveFacility(identityId, plotId, actionId = this.newActionId('approve-facility')) {
+    const context = this._landContext(identityId, plotId, actionId, 'facility-approve');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const { entry, plot, kind } = context;
+    if (plot.status !== 'claimed') return { ok: false, error: 'Claim this land before approving its facility.' };
+    if (plot.facilityProject) return { ok: false, error: 'This facility already has an approved project.' };
+    const targetLevel = plot.facilityLevel + 1;
+    const costs = GAME_CONFIG.facilities[plotId]?.costs[targetLevel];
+    if (!costs) return { ok: false, error: 'This facility is fully upgraded.' };
+    if (targetLevel > entry.saved.base.levels.hq) return { ok: false, error: `Command Hall Level ${targetLevel} is required for this facility tier.` };
+    plot.facilityProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0, donors: [] };
+    const result = { ok: true, plotId, targetLevel, partsCost: costs[0], timberCost: costs[1] };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  contributeFacility(identityId, plotId, parts, timber, actionId = this.newActionId('facility-donate')) {
+    const context = this._landContext(identityId, plotId, actionId, 'facility-contribute');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { entry, member, plot, kind } = context;
+    const project = plot.facilityProject;
+    if (plot.status !== 'claimed' || !project) return { ok: false, error: 'Leadership must approve a claimed facility project first.' };
+    if (!Number.isSafeInteger(parts) || parts < 0 || !Number.isSafeInteger(timber) || timber < 0 || parts + timber < 1) return { ok: false, error: 'Donate a positive whole amount of Parts or Timber.' };
+    const acceptedParts = Math.min(parts, member.parts, project.partsCost - project.partsFunded);
+    const acceptedTimber = Math.min(timber, member.timber, project.timberCost - project.timberFunded);
+    if (acceptedParts + acceptedTimber < 1) return { ok: false, error: 'No required Parts or Timber are available to donate.' };
+    member.parts -= acceptedParts;
+    member.timber -= acceptedTimber;
+    member.lifetimeContributed += acceptedParts;
+    project.partsFunded += acceptedParts;
+    project.timberFunded += acceptedTimber;
+    project.donors.push({ identityId, name: this.profile(identityId).name, parts: acceptedParts, timber: acceptedTimber, at: this.now() });
+    project.donors = project.donors.slice(-8);
+    const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
+    const targetLevel = project.targetLevel;
+    if (completed) { plot.facilityLevel = targetLevel; plot.facilityProject = null; }
+    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, facilityLevel: plot.facilityLevel };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  claimDepotTimber(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const member = this.member(identityId);
+    const plot = this.community(identityId)?.saved.base.landPlots.find(item => item.id === 'timberline-depot');
+    if (!member || !plot || plot.status !== 'claimed' || plot.facilityLevel < 1) return { ok: false, error: 'Build the Timberline Lumber Yard to unlock daily Timber.' };
+    const now = this.now();
+    if (member.nextTimberClaimAt > now) return { ok: false, error: 'Lumber Yard resupply is not ready yet.', nextClaimAt: member.nextTimberClaimAt };
+    const amount = 20 + (plot.facilityLevel - 1) * 10;
+    member.timber += amount;
+    member.nextTimberClaimAt = now + DAY_MS;
+    this.save();
+    return { ok: true, amount, nextClaimAt: member.nextTimberClaimAt };
+  }
+
+  recycleTimber(identityId = this.state.currentIdentityId, actionId = this.newActionId('recycle-timber')) {
+    const member = this.member(identityId);
+    if (!member) return { ok: false, error: 'Member inventory unavailable.' };
+    const prior = this._findAction(member.actionRecords, actionId);
+    if (prior) return prior.kind === `recycle-timber-${identityId}` ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used for another action.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (member.salvage < GAME_CONFIG.recycleSalvageCost) return { ok: false, error: `Need ${GAME_CONFIG.recycleSalvageCost} Salvage to reclaim Timber.` };
+    member.salvage -= GAME_CONFIG.recycleSalvageCost;
+    member.timber += GAME_CONFIG.recycledTimber;
+    const result = { ok: true, amount: GAME_CONFIG.recycledTimber, cost: GAME_CONFIG.recycleSalvageCost };
+    this._recordAction(member.actionRecords, actionId, result, `recycle-timber-${identityId}`);
     this.save();
     return result;
   }

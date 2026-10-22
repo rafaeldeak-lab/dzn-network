@@ -44,3 +44,18 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid model bounds: ${name}`);
 }
 console.log(`Stronghold preview assets verified: ${pairs} building level pairs, ${recorded.size} original checksums, ${sceneryNames.length} original scenery GLBs.`);
+const facilityManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/manifest.json'), 'utf8'));
+const families = ['timberline', 'ridgewatch', 'signal', 'highland'];
+const facilityNames = Object.keys(facilityManifest.assets);
+if (facilityNames.length !== 20 || !families.every(family => [1, 2, 3, 4, 5].every(level => facilityNames.includes(`${family}_l0${level}`)))) throw new Error('Facility kit must contain four distinct five-level families.');
+for (const [name, entry] of Object.entries(facilityManifest.assets)) {
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid facility GLB container: ${name}`);
+  const jsonLength = bytes.readUInt32LE(12);
+  if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing facility scene JSON: ${name}`);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete facility GLB scene: ${name}`);
+  if (bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Facility integrity mismatch: ${name}`);
+  if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid facility model bounds: ${name}`);
+}
+console.log(`Additional district facilities verified: ${facilityNames.length} original GLBs across four five-level families.`);
