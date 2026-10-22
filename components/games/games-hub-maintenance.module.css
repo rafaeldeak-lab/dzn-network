@@ -1,0 +1,172 @@
+.page {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-height: 100dvh;
+  padding: 28px max(20px, calc((100% - 1120px) / 2)) 64px;
+  overflow: hidden;
+  color: #edf2f2;
+  background: #090d0e;
+}
+
+.backdrop {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background:
+    linear-gradient(90deg, #05090bdc 0%, #081011cc 47%, #080c0ed9 100%),
+    linear-gradient(180deg, #04080a36 0%, #090d0eeb 80%, #090d0e 100%),
+    url("/images/games/dzn-outpost.webp") center / cover no-repeat;
+}
+
+.backdrop::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: repeating-linear-gradient(90deg, transparent 0 74px, #a7f1e109 75px 76px);
+}
+
+.content {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: min(100%, 1120px);
+  min-height: min(760px, calc(100dvh - 92px));
+  margin: auto;
+}
+
+.navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #6b827b57;
+}
+
+.homeLink {
+  width: 220px;
+  height: 72px;
+  min-height: 0;
+}
+
+.navigationActions,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.navigationActions a,
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid #557b75;
+  color: #dbeae7;
+  background: #081212c7;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.navigationActions a:hover,
+.navigationActions a:focus-visible,
+.secondaryAction:hover,
+.secondaryAction:focus-visible {
+  border-color: #8eeadd;
+  background: #102724;
+  outline: none;
+}
+
+.notice {
+  align-self: center;
+  width: min(100%, 720px);
+  margin: 44px 0;
+  padding: clamp(26px, 5vw, 58px);
+  border: 1px solid #777047;
+  border-left: 4px solid #f1ce73;
+  background: linear-gradient(125deg, #111611f2, #0b1213ed 72%, #101119e8);
+  box-shadow: 0 24px 70px #0000009c, inset 0 1px #fff9dc18;
+}
+
+.statusLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #f0d788;
+  font: 800 10px var(--font-geist-mono), monospace;
+  letter-spacing: .13em;
+}
+
+.icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  margin-top: 28px;
+  border: 1px solid #d2b05d;
+  color: #ffe49a;
+  background: #2a2413;
+}
+
+.eyebrow {
+  margin: 22px 0 8px;
+  color: #bad5cf;
+  font: 800 10px var(--font-geist-mono), monospace;
+  letter-spacing: .13em;
+}
+
+.notice h1 {
+  max-width: 600px;
+  margin: 0;
+  color: #fff7dc;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1.02;
+}
+
+.summary {
+  max-width: 590px;
+  margin: 18px 0 0;
+  color: #c7cfca;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.actions { margin-top: 28px; }
+
+.primaryAction {
+  border-color: #f4d277;
+  color: #151710;
+  background: #f0cf73;
+}
+
+.primaryAction:hover,
+.primaryAction:focus-visible {
+  background: #ffe29a;
+  outline: 2px solid #f5d77f;
+  outline-offset: 3px;
+}
+
+.footer {
+  margin: 20px 0 0;
+  color: #a8b4b1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 680px) {
+  .page { padding: 18px 16px 38px; }
+  .content { min-height: calc(100dvh - 56px); }
+  .navigation { align-items: flex-start; flex-direction: column; }
+  .homeLink { width: min(100%, 220px); }
+  .navigationActions { width: 100%; }
+  .navigationActions a { flex: 1 1 150px; }
+  .notice { margin: 28px 0; padding: 28px 22px; }
+  .notice h1 { font-size: 38px; }
+  .actions > a { width: 100%; }
+}
