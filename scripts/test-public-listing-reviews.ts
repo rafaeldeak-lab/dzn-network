@@ -65,6 +65,7 @@ assert.match(publicReviewRoute, /\}, \{ headers \}\);/);
 
 const publicNetworkSource = readFileSync("components/network/public-network.tsx", "utf8");
 assert.match(publicNetworkSource, /const reviewsLocked = data \? data\.is_locked === true : Boolean\(server\.is_locked\);/);
+assert.match(publicNetworkSource, /<ReviewsPanel key=\{server\.public_slug\} server=\{server\} \/>/);
 assert.match(publicNetworkSource, /Checking Discord review access\.\.\./);
 assert.match(publicNetworkSource, /You own this server, so you cannot review it\./);
 

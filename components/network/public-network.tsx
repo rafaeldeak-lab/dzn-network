@@ -1684,7 +1684,7 @@ export function ServerProfile({ server }: { server: PublicServer }) {
         <div className="grid gap-4">
           <ServerTagsPanel tags={tags} />
           <CommunityInfoPanel server={server} />
-          <ReviewsPanel server={server} />
+          <ReviewsPanel key={server.public_slug} server={server} />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             {isLocked ? (
               <>
