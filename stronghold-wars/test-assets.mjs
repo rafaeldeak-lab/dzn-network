@@ -59,3 +59,20 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid facility model bounds: ${name}`);
 }
 console.log(`Additional district facilities verified: ${facilityNames.length} original GLBs across four five-level families.`);
+const routeManifest = JSON.parse(readFileSync(join(root, 'assets/models/routes/manifest.json'), 'utf8'));
+const routeNames = Object.keys(routeManifest.assets);
+if (routeNames.length !== 5 || ![1, 2, 3, 4, 5].every(level => routeNames.includes(`supply_route_l0${level}`))) throw new Error('Supply route kit must contain five distinct visual tiers.');
+const routeHashes = new Set();
+for (const [name, entry] of Object.entries(routeManifest.assets)) {
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid route GLB container: ${name}`);
+  const jsonLength = bytes.readUInt32LE(12);
+  if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing route scene JSON: ${name}`);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete route GLB scene: ${name}`);
+  const actual = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.length !== entry.bytes || actual !== entry.sha256 || routeHashes.has(actual)) throw new Error(`Route integrity or visual-tier mismatch: ${name}`);
+  routeHashes.add(actual);
+  if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid route model bounds: ${name}`);
+}
+console.log(`DZN supply routes verified: ${routeNames.length} original levelled GLBs.`);

@@ -210,6 +210,17 @@ function drawCompatibilityScene() {
   }
   diamond(0, 0, 15, 14, '#73766e', '#9b9e91');
   diamond(0, 0, 9.4, 8.8, 'rgba(102,112,99,.65)', 'rgba(198,202,184,.45)');
+  for (const config of GAME_CONFIG.landPlots.slice(1)) {
+    const plot = land.find(item => item.id === config.id);
+    if (plot?.status !== 'claimed' || !plot.routeLevel) continue;
+    const [[sx, sz], [ex, ez]] = supplyRouteEndpoints(config.position);
+    const from = project(sx, sz);
+    const to = project(ex, ez);
+    ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = plot.routeLevel >= 5 ? '#b27aea' : plot.routeLevel >= 3 ? '#9da79c' : '#896746';
+    ctx.lineWidth = Math.max(4, unit * (.33 + plot.routeLevel * .04)); ctx.lineCap = 'round'; ctx.stroke();
+    if (plot.routeLevel >= 4) { ctx.strokeStyle = '#70e59a'; ctx.lineWidth = 2; ctx.stroke(); }
+  }
   const wall = [];
   for (const [x, z] of [[-17, -17], [17, -17], [17, 17], [-17, 17]]) wall.push(project(x, z));
   ctx.beginPath(); ctx.moveTo(wall[0].x, wall[0].y); wall.slice(1).forEach(pt => ctx.lineTo(pt.x, pt.y)); ctx.closePath();
@@ -447,6 +458,25 @@ async function facilityModel(name) {
   return sceneryTemplates.get(key);
 }
 
+async function routeModel(level) {
+  const key = `route/${level}`;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/routes/supply_route_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+    sceneryTemplates.delete(key);
+    console.warn(`Supply route Level ${level} could not load.`, error);
+    return null;
+  }));
+  return sceneryTemplates.get(key);
+}
+
+function supplyRouteEndpoints([x, z]) {
+  const distance = Math.hypot(x, z);
+  const sideX = z / distance, sideZ = -x / distance;
+  return [
+    [x / distance * 13 + sideX * 7, z / distance * 13 + sideZ * 7],
+    [x / distance * (distance - 3.5) + sideX * 3.8, z / distance * (distance - 3.5) + sideZ * 3.8],
+  ];
+}
+
 async function reconcileLandScenery() {
   if (fallback2D) return;
   const request = ++sceneryRequest;
@@ -456,14 +486,33 @@ async function reconcileLandScenery() {
   try {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
       .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
+    const routeLevels = [...new Set(base.landPlots.filter(plot => plot.status === 'claimed' && plot.routeLevel > 0).map(plot => plot.routeLevel))];
     const models = Object.fromEntries(await Promise.all([
       ...names.map(async name => [name, await sceneryModel(name)]),
       ...facilityNames.map(async name => [name, await facilityModel(name)]),
+      ...routeLevels.map(async level => [`route_l0${level}`, await routeModel(level)]),
     ]));
     if (request !== sceneryRequest) return;
     for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
     landScenery.clear();
     landTreePicks = [];
+    for (const config of GAME_CONFIG.landPlots.slice(1)) {
+      const plot = base.landPlots.find(item => item.id === config.id);
+      if (plot?.status !== 'claimed' || !plot.routeLevel || !models[`route_l0${plot.routeLevel}`]) continue;
+      const [[sx, sz], [ex, ez]] = supplyRouteEndpoints(config.position);
+      const dx = ex - sx, dz = ez - sz;
+      const length = Math.hypot(dx, dz);
+      const count = Math.max(1, Math.ceil(length / 3.8));
+      for (let i = 0; i < count; i++) {
+        const route = models[`route_l0${plot.routeLevel}`].clone(true);
+        const t = (i + .5) / count;
+        route.position.set(sx + dx * t, .075, sz + dz * t);
+        route.rotation.y = Math.atan2(dx, dz);
+        route.scale.z = length / (count * 3.8);
+        route.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        landScenery.add(route);
+      }
+    }
     for (const config of GAME_CONFIG.landPlots.slice(1)) {
       const plot = base.landPlots.find(item => item.id === config.id);
       if (!plot) continue;
@@ -1065,7 +1114,7 @@ function showForgePanel() {
   const slots = service.forgeSlotCount();
   const working = member.forgeJobs.filter(job => job.status === 'working').length;
   const claimText = member.nextClaimAt > Date.now() ? `Next daily Salvage in ${formatRemaining(member.nextClaimAt)}` : 'Daily demo Salvage resupply is ready.';
-  let html = `<h2>Personal Forge</h2><p>Personal inventory · Salvage ${member.salvage.toLocaleString()} · Parts ${member.parts.toLocaleString()}</p><p>Demo resupply: +${GAME_CONFIG.dailySalvage} Salvage once per 24h per stable preview identity. <span id="forgeDailyCountdown">${claimText}</span></p><div class="row"><button id="claimSalvageBtn" ${member.nextClaimAt > Date.now() ? 'disabled' : ''}>Claim daily Salvage</button></div><hr><p id="forgeSlotStatus">Forge slots: ${working}/${slots} working · ${slots} slot${slots === 1 ? '' : 's'} from Command Hall L${state.levels.hq}. Recipes use fast preview timings.</p>`;
+  let html = `<h2>Personal Forge</h2><p>Personal inventory · Salvage ${member.salvage.toLocaleString()} · Parts ${member.parts.toLocaleString()}</p><p>Demo resupply: +${GAME_CONFIG.dailySalvage + service.routeNetworkBonus()} Salvage once per 24h per stable preview identity, including +${service.routeNetworkBonus()} from shared supply routes. <span id="forgeDailyCountdown">${claimText}</span></p><div class="row"><button id="claimSalvageBtn" ${member.nextClaimAt > Date.now() ? 'disabled' : ''}>Claim daily Salvage</button></div><hr><p id="forgeSlotStatus">Forge slots: ${working}/${slots} working · ${slots} slot${slots === 1 ? '' : 's'} from Command Hall L${state.levels.hq}. Recipes use fast preview timings.</p>`;
   html += GAME_CONFIG.forgeRecipes.map(recipe => `<div class="job-card"><strong>${escapeHTML(recipe.name)}</strong><p>-${recipe.input} Salvage → +${recipe.output} Parts · ${recipe.durationSeconds}s fast preview timing</p><button data-recipe="${recipe.id}" ${member.salvage < recipe.input ? 'disabled' : ''}>Start recipe</button></div>`).join('');
   html += '<h3>Queued · Working · Ready jobs</h3>';
   html += jobs.length ? jobs.map(job => {
@@ -1175,9 +1224,23 @@ function showLandPanel() {
       }
       if (config.id === 'timberline-depot' && plot.facilityLevel > 0) facilityHtml += `<div class="row"><button data-depot-claim="${config.id}" ${snapshot.member.nextTimberClaimAt > Date.now() ? 'disabled' : ''}>${snapshot.member.nextTimberClaimAt > Date.now() ? `Resupply in ${formatRemaining(snapshot.member.nextTimberClaimAt)}` : 'Claim daily Timber'}</button></div>`;
     }
-    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div>${facilityHtml}</article>`;
+    let routeHtml = '';
+    if (plot.status === 'claimed') {
+      routeHtml = `<hr><p><b>DZN Supply Route · Level ${plot.routeLevel}/5</b></p><p class="help">Connect this district to the Command Hall. Each completed route tier adds +${GAME_CONFIG.routeSalvageBonusPerLevel} personal daily Salvage for verified members in this local preview.</p>`;
+      const routeProject = plot.routeProject;
+      if (routeProject) {
+        const donors = routeProject.donors.map(d => `${escapeHTML(d.name)}: ${d.parts} Parts + ${d.timber} Timber`).join(' · ');
+        routeHtml += `<p>Approved Level ${routeProject.targetLevel}: ${routeProject.partsFunded}/${routeProject.partsCost} Parts · ${routeProject.timberFunded}/${routeProject.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (routeProject.partsFunded + routeProject.timberFunded) / (routeProject.partsCost + routeProject.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p><button data-fund-route="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate to supply route</button>`;
+      } else if (plot.routeLevel < 5 && isLeadership()) {
+        const target = plot.routeLevel + 1;
+        const [partsCost, timberCost] = GAME_CONFIG.routeCosts[target];
+        routeHtml += `<button data-approve-route="${config.id}" ${target > hall ? 'disabled' : ''}>Approve Route L${target} · ${partsCost} Parts + ${timberCost} Timber</button>`;
+        if (target > hall) routeHtml += `<p class="help">Command Hall L${target} required for the next route tier.</p>`;
+      }
+    }
+    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
   }).join('');
-  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Leadership approves land and facility projects; members contribute and build them together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p><div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div><p class="help">Daily Salvage keeps Timber renewable after your forest is cleared.</p>${cards}<p class="help">Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades are frozen when a local war is accepted.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Leadership approves land, facilities and DZN supply routes; members contribute and build them together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Route tiers: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.routeLevel, 0)} · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p><div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div><p class="help">Daily Salvage keeps Timber renewable after your forest is cleared. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim.</p>${cards}<p class="help">Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades are frozen when a local war is accepted. Supply routes do not change war scoring.</p><div class="row"><button id="closeBtn">Close</button></div>`);
   $('closeBtn').onclick = closePanel;
   $('recycleTimberBtn').onclick = () => { const result = service.recycleTimber(); toast(result.ok ? `+${result.amount} recycled Timber` : result.error); updateHud(); showLandPanel(); };
   panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
@@ -1218,6 +1281,29 @@ function showLandPanel() {
     else {
       toast(result.completed ? `${GAME_CONFIG.facilities[plotId].name} Level ${result.targetLevel} complete!` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
       if (result.completed && !result.replay) { const config = GAME_CONFIG.landPlots.find(item => item.id === plotId); celebrateUpgrade(config.position[0], config.position[1], GAME_CONFIG.facilities[plotId].name, result.facilityLevel); reconcileLandScenery(); playClank(); }
+      updateHud();
+    }
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-approve-route]').forEach(button => button.onclick = () => {
+    const result = service.approveRoute(service.state.currentIdentityId, button.dataset.approveRoute);
+    toast(result.ok ? `Supply route Level ${result.targetLevel} approved for community funding.` : result.error);
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-fund-route]').forEach(button => button.onclick = () => {
+    const plotId = button.dataset.fundRoute;
+    const project = service.community().saved.base.landPlots.find(item => item.id === plotId)?.routeProject;
+    const member = service.member();
+    const result = service.contributeRoute(service.state.currentIdentityId, plotId,
+      Math.min(member.parts, project.partsCost - project.partsFunded), Math.min(member.timber, project.timberCost - project.timberFunded));
+    if (!result.ok) toast(result.error);
+    else {
+      toast(result.completed ? `DZN supply route Level ${result.targetLevel} complete!` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
+      if (result.completed && !result.replay) {
+        const config = GAME_CONFIG.landPlots.find(item => item.id === plotId);
+        celebrateUpgrade(config.position[0] * .7, config.position[1] * .7, `${config.name} Supply Route`, result.routeLevel);
+        reconcileLandScenery(); playClank();
+      }
       updateHud();
     }
     showLandPanel();

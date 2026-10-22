@@ -80,6 +80,24 @@ in Canvas 2D, and reduced-motion settings disable the new motion effects.
 The local service tests cover funding, replay, entitlement, cooldown, reload and
 frozen battle scores; `test-assets.mjs` validates all 20 new GLBs.
 
+## DZN supply routes
+
+The original `tools/generate-routes.mjs` script builds five low-poly GLB tiers
+under `preview/assets/models/routes/`, with a manifest of dimensions and
+SHA-256 hashes. Routes grow from marked dirt through timber, stone and
+reinforcement into illuminated DZN network paths. Claimed districts can each
+have one route to the Hall. The camera-facing route corridor avoids the
+Command Compound buildings so construction stays visible.
+
+Owner and admin preview roles approve each route tier. Verified members donate
+personal Parts and Timber, and the completed route advances exactly once. The
+Hall caps route levels. Every built route tier adds five Salvage to each
+eligible member's next once-daily local resupply; an entirely level-five route
+network adds 100. It changes only this game inventory. Routes do not affect
+war scores, existing DZN leaderboards, server events or DayZ data. The
+service and asset checks cover roles, replay safety, reload persistence,
+cross-community isolation, daily claims and the five distinct GLBs.
+
 ## Feasible next game slices
 
 1. **Server-backed shared base:** create D1 state and a ledger for Timber,
@@ -92,10 +110,9 @@ frozen battle scores; `test-assets.mjs` validates all 20 new GLBs.
    members per side to choose a target district and tactic. Resolve from the
    immutable snapshot and a bounded action log; keep seasonal ranking rules
    independent of subscriptions and avoid DayZ location data.
-3. **Scenery with purpose:** add roads and supply caches on claimed plots,
-   repairable barricades after battles, patrol posts, weather visibility and
-   cosmetic server banners. These can build on the existing art and deterministic
-   map without paid asset or AI services.
+3. **Scenery with purpose:** add repairable barricades after battles, patrol
+   posts, weather visibility and cosmetic server banners. These can build on
+   the existing art and deterministic map without paid asset or AI services.
 
 ## Production integration gate
 
