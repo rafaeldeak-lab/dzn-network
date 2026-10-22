@@ -1,6 +1,7 @@
 // Original, reproducible DZN Stronghold soldier kit. No paid generator or external art.
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -12,22 +13,31 @@ if (!globalThis.FileReader) {
   };
 }
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads-v2');
 await mkdir(root, { recursive: true });
 const exporter = new GLTFExporter();
-const mat = (color, metalness = 0) => new THREE.MeshStandardMaterial({ color, metalness, roughness: metalness ? 0.52 : 0.9, flatShading: true });
+const mat = (color, metalness = 0, emissive = 0) => new THREE.MeshStandardMaterial({
+  color, metalness, roughness: metalness ? 0.42 : 0.83,
+  emissive: emissive ? color : 0x000000, emissiveIntensity: emissive,
+});
 const M = {
-  fabric: mat(0x31483d), shadow: mat(0x1b2926), armour: mat(0x65746b), steel: mat(0x8a9a97, 0.48),
-  visor: mat(0x78e7b2, 0.22), purple: mat(0x9a65d2), amber: mat(0xe3a865),
-  skin: mat(0xb58e70), pouch: mat(0x756850), recon: mat(0x405b60), engineer: mat(0x696247),
-  tactical: mat(0x20252d), carbon: mat(0x343b45), obsidian: mat(0x111820), lime: mat(0x9cf765, 0.18),
-  medical: mat(0xd9f6e4), medicCloth: mat(0x456459),
+  fabric: mat(0x171b20), shadow: mat(0x090d12), armour: mat(0x343b45, 0.38), steel: mat(0x69747b, 0.7),
+  visor: mat(0x7dff38, 0.18, 0.6), purple: mat(0x633489, 0.46), amber: mat(0xed9c26, 0.24, 0.18),
+  skin: mat(0x161c22), pouch: mat(0x23272c), recon: mat(0x191a22), engineer: mat(0x212024),
+  tactical: mat(0x101318), carbon: mat(0x252a32, 0.55), obsidian: mat(0x0e1219, 0.45), lime: mat(0xa5ff32, 0.2, 0.85),
+  medical: mat(0xe4eee7, 0.1), medicCloth: mat(0x172023),
 };
 function mesh(group, geometry, material, name, x = 0, y = 0, z = 0) {
   const item = new THREE.Mesh(geometry, material); item.name = name; item.position.set(x, y, z); group.add(item); return item;
 }
-function box(g, w, h, d, m, name, x = 0, y = 0, z = 0) { return mesh(g, new THREE.BoxGeometry(w, h, d), m, name, x, y, z); }
+function box(g, w, h, d, m, name, x = 0, y = 0, z = 0) {
+  const radius = Math.max(0.004, Math.min(w, h, d) * 0.18);
+  return mesh(g, new RoundedBoxGeometry(w, h, d, 3, radius), m, name, x, y, z);
+}
 function cyl(g, top, bottom, h, m, name, x = 0, y = 0, z = 0, sides = 8) { return mesh(g, new THREE.CylinderGeometry(top, bottom, h, sides), m, name, x, y, z); }
+function orb(g, radius, m, name, x = 0, y = 0, z = 0) {
+  return mesh(g, new THREE.SphereGeometry(radius, 16, 12), m, name, x, y, z);
+}
 function beam(g, from, to, radius, m, name) {
   const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to), delta = b.clone().sub(a);
   const item = cyl(g, radius, radius, delta.length(), m, name, ...a.clone().add(b).multiplyScalar(0.5).toArray(), 6);
@@ -35,31 +45,44 @@ function beam(g, from, to, radius, m, name) {
   return item;
 }
 
-function soldier(role, tier) {
+export function soldier(role, tier) {
   const g = new THREE.Group(); g.name = `${role}_l0${tier}`;
   const cloth = role === 'recon' ? M.recon : role === 'engineer' ? M.engineer : role === 'sentinel' ? M.tactical : role === 'medic' ? M.medicCloth : M.fabric;
   const glow = role === 'assault' ? M.amber : role === 'recon' ? M.purple : role === 'sentinel' ? M.lime : M.visor;
   // Feet start on the world plane. Forward is +Z; the runtime animates the named limb pivots.
   box(g, 0.43, 0.58, 0.28, cloth, 'body', 0, 1.07, 0);
   box(g, 0.5, 0.12, 0.3, M.shadow, 'belt', 0, 0.78, 0);
-  box(g, 0.47, 0.32, 0.08, M.armour, 'vest', 0, 1.14, 0.17);
-  box(g, 0.32, 0.1, 0.09, glow, 'dzn_chest_flash', 0, 1.2, 0.226);
-  cyl(g, 0.18, 0.19, 0.21, M.skin, 'face', 0, 1.56, 0.035, 10);
-  cyl(g, 0.205 + tier * 0.005, 0.20, 0.15, cloth, 'helmet', 0, 1.7, 0, 10);
-  box(g, 0.33, 0.075, 0.09, M.shadow, 'helmet_brow', 0, 1.63, 0.135);
-  box(g, 0.28, 0.055, 0.025, M.visor, 'visor', 0, 1.61, 0.185);
+  box(g, 0.52, 0.41, 0.16, M.carbon, 'segmented_vest', 0, 1.15, 0.16);
+  box(g, 0.35, 0.095, 0.035, glow, 'dzn_chest_flash', 0, 1.2, 0.253);
+  orb(g, 0.21 + tier * 0.004, M.carbon, 'rounded_helmet', 0, 1.66, 0);
+  box(g, 0.37, 0.19, 0.16, M.obsidian, 'enclosed_mask', 0, 1.53, 0.13);
+  box(g, 0.4, 0.07, 0.13, M.armour, 'helmet_brow', 0, 1.67, 0.16);
+  for (const side of [-1, 1]) {
+    orb(g, 0.074, M.visor, side < 0 ? 'left_optic' : 'right_optic', side * 0.105, 1.61, 0.227);
+    cyl(g, 0.045, 0.045, 0.04, M.steel, 'mask_filter', side * 0.11, 1.49, 0.224, 12);
+    orb(g, 0.068, M.steel, 'helmet_comm', side * 0.215, 1.64, 0);
+  }
+  box(g, 0.16, 0.09, 0.07, M.steel, 'respirator', 0, 1.51, 0.25);
   for (const side of [-1, 1]) {
     const arm = new THREE.Group(); arm.name = side < 0 ? 'left_arm' : 'right_arm'; arm.position.set(side * 0.32, 1.34, 0); g.add(arm);
-    box(arm, 0.18, 0.48, 0.2, cloth, 'sleeve', 0, -0.23, 0);
+    box(arm, 0.22, 0.48, 0.22, cloth, 'sleeve', 0, -0.23, 0);
+    orb(arm, 0.135, M.armour, 'shoulder_joint', 0, -0.04, 0);
     box(arm, 0.2, 0.12, 0.22, M.shadow, 'glove', 0, -0.51, 0);
+    box(arm, 0.24, 0.19, 0.25, M.carbon, 'forearm_plate', 0, -0.34, 0.025);
     const leg = new THREE.Group(); leg.name = side < 0 ? 'left_leg' : 'right_leg'; leg.position.set(side * 0.13, 0.77, 0); g.add(leg);
     box(leg, 0.22, 0.57, 0.25, cloth, 'trouser', 0, -0.29, 0);
     box(leg, 0.24, 0.21, 0.33, M.shadow, 'boot', 0, -0.65, 0.05);
+    box(leg, 0.25, 0.2, 0.3, M.carbon, 'shaped_knee_guard', 0, -0.43, 0.06);
+    box(leg, 0.23, 0.16, 0.28, tier >= 4 ? M.purple : M.armour, 'shin_plate', 0, -0.56, 0.035);
     if (tier >= 2) box(arm, 0.23, 0.18, 0.24, M.armour, 'shoulder_plate', 0, -0.08, 0);
     if (tier >= 3) box(leg, 0.23, 0.22, 0.28, M.armour, 'knee_plate', 0, -0.49, 0.035);
     if (tier >= 4) box(arm, 0.22, 0.16, 0.25, glow, 'rank_stripe', 0, -0.23, 0);
   }
   box(g, 0.36 + tier * 0.035, 0.45 + tier * 0.035, 0.23, M.pouch, 'field_pack', 0, 1.11, -0.26);
+  for (const side of [-1, 1]) {
+    box(g, 0.08, 0.52, 0.075, M.steel, 'pack_harness', side * 0.23, 1.15, 0.05);
+    box(g, 0.14, 0.08, 0.035, tier >= 4 ? M.purple : M.lime, 'shoulder_light', side * 0.33, 1.31, 0.15);
+  }
   for (let i = 0; i < Math.min(4, tier); i++) box(g, 0.1, 0.13, 0.09, M.pouch, `utility_pouch_${i}`, -0.2 + i * 0.13, 0.8, 0.12);
 
   if (role === 'assault') {
@@ -132,9 +155,10 @@ function soldier(role, tier) {
   return g;
 }
 
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const manifest = {
   schemaVersion: 1,
-  provenance: 'Original procedural DZN Stronghold Wars soldier geometry; no paid provider or external art.',
+  provenance: 'Original procedural 3D geometry and animation pivots styled after the owner-supplied DZN character sheets; no paid provider.',
   license: 'Project-owned original',
   unit: 'metre', coordinateSystem: 'Y up; forward +Z',
   roles: {
@@ -154,7 +178,7 @@ for (const role of Object.keys(manifest.roles)) for (let tier = 1; tier <= 5; ti
   const size = bounds.getSize(new THREE.Vector3());
   await writeFile(path.join(root, `${name}.glb`), bytes);
   manifest.assets[name] = {
-    file: `assets/models/squads/${name}.glb`,
+    file: `assets/models/squads-v2/${name}.glb`,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
     dimensions: size.toArray().map(value => Number(value.toFixed(3))),
@@ -163,3 +187,4 @@ for (const role of Object.keys(manifest.roles)) for (let tier = 1; tier <= 5; ti
 }
 await writeFile(path.join(root, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Created ${Object.keys(manifest.assets).length} original DZN squad GLBs in ${root}`);
+}

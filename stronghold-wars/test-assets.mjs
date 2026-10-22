@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
+import { PATROL_NODES, PATROL_STOPS, createPatrolMotion, shortestPatrolPath, stepPatrolMotion } from './preview/patrol-routes.js';
+import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
@@ -99,7 +101,7 @@ const worldBytes = readFileSync(join(root, ...worldManifest.asset.split('/')));
 if (worldBytes.toString('latin1', 0, 4) !== '\x89PNG' || worldBytes.readUInt32BE(16) !== worldManifest.dimensions[0] || worldBytes.readUInt32BE(20) !== worldManifest.dimensions[1]) throw new Error('Invalid Stronghold world texture size or PNG signature.');
 if (createHash('sha256').update(worldBytes).digest('hex') !== worldManifest.sha256) throw new Error('Stronghold world texture checksum mismatch.');
 console.log(`DZN world map verified: ${worldManifest.dimensions.join('x')} original texture.`);
-const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads/manifest.json'), 'utf8'));
+const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v2/manifest.json'), 'utf8'));
 const squadNames = Object.keys(squadManifest.assets);
 if (squadNames.length !== 25 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain five roles at five levels each.');
 if (squadTier('assault', { hq: 3, tower: 5 }) !== 3 || squadTier('recon', { hq: 5, comms: 2 }) !== 2 || squadTier('engineer', { hq: 4, workshop: 3 }) !== 3) throw new Error('Squad gear must follow the specialist and Hall visual cap.');
@@ -120,6 +122,60 @@ for (const [name, entry] of Object.entries(squadManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(d => !Number.isFinite(d) || d <= 0)) throw new Error(`Invalid squad bounds: ${name}`);
 }
 console.log(`DZN squad kit verified: ${squadNames.length} original, distinct and animatable GLBs.`);
+const occupied = [
+  [0, 0, BUILDING_ASSETS.hq.footprint], [-9, 4, BUILDING_ASSETS.workshop.footprint],
+  [8, 6, BUILDING_ASSETS.tower.footprint], [6, -8, BUILDING_ASSETS.comms.footprint],
+];
+for (const [role, stops] of Object.entries(PATROL_STOPS)) {
+  const motion = createPatrolMotion(role);
+  const reached = new Set();
+  let walking = 0, resting = 0;
+  for (let frame = 0; frame < 3600; frame++) {
+    stepPatrolMotion(motion, 0.05);
+    if (motion.moving) walking++; else resting++;
+    if (!motion.route.length && motion.wait > 0) reached.add(motion.node);
+    for (const [x, z, size] of occupied) {
+      const clearance = size / 2 + 0.15;
+      if (Math.abs(motion.x - x) < clearance && Math.abs(motion.z - z) < clearance) {
+        throw new Error(`${role} patrol crossed a building at ${motion.x.toFixed(2)}, ${motion.z.toFixed(2)}`);
+      }
+    }
+  }
+  if (!walking || !resting || stops.some(stop => !reached.has(stop))) throw new Error(`${role} patrol did not walk, stop and visit every assigned structure`);
+  for (const stop of stops) if (!PATROL_NODES[stop] || !shortestPatrolPath('camp', stop).length) throw new Error(`${role} has an unreachable stop`);
+}
+console.log('DZN patrols verified: five roles visit assigned buildings and camp, pause, and avoid building footprints.');
+const defenderManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders/manifest.json'), 'utf8'));
+const defenderHashes = new Set();
+const defenderParts = {
+  guardian: ['barrier_shield', 'barrier_body'], aegis: ['left_drone', 'right_drone'],
+  trapper: ['snare_module_0', 'snare_module_1', 'snare_module_2'],
+  hound: ['left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg'],
+};
+if (Object.keys(defenderManifest.assets).length !== 20) throw new Error('Four DZN defenders need five 3D appearance tiers each.');
+for (const role of Object.keys(DEFENDER_CONCEPTS)) for (let level = 1; level <= 5; level++) {
+  const name = `${role}_l0${level}`;
+  const entry = defenderManifest.assets[name];
+  if (!entry || entry.file !== defenderAsset(role, level)) throw new Error(`Missing defender tier: ${name}`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid defender GLB: ${name}`);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  const names = new Set((gltf.nodes || []).map(node => node.name));
+  if (!gltf.meshes?.length || defenderParts[role].some(part => !names.has(part))) throw new Error(`Incomplete ${role} 3D geometry: ${name}`);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (entry.sha256 !== hash || entry.bytes !== bytes.length || defenderHashes.has(hash)) throw new Error(`Defender integrity or tier distinction failed: ${name}`);
+  defenderHashes.add(hash);
+}
+const defenderArt = JSON.parse(readFileSync(join(root, 'assets/portraits/defenders/manifest.json'), 'utf8'));
+if (Object.keys(defenderArt.assets).length !== 4) throw new Error('Four defender concept images are required.');
+for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+  const entry = defenderArt.assets[role];
+  if (!entry || entry.file !== defenderPortrait(role)) throw new Error(`Missing defender art: ${role}`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('latin1', 0, 4) !== '\x89PNG' || bytes.readUInt32BE(16) !== 1254 || bytes.readUInt32BE(20) !== 1254 || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Invalid defender portrait: ${role}`);
+}
+console.log('DZN defender concepts verified: 20 distinct 3D GLBs and four unchanged owner images.');
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
 if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');

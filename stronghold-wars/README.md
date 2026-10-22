@@ -126,11 +126,23 @@ stored unchanged under `source-art/squads/` for reproducibility; this process
 does not redraw the characters. `review/squad-progression-contact.png` shows
 all 25 exported stages together.
 
-Base patrols, practice raiders and local war squads now show the supplied art
-as camera-facing sprites in WebGL and as transparent images in Canvas 2D.
-They have subtle movement but are not rigged 3D characters. The earlier
-`tools/generate-squads.mjs` low-poly GLBs and derived portraits remain in the
-repository as a legacy kit and are no longer the visible soldier artwork.
+Base patrols, practice raiders and local war squads use 25 articulated 3D
+GLBs in WebGL, with role equipment and visual changes from Level 1 to 5.
+Patrols walk along paths between the compound buildings and squad camp,
+pause at assigned stops, and turn toward their next destination. The exact
+owner-supplied artwork remains in the Armoury; Canvas 2D uses flat portraits
+as a compatibility fallback. The new procedural models are game-scale
+interpretations of the single-view concept sheets, not exact textured 3D
+reconstructions. The previous blocky models remain under
+`preview/assets/models/squads/` and are no longer selected in WebGL.
+`tools/generate-squads.mjs` creates the replacement `squads-v2` kit.
+
+Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
+unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs
+in `preview/assets/models/defenders/` cover their five appearance levels.
+The Armoury can place one 3D defender concept beside the camp for inspection.
+Defender slots, combat abilities and upgrade access have not been added for
+these concepts; their preview has no battle effect.
 The Squads panel explains the current equipment; the World Map shows the
 opponent's visual gear tier from its public building levels. Command Hall caps
 gear, while Watchtower, Communications and Workshop set specialist tiers.

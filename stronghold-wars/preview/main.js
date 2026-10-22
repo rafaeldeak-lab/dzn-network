@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
-import { SQUAD_ROLES, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
+import { createPatrolMotion, stepPatrolMotion } from './patrol-routes.js';
+import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 
@@ -389,6 +391,25 @@ function cyl(parent, rt, rb, h, mat, x = 0, y = 0, z = 0, seg = 12) {
   parent.add(mesh);
   return mesh;
 }
+
+// A visible home for off-duty squads. Patrols leave this clearing for assigned
+// structures, stop to work or guard, then return here.
+const campMat = new THREE.MeshStandardMaterial({ color: 0x182520, roughness: 0.9 });
+const campAccent = new THREE.MeshStandardMaterial({ color: 0x7542a4, metalness: 0.35, roughness: 0.55 });
+const campGround = new THREE.Mesh(new THREE.CircleGeometry(2.6, 24), new THREE.MeshStandardMaterial({ color: 0x3c413a, roughness: 1 }));
+campGround.rotation.x = -Math.PI / 2;
+campGround.position.set(-4, 0.055, -12);
+scene.add(campGround);
+const campTent = new THREE.Mesh(new THREE.ConeGeometry(1.45, 1.35, 4), campMat);
+campTent.rotation.y = Math.PI / 4;
+campTent.position.set(-6.6, 0.74, -13.1);
+campTent.castShadow = true;
+scene.add(campTent);
+box(scene, 1.2, 0.8, 0.85, MAT.dark, -6.6, 0, -13.1);
+box(scene, 1.5, 0.15, 0.38, campAccent, -6.6, 1.34, -13.1);
+for (const x of [-2.8, -1.7]) box(scene, 0.62, 0.53, 0.68, MAT.dark, x, 0, -13.7);
+const campBeacon = cyl(scene, 0.1, 0.18, 1.45, MAT.dark, -2.1, 0, -10.5);
+box(scene, 0.4, 0.19, 0.4, MAT.green, -2.1, 1.46, -10.5);
 
 // Perimeter fence posts
 for (let i = 0; i < 48; i++) {
@@ -792,7 +813,7 @@ function setRendererDiagnostic(message) {
   if (message !== undefined) rendererDiagnosticMessage = message;
   const status = document.getElementById('rendererStatus');
   if (!status) return;
-  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · DZN squad art' : 'Three.js WebGL · 3D base and DZN squad art');
+  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · DZN squad art' : 'Three.js WebGL · articulated 3D squads');
   status.classList.toggle('error', Boolean(rendererDiagnosticMessage));
 }
 
@@ -886,22 +907,10 @@ for (const key of Object.keys(DEFS)) {
 if (!fallback2D) for (const key of Object.keys(DEFS)) requestBuildingModel(key, state.levels[key]);
 applyScaffoldState();
 
-// The owner's final character sheets are used as camera-facing game sprites.
-// This keeps the detailed supplied design visible in patrols, raids and wars.
-const squadTextures = new Map();
-function loadSquadTexture(path) {
-  if (!squadTextures.has(path)) squadTextures.set(path, texLoader.loadAsync(path).then(texture => {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(8, renderer.capabilities?.getMaxAnisotropy?.() || 1);
-    return texture;
-  }).catch(error => {
-    console.warn(`DZN squad artwork could not load: ${path}`, error);
-    return null;
-  }));
-  return squadTextures.get(path);
-}
+// Keep the owner's detailed character sheets in the Armoury. In the world, load
+// actual three-dimensional GLBs so the named limb pivots can walk and turn.
 function equipSoldier(soldier, role, tier) {
-  const path = squadPortrait(role, tier);
+  const path = squadAsset(role, tier);
   if (soldier.userData.squadAsset === path) return;
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
@@ -909,22 +918,18 @@ function equipSoldier(soldier, role, tier) {
   const token = (soldier.userData.loadToken || 0) + 1;
   soldier.userData.loadToken = token;
   soldier.clear();
-  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.37, depthWrite: false }));
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.025;
   soldier.add(shadow);
-  const portrait = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.03, depthWrite: false }));
-  portrait.name = 'squad_art';
-  portrait.center.set(0.5, 0.03);
-  portrait.scale.set(2.65, 2.65, 1);
-  portrait.visible = false;
-  soldier.add(portrait);
-  loadSquadTexture(path).then(texture => {
+  loadBuildingTemplate(path).then(template => {
     if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
-    if (!texture) { shadow.visible = false; return; }
-    portrait.material.map = texture;
-    portrait.material.needsUpdate = true;
-    portrait.visible = true;
+    const model = template.clone(true);
+    model.name = 'squad_model';
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    soldier.add(model);
+  }).catch(error => {
+    if (soldier.userData.loadToken === token) console.warn(`DZN squad model could not load: ${path}`, error);
   });
 }
 function makeSoldier(role, levels) {
@@ -934,12 +939,6 @@ function makeSoldier(role, levels) {
 }
 function animateSoldier(soldier, phase, pace = 1) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const portrait = soldier.getObjectByName('squad_art');
-  if (portrait) {
-    portrait.position.y = Math.abs(Math.sin(phase)) * 0.045 * pace;
-    portrait.material.rotation = Math.sin(phase) * 0.015 * pace;
-    return;
-  }
   const swing = Math.sin(phase) * 0.42 * pace;
   for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
     const limb = soldier.getObjectByName(name);
@@ -952,10 +951,32 @@ const patrols = [];
 for (let i = 0; i < 5; i++) {
   const role = ['assault', 'recon', 'engineer', 'sentinel', 'medic'][i];
   const soldier = makeSoldier(role, state.levels);
+  const motion = createPatrolMotion(role, i);
+  soldier.position.set(motion.x, 0, motion.z);
   scene.add(soldier);
-  patrols.push({ mesh: soldier, role, radius: 13 + (i % 2) * 2.5, phase: (i / 5) * Math.PI * 2, speed: 0.12 + i * 0.01 });
+  patrols.push({ mesh: soldier, role, motion });
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
+let defenderPreview = null;
+let defenderPreviewToken = 0;
+function placeDefenderPreview(role, level) {
+  const path = defenderAsset(role, level);
+  if (!path) return;
+  const token = ++defenderPreviewToken;
+  if (defenderPreview) { scene.remove(defenderPreview); defenderPreview = null; }
+  loadBuildingTemplate(path).then(template => {
+    if (token !== defenderPreviewToken) return;
+    const model = template.clone(true);
+    model.position.set(-2, 0.07, -8);
+    model.rotation.y = -0.6;
+    model.scale.setScalar(1.25);
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    model.userData.cosmeticConcept = true;
+    defenderPreview = model;
+    scene.add(model);
+  }).catch(error => console.warn(`Defender concept could not load: ${path}`, error));
+  toast(`${DEFENDER_CONCEPTS[role].name} L${level} · 3D concept at squad camp · no battle effect`);
+}
 
 // Smoke particles
 const smokeMat = new THREE.MeshBasicMaterial({ color: 0x9aa39a, transparent: true, opacity: 0.5, depthWrite: false });
@@ -1296,7 +1317,8 @@ function showSquadPanel() {
     return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
   }).join('');
   const away = currentAwaySquads().length;
-  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles with the owner's detailed Level 1–5 character art. Choose a thumbnail to inspect its outfit; this does not change the equipped level. Command Hall and specialist buildings determine the active kit. Sentinel and Lifeline join the roster at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  const defenderCards = Object.entries(DEFENDER_CONCEPTS).map(([role, defender]) => `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(defender.name)}</strong><small>${escapeHTML(defender.role)}</small></div></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(defender.name)} supplied design"><p>${escapeHTML(defender.detail)}</p><p class="help">Choose an L1–L5 3D concept to place beside the squad camp. Preview only; no defender slot or battle effect yet.</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(defender.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`).join('');
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles use the owner's detailed Level 1–5 artwork in this Armoury and articulated 3D models in the base and battles. Choose a thumbnail to inspect an outfit; this does not change equipped level. Command Hall and specialist buildings determine active kit. Sentinel and Lifeline join at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><h3>DZN Defender Concepts · 3D previews</h3><p>Guardian, Aegis, Trapper and Hound are based on the supplied designs. Their 3D appearance tiers can be inspected at the camp; defence mechanics and owner-assigned slots are still in design.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
   panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
     const role = button.dataset.squadPreview;
     const level = Number(button.dataset.level);
@@ -1312,6 +1334,12 @@ function showSquadPanel() {
       choice.classList.toggle('selected', selected);
       choice.setAttribute('aria-pressed', String(selected));
     });
+  }));
+  panel.querySelectorAll('[data-defender-preview]').forEach(button => button.addEventListener('click', () => {
+    const level = Number(button.dataset.level);
+    if (!Number.isInteger(level) || level < 1 || level > 5) return;
+    placeDefenderPreview(button.dataset.defenderPreview, level);
+    closePanel();
   }));
   $('closeBtn').onclick = closePanel;
 }
@@ -2113,10 +2141,10 @@ renderer.setAnimationLoop(time => {
     }
   }
   patrols.forEach(p => {
-    const a = p.phase + elapsed * p.speed;
-    p.mesh.position.set(Math.cos(a) * p.radius, Math.abs(Math.sin(elapsed * 8)) * 0.08, Math.sin(a) * p.radius);
-    p.mesh.rotation.y = -a;
-    animateSoldier(p.mesh, elapsed * 7 + p.phase);
+    const motion = stepPatrolMotion(p.motion, dt);
+    p.mesh.position.set(motion.x, 0, motion.z);
+    p.mesh.rotation.y = motion.yaw;
+    animateSoldier(p.mesh, motion.stride, motion.moving ? 1 : 0.04);
   });
   Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {
