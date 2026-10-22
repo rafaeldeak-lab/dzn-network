@@ -179,6 +179,7 @@ function drawCompatibilityScene() {
     const [x, z] = config.position;
     diamond(x, z, 5, 5, plot.status === 'claimed' ? '#405b49' : plot.status === 'approved' ? '#625c42' : '#354c38', '#8b997a');
     for (let i = 0; i < config.trees; i++) {
+      if (plot.status === 'claimed' && plot.facilityLevel > 0) continue;
       const a = i * 2.39996 + config.hall;
       const radius = 1.4 + (i % 3) * 0.8;
       const p = project(x + Math.cos(a) * radius, z + Math.sin(a) * radius);
@@ -195,7 +196,14 @@ function drawCompatibilityScene() {
     ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#e8f1e9';
     ctx.fillText(`${config.name} · ${plot.status}`, label.x, label.y);
     if (plot.status === 'claimed') {
-      ctx.fillStyle = '#70e59a'; ctx.fillRect(label.x - 3, label.y - 18, 6, 10);
+      const center = project(x, z);
+      if (plot.facilityLevel > 0) {
+        const size = Math.max(16, unit * 2.6);
+        ctx.fillStyle = '#29382f'; ctx.fillRect(center.x - size * .5, center.y - size * .75, size, size * .75);
+        ctx.fillStyle = '#6a7b55'; ctx.beginPath(); ctx.moveTo(center.x - size * .6, center.y - size * .75); ctx.lineTo(center.x, center.y - size * 1.15); ctx.lineTo(center.x + size * .6, center.y - size * .75); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#c084fc'; ctx.fillRect(center.x - size * .37, center.y - size * .45, size * .74, Math.max(3, size * .1));
+        ctx.fillStyle = '#edfaf0'; ctx.font = '700 10px Orbitron, sans-serif'; ctx.fillText(`L${plot.facilityLevel}`, center.x, center.y - size * .5);
+      } else { ctx.fillStyle = '#70e59a'; ctx.fillRect(label.x - 3, label.y - 18, 6, 10); }
       ctx.font = '700 9px Inter, sans-serif';
       ctx.fillText(`${plot.barricades} barricades`, label.x, label.y + 11);
     }
@@ -358,6 +366,59 @@ for (let i = 0; i < 48; i++) {
 const buildings = {};
 const animated = { radars: [], lights: [], chimneys: [] };
 const revealEffects = new Map();
+const celebrations = [];
+let revealBannerTimer = 0;
+function celebrateUpgrade(x, z, name, level) {
+  const banner = document.getElementById('upgradeReveal');
+  if (banner) {
+    banner.querySelector('span').textContent = `${name} · Level ${level}`;
+    banner.classList.remove('active');
+    void banner.offsetWidth;
+    banner.classList.add('active');
+    clearTimeout(revealBannerTimer);
+    revealBannerTimer = setTimeout(() => banner.classList.remove('active'), GAME_CONFIG.revealSeconds * 1000);
+  }
+  if (!state.muted) { beep(660, .17); setTimeout(() => beep(880, .19), 115); setTimeout(() => beep(1100, .25), 245); }
+  if (fallback2D || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const group = new THREE.Group();
+  group.position.set(x, .15, z);
+  const rings = [0xc084fc, 0x70e59a, 0xe9d4ff].map((color, index) => {
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(2.1, 2.27, 40), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: .7, depthWrite: false }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = .06 + index * .04;
+    group.add(mesh);
+    return mesh;
+  });
+  const sparks = Array.from({ length: 28 }, (_, index) => {
+    const angle = index * 2.399963;
+    const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(.13 + (index % 3) * .04), new THREE.MeshBasicMaterial({ color: index % 2 ? 0x70e59a : 0xd5a9ff, transparent: true, opacity: 1, depthWrite: false }));
+    mesh.position.set(Math.cos(angle) * .5, .4, Math.sin(angle) * .5);
+    group.add(mesh);
+    return { mesh, angle, speed: 2.3 + (index % 5) * .35, lift: .7 + (index % 4) * .28 };
+  });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(.25, .8, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x9bffbb, transparent: true, opacity: .2, depthWrite: false, side: THREE.DoubleSide }));
+  beam.position.y = 4.5;
+  group.add(beam);
+  scene.add(group);
+  celebrations.push({ group, rings, sparks, beam, startedAt: performance.now() });
+}
+
+function updateCelebrations(now) {
+  for (let i = celebrations.length - 1; i >= 0; i--) {
+    const effect = celebrations[i];
+    const progress = (now - effect.startedAt) / (GAME_CONFIG.revealSeconds * 1000);
+    if (progress >= 1) {
+      scene.remove(effect.group);
+      effect.group.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
+      celebrations.splice(i, 1);
+      continue;
+    }
+    effect.rings.forEach((ring, index) => { const stage = Math.max(0, progress - index * .12); ring.scale.setScalar(.35 + stage * 3.3); ring.material.opacity = Math.max(0, .8 - stage); });
+    effect.sparks.forEach(({ mesh, angle, speed, lift }) => { mesh.position.set(Math.cos(angle) * (.5 + progress * speed), .4 + Math.sin(progress * Math.PI) * lift * 3, Math.sin(angle) * (.5 + progress * speed)); mesh.rotation.y += .04; mesh.material.opacity = 1 - progress; });
+    effect.beam.material.opacity = .22 * Math.sin(progress * Math.PI);
+    effect.beam.scale.set(1 + progress * .8, 1, 1 + progress * .8);
+  }
+}
 const gltfLoader = new GLTFLoader();
 const modelTemplateCache = new Map();
 const modelLoadPromises = new Map();
@@ -376,6 +437,16 @@ async function sceneryModel(name) {
   return sceneryTemplates.get(name);
 }
 
+async function facilityModel(name) {
+  const key = `facility/${name}`;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${name}.glb`).then(gltf => gltf.scene).catch(error => {
+    sceneryTemplates.delete(key);
+    console.warn(`Facility model ${name} could not load; keeping the claimed plot marker.`, error);
+    return null;
+  }));
+  return sceneryTemplates.get(key);
+}
+
 async function reconcileLandScenery() {
   if (fallback2D) return;
   const request = ++sceneryRequest;
@@ -383,7 +454,12 @@ async function reconcileLandScenery() {
   if (!base) return;
   const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder'];
   try {
-    const models = Object.fromEntries(await Promise.all(names.map(async name => [name, await sceneryModel(name)])));
+    const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
+      .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
+    const models = Object.fromEntries(await Promise.all([
+      ...names.map(async name => [name, await sceneryModel(name)]),
+      ...facilityNames.map(async name => [name, await facilityModel(name)]),
+    ]));
     if (request !== sceneryRequest) return;
     for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
     landScenery.clear();
@@ -403,6 +479,7 @@ async function reconcileLandScenery() {
       clearing.userData.ownedTerrain = true;
       landScenery.add(clearing);
       for (let i = 0; i < config.trees; i++) {
+        if (claimed && plot.facilityLevel > 0) continue;
         const a = i * 2.39996 + config.hall;
         const radius = 1.4 + (i % 3) * 0.8;
         const standing = i < plot.treesRemaining;
@@ -420,9 +497,17 @@ async function reconcileLandScenery() {
         }
       }
       if (claimed) {
-        const marker = models.claim_marker.clone();
-        marker.position.set(x, 0.09, z);
-        landScenery.add(marker);
+        const name = plot.facilityLevel > 0 ? `${GAME_CONFIG.facilities[config.id].model}_l0${plot.facilityLevel}` : null;
+        if (name && models[name]) {
+          const facility = models[name].clone(true);
+          facility.position.set(x, 0.09, z);
+          facility.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+          landScenery.add(facility);
+        } else {
+          const marker = models.claim_marker.clone();
+          marker.position.set(x, 0.09, z);
+          landScenery.add(marker);
+        }
         for (let i = 0; i < plot.barricades; i++) {
           const logs = models.pine_log_stack.clone();
           const a = i * Math.PI * 2 / 3;
@@ -843,6 +928,7 @@ function startReveal(key) {
   refreshBuilding(key);
   building.scaffold.visible = true;
   revealEffects.set(key, Date.now() + GAME_CONFIG.revealSeconds * 1000);
+  celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
   playClank();
 }
 function showBuildingPanel(key) {
@@ -1043,7 +1129,7 @@ function showProgressionPanel() {
     if (req.prerequisites.length) html += `<div class="notice warn">${req.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
     else html += `<p class="help">Requirements met. An owner/admin can approve this as a collaborative project from the Command Hall.</p>`;
   } else html += '<p>Maximum demo Hall level reached.</p>';
-  html += `<hr><h3>Stronghold Map</h3>${districts}<p class="help">Later districts are under development; their names and Hall gates are original DZN demo placeholders.</p><hr><p><b>Permanent base progression</b> is saved per community. <b>Seasonal score:</b> not active in this local preview; training wins are practice results, not seasonal ranking.</p><div class="row"><button id="closeBtn">Close</button></div>`;
+  html += `<hr><h3>Stronghold Map</h3>${districts}<p class="help">Clear each plot, have leadership approve its claim, then fund its distinct facility together through five visual tiers.</p><hr><p><b>Permanent base progression</b> is saved per community. <b>Seasonal score:</b> not active in this local preview; training wins are practice results, not seasonal ranking.</p><div class="row"><button id="closeBtn">Close</button></div>`;
   openPanel(html);
   $('closeBtn').onclick = closePanel;
 }
@@ -1073,10 +1159,27 @@ function showLandPanel() {
           : plot.status === 'claimed'
             ? `<button data-barricade="${config.id}" ${snapshot.member.timber < GAME_CONFIG.barricadeTimberCost || plot.barricades >= GAME_CONFIG.maxBarricadesPerPlot ? 'disabled' : ''}>Build barricade · ${GAME_CONFIG.barricadeTimberCost} Timber</button>`
             : '';
-    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div></article>`;
+    const facility = GAME_CONFIG.facilities[config.id];
+    const project = plot.facilityProject;
+    let facilityHtml = '';
+    if (plot.status === 'claimed') {
+      facilityHtml = `<p><b>${escapeHTML(facility.name)} · Level ${plot.facilityLevel}/5</b></p><p class="help">${escapeHTML(facility.purpose)}${config.id === 'timberline-depot' && plot.facilityLevel > 0 ? ` · ${20 + (plot.facilityLevel - 1) * 10} Timber per member daily` : ''}</p>`;
+      if (project) {
+        const donors = project.donors.map(d => `${escapeHTML(d.name)}: ${d.parts} Parts + ${d.timber} Timber`).join(' · ');
+        facilityHtml += `<p>Approved Level ${project.targetLevel}: ${project.partsFunded}/${project.partsCost} Parts · ${project.timberFunded}/${project.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (project.partsFunded + project.timberFunded) / (project.partsCost + project.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p><button data-fund-facility="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate Parts &amp; Timber</button>`;
+      } else if (plot.facilityLevel < 5 && isLeadership()) {
+        const target = plot.facilityLevel + 1;
+        const [partsCost, timberCost] = facility.costs[target];
+        facilityHtml += `<button data-approve-facility="${config.id}" ${target > hall ? 'disabled' : ''}>Approve Level ${target} · ${partsCost} Parts + ${timberCost} Timber</button>`;
+        if (target > hall) facilityHtml += `<p class="help">Command Hall L${target} required for the next facility tier.</p>`;
+      }
+      if (config.id === 'timberline-depot' && plot.facilityLevel > 0) facilityHtml += `<div class="row"><button data-depot-claim="${config.id}" ${snapshot.member.nextTimberClaimAt > Date.now() ? 'disabled' : ''}>${snapshot.member.nextTimberClaimAt > Date.now() ? `Resupply in ${formatRemaining(snapshot.member.nextTimberClaimAt)}` : 'Claim daily Timber'}</button></div>`;
+    }
+    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div>${facilityHtml}</article>`;
   }).join('');
-  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Owner/admin approval opens each shared land claim. Any verified member can fund the claim and build barricades.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p>${cards}<p class="help">Barricades become frozen defence in the next local war snapshot. Existing wars do not change when the base changes.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Leadership approves land and facility projects; members contribute and build them together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p><div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div><p class="help">Daily Salvage keeps Timber renewable after your forest is cleared.</p>${cards}<p class="help">Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades are frozen when a local war is accepted.</p><div class="row"><button id="closeBtn">Close</button></div>`);
   $('closeBtn').onclick = closePanel;
+  $('recycleTimberBtn').onclick = () => { const result = service.recycleTimber(); toast(result.ok ? `+${result.amount} recycled Timber` : result.error); updateHud(); showLandPanel(); };
   panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
     const result = service.chopTree(service.state.currentIdentityId, button.dataset.chop);
     if (!result.ok) toast(result.error); else { toast(`+${result.timberEarned} Timber · ${result.treesRemaining} trees left`); reconcileLandScenery(); updateHud(); }
@@ -1092,13 +1195,37 @@ function showLandPanel() {
     const plot = service.community().saved.base.landPlots.find(item => item.id === config.id);
     const amount = Math.min(service.member().timber, config.timberCost - plot.timberFunded);
     const result = service.contributeTimber(service.state.currentIdentityId, config.id, amount);
-    if (!result.ok) toast(result.error); else { toast(result.status === 'claimed' ? 'New land claimed for the whole community.' : `${result.accepted} Timber donated.`); reconcileLandScenery(); updateHud(); }
+    if (!result.ok) toast(result.error); else { toast(result.status === 'claimed' ? 'New land claimed for the whole community.' : `${result.accepted} Timber donated.`); reconcileLandScenery(); updateHud(); if (result.status === 'claimed') celebrateUpgrade(config.position[0], config.position[1], config.name + ' claimed', 1); }
     showLandPanel();
   });
   panel.querySelectorAll('[data-barricade]').forEach(button => button.onclick = () => {
     const result = service.buildBarricade(service.state.currentIdentityId, button.dataset.barricade);
     if (!result.ok) toast(result.error); else { toast('Barricade built by a community member.'); reconcileLandScenery(); updateHud(); }
     showLandPanel();
+  });
+  panel.querySelectorAll('[data-approve-facility]').forEach(button => button.onclick = () => {
+    const result = service.approveFacility(service.state.currentIdentityId, button.dataset.approveFacility);
+    toast(result.ok ? `Level ${result.targetLevel} facility approved for community funding.` : result.error);
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-fund-facility]').forEach(button => button.onclick = () => {
+    const plotId = button.dataset.fundFacility;
+    const project = service.community().saved.base.landPlots.find(item => item.id === plotId)?.facilityProject;
+    const member = service.member();
+    const result = service.contributeFacility(service.state.currentIdentityId, plotId,
+      Math.min(member.parts, project.partsCost - project.partsFunded), Math.min(member.timber, project.timberCost - project.timberFunded));
+    if (!result.ok) toast(result.error);
+    else {
+      toast(result.completed ? `${GAME_CONFIG.facilities[plotId].name} Level ${result.targetLevel} complete!` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
+      if (result.completed && !result.replay) { const config = GAME_CONFIG.landPlots.find(item => item.id === plotId); celebrateUpgrade(config.position[0], config.position[1], GAME_CONFIG.facilities[plotId].name, result.facilityLevel); reconcileLandScenery(); playClank(); }
+      updateHud();
+    }
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-depot-claim]').forEach(button => button.onclick = () => {
+    const result = service.claimDepotTimber();
+    toast(result.ok ? `Lumber Yard resupply +${result.amount} personal Timber` : result.error);
+    updateHud(); showLandPanel();
   });
 }
 
@@ -1108,7 +1235,7 @@ function checkUpgrades() {
     refreshBuilding(key);
     buildings[key].scaffold.visible = false;
     toast(`${DEFS[key].name} legacy upgrade completed once · Level ${state.levels[key]}`);
-    playClank();
+    startReveal(key);
     if (selectedKey === key) showBuildingPanel(key);
   }
 }
@@ -1157,7 +1284,7 @@ function warTimelineHTML(war) {
 
 function warSnapshotLine(side) {
   const levels = side.base.levels;
-  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0}`;
+  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0} · Assault +${side.stats.assaultBonus || 0} · Recon +${side.stats.reconBonus || 0} · Works -${side.stats.worksDefence || 0}`;
 }
 
 function renderWarRecord(war, currentCommunityId, currentIdentity) {
@@ -1193,7 +1320,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
-      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Enemy barricades reduce Assault by 3 points each. Strong firepower, heavier counterfire.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Enemy barricades reduce Recon by 1 point each. Comms-focused, lighter counterfire.</p></div></div>
+      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Ridgewatch adds 2 per level. Enemy barricades reduce Assault by 3 each; Defence Works reduces both tactics by 2 per level.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Signal Relay adds 2 per level. Enemy barricades reduce Recon by 1 each; Defence Works counters the sweep.</p></div></div>
       ${canAttack ? `<div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Deploy Assault squad</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Deploy Recon squad</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
       ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve when attack cap is reached or timer ends'}</button></div>` : ''}`;
   } else if (war.state === 'resolved') {
@@ -1595,6 +1722,7 @@ let forgeTimer = 0;
 let saveTimer = 0;
 const tmp = new THREE.Vector3();
 renderer.setAnimationLoop(time => {
+  updateCelebrations(time);
   timer.update(time);
   const dt = Math.min(0.1, timer.getDelta());
   elapsed += dt;

@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural district geometry authored for DZN Stronghold Wars; no paid provider or third-party game art.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up",
+  "assets": {
+    "timberline_l01": {
+      "file": "assets/models/facilities/timberline_l01.glb",
+      "sha256": "d6ecbd1c404f38411ac8a76eb9d368a4bb5eade61c9c7e41e02164c5c5f8da3f",
+      "bytes": 74244,
+      "dimensions": [
+        6.6,
+        2.45,
+        6.2
+      ]
+    },
+    "timberline_l02": {
+      "file": "assets/models/facilities/timberline_l02.glb",
+      "sha256": "8d699bd245657a5c7177d6b9bd6998f128dd808806f57f0f279cb563177c08ca",
+      "bytes": 85844,
+      "dimensions": [
+        6.6,
+        2.59,
+        6.2
+      ]
+    },
+    "timberline_l03": {
+      "file": "assets/models/facilities/timberline_l03.glb",
+      "sha256": "34c8f93dd5e8524400324a71b4c3b80ae3c3f9412f35f62875c805c609b69e48",
+      "bytes": 100832,
+      "dimensions": [
+        6.6,
+        3.778,
+        6.2
+      ]
+    },
+    "timberline_l04": {
+      "file": "assets/models/facilities/timberline_l04.glb",
+      "sha256": "f31d23b062a40cc8a32895f983062f37815040f2b68727500af74f1d1a7141ec",
+      "bytes": 113956,
+      "dimensions": [
+        6.6,
+        3.778,
+        6.2
+      ]
+    },
+    "timberline_l05": {
+      "file": "assets/models/facilities/timberline_l05.glb",
+      "sha256": "81489a093ae8c29133b00d80dfab7d3f1a744a6ce71ffc4239a8f5be408338e5",
+      "bytes": 128116,
+      "dimensions": [
+        6.6,
+        4.2,
+        6.2
+      ]
+    },
+    "ridgewatch_l01": {
+      "file": "assets/models/facilities/ridgewatch_l01.glb",
+      "sha256": "46a67b900450340c8314d68a6da4d4c2e44dc523c2ea774833d6b2b1463081df",
+      "bytes": 81568,
+      "dimensions": [
+        6.6,
+        1.94,
+        6.2
+      ]
+    },
+    "ridgewatch_l02": {
+      "file": "assets/models/facilities/ridgewatch_l02.glb",
+      "sha256": "1cbbe3bf659c4cb793765e3a409b5274c42284b035586e69f0814251338c56f0",
+      "bytes": 86872,
+      "dimensions": [
+        6.6,
+        2.2,
+        6.2
+      ]
+    },
+    "ridgewatch_l03": {
+      "file": "assets/models/facilities/ridgewatch_l03.glb",
+      "sha256": "23cb020c067b8b3bd317c5f5166420b056eec7085616c8ff29954bff988cab4a",
+      "bytes": 93104,
+      "dimensions": [
+        6.6,
+        3.32,
+        6.2
+      ]
+    },
+    "ridgewatch_l04": {
+      "file": "assets/models/facilities/ridgewatch_l04.glb",
+      "sha256": "15425e6ba462868b63465d1ce51bf447dbb695b671a06ee33923fdddea11bea4",
+      "bytes": 101904,
+      "dimensions": [
+        6.6,
+        3.32,
+        6.2
+      ]
+    },
+    "ridgewatch_l05": {
+      "file": "assets/models/facilities/ridgewatch_l05.glb",
+      "sha256": "727c55160da5187290fcbfe542aea2b3b65d3caabd4591d9770eeac1145431e8",
+      "bytes": 110904,
+      "dimensions": [
+        6.6,
+        3.32,
+        6.2
+      ]
+    },
+    "signal_l01": {
+      "file": "assets/models/facilities/signal_l01.glb",
+      "sha256": "ee6498c7168cf9d943f0761ddd1cb6bf002e84ea65cca140ea234f08059ee506",
+      "bytes": 43816,
+      "dimensions": [
+        6.6,
+        3.875,
+        6.2
+      ]
+    },
+    "signal_l02": {
+      "file": "assets/models/facilities/signal_l02.glb",
+      "sha256": "2a366e8f9a6b6cf68f22aa35a8adba543879d530c587580ad946e7df21d5a060",
+      "bytes": 54428,
+      "dimensions": [
+        6.6,
+        4.241,
+        6.2
+      ]
+    },
+    "signal_l03": {
+      "file": "assets/models/facilities/signal_l03.glb",
+      "sha256": "0b1953359be5f8dcff56574de0b750c2d4eae6e963d4abc9ce04f64958c096c8",
+      "bytes": 64208,
+      "dimensions": [
+        6.6,
+        4.608,
+        6.2
+      ]
+    },
+    "signal_l04": {
+      "file": "assets/models/facilities/signal_l04.glb",
+      "sha256": "1dc9265894983152ec15f3daf264cfc060ac787e31b59938c65c64c2aebff8f8",
+      "bytes": 72192,
+      "dimensions": [
+        6.6,
+        4.974,
+        6.2
+      ]
+    },
+    "signal_l05": {
+      "file": "assets/models/facilities/signal_l05.glb",
+      "sha256": "a6e921f3fcde702e931c8e40b36c1d4fa0c958f601b157b65d901fa23ae7c0ef",
+      "bytes": 77596,
+      "dimensions": [
+        6.6,
+        5.34,
+        6.2
+      ]
+    },
+    "highland_l01": {
+      "file": "assets/models/facilities/highland_l01.glb",
+      "sha256": "294d3576d0c9f8baf9276d05e144a75676c59880f83425ffa551e660436be18f",
+      "bytes": 39916,
+      "dimensions": [
+        6.6,
+        4.26,
+        6.2
+      ]
+    },
+    "highland_l02": {
+      "file": "assets/models/facilities/highland_l02.glb",
+      "sha256": "20c76ce6df013c77440235ae281bdd18f8a1df0d76248c65aabc6b1a9c311131",
+      "bytes": 48368,
+      "dimensions": [
+        6.6,
+        4.69,
+        6.2
+      ]
+    },
+    "highland_l03": {
+      "file": "assets/models/facilities/highland_l03.glb",
+      "sha256": "d678c357bf936c8578630376b421691f05588ef65fa385f6d3464ad65d911eab",
+      "bytes": 55732,
+      "dimensions": [
+        6.6,
+        5.12,
+        6.2
+      ]
+    },
+    "highland_l04": {
+      "file": "assets/models/facilities/highland_l04.glb",
+      "sha256": "c1d40e39803497acb5c0e8c6adf7abfae3a2cd38a68e2ac4084f5329448a22e7",
+      "bytes": 64672,
+      "dimensions": [
+        6.6,
+        5.55,
+        6.2
+      ]
+    },
+    "highland_l05": {
+      "file": "assets/models/facilities/highland_l05.glb",
+      "sha256": "ee1056fa1e42f8d24893e2222cd4c08a8d72704074a4d2b89bf33d8b28af2c3b",
+      "bytes": 71884,
+      "dimensions": [
+        6.6,
+        5.98,
+        6.2
+      ]
+    }
+  }
+}

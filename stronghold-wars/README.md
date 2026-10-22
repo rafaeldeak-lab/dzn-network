@@ -51,10 +51,34 @@ wars freeze the districts and barricades with the base snapshot. Each frozen
 defensive barricade reduces a later local Assault score by three points or
 Recon by one point. Local war scores never touch DZN competitive records.
 
-The original Rosebud editor remains on the preceding version until these GLBs
-and the reviewed code are imported. An empty `assets/models/scenery` folder was
-created there, but the browser extension blocked local file transfer. The
-original project and its saved progress were not replaced or published.
+The scenery GLBs and land-clearing code were imported into the existing Rosebud
+project in the preceding stage. The editor's embedded preview stayed blank,
+while the direct game preview rendered and passed the local service checks.
+
+## District facilities and upgrade reveal
+
+Four original facility families now have five GLB models each under
+`preview/assets/models/facilities/`: Timberline Lumber Yard, Ridgewatch
+Training Range, Signal Marsh Relay and Highland Defence Works. The reproducible
+`tools/generate-facilities.mjs` script creates the assets without paid credits;
+the facility manifest records each model's dimensions and SHA-256 hash.
+
+After a plot is claimed, an owner or admin approves each facility tier. Verified
+members contribute personal Parts and Timber until both costs are met; the
+shared model advances once. The Hall level caps facility levels. Timberline
+provides daily per-member Timber (20 at Level 1, then 10 more per level).
+Members can also recycle 50 daily renewable Salvage into 30 Timber, so an old
+save that spent its tree harvest on barricades can still progress. Ridgewatch
+adds 2 Assault score per level, Signal Marsh adds 2 Recon score per level, and
+Highland Works reduces incoming scores by 2 per level. War snapshots lock those
+bonuses alongside the base and barricades when a challenge is made. Existing
+war records default missing facility bonuses to zero.
+
+Completed Hall/support and district upgrades trigger a brief DZN reveal banner,
+sound cadence, world rings, spark burst and light beam. The banner stays visible
+in Canvas 2D, and reduced-motion settings disable the new motion effects.
+The local service tests cover funding, replay, entitlement, cooldown, reload and
+frozen battle scores; `test-assets.mjs` validates all 20 new GLBs.
 
 ## Feasible next game slices
 
