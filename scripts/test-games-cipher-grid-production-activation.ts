@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const wrangler = readFileSync("wrangler.toml", "utf8");
 const productionBlock = wrangler.match(/\[env\.production\.vars\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
 
-assert.match(productionBlock, /^DZN_GAMES_HUB_ENABLED = "true"$/m);
+assert.match(productionBlock, /^DZN_GAMES_HUB_ENABLED = "false"$/m, "Games Hub maintenance must keep every game API closed.");
 assert.match(productionBlock, /^DZN_GAMES_CIPHER_GRID_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_NIGHT_RUN_ROUTE_CONTROL_MIGRATION_MAINTENANCE = /m, "Night Run maintenance must be removed after the isolated 0110 preservation rollout.");
 assert.doesNotMatch(productionBlock, /^DZN_CIRCUIT_FORGE_GRID_CONTROL_MIGRATION_MAINTENANCE = /m, "Circuit Forge maintenance must be removed after the isolated 0111 preservation rollout.");
@@ -15,4 +15,4 @@ assert.doesNotMatch(productionBlock, /^DZN_COMMS_PRESENCE_(?:READ|WRITE|RETENTIO
 assert.doesNotMatch(productionBlock, /^DZN_STORE_ENABLED = "true"$/m);
 assert.doesNotMatch(productionBlock, /^DZN_STORE_ADMIN_ENABLED = "true"$/m);
 
-console.log("Cipher Grid production activation boundary checks passed.");
+console.log("Cipher Grid configuration is preserved behind the Games Hub maintenance gate.");

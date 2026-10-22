@@ -99,12 +99,12 @@ async function run() {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 300, assemblies: 9 })).map(item => item.id),
       HUB_EQUIPMENT.map(item => item.id));
   });
-  await test("approved production flag persists in Pages config without enabling preview", async () => {
+  await test("Games Hub maintenance keeps every production game route closed without enabling preview", async () => {
     const base = unstable_readConfig({ config: "wrangler.toml" });
     const production = unstable_readConfig({ config: "wrangler.toml", env: "production" });
     const preview = unstable_readConfig({ config: "wrangler.toml", env: "preview" });
     assert.deepEqual({ ...production.vars }, {
-      DZN_GAMES_HUB_ENABLED: "true",
+      DZN_GAMES_HUB_ENABLED: "false",
       DZN_GAMES_TRIVIA_ENABLED: "true",
       DZN_GAMES_WORD_CHAIN_ENABLED: "true",
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",

@@ -42,6 +42,15 @@ export const DZN_OFFICIAL_UPDATES: readonly DznOfficialUpdate[] = [
     summary: "DZN is improving its games in focused releases. Finished changes will be announced here when they are ready to play, rather than being presented as complete early.",
     href: "/games",
   },
+  {
+    id: "games-hub-maintenance-window",
+    publishedAt: "2026-10-22",
+    audience: "Players",
+    category: "Games",
+    title: "Games Hub is temporarily closed for maintenance",
+    summary: "DZN is rebuilding the arcade before the next public opening. Existing verified player records remain protected, and completed game releases will be announced here when they are ready to play.",
+    href: "/games",
+  },
 ] as const;
 
 export function officialDznUpdates() {
