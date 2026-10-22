@@ -388,9 +388,9 @@ const animated = { radars: [], lights: [], chimneys: [] };
 const revealEffects = new Map();
 const celebrations = [];
 let revealBannerTimer = 0;
-function celebrateUpgrade(x, z, name, level) {
+function celebrateUpgrade(x, z, name, level, announce = true) {
   const banner = document.getElementById('upgradeReveal');
-  if (banner) {
+  if (banner && announce) {
     banner.querySelector('span').textContent = `${name} · Level ${level}`;
     banner.classList.remove('active');
     void banner.offsetWidth;
@@ -398,7 +398,7 @@ function celebrateUpgrade(x, z, name, level) {
     clearTimeout(revealBannerTimer);
     revealBannerTimer = setTimeout(() => banner.classList.remove('active'), GAME_CONFIG.revealSeconds * 1000);
   }
-  if (!state.muted) { beep(660, .17); setTimeout(() => beep(880, .19), 115); setTimeout(() => beep(1100, .25), 245); }
+  if (announce && !state.muted) { beep(660, .17); setTimeout(() => beep(880, .19), 115); setTimeout(() => beep(1100, .25), 245); }
   if (fallback2D || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const group = new THREE.Group();
   group.position.set(x, .15, z);
@@ -1079,11 +1079,11 @@ function startReveal(key) {
   celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
   for (const [role, definition] of Object.entries(SQUAD_ROLES)) {
     const tier = squadTier(role, state.levels);
-    if (tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit unlocked`, tier);
+    if (tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit unlocked`, tier, false);
   }
   if (key === 'hq') {
     reconcileLandScenery();
-    celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq);
+    celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq, false);
   }
   playClank();
 }
