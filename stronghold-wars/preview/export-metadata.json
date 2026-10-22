@@ -1,0 +1,17 @@
+{
+  "name": "DZN: Stronghold Wars",
+  "revisionLabel": "Strengthen Tactical Control and Atmosphere",
+  "description": "Create DZN: Stronghold Wars, a polished 3D isometric single-player survival base-builder in a detailed forest military compound, inspired by Clash of Clans. Players collect Parts, contribute to a community treasury, and fund timed upgrades across three levels. From the base, they can pan and zoom, inspect buildings for upgrade costs and benefits, and use starting Parts to upgrade immediately. A War Table offers three fictional communities and one AI practice raid against a fixed outpost: launch a squad, watch the attack, and receive a result and reward. Clearly label all rivals as simulated. Save progress locally, prevent duplicate rewards and spending, include mute, and use no paid APIs or real account connections.",
+  "mode": "Universal",
+  "exportDate": "2026-10-22T09:54:16.253Z",
+  "rosebudBuiltInSplash": {
+    "present": true,
+    "version": 1
+  },
+  "assetCount": 46,
+  "assetTypes": [
+    "image",
+    "audio",
+    "model"
+  ]
+}
