@@ -1461,6 +1461,13 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   } else {
     actions = `<p class="notice">War ${escapeHTML(war.state)} · no attack or reward can be issued.</p>`;
   }
+  if (isParticipant && ['preparation', 'active'].includes(war.state)) {
+    const scouts = service.getScoutReports(currentIdentity.id, war.id);
+    const ownScout = scouts.find(scout => scout.identityId === currentIdentity.id);
+    const away = service.getAwaySquads(currentCommunityId, war.id);
+    const ownAwayAttacks = war.attacks.filter(attack => attack.identityId === currentIdentity.id && attack.returnAt > Date.now() && !attack.returnedAt);
+    actions += `<div class="world-mission"><strong>SCOUTS & HOME DEFENCE</strong><p>${away.length} squad${away.length === 1 ? '' : 's'} away from your base. Every away squad can expose home defence to a timely counterattack; barricades reduce the bonus.</p>${readiness.eligible && hasRoster && !ownScout && scouts.length < WAR_RULES.maxScoutsPerSide ? `<button data-war-scout="${escapeHTML(war.id)}">Send scout · ${WAR_RULES.scoutArrivalMs / 1000}s to intel</button>` : ''}${scouts.map(scout => `<p>${escapeHTML(scout.id)} · ${scout.recalledAt ? 'recalled' : scout.active ? scout.arrived ? `intel received, returns in ${formatRemaining(scout.returnAt)}` : `travelling, arrives in ${formatRemaining(scout.arrivalAt)}` : 'returned'}${scout.intel ? ` · Hall L${scout.intel.hallLevel}, Tower L${scout.intel.towerLevel}, ${scout.intel.fortification} barricades` : ''}${scout.active && scout.identityId === currentIdentity.id ? ` <button data-scout-recall="${escapeHTML(scout.id)}">Recall scout</button>` : ''}</p>`).join('')}${ownAwayAttacks.map(attack => `<p>War squad ${escapeHTML(attack.attackId)} returns in ${formatRemaining(attack.returnAt)} · <button data-war-recall="${escapeHTML(attack.attackId)}" data-war-id="${escapeHTML(war.id)}">Recall to defend (25% point cost)</button></p>`).join('')}</div>`;
+  }
   const status = war.state.toUpperCase();
   return `<article class="war-card ${war.state === 'active' ? 'ready' : ''}" data-war-record="${escapeHTML(war.id)}" data-war-state="${escapeHTML(war.state)}"><span class="war-tag">${status} · ${escapeHTML(war.id)}</span><h3>${escapeHTML(challenger.name)} vs ${escapeHTML(defender.name)}</h3><p class="help">Captured before the challenge · fixed for scoring. ${isParticipant ? 'Shared war record for both preview communities.' : ''}</p>${actions}${warTimelineHTML(war)}</article>`;
 }
@@ -1518,6 +1525,21 @@ function showWarTable(errorMessage = '') {
     toast('War active · two deployments per side.'); showWarTable();
   });
   panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => launchWarAttack(button.dataset.warId, button.dataset.warAttack));
+  panel.querySelectorAll('[data-war-scout]').forEach(button => button.onclick = () => {
+    const result = service.dispatchScout(profile.id, button.dataset.warScout);
+    toast(result.ok ? 'Scout dispatched · home defence exposed until return or recall.' : result.error);
+    showWarTable();
+  });
+  panel.querySelectorAll('[data-scout-recall]').forEach(button => button.onclick = () => {
+    const result = service.recallScout(profile.id, button.dataset.scoutRecall);
+    toast(result.ok ? 'Scout returned to defend.' : result.error);
+    showWarTable();
+  });
+  panel.querySelectorAll('[data-war-recall]').forEach(button => button.onclick = () => {
+    const result = service.recallWarSquad(profile.id, button.dataset.warId, button.dataset.warRecall);
+    toast(result.ok ? `Squad recalled · ${result.penalty} points traded for home defence.` : result.error);
+    showWarTable();
+  });
   panel.querySelectorAll('[data-war-resolve]').forEach(button => button.onclick = () => {
     const result = service.resolveWar(profile.id, button.dataset.warResolve);
     if (!result.ok) { showWarTable(result.error); return; }
@@ -1526,6 +1548,48 @@ function showWarTable(errorMessage = '') {
   });
 }
 $('warBtn').onclick = showWarTable;
+
+let selectedWorldCommunityId = 'iron-pines';
+function showWorldMap() {
+  closePanel();
+  const overlay = $('worldMapOverlay');
+  const profile = service.profile();
+  const communities = service.getWorldMap();
+  const selected = communities.find(community => community.id === selectedWorldCommunityId) || communities[0];
+  selectedWorldCommunityId = selected.id;
+  const ownBase = selected.id === profile.communityId;
+  const access = service.getAccess(profile.id);
+  const war = service.getWars(profile.id).find(item => ['preparation', 'active'].includes(item.state) && [item.challengerCommunityId, item.defenderCommunityId].includes(selected.id));
+  const reports = war ? service.getScoutReports(profile.id, war.id) : [];
+  const canScout = Boolean(war && access.allowed && selected.id !== profile.communityId && service.getWarReadiness(profile.communityId, profile.id).eligible && war.roster[profile.communityId]?.some(member => member.identityId === profile.id) && !reports.some(report => report.identityId === profile.id) && reports.length < WAR_RULES.maxScoutsPerSide);
+  const away = war ? service.getAwaySquads(selected.id, war.id) : [];
+  const pins = communities.map(community => `<button class="world-pin ${community.id === selected.id ? 'selected' : ''} ${community.accessTier === 'view only' ? 'view-only' : ''}" style="left:${community.map[0]}%;top:${community.map[1]}%" data-world-community="${escapeHTML(community.id)}" aria-label="Inspect ${escapeHTML(community.name)}">${community.construction.length ? '⚒' : '⌂'}</button>`).join('');
+  const buildings = Object.entries(selected.buildings).map(([key, level]) => {
+    const asset = getBuildingAsset(key, level);
+    const construction = selected.construction.find(project => project.key === key);
+    return `<div class="world-building ${construction ? 'constructing' : ''}"><img src="${escapeHTML(asset.png)}" alt="${escapeHTML(GAME_CONFIG.buildings[key].name)} Level ${level}${construction ? ', under construction' : ''}"><strong>${escapeHTML(GAME_CONFIG.buildings[key].name)} · L${level}${construction ? ' · ⚒' : ''}</strong></div>`;
+  }).join('');
+  const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
+  const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
+  const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  overlay.style.display = 'block';
+  $('closeWorldBtn').onclick = () => { overlay.style.display = 'none'; $('worldBtn').focus(); };
+  $('worldWarBtn').onclick = () => { overlay.style.display = 'none'; showWarTable(); };
+  overlay.querySelectorAll('[data-world-community]').forEach(button => button.onclick = () => { selectedWorldCommunityId = button.dataset.worldCommunity; showWorldMap(); });
+  if ($('worldScoutBtn')) $('worldScoutBtn').onclick = () => {
+    const result = service.dispatchScout(profile.id, war.id);
+    toast(result.ok ? 'Scout dispatched · home defence exposed until return or recall.' : result.error);
+    showWorldMap();
+  };
+  overlay.querySelectorAll('[data-recall-scout]').forEach(button => button.onclick = () => {
+    const result = service.recallScout(profile.id, button.dataset.recallScout);
+    toast(result.ok ? 'Scout recalled · home defence reinforced.' : result.error);
+    showWorldMap();
+  });
+}
+$('worldBtn').onclick = showWorldMap;
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && $('worldMapOverlay').style.display === 'block') { $('worldMapOverlay').style.display = 'none'; $('worldBtn').focus(); } });
 
 function refreshWarTableTimers() {
   if (panel.style.display === 'none' || !panel.querySelector('[data-war-record]')) return;

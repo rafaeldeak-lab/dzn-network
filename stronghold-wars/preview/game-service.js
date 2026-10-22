@@ -18,6 +18,9 @@ export const WAR_RULES = Object.freeze({
   attackWindowMs: 10 * 60 * 1000,
   maxAttacksPerSide: 2,
   localRewardParts: 40,
+  scoutArrivalMs: 30 * 1000,
+  squadReturnMs: 90 * 1000,
+  maxScoutsPerSide: 2,
 });
 
 export const GAME_CONFIG = Object.freeze({
@@ -102,9 +105,9 @@ export const PREVIEW_IDENTITIES = Object.freeze([
 ]);
 
 const COMMUNITIES = Object.freeze([
-  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
-  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
-  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, members: Object.freeze(['free-owner', 'free-member']) }),
+  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, map: [47, 29], members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
+  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, map: [23, 32], members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
+  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, map: [82, 38], members: Object.freeze(['free-owner', 'free-member']) }),
 ]);
 
 const SUPPORT_KEYS = Object.freeze(['workshop', 'tower', 'comms']);
@@ -148,6 +151,8 @@ function createFreshState() {
     communities,
     members,
     wars: [],
+    scouts: [],
+    nextScoutNumber: 1,
     warActionRecords: [],
     warRewardLedger: [],
     nextWarNumber: 1,
@@ -240,6 +245,7 @@ function normalizeWarRecord(war) {
   const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => ({
     attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
     tactic: a.tactic === 'recon' ? 'recon' : 'assault', at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
+    returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus),
   })) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
   return {
@@ -353,6 +359,11 @@ function normalizeLoadedState(raw) {
     };
   }
   fresh.wars = Array.isArray(raw.wars) ? raw.wars.map(normalizeWarRecord).filter(Boolean) : [];
+  fresh.scouts = Array.isArray(raw.scouts) ? raw.scouts.filter(scout => scout && typeof scout.id === 'string' && ['iron-pines', 'violet-ridge'].includes(scout.communityId) && ['iron-pines', 'violet-ridge'].includes(scout.targetCommunityId) && scout.communityId !== scout.targetCommunityId && PREVIEW_IDENTITIES.some(profile => profile.id === scout.identityId && profile.communityId === scout.communityId)).slice(-100).map(scout => ({
+    id: scout.id, warId: String(scout.warId || ''), identityId: scout.identityId, communityId: scout.communityId, targetCommunityId: scout.targetCommunityId,
+    at: safeInt(scout.at), arrivalAt: safeInt(scout.arrivalAt), returnAt: safeInt(scout.returnAt), recalledAt: safeInt(scout.recalledAt),
+  })) : [];
+  fresh.nextScoutNumber = Math.max(1, safeInt(raw.nextScoutNumber, fresh.scouts.length + 1));
   fresh.warActionRecords = Array.isArray(raw.warActionRecords) ? raw.warActionRecords.filter(r => r && typeof r.id === 'string' && typeof r.actorId === 'string' && r.result && typeof r.result === 'object').slice(-2000).map(r => ({ id: r.id, actorId: r.actorId, kind: String(r.kind || ''), result: clone(r.result), at: safeInt(r.at) })) : [];
   fresh.warRewardLedger = Array.isArray(raw.warRewardLedger) ? raw.warRewardLedger.filter(r => r && typeof r.id === 'string' && typeof r.identityId === 'string').map(r => ({ id: r.id, warId: String(r.warId || ''), identityId: r.identityId, amount: safeInt(r.amount), at: safeInt(r.at) })) : [];
   fresh.nextWarNumber = Math.max(1, safeInt(raw.nextWarNumber, fresh.wars.length + 1));
@@ -501,6 +512,55 @@ export class LocalGameService {
     const profile = this.profile(identityId);
     if (!entry || !profile) return null;
     return { id: entry.definition.id, name: entry.definition.name, eligible: entry.definition.eligible, proActive: entry.saved.proActive, role: profile.role };
+  }
+
+  // Public-style projection for the local map. No member inventory, donor,
+  // treasury, exact location or private roster data crosses this boundary.
+  getWorldMap() {
+    return COMMUNITIES.map(definition => {
+      const saved = this.state.communities[definition.id];
+      const base = saved.base;
+      return {
+        id: definition.id, name: definition.name, map: [...definition.map], illustrative: true,
+        accessTier: definition.eligible && saved.proActive ? 'owner Pro active' : 'view only',
+        hallLevel: base.levels.hq,
+        buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
+        districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
+          facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades })),
+        construction: base.projects.filter(project => project.status === 'approved').map(project => ({
+          kind: 'building', name: GAME_CONFIG.buildings[project.key].name, key: project.key, targetLevel: project.targetLevel,
+          percent: project.targetAmount > 0 ? Math.floor(project.funded / project.targetAmount * 100) : 0,
+        })).concat(base.landPlots.flatMap(plot => [
+          plot.facilityProject ? { kind: 'facility', name: GAME_CONFIG.facilities[plot.id]?.name || 'District facility', targetLevel: plot.facilityProject.targetLevel,
+            percent: Math.floor(100 * (plot.facilityProject.partsFunded + plot.facilityProject.timberFunded) / (plot.facilityProject.partsCost + plot.facilityProject.timberCost)) } : null,
+          plot.routeProject ? { kind: 'route', name: 'Supply route', targetLevel: plot.routeProject.targetLevel,
+            percent: Math.floor(100 * (plot.routeProject.partsFunded + plot.routeProject.timberFunded) / (plot.routeProject.partsCost + plot.routeProject.timberCost)) } : null,
+        ].filter(Boolean))),
+      };
+    });
+  }
+
+  getAwaySquads(communityId, warId) {
+    const war = this._warById(warId);
+    if (!war || !['preparation', 'active'].includes(war.state)) return [];
+    const now = this.now();
+    const attacks = war.attacks.filter(attack => attack.communityId === communityId && attack.returnAt > now && (!attack.returnedAt || attack.returnedAt > now));
+    const scouts = this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === communityId && scout.returnAt > now && (!scout.recalledAt || scout.recalledAt > now));
+    return [...attacks.map(attack => ({ id: attack.attackId, kind: 'attack', returnAt: attack.returnAt })), ...scouts.map(scout => ({ id: scout.id, kind: 'scout', returnAt: scout.returnAt }))];
+  }
+
+  getScoutReports(identityId = this.state.currentIdentityId, warId = null) {
+    const profile = this.profile(identityId);
+    if (!profile || !this.getAccess(identityId).allowed) return [];
+    const now = this.now();
+    return this.state.scouts.filter(scout => scout.communityId === profile.communityId && (!warId || scout.warId === warId)).map(scout => {
+      const arrived = scout.arrivalAt <= now && (!scout.recalledAt || scout.recalledAt >= scout.arrivalAt);
+      const war = this._warById(scout.warId);
+      const target = war?.snapshots?.challenger?.communityId === scout.targetCommunityId ? war.snapshots.challenger : war?.snapshots?.defender;
+      return { ...scout, arrived, active: !scout.recalledAt && now < scout.returnAt,
+        intel: arrived && target ? { hallLevel: target.base.levels.hq, towerLevel: target.base.levels.tower,
+          fortification: target.stats.fortification, worksDefence: target.stats.worksDefence } : null };
+    });
   }
 
   getAccess(identityId = this.state.currentIdentityId) {
@@ -718,6 +778,52 @@ export class LocalGameService {
     return result;
   }
 
+  dispatchScout(identityId, warId, actionId = this.newActionId('scout-dispatch')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-dispatch');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    if (!war || !profile || ![war.challengerCommunityId, war.defenderCommunityId].includes(profile.communityId)) return { ok: false, error: 'Choose a war involving your connected community.' };
+    const accessError = this._warIdentityError(identityId, profile.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[profile.communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'This member was not on the verified pre-war roster.' };
+    if (!['preparation', 'active'].includes(war.state)) return { ok: false, error: 'Scouts can deploy during preparation or an active war.' };
+    const now = this.now();
+    if (war.state === 'preparation' && now > war.prepDeadlineAt || war.state === 'active' && now > war.attackEndsAt) return { ok: false, error: 'The mission window has closed.' };
+    if (this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === profile.communityId).length >= WAR_RULES.maxScoutsPerSide) return { ok: false, error: 'This community has deployed its two scouts.' };
+    if (this.state.scouts.some(scout => scout.warId === warId && scout.identityId === identityId)) return { ok: false, error: 'This member has already scouted in this war.' };
+    if (this.getAwaySquads(profile.communityId, warId).some(squad => war.attacks.some(attack => attack.attackId === squad.id && attack.identityId === identityId))) return { ok: false, error: 'Your war squad is away. Wait for its return before scouting.' };
+    const targetCommunityId = profile.communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const scout = { id: `scout-${this.state.nextScoutNumber++}`, warId, identityId, communityId: profile.communityId, targetCommunityId,
+      at: now, arrivalAt: now + WAR_RULES.scoutArrivalMs, returnAt: now + WAR_RULES.squadReturnMs, recalledAt: 0 };
+    this.state.scouts.push(scout);
+    if (this.state.scouts.length > 100) this.state.scouts.splice(0, this.state.scouts.length - 100);
+    war.events.push({ type: 'scout', at: now, actorId: identityId, text: `${profile.name} dispatched a scout. Home defence is exposed until recall or return.`, details: { scoutId: scout.id, returnAt: scout.returnAt } });
+    const result = { ok: true, scoutId: scout.id, arrivalAt: scout.arrivalAt, returnAt: scout.returnAt, targetCommunityId };
+    this._recordWarAction(identityId, actionId, 'scout-dispatch', result);
+    this.save();
+    return result;
+  }
+
+  recallScout(identityId, scoutId, actionId = this.newActionId('scout-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-recall');
+    if (replay) return replay;
+    const scout = this.state.scouts.find(item => item.id === scoutId);
+    const profile = this.profile(identityId);
+    if (!scout || !profile || scout.identityId !== identityId) return { ok: false, error: 'Only the scout owner can recall this mission.' };
+    const accessError = this._warIdentityError(identityId, scout.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const war = this._warById(scout.warId);
+    const now = this.now();
+    if (!war || !['preparation', 'active'].includes(war.state) || scout.recalledAt || now >= scout.returnAt) return { ok: false, error: 'This scout has already returned or the war has closed.' };
+    scout.recalledAt = now;
+    war.events.push({ type: 'scout-recall', at: now, actorId: identityId, text: `${profile.name} recalled their scout to reinforce home defence.`, details: { scoutId } });
+    const result = { ok: true, scoutId, arrived: now >= scout.arrivalAt, recalledAt: now };
+    this._recordWarAction(identityId, actionId, 'scout-recall', result);
+    this.save();
+    return result;
+  }
+
   submitWarAttack(identityId, warId, tactic, actionId = this.newActionId('war-attack')) {
     const replay = this._warActionReplay(identityId, actionId, 'attack');
     if (replay) return replay;
@@ -735,22 +841,50 @@ export class LocalGameService {
     const sideAttacks = war.attacks.filter(attack => attack.communityId === profile.communityId);
     if (sideAttacks.length >= WAR_RULES.maxAttacksPerSide) return { ok: false, error: `Attack cap reached (${WAR_RULES.maxAttacksPerSide} per community).` };
     if (war.attacks.some(attack => attack.identityId === identityId)) return { ok: false, error: 'Each roster member may deploy once per war.' };
+    if (this.getScoutReports(identityId, warId).some(scout => scout.identityId === identityId && scout.active)) return { ok: false, error: 'Your scout squad is still away. Recall it or wait for its return before attacking.' };
     const attacker = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
     const a = attacker.base.levels; const d = defender.base.levels;
     const rawScore = tactic === 'assault'
       ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
       : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
-    const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+    const awaySquads = this.getAwaySquads(defender.communityId, warId).length;
+    const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2)));
+    const scoutBonus = this.getScoutReports(identityId, warId).some(scout => scout.warId === warId && scout.arrived) ? 4 : 0;
+    const score = Math.max(0, Math.min(100, Math.round(rawScore + exposureBonus + scoutBonus)));
     const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0))));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} gained +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support and scored ${score}.`;
-    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, score, casualties, feedback };
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} gained +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
+    const returnAt = now + WAR_RULES.squadReturnMs;
+    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, score, casualties, feedback };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
+    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, returnAt, exposureBonus, scoutBonus, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
+    this.save();
+    return result;
+  }
+
+  recallWarSquad(identityId, warId, attackId, actionId = this.newActionId('war-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'war-recall');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const attack = war?.attacks.find(item => item.attackId === attackId);
+    const profile = this.profile(identityId);
+    if (!attack || !profile || attack.identityId !== identityId) return { ok: false, error: 'Only the deployed squad owner can recall this attack.' };
+    const accessError = this._warIdentityError(identityId, attack.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const now = this.now();
+    if (war.state !== 'active' || attack.returnedAt || !attack.returnAt || now >= attack.returnAt) return { ok: false, error: 'This squad has returned or the war is closed.' };
+    const penalty = Math.ceil(attack.score / 4);
+    attack.returnedAt = now;
+    attack.recallPenalty = penalty;
+    attack.score -= penalty;
+    war.score[attack.communityId] -= penalty;
+    war.events.push({ type: 'squad-recall', at: now, actorId: identityId, text: `${profile.name} recalled a war squad to defend home · -${penalty} attack points.`, details: { attackId, penalty } });
+    const result = { ok: true, warId, attackId, returnedAt: now, penalty, score: attack.score, totalScore: war.score[attack.communityId] };
+    this._recordWarAction(identityId, actionId, 'war-recall', result);
     this.save();
     return result;
   }

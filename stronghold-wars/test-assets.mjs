@@ -93,3 +93,8 @@ for (const [name, entry] of Object.entries(chronicleManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid Chronicle model bounds: ${name}`);
 }
 console.log(`DZN Chronicle Beacon verified: ${chronicleNames.length} original levelled GLBs.`);
+const worldManifest = JSON.parse(readFileSync(join(root, 'assets/world/manifest.json'), 'utf8'));
+const worldBytes = readFileSync(join(root, ...worldManifest.asset.split('/')));
+if (worldBytes.toString('latin1', 0, 4) !== '\x89PNG' || worldBytes.readUInt32BE(16) !== worldManifest.dimensions[0] || worldBytes.readUInt32BE(20) !== worldManifest.dimensions[1]) throw new Error('Invalid Stronghold world texture size or PNG signature.');
+if (createHash('sha256').update(worldBytes).digest('hex') !== worldManifest.sha256) throw new Error('Stronghold world texture checksum mismatch.');
+console.log(`DZN world map verified: ${worldManifest.dimensions.join('x')} original texture.`);
