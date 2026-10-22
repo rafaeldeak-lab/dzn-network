@@ -12,7 +12,6 @@ import {
   Send,
   ShieldCheck,
   Trash2,
-  Users,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
@@ -595,7 +594,6 @@ export function DznCommsShell() {
                   <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
                   <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
                   <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
-                  <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
                 </>}
               </div>
               <details className="mt-4 rounded-md border border-violet-300/18 bg-violet-400/8 p-3">
