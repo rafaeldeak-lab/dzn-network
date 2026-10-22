@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier } from './squad-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 
@@ -851,18 +852,60 @@ for (const key of Object.keys(DEFS)) {
 if (!fallback2D) for (const key of Object.keys(DEFS)) requestBuildingModel(key, state.levels[key]);
 applyScaffoldState();
 
+// DZN squad kit: original five-tier GLBs, shared across base patrols and battles.
+const squadTemplates = new Map();
+function loadSquadTemplate(role, tier) {
+  const path = squadAsset(role, tier);
+  if (!path) return Promise.resolve(null);
+  if (!squadTemplates.has(path)) squadTemplates.set(path, gltfLoader.loadAsync(path).then(gltf => gltf.scene).catch(error => {
+    console.warn(`DZN ${role} Level ${tier} kit could not load; retaining a functional soldier silhouette.`, error);
+    return null;
+  }));
+  return squadTemplates.get(path);
+}
+function equipSoldier(soldier, role, tier) {
+  const path = squadAsset(role, tier);
+  if (soldier.userData.squadAsset === path) return;
+  soldier.userData.squadAsset = path;
+  soldier.userData.squadRole = role;
+  soldier.userData.squadTier = tier;
+  const token = (soldier.userData.loadToken || 0) + 1;
+  soldier.userData.loadToken = token;
+  soldier.clear();
+  const silhouette = new THREE.Group();
+  const color = role === 'recon' ? MAT.purple : role === 'engineer' ? MAT.metal : MAT.olive;
+  box(silhouette, 0.45, 0.65, 0.3, color, 0, 0.93);
+  cyl(silhouette, 0.21, 0.21, 0.25, color, 0, 1.43);
+  soldier.add(silhouette);
+  loadSquadTemplate(role, tier).then(template => {
+    if (!template || soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
+    soldier.clear();
+    soldier.add(template.clone(true));
+  });
+}
+function makeSoldier(role, levels) {
+  const soldier = new THREE.Group();
+  equipSoldier(soldier, role, squadTier(role, levels));
+  return soldier;
+}
+function animateSoldier(soldier, phase, pace = 1) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const swing = Math.sin(phase) * 0.42 * pace;
+  for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
+    const limb = soldier.getObjectByName(name);
+    if (limb) limb.rotation.x = angle;
+  }
+}
+
 // Patrol soldiers
 const patrols = [];
 for (let i = 0; i < 5; i++) {
-  const soldier = new THREE.Group();
-  box(soldier, 0.5, 0.8, 0.35, MAT.olive, 0, 0.6);
-  box(soldier, 0.18, 0.6, 0.18, MAT.dark, -0.13, 0);
-  box(soldier, 0.18, 0.6, 0.18, MAT.dark, 0.13, 0);
-  cyl(soldier, 0.22, 0.22, 0.3, MAT.olive, 0, 1.4);
-  box(soldier, 0.1, 0.1, 0.6, MAT.metal, 0.3, 0.9, 0.2);
+  const role = ['assault', 'recon', 'engineer', 'assault', 'recon'][i];
+  const soldier = makeSoldier(role, state.levels);
   scene.add(soldier);
-  patrols.push({ mesh: soldier, radius: 13 + (i % 2) * 2.5, phase: (i / 5) * Math.PI * 2, speed: 0.12 + i * 0.01 });
+  patrols.push({ mesh: soldier, role, radius: 13 + (i % 2) * 2.5, phase: (i / 5) * Math.PI * 2, speed: 0.12 + i * 0.01 });
 }
+function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
 
 // Smoke particles
 const smokeMat = new THREE.MeshBasicMaterial({ color: 0x9aa39a, transparent: true, opacity: 0.5, depthWrite: false });
@@ -947,6 +990,7 @@ function renderIdentityOptions() {
     closePanel();
     reconcileBasePresentation();
     reconcileLandScenery();
+    syncPatrolKits();
     updateHud();
     updateBuildingList();
     toast(`Preview identity: ${service.profile().name}`);
@@ -977,11 +1021,22 @@ function updateBuildingList() {
   }).join('');
   document.querySelectorAll('[data-building]').forEach(button => button.addEventListener('click', () => showBuildingPanel(button.dataset.building)));
 }
+function currentAwaySquads() {
+  const profile = service.profile();
+  return service.getWars(profile.id).filter(war => ['preparation', 'active'].includes(war.state))
+    .flatMap(war => service.getAwaySquads(profile.communityId, war.id));
+}
 function updateHud() {
   const profile = service.profile();
   const community = service.getCommunityInfo();
   const access = service.getAccess();
   $('communityBadge').textContent = `${access.allowed ? '●' : '🔒'} ${community.name} · ${community.proActive ? 'OWNER PRO ACTIVE' : 'PRO INACTIVE'} · ${profile.role.toUpperCase()}`;
+  const away = currentAwaySquads().length;
+  const defenceChip = $('defenceChip');
+  defenceChip.hidden = away === 0;
+  defenceChip.classList.toggle('exposed', away > 0);
+  defenceChip.textContent = `${away} SQUAD${away === 1 ? '' : 'S'} AWAY · HOME EXPOSED`;
+  patrols.forEach((patrol, index) => { patrol.mesh.visible = index >= Math.min(away, 3); });
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -999,10 +1054,16 @@ function formatRemaining(timestamp) {
 function startReveal(key) {
   const building = buildings[key];
   if (!building) return;
+  const previousLevels = { ...state.levels, [key]: Math.max(1, state.levels[key] - 1) };
   refreshBuilding(key);
+  syncPatrolKits();
   building.scaffold.visible = true;
   revealEffects.set(key, Date.now() + GAME_CONFIG.revealSeconds * 1000);
   celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
+  for (const [role, definition] of Object.entries(SQUAD_ROLES)) {
+    const tier = squadTier(role, state.levels);
+    if (tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit unlocked`, tier);
+  }
   if (key === 'hq') {
     reconcileLandScenery();
     celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq);
@@ -1165,6 +1226,25 @@ function showForgePanel() {
     if (!result.ok) toast(result.error); else toast(`Forge claimed: +${result.amount} Parts`);
     showForgePanel();
   });
+}
+
+function showSquadPanel() {
+  selectedKey = null;
+  updateBuildingList();
+  const levels = state.levels;
+  const cards = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
+    const tier = squadTier(role, levels);
+    const sourceName = GAME_CONFIG.buildings[definition.source].name;
+    const equipment = role === 'assault'
+      ? ['Field carbine', 'Shoulder armour', 'Knee plates and spare magazine', 'Forearm shield', 'Illuminated shield rank']
+      : role === 'recon'
+        ? ['Optic visor and scanner', 'Hood and utility armour', 'Longer signal mast', 'Wide optic array', 'Elite signal markers']
+        : ['Field tools and axe', 'Repair canister', 'Reinforced knees', 'Welding guard', 'Elite work lights'];
+    return `<article class="squad-card ${role}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${role === 'assault' ? '◈' : role === 'recon' ? '◇' : '✦'}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>L${tier}</b></div><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} equipped soldier Level ${tier}"><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<img class="${level === tier ? 'current' : ''}" src="${squadPortrait(role, level)}" loading="lazy" alt="Level ${level} gear preview" title="Level ${level} · ${escapeHTML(equipment[level - 1])}">`).join('')}</div><p>${escapeHTML(definition.kit)}. Visual tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><ol>${equipment.map((item, index) => `<li class="${index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)}</li>`).join('')}</ol></article>`;
+  }).join('');
+  const away = currentAwaySquads().length;
+  openPanel(`<h2>DZN Squad Armoury</h2><p>The base patrols, practice raid and war battle now use original equipped soldier models. Every role has five distinct gear tiers.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">Uniforms are visual progression. War scores still use the existing frozen Hall, Watchtower, district and defence rules; this panel cannot unlock a paid action.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('closeBtn').onclick = closePanel;
 }
 
 function refreshForgePanel() {
@@ -1378,6 +1458,7 @@ $('collectBtn').onclick = () => {
 };
 $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
+$('squadsBtn').onclick = showSquadPanel;
 $('progressionBtn').onclick = showProgressionPanel;
 $('landBtn').onclick = showLandPanel;
 $('chronicleBtn').onclick = showChroniclePanel;
@@ -1571,8 +1652,9 @@ function showWorldMap() {
   }).join('');
   const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
   const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
+  const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · gear L${squadTier(role, selected.buildings)}</span>`).join('');
   const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
-  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
   overlay.style.display = 'block';
   $('closeWorldBtn').onclick = () => { overlay.style.display = 'none'; $('worldBtn').focus(); };
   $('worldWarBtn').onclick = () => { overlay.style.display = 'none'; showWarTable(); };
@@ -1653,18 +1735,16 @@ function launchWarAttack(warId, tactic) {
   if (!result.ok) { showWarTable(result.error); return; }
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+  const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
   buildWarBaseVisual(defendingSide);
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
-  const squadSize = Math.min(10, (profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender).stats.squadSize);
+  const squadSize = Math.min(10, attackingSide.stats.squadSize);
   const target = OUTPOST.clone().add(new THREE.Vector3(-3, 0, 0));
   const troops = [];
   for (let i = 0; i < squadSize; i++) {
-    const troop = new THREE.Group();
-    box(troop, 0.48, 0.8, 0.35, MAT.olive, 0, 0.45);
-    box(troop, 0.17, 0.52, 0.16, MAT.dark, -0.13, 0);
-    box(troop, 0.17, 0.52, 0.16, MAT.dark, 0.13, 0);
-    cyl(troop, 0.2, 0.2, 0.26, MAT.olive, 0, 1.05);
+    const role = tactic === 'recon' ? 'recon' : 'assault';
+    const troop = makeSoldier(role, attackingSide.base.levels);
     const start = new THREE.Vector3(OUTPOST.x - 22, 0, OUTPOST.z + (i - (squadSize - 1) / 2) * 1.15);
     const troopTarget = target.clone().add(new THREE.Vector3(0, 0, (i - (squadSize - 1) / 2) * 0.9));
     troop.position.copy(start);
@@ -1689,6 +1769,7 @@ function updateWarBattle(dt) {
     troop.mesh.position.lerpVectors(troop.start, troop.target, progress);
     troop.mesh.position.y = Math.abs(Math.sin(warBattle.time * 8 + troop.phase)) * 0.08;
     troop.mesh.rotation.y = Math.PI / 2;
+    animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase);
   }
   warBattle.smokeTimer += dt;
   if (warBattle.smokeTimer >= 0.8 && progress > 0.65) {
@@ -1730,9 +1811,8 @@ function launchRaid() {
   const troops = [];
   const count = 2 + state.levels.hq * 2;
   for (let i = 0; i < count; i++) {
-    const t = new THREE.Group();
-    box(t, 0.6, 0.9, 0.4, MAT.olive);
-    cyl(t, 0.25, 0.25, 0.3, MAT.purple, 0, 0.9);
+    const t = makeSoldier('assault', state.levels);
+    t.userData.stride = i * 0.65;
     t.position.set(OUTPOST.x - 18, 0, OUTPOST.z + (i - count / 2) * 1.5);
     scene.add(t);
     troops.push(t);
@@ -1758,7 +1838,9 @@ function updateRaid(dt) {
     if (dir.length() > 4) {
       t.position.addScaledVector(dir.normalize(), dt * 5);
       t.rotation.y = Math.atan2(dir.x, dir.z);
+      animateSoldier(t, raid.time * 8 + t.userData.stride);
     } else {
+      animateSoldier(t, raid.time * 2 + t.userData.stride, 0.22);
       target.userData.hp -= firepower * dt;
       if (Math.random() < dt * 6) {
         spawnSmoke(target.position.clone().add(new THREE.Vector3(0, 1, 0)));
@@ -1963,6 +2045,7 @@ renderer.setAnimationLoop(time => {
     const a = p.phase + elapsed * p.speed;
     p.mesh.position.set(Math.cos(a) * p.radius, Math.abs(Math.sin(elapsed * 8)) * 0.08, Math.sin(a) * p.radius);
     p.mesh.rotation.y = -a;
+    animateSoldier(p.mesh, elapsed * 7 + p.phase);
   });
   Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {

@@ -113,6 +113,27 @@ community's history while owner Pro is active. Older saves display completed
 work without fabricating dates. The Chronicle is cosmetic and never changes
 funding, war scores, DZN rankings or live server data.
 
+## DZN equipped squads
+
+`tools/generate-squads.mjs` creates 15 original low-poly GLBs: DZN Warden
+(Assault), Ghost (Recon) and Fixer (construction patrol), each at five visibly
+different gear tiers. The models include named arm and leg pivots for walking
+motion, helmets, body armour, role tools and DZN green/purple/amber accents.
+`tools/render-squad-portraits.mjs` renders those same GLBs into 15 transparent
+400px close-up PNGs for the Armoury, so each gear tier can be inspected. The
+manifests record dimensions, mesh counts and SHA-256; `test-assets.mjs` checks
+all 30 files and the models' animatable limbs.
+
+Base patrols, practice raiders and local war squads now load the actual models.
+The Squads panel explains the current equipment; the World Map shows the
+opponent's visual gear tier from its public building levels. Command Hall caps
+gear, while Watchtower, Communications and Workshop set Warden, Ghost and Fixer
+tiers respectively. An upgrade that raises a tier triggers the existing reveal
+burst and announces the newly equipped role. These are cosmetic tiers: war
+scores still follow the existing frozen rules, and preview gear never supplies
+live DZN ownership, membership or entitlement evidence. A simple silhouette
+keeps the local scene usable while GLBs load or if one fails.
+
 ## Feasible next game slices
 
 1. **Server-backed shared base:** create D1 state and a ledger for Timber,

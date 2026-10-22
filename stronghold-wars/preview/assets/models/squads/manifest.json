@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural DZN Stronghold Wars soldier geometry; no paid provider or external art.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up; forward +Z",
+  "roles": {
+    "assault": "DZN Warden: direct-push carbine, armour and shield",
+    "recon": "DZN Ghost: scout optics, scanner and signal mast",
+    "engineer": "DZN Fixer: timber axe, construction and repair kit"
+  },
+  "assets": {
+    "assault_l01": {
+      "file": "assets/models/squads/assault_l01.glb",
+      "sha256": "3121813619b7cbd3da6fa377fa486f54231ebeace882afa78ef2ffd1ed9cfaf6",
+      "bytes": 46960,
+      "dimensions": [
+        0.865,
+        1.76,
+        1.155
+      ],
+      "meshes": 23
+    },
+    "assault_l02": {
+      "file": "assets/models/squads/assault_l02.glb",
+      "sha256": "2cfe50becf2d7bf7012407bb5e1ea2bfd13bc52ebb6af2566db07270b8667c6d",
+      "bytes": 54232,
+      "dimensions": [
+        0.88,
+        1.76,
+        1.155
+      ],
+      "meshes": 27
+    },
+    "assault_l03": {
+      "file": "assets/models/squads/assault_l03.glb",
+      "sha256": "89349ea2a860c8830402099dd66b7c891202b97cf567e69915c7a0c6c1e69522",
+      "bytes": 63340,
+      "dimensions": [
+        0.88,
+        1.76,
+        1.155
+      ],
+      "meshes": 32
+    },
+    "assault_l04": {
+      "file": "assets/models/squads/assault_l04.glb",
+      "sha256": "f215a8748de232622c24936612c32626ce00ad26477ffbbfaedc98644fd1b32f",
+      "bytes": 72368,
+      "dimensions": [
+        1.095,
+        1.76,
+        1.155
+      ],
+      "meshes": 37
+    },
+    "assault_l05": {
+      "file": "assets/models/squads/assault_l05.glb",
+      "sha256": "1e0e07f0bf9fbb1c65f7eeb71ee7cea8fd287f9f1b16de0722df632ec7b7969b",
+      "bytes": 76020,
+      "dimensions": [
+        1.095,
+        1.76,
+        1.155
+      ],
+      "meshes": 39
+    },
+    "recon_l01": {
+      "file": "assets/models/squads/recon_l01.glb",
+      "sha256": "733b23da2348cd5033f5588cdb6f6d25abf831453d2d7b12d5448c71764c8e83",
+      "bytes": 53364,
+      "dimensions": [
+        0.963,
+        1.975,
+        0.795
+      ],
+      "meshes": 26
+    },
+    "recon_l02": {
+      "file": "assets/models/squads/recon_l02.glb",
+      "sha256": "4a18643d47e0bc6799b603ae1b73997298df1170a251ca970cd5a9e2f2731f8f",
+      "bytes": 60608,
+      "dimensions": [
+        0.98,
+        2.105,
+        0.795
+      ],
+      "meshes": 30
+    },
+    "recon_l03": {
+      "file": "assets/models/squads/recon_l03.glb",
+      "sha256": "9a4b1393e1c1393252d679b037a2b987085d9eb21bc6ce7c5255824a355d8bc7",
+      "bytes": 67936,
+      "dimensions": [
+        0.998,
+        2.235,
+        0.795
+      ],
+      "meshes": 34
+    },
+    "recon_l04": {
+      "file": "assets/models/squads/recon_l04.glb",
+      "sha256": "493b8a7ae5b98b6cc7998a48ab2baf68d64d6e1a27427f290e8fdcf86bf3fd8c",
+      "bytes": 78780,
+      "dimensions": [
+        1.015,
+        2.365,
+        0.795
+      ],
+      "meshes": 40
+    },
+    "recon_l05": {
+      "file": "assets/models/squads/recon_l05.glb",
+      "sha256": "cfbf28e60d872c00b7bf9460e7e577b0d29ca95ce7a389be5e714d3441d8bd34",
+      "bytes": 80612,
+      "dimensions": [
+        1.033,
+        2.495,
+        0.795
+      ],
+      "meshes": 41
+    },
+    "engineer_l01": {
+      "file": "assets/models/squads/engineer_l01.glb",
+      "sha256": "ba1630df8134d4e388b459449d853fc3969a9ce44c7f2002825b76854e36652f",
+      "bytes": 50456,
+      "dimensions": [
+        0.99,
+        1.93,
+        0.71
+      ],
+      "meshes": 25
+    },
+    "engineer_l02": {
+      "file": "assets/models/squads/engineer_l02.glb",
+      "sha256": "1e83749ac59bbec26bdb91f4c35ecddca3e06ff533a7cf226559a70aa36708ee",
+      "bytes": 59568,
+      "dimensions": [
+        1.005,
+        1.93,
+        0.71
+      ],
+      "meshes": 30
+    },
+    "engineer_l03": {
+      "file": "assets/models/squads/engineer_l03.glb",
+      "sha256": "584c6d0e9c2ec09941dce705af0f038285776b02ccce3162da224f3ace65b8c0",
+      "bytes": 66852,
+      "dimensions": [
+        1.005,
+        1.93,
+        0.71
+      ],
+      "meshes": 34
+    },
+    "engineer_l04": {
+      "file": "assets/models/squads/engineer_l04.glb",
+      "sha256": "ed0885893a1dc9beff5c88600dcda9747b310c0b536980bfb45ebebd9f5b0a29",
+      "bytes": 75884,
+      "dimensions": [
+        1.005,
+        1.93,
+        0.71
+      ],
+      "meshes": 39
+    },
+    "engineer_l05": {
+      "file": "assets/models/squads/engineer_l05.glb",
+      "sha256": "f0feb68b4ef9d709197bc32ee19cf073c288f7f9caa14d95d611c37fe05ec0ca",
+      "bytes": 77712,
+      "dimensions": [
+        1.005,
+        1.93,
+        0.71
+      ],
+      "meshes": 40
+    }
+  }
+}

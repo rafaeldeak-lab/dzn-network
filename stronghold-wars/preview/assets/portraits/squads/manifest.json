@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Local Chromium render of original DZN Stronghold Wars squad GLBs; no paid provider or external art.",
+  "dimensions": [
+    400,
+    400
+  ],
+  "assets": {
+    "assault_l01": {
+      "file": "assets/portraits/squads/assault_l01.png",
+      "sha256": "09bb9c65d73aa889865641421da4c922f4004cc44f15aa1a2fb3a6f0f1103684",
+      "bytes": 13278
+    },
+    "assault_l02": {
+      "file": "assets/portraits/squads/assault_l02.png",
+      "sha256": "d986ff24bc8de7ddb0b79efc3825d24a7c536080a936edbe85a68f90269f41b3",
+      "bytes": 14130
+    },
+    "assault_l03": {
+      "file": "assets/portraits/squads/assault_l03.png",
+      "sha256": "8b67a1533fbeb09259f334d14729dd6e8033e00991675923e0a2e3b48549712d",
+      "bytes": 14874
+    },
+    "assault_l04": {
+      "file": "assets/portraits/squads/assault_l04.png",
+      "sha256": "e40db2a4586b88196ff2c6787e7b917b2b89512a8cb96d1162f4e9f4fd6e8ce3",
+      "bytes": 15380
+    },
+    "assault_l05": {
+      "file": "assets/portraits/squads/assault_l05.png",
+      "sha256": "ae946c3ce3668e4783869604618392db3dd594eae9963660c25996e0def2bb00",
+      "bytes": 15800
+    },
+    "recon_l01": {
+      "file": "assets/portraits/squads/recon_l01.png",
+      "sha256": "eacfaf842397df9495d7b8a34ed0b5eda537a85e1df22fc3393e7b0d8aa8aaae",
+      "bytes": 11682
+    },
+    "recon_l02": {
+      "file": "assets/portraits/squads/recon_l02.png",
+      "sha256": "700908c7a131a2c6c820d73c7587d5bf99deae780c5b8717a2ba5b5a1a1d857b",
+      "bytes": 12476
+    },
+    "recon_l03": {
+      "file": "assets/portraits/squads/recon_l03.png",
+      "sha256": "5c1a8649f2bcf7e7c3584be7b0cf24c70a4b743f4acddc62bed10b62b4c00bb1",
+      "bytes": 12990
+    },
+    "recon_l04": {
+      "file": "assets/portraits/squads/recon_l04.png",
+      "sha256": "18d6ba5425ec4cba69fcacd62bdc5724810d78599415059f8dede847ba92654c",
+      "bytes": 13593
+    },
+    "recon_l05": {
+      "file": "assets/portraits/squads/recon_l05.png",
+      "sha256": "dc46a4eb7af2e5352574bf80f02216fe6e81b48385f0612215a4184e76abc6cd",
+      "bytes": 13703
+    },
+    "engineer_l01": {
+      "file": "assets/portraits/squads/engineer_l01.png",
+      "sha256": "c65b2d529480b679a79352a99fa42da98a85cdab17be6d32571cc9b5b8f04027",
+      "bytes": 13051
+    },
+    "engineer_l02": {
+      "file": "assets/portraits/squads/engineer_l02.png",
+      "sha256": "bc8e81bcfad01e0e914a10c04fdc5069f03efc5b871a6c57fcf9afa6242ecd4a",
+      "bytes": 13942
+    },
+    "engineer_l03": {
+      "file": "assets/portraits/squads/engineer_l03.png",
+      "sha256": "94c78fab2deffaa6945a78b83d6ea792caec17f814e1a9c62c0b402dadbd8539",
+      "bytes": 14630
+    },
+    "engineer_l04": {
+      "file": "assets/portraits/squads/engineer_l04.png",
+      "sha256": "5d07e4248f7c683432b9d85c74e6344dfe9f1d71173f5447df2296442d36dee0",
+      "bytes": 15091
+    },
+    "engineer_l05": {
+      "file": "assets/portraits/squads/engineer_l05.png",
+      "sha256": "22d982363112975754685f676f31f5bda6f787c072ec7a3ffb4bb20a7d26f1f5",
+      "bytes": 15237
+    }
+  }
+}

@@ -35,6 +35,7 @@
       .chip { padding: 8px 11px; background: rgba(13, 20, 16, .9); border: 1px solid rgba(112, 229, 154, .38); border-radius: 9px; box-shadow: 0 5px 20px rgba(0,0,0,.23); font-size: 12px; font-weight: 700; white-space: nowrap; }
       .title { font: 700 12px Orbitron, sans-serif; color: var(--purple); border-color: rgba(192,132,252,.7); letter-spacing: .05em; }
       .badge { color: var(--green); }
+      .chip.exposed { border-color: #dba460; color: #ffdcaa; background: rgba(77,45,25,.9); box-shadow: 0 0 16px rgba(231,157,86,.16); }
       .dim { color: var(--muted); }
       .accent { color: var(--purple); }
       .preview-card { position: fixed; z-index: 4; top: 64px; left: 14px; width: min(280px, calc(100vw - 28px)); max-height: min(76vh, 760px); overflow: auto; background: rgba(13,19,16,.9); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); backdrop-filter: blur(8px); }
@@ -95,6 +96,27 @@
       .war-tactic strong { color: var(--green); font-size: 11px; }
       .war-tactic p { color: var(--muted); font-size: 9px !important; }
       .war-tag { color: var(--purple); font: 700 9px Orbitron, sans-serif; letter-spacing: .07em; }
+      .squad-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
+      .panel:has(.squad-grid) { width: min(700px, calc(100vw - 28px)); }
+      .squad-card { padding: 11px; border: 1px solid rgba(112,229,154,.26); border-radius: 11px; background: linear-gradient(145deg, rgba(46,68,54,.38), rgba(13,19,16,.4)); }
+      .squad-card.recon { border-color: rgba(192,132,252,.38); }
+      .squad-card.engineer { border-color: rgba(229,173,101,.38); }
+      .squad-card-head { display: flex; gap: 8px; align-items: center; }
+      .squad-card-head strong { display: block; color: var(--green); font: 700 12px Orbitron, sans-serif; }
+      .squad-card-head small { display: block; color: var(--muted); font-size: 9px; }
+      .squad-card-head b { margin-left: auto; color: var(--purple); font: 700 13px Orbitron, sans-serif; }
+      .squad-emblem { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--green); font-size: 20px; }
+      .squad-card.recon .squad-emblem { color: var(--purple); }
+      .squad-card.engineer .squad-emblem { color: #e3a865; }
+      .squad-portrait { display: block; width: min(100%, 170px); aspect-ratio: 1; margin: 6px auto; object-fit: contain; border-radius: 9px; background: radial-gradient(circle at 50% 50%, rgba(94,132,112,.18), transparent 67%); }
+      .squad-tier-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+      .squad-tier-strip img { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(255,255,255,.025); }
+      .squad-tier-strip img.current { border-color: var(--green); box-shadow: 0 0 10px rgba(112,229,154,.22); }
+      .squad-card p { font-size: 10px; line-height: 1.45; }
+      .squad-card ol { list-style: none; margin: 8px 0 0; padding: 0; }
+      .squad-card li { padding: 3px 0; color: #889b90; font-size: 9px; }
+      .squad-card li.equipped { color: #b9f5cc; }
+      .squad-card li.equipped::before { content: '✓ '; }
       .world-overlay { position: fixed; z-index: 7; inset: 7vh 4vw auto; max-height: 88vh; display: none; overflow: auto; padding: 18px; border: 1px solid rgba(112,229,154,.65); border-radius: 18px; background: rgba(8,17,17,.97); box-shadow: 0 24px 80px #000b; }
       .world-overlay h2 { margin: 0; color: var(--green); font: 700 18px Orbitron, sans-serif; }
       .world-overlay p { color: #c4d2c9; font-size: 11px; line-height: 1.5; }
@@ -116,6 +138,9 @@
       .world-construction { padding: 9px; margin: 8px 0; border: 1px dashed #e6bf79; border-radius: 9px; background: repeating-linear-gradient(135deg,#5d4b2c66 0 8px,#2b281d 8px 16px); }
       .world-construction strong { font-size: 10px; color: #ffe1ab; }
       .world-construction .progress-track { height: 8px; }
+      .world-kits { display: flex; gap: 5px; flex-wrap: wrap; margin: 7px 0 12px; }
+      .world-kit { padding: 5px 7px; border: 1px solid rgba(112,229,154,.25); border-radius: 7px; background: rgba(112,229,154,.06); color: #d3e4d7; font-size: 9px; }
+      .world-kit b { color: var(--green); }
       .world-mission { padding: 8px; margin: 7px 0; border: 1px solid #6f538c; border-radius: 9px; background: #211b2b; }
       .world-mission strong { color: #ddb8ff; font-size: 10px; }
       @media (prefers-reduced-motion: reduce) { .world-building.constructing::after { animation: none; } }
@@ -234,6 +259,7 @@
     <header id="hud" aria-label="Stronghold controls">
       <span class="chip title">DZN: STRONGHOLD WARS</span>
       <span class="chip badge" id="communityBadge">COMMUNITY · LOCAL PREVIEW</span>
+      <span class="chip" id="defenceChip" hidden>HOME DEFENCE</span>
       <span class="chip" id="parts">⚙ 0 Parts</span>
       <span class="chip" id="salvage">♻ 0 Salvage</span>
       <span class="chip" id="timber">🪵 0 Timber</span>
@@ -241,6 +267,7 @@
       <button id="collectBtn">Collect</button>
       <button id="projectsBtn">Projects</button>
       <button id="forgeBtn">Forge</button>
+      <button id="squadsBtn">Squads</button>
       <button id="progressionBtn">Progression</button>
       <button id="landBtn">Land &amp; Forest</button>
       <button id="chronicleBtn">Chronicle</button>
