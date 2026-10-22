@@ -5,7 +5,7 @@ import { DznCommsShell } from "@/components/comms/dzn-comms-shell";
 export const metadata: Metadata = {
   title: "DZN Comms | DZN Network",
   description:
-    "Open moderated DZN Global Chat and use DZN Assist for trusted website, player and server guidance.",
+    "Open moderated DZN Global Chat, browse official DZN updates, and use DZN Assist for trusted website, player and server guidance.",
 };
 
 export default function CommunityPage() {

@@ -4,10 +4,10 @@ import Image from "next/image";
 import {
   AlertTriangle,
   Bot,
-  ChevronRight,
   Flag,
   Hash,
   LockKeyhole,
+  Megaphone,
   MessageCircle,
   Send,
   ShieldCheck,
@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DznAssist } from "./dzn-assist";
+import { DznUpdatesFeed } from "./dzn-updates-feed";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import { mergeDeletionNotices, type DeletionNotice } from "./deletion-notices";
@@ -118,10 +119,11 @@ export function DznCommsShell() {
       ? "Checking whether DZN Global Chat is available."
       : "Message history is not active here. No messages are shown.",
   }));
+  const isUpdatesChannel = selectedChannel === "dzn-updates";
   const liveHistoryRuntimeEnabled = history.status === "ready" && history.payload.feature_flags.sending_enabled;
 
   useEffect(() => {
-    if (!historyProbeEnabled) return;
+    if (!historyProbeEnabled || selectedChannel === "dzn-updates") return;
 
     const controller = new AbortController();
     let poller: number | undefined;
@@ -184,6 +186,33 @@ export function DznCommsShell() {
     };
   }, [selectedChannel, liveHistoryRuntimeEnabled]);
 
+  useEffect(() => {
+    const selectChannelFromHash = () => {
+      const nextChannel = window.location.hash === "#dzn-updates" ? "dzn-updates" : "global-chat";
+      if (selectedChannelRef.current === nextChannel) return;
+      historyRequestGenerationRef.current += 1;
+      setDraft("");
+      setComposerMessage("");
+      selectedChannelRef.current = nextChannel;
+      if (nextChannel === "global-chat") {
+        setHistory({
+          status: historyProbeEnabled ? "loading" : "static",
+          payload: staticPayload,
+          message: historyProbeEnabled ? "Opening Global Chat." : "Message history is not active here. No messages are shown.",
+        });
+      }
+      setSelectedChannel(nextChannel);
+    };
+    selectChannelFromHash();
+    window.addEventListener("hashchange", selectChannelFromHash);
+    return () => window.removeEventListener("hashchange", selectChannelFromHash);
+  }, []);
+
+  useEffect(() => {
+    if (!isUpdatesChannel || window.location.hash !== "#dzn-updates") return;
+    document.getElementById("dzn-updates")?.scrollIntoView({ block: "start" });
+  }, [isUpdatesChannel]);
+
   useEffect(() => () => {
     for (const timeout of deletionNoticeTimeoutsRef.current.values()) window.clearTimeout(timeout);
     deletionNoticeTimeoutsRef.current.clear();
@@ -225,13 +254,25 @@ export function DznCommsShell() {
   const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
   const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
-  const selectedChannelAccessLabel = sendingEnabled
+  const selectedChannelAccessLabel = isUpdatesChannel
+    ? "Official updates"
+    : sendingEnabled
     ? "Live now"
     : history.status === "ready"
       ? "Read-only history"
       : history.status === "loading"
         ? "Checking access"
         : "Preview only";
+
+  function selectUpdatesChannel() {
+    if (selectedChannelRef.current === "dzn-updates") return;
+    historyRequestGenerationRef.current += 1;
+    setDraft("");
+    setComposerMessage("");
+    selectedChannelRef.current = "dzn-updates";
+    setSelectedChannel("dzn-updates");
+    if (window.location.hash !== "#dzn-updates") window.history.replaceState(null, "", "#dzn-updates");
+  }
 
   async function handleSend(event: FormEvent) {
     event.preventDefault();
@@ -365,22 +406,32 @@ export function DznCommsShell() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
-      <section className="mx-auto flex w-full max-w-[84rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="DZN communication tools" className={`grid gap-2 rounded-md border border-white/10 bg-[#060a15]/95 p-2 ${ownerDiscordAccessUiEnabled ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
-          <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Comms</span><span className="block text-xs font-bold text-emerald-200">{selectedChannelAccessLabel}</span></span>
-            <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+      <section className="mx-auto flex w-full max-w-[92rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
+        <nav aria-label="DZN communication tools" className="flex flex-wrap items-center gap-x-1 gap-y-2 border-y border-white/10 bg-[#050812]/92 px-2 py-2">
+          <a href="#global-chat" onClick={() => {
+            if (selectedChannelRef.current === "global-chat") return;
+            historyRequestGenerationRef.current += 1;
+            setDraft("");
+            setComposerMessage("");
+            selectedChannelRef.current = "global-chat";
+            setHistory({ status: "loading", payload: staticPayload, message: "Opening Global Chat." });
+            setSelectedChannel("global-chat");
+          }} className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-cyan-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-cyan-300/8">
+            <MessageCircle className="h-4 w-4 text-cyan-200" aria-hidden="true" />
+            <span>DZN Comms</span>
+            <span className="text-[10px] tracking-[0.14em] text-emerald-200">{selectedChannelAccessLabel}</span>
           </a>
-          <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100"><Bot className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-emerald-200">Guided help live</span></span>
-            <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          <a href="#dzn-updates" onClick={selectUpdatesChannel} className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-violet-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-violet-300/8">
+            <Megaphone className="h-4 w-4 text-violet-200" aria-hidden="true" />
+            <span>DZN Updates</span>
           </a>
-          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group flex min-h-14 items-center gap-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 transition hover:border-amber-200/45">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-amber-300/25 bg-amber-300/10 text-amber-100"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Server owners</span><span className="block text-xs font-bold text-amber-100">Request private access</span></span>
-            <ChevronRight className="h-4 w-4 text-amber-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          <a href="#dzn-assist" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-violet-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-violet-300/8">
+            <Bot className="h-4 w-4 text-violet-200" aria-hidden="true" />
+            <span>DZN Assist</span>
+          </a>
+          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-amber-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-amber-300/8">
+            <ShieldCheck className="h-4 w-4 text-amber-200" aria-hidden="true" />
+            <span>Owner access</span>
           </a> : null}
         </nav>
 
@@ -392,27 +443,29 @@ export function DznCommsShell() {
               </span>
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">DZN Comms</p>
-                <h1 className="mt-1 text-2xl font-black uppercase leading-none text-white sm:text-3xl">{payload.channel.name}</h1>
+                <h1 className="mt-1 text-2xl font-black uppercase leading-none text-white sm:text-3xl">{isUpdatesChannel ? "DZN Updates" : payload.channel.name}</h1>
                 <p className="mt-1.5 max-w-2xl text-sm font-semibold leading-5 text-zinc-300">
-                  {payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}
+                  {isUpdatesChannel
+                    ? "Verified DZN product and community release notes for players and server owners."
+                    : payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}
                 </p>
               </div>
             </div>
-            <div className={presenceUiEnabled ? "grid gap-2 sm:grid-cols-3 lg:w-[420px]" : "grid gap-2 sm:grid-cols-2 lg:w-[280px]"}>
-              <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
-              <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
-              {presenceUiEnabled ? <DznLivePresenceCounter /> : null}
+            <div className={presenceUiEnabled && !isUpdatesChannel ? "grid gap-2 sm:grid-cols-3 lg:w-[420px]" : "grid gap-2 sm:grid-cols-2 lg:w-[280px]"}>
+              <StatusPill label="History" value={isUpdatesChannel ? "Permanent" : statusLabel} tone={isUpdatesChannel || history.status === "ready" ? "cyan" : "violet"} />
+              <StatusPill label="Runtime" value={isUpdatesChannel ? "Official" : sendingEnabled ? "Live" : "Read Only"} tone={isUpdatesChannel || sendingEnabled ? "cyan" : "gold"} />
+              {!isUpdatesChannel && presenceUiEnabled ? <DznLivePresenceCounter /> : null}
             </div>
           </div>
 
-          <div className="border-b border-white/10 bg-black/20 px-4 py-2.5 sm:px-5">
+          {!isUpdatesChannel ? <div className="border-b border-white/10 bg-black/20 px-4 py-2.5 sm:px-5">
             <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <span className="inline-flex shrink-0 items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-300" /> Recent</span>
               {recentSpeakers.length > 0 ? recentSpeakers.map((member) => <span key={`${member.author_display_name}:${member.author_role_label}`} className="inline-flex shrink-0 items-center gap-2 text-xs font-bold text-zinc-200"><span className="grid h-6 w-6 place-items-center rounded-full border border-violet-300/35 bg-violet-400/15 text-[10px] text-violet-100">{initials(member.author_display_name)}</span>{member.author_display_name}</span>) : <span className="text-xs font-semibold text-zinc-500">Conversation is quiet.</span>}
             </div>
-          </div>
+          </div> : null}
 
-          <div className="grid gap-0 lg:grid-cols-[200px_minmax(0,1fr)_226px]">
+          <div className="grid gap-0 lg:grid-cols-[14.5rem_minmax(0,1fr)_15rem]">
             <aside className="border-b border-white/10 bg-black/18 p-3 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-3 space-y-2">
@@ -421,7 +474,7 @@ export function DznCommsShell() {
                   .map((channel) => (
                     <ChannelButton
                       key={channel.slug}
-                      active={channel.slug === payload.channel.slug}
+                      active={!isUpdatesChannel && channel.slug === payload.channel.slug}
                       icon={channel.kind === "private_group" ? LockKeyhole : Hash}
                       label={channel.name}
                       meta={channel.kind === "private_group" ? channel.current_user_member_role ?? "Member" : sendingEnabled ? "Live" : "Read-only"}
@@ -436,6 +489,13 @@ export function DznCommsShell() {
                       }}
                     />
                   ))}
+                <ChannelButton
+                  active={isUpdatesChannel}
+                  icon={Megaphone}
+                  label="DZN Updates"
+                  meta="Official"
+                  onSelect={selectUpdatesChannel}
+                />
                 <ChannelButton icon={Hash} label="New Players" meta="Future" />
                 <ChannelButton icon={Hash} label="Server Owners" meta="Future" />
                 {!privateGroupsUiEnabled || !payload.feature_flags.private_groups_enabled
@@ -451,6 +511,7 @@ export function DznCommsShell() {
             </aside>
 
             <section className="min-w-0 border-b border-white/10 p-3 sm:p-4 lg:border-b-0 lg:border-r">
+              {isUpdatesChannel ? <DznUpdatesFeed /> : <>
               <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">#{payload.channel.slug}</p>
@@ -469,7 +530,7 @@ export function DznCommsShell() {
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
-                className="mt-3 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
+                className="mt-3 h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
               >
                 {visibleMessages.length > 0 ? visibleMessages.map((message) => (
                   <MessageRow
@@ -525,20 +586,29 @@ export function DznCommsShell() {
                 </button>
               </form>
               {composerMessage ? <p role="alert" className="mt-2 text-sm font-bold text-amber-200">{composerMessage}</p> : null}
+              </>}
             </section>
 
             <aside className="bg-black/18 p-3">
-              <PanelTitle icon={ShieldCheck} label="Safety Contract" />
+              <PanelTitle icon={ShieldCheck} label="Channel details" />
               <div className="mt-3 space-y-2">
-                <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
-                <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
-                <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
-                <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
+                {isUpdatesChannel ? <>
+                  <SafetyCard icon={ShieldCheck} label="Verified source" value="Entries are released with their matching DZN website change." />
+                  <SafetyCard icon={Megaphone} label="Read-only" value="Official updates do not create or imitate player activity." />
+                  <SafetyCard icon={MessageCircle} label="Global Chat" value="Player conversation stays in its own moderated channel." />
+                </> : <>
+                  <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
+                  <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
+                  <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
+                  <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
+                </>}
               </div>
               <details className="mt-4 rounded-md border border-violet-300/18 bg-violet-400/8 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.16em] text-violet-200">Fair boundary</summary>
                 <ul className="mt-3 space-y-2 text-xs font-semibold leading-5 text-zinc-300">
-                  {payload.fairness_boundary.slice(0, 4).map((line) => (
+                  {(isUpdatesChannel
+                    ? ["Only material DZN releases belong in this channel.", "Update entries are distinct from chat messages and private notifications.", "The feed contains no player, account, payment, or server-private information."]
+                    : payload.fairness_boundary.slice(0, 4)).map((line) => (
                     <li key={line}>{line}</li>
                   ))}
                 </ul>
@@ -708,13 +778,13 @@ function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { 
       disabled={!onSelect || active}
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left ${
-        active ? "border-cyan-300/40 bg-cyan-400/12 text-white" : "border-white/8 bg-white/4 text-zinc-400"
-      } disabled:cursor-default enabled:hover:border-cyan-300/30 enabled:hover:text-white`}
+      className={`flex w-full items-center justify-between gap-2 border-l-2 px-3 py-3 text-left ${
+        active ? "border-cyan-300 bg-cyan-400/12 text-white" : "border-transparent bg-white/[0.025] text-zinc-400"
+      } disabled:cursor-default enabled:hover:border-cyan-300/55 enabled:hover:bg-cyan-300/6 enabled:hover:text-white`}
     >
       <span className="flex min-w-0 items-center gap-2">
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="truncate text-sm font-black uppercase">{label}</span>
+        <span className="text-sm font-black uppercase leading-4">{label}</span>
       </span>
       <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{meta}</span>
     </button>
@@ -723,7 +793,7 @@ function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { 
 
 function SafetyCard({ id, icon: Icon, label, value }: { id?: string; icon: typeof ShieldCheck; label: string; value: string }) {
   return (
-    <div id={id} className="scroll-mt-6 rounded-lg border border-white/10 bg-white/5 p-3">
+    <div id={id} className="scroll-mt-6 border-l-2 border-white/10 px-3 py-2">
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-cyan-200" aria-hidden="true" />
         <span className="text-xs font-black uppercase tracking-[0.14em] text-white">{label}</span>

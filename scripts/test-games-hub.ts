@@ -46,6 +46,9 @@ async function run() {
   assert.match(gamesHubSource, /href="\/community"/, "Games Hub must retain a direct route to DZN Community chat and help.");
   assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
   assert.match(gamesHubSource, /Field games\. One earned record\./, "Signed-out visitors must see a truthful Games Hub entry point instead of an empty loading surface.");
+  assert.match(gamesHubSource, /DZN GAMES \/ ACTIVE DEVELOPMENT/, "Games Hub must clearly identify the current catalogue as active development.");
+  assert.match(gamesHubSource, /Current operations are playable prototypes and may change/, "Games Hub must not present field-test builds as finished games.");
+  assert.match(gamesHubStyles, /\.developmentNotice/, "The active-development state must have a dedicated, responsive visual treatment.");
   assert.match(gamesHubSource, /modes currently enabled for this launch/, "Signed-out visitors must not be told catalogue games are all enabled before the server evaluates the launch flags.");
   assert.match(gamesHubSource, /DZN Games Hub game catalogue/, "The signed-out mode list must be described as a catalogue rather than a live availability claim.");
   assert.match(gamesHubSource, /href="\/login\?returnTo=%2Fgames"/, "The public Games Hub briefing must provide the account-bound Discord sign-in route.");

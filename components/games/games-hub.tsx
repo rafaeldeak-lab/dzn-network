@@ -5,7 +5,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
-  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Satellite, ScanSearch, Search, Settings2, Shield, ShieldCheck, Sparkles, Target, Wind, X, Zap } from "lucide-react";
+  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Satellite, ScanSearch, Search, Settings2, Shield, ShieldCheck, Sparkles, Target, Wind, Wrench, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameCell, type GameMode, type GamePhase, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
@@ -265,6 +265,11 @@ export function GamesHub() {
       <div><span className={styles.eyebrow}>DZN / PLAYER ARCADE</span><h1>DZN Games Hub<span className={styles.dot}>.</span></h1></div>
       {summary && <div className={styles.identity}>{xp >= HUB_BADGES[0].xp ? <Insignia position={rank.position} small /> : <span className={styles.recruit}><Gamepad2 size={24} /></span>}<div><strong>{summary.username}</strong><span>{xp >= HUB_BADGES[0].xp ? rank.name : "New recruit"}</span></div><span className={styles.level}>LV {1 + Math.floor(xp / 150)}</span></div>}
     </div>
+    <section className={styles.developmentNotice} aria-label="Games Hub development status">
+      <span className={styles.developmentIcon}><Wrench size={19} aria-hidden="true" /></span>
+      <div><span className={styles.eyebrow}>DZN GAMES / ACTIVE DEVELOPMENT</span><strong>Field testing is in progress.</strong><p>The owner is rebuilding DZN Games into deeper, more polished releases. Current operations are playable prototypes and may change while the next generation is prepared.</p></div>
+      <span className={styles.developmentState}>Prototype builds</span>
+    </section>
     <div className={styles.topline}>
       <nav aria-label="Games Hub" className={styles.tabs}>{views.map(item => <a href={`#${item.id}`} key={item.id} aria-label={item.label} title={item.label} aria-current={view === item.id ? "page" : undefined}
         onClick={() => setView(item.id)}><item.icon size={17} /><span>{item.label}</span></a>)}</nav>
