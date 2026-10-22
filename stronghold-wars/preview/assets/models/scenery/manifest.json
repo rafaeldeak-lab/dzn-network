@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural geometry authored for DZN Stronghold Wars; no paid provider or external art source.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up",
+  "assets": {
+    "pine_l01": {
+      "file": "assets/models/scenery/pine_l01.glb",
+      "sha256": "4695f61b0b5fdfc07844245fd77d5e1d4493915f0233e9e52ed518eba148c41a",
+      "bytes": 12832,
+      "dimensions": [
+        1.462,
+        3.227,
+        1.426
+      ]
+    },
+    "pine_l02": {
+      "file": "assets/models/scenery/pine_l02.glb",
+      "sha256": "ab64d06efdbe8b8a04fecb8dbe3a7cf0e2ce46240c67e9875e0bff967ae2efb7",
+      "bytes": 15048,
+      "dimensions": [
+        1.852,
+        3.949,
+        1.806
+      ]
+    },
+    "pine_l03": {
+      "file": "assets/models/scenery/pine_l03.glb",
+      "sha256": "e90202ed7595ba4bbe83de665c79e57d84df5f3745f1c69855078a7d73a9dc6a",
+      "bytes": 17212,
+      "dimensions": [
+        2.242,
+        4.674,
+        2.189
+      ]
+    },
+    "pine_l04": {
+      "file": "assets/models/scenery/pine_l04.glb",
+      "sha256": "572d589477ae96a1d7f923063405319394f13ac371ff328ce618e9c347961c71",
+      "bytes": 19404,
+      "dimensions": [
+        2.668,
+        5.401,
+        2.618
+      ]
+    },
+    "pine_l05": {
+      "file": "assets/models/scenery/pine_l05.glb",
+      "sha256": "00a0ff81ac8d2b13d0ab807ad2f2b89dfbf96dff5ce29c1048940e5a3d721e55",
+      "bytes": 19360,
+      "dimensions": [
+        3.063,
+        6.167,
+        3.006
+      ]
+    },
+    "pine_stump": {
+      "file": "assets/models/scenery/pine_stump.glb",
+      "sha256": "fa3551f1144fdb381ffd04dad7b21d2cb390794bfb5c95569d5d0822372b179d",
+      "bytes": 14044,
+      "dimensions": [
+        1.024,
+        0.648,
+        1.24
+      ]
+    },
+    "pine_log_stack": {
+      "file": "assets/models/scenery/pine_log_stack.glb",
+      "sha256": "49e4cfb30b3874c494adfd37dab1ff4d1a85a0d32f28a208454a23ac0ce8a37b",
+      "bytes": 19136,
+      "dimensions": [
+        3.118,
+        0.823,
+        0.427
+      ]
+    },
+    "granite_boulder": {
+      "file": "assets/models/scenery/granite_boulder.glb",
+      "sha256": "b21cecbc146d1e62059a41c2f7b4ad8f2a41e98122900e40894059238aa2f090",
+      "bytes": 6276,
+      "dimensions": [
+        2.278,
+        1.374,
+        1.567
+      ]
+    },
+    "claim_marker": {
+      "file": "assets/models/scenery/claim_marker.glb",
+      "sha256": "28e5ebf672dfd66692dd59a2b735625b028af73651311e5fde897683781fca80",
+      "bytes": 11124,
+      "dimensions": [
+        1.66,
+        1.03,
+        1.66
+      ]
+    }
+  }
+}

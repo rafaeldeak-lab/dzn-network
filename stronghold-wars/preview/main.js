@@ -24,7 +24,7 @@ const state = new Proxy({}, {
     if (key === 'upgrades') return Object.fromEntries((entry?.saved.base.legacyJobs || []).map(job => [job.key, job]));
     if (key === 'raidCount') return entry?.saved.base.raidCount ?? 0;
     if (key === 'lastRaidClaimed') return entry?.saved.base.lastRaidClaimed ?? 0;
-    if (key === 'parts' || key === 'stored' || key === 'salvage' || key === 'muted') return member?.[key] ?? 0;
+    if (key === 'parts' || key === 'stored' || key === 'salvage' || key === 'timber' || key === 'muted') return member?.[key] ?? 0;
     return undefined;
   },
   set(_target, key, value) {
@@ -172,6 +172,34 @@ function drawCompatibilityScene() {
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(13,25,15,.46)'; ctx.beginPath(); ctx.arc(p.x + r * .55, p.y + r * .45, r * .7, 0, Math.PI * 2); ctx.fill();
   }
+  const land = service.community()?.saved.base.landPlots || [];
+  for (const config of GAME_CONFIG.landPlots.slice(1)) {
+    const plot = land.find(item => item.id === config.id);
+    if (!plot) continue;
+    const [x, z] = config.position;
+    diamond(x, z, 5, 5, plot.status === 'claimed' ? '#405b49' : plot.status === 'approved' ? '#625c42' : '#354c38', '#8b997a');
+    for (let i = 0; i < config.trees; i++) {
+      const a = i * 2.39996 + config.hall;
+      const radius = 1.4 + (i % 3) * 0.8;
+      const p = project(x + Math.cos(a) * radius, z + Math.sin(a) * radius);
+      const standing = i < plot.treesRemaining;
+      const size = Math.max(8, unit * (0.52 + config.hall * 0.09));
+      ctx.fillStyle = standing ? '#715037' : '#a78656';
+      ctx.fillRect(p.x - size * 0.12, p.y - size * (standing ? 0.9 : 0.24), size * 0.24, size * (standing ? 0.9 : 0.24));
+      if (standing) {
+        ctx.fillStyle = ['#477b50', '#3b7250', '#31694b', '#295d48', '#245442'][config.hall - 1];
+        ctx.beginPath(); ctx.moveTo(p.x, p.y - size * 1.8); ctx.lineTo(p.x - size * 0.55, p.y - size * 0.35); ctx.lineTo(p.x + size * 0.55, p.y - size * 0.35); ctx.closePath(); ctx.fill();
+      }
+    }
+    const label = project(x, z + 5.6);
+    ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#e8f1e9';
+    ctx.fillText(`${config.name} · ${plot.status}`, label.x, label.y);
+    if (plot.status === 'claimed') {
+      ctx.fillStyle = '#70e59a'; ctx.fillRect(label.x - 3, label.y - 18, 6, 10);
+      ctx.font = '700 9px Inter, sans-serif';
+      ctx.fillText(`${plot.barricades} barricades`, label.x, label.y + 11);
+    }
+  }
   diamond(0, 0, 15, 14, '#73766e', '#9b9e91');
   diamond(0, 0, 9.4, 8.8, 'rgba(102,112,99,.65)', 'rgba(198,202,184,.45)');
   const wall = [];
@@ -317,19 +345,6 @@ function cyl(parent, rt, rb, h, mat, x = 0, y = 0, z = 0, seg = 12) {
   return mesh;
 }
 
-// Forest ring
-for (let i = 0; i < 160; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const radius = 22 + Math.random() * 40;
-  const tree = new THREE.Group();
-  const s = 0.8 + Math.random() * 0.8;
-  cyl(tree, 0.25, 0.3, 1.2, MAT.trunk);
-  cyl(tree, 0, 1.6, 2.6, MAT.pine, 0, 1, 0, 7);
-  cyl(tree, 0, 1.2, 2.2, MAT.pine, 0, 2.4, 0, 7);
-  tree.scale.setScalar(s);
-  tree.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-  scene.add(tree);
-}
 // Perimeter fence posts
 for (let i = 0; i < 48; i++) {
   const a = (i / 48) * Math.PI * 2;
@@ -346,6 +361,89 @@ const revealEffects = new Map();
 const gltfLoader = new GLTFLoader();
 const modelTemplateCache = new Map();
 const modelLoadPromises = new Map();
+const landScenery = new THREE.Group();
+scene.add(landScenery);
+const sceneryTemplates = new Map();
+const landPickGeometry = new THREE.CylinderGeometry(1.1, 1.1, 5.5, 8);
+const landPickMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+let landTreePicks = [];
+let sceneryRequest = 0;
+
+async function sceneryModel(name) {
+  if (!sceneryTemplates.has(name)) {
+    sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${name}.glb`).then(gltf => gltf.scene));
+  }
+  return sceneryTemplates.get(name);
+}
+
+async function reconcileLandScenery() {
+  if (fallback2D) return;
+  const request = ++sceneryRequest;
+  const base = service.community()?.saved.base;
+  if (!base) return;
+  const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder'];
+  try {
+    const models = Object.fromEntries(await Promise.all(names.map(async name => [name, await sceneryModel(name)])));
+    if (request !== sceneryRequest) return;
+    for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
+    landScenery.clear();
+    landTreePicks = [];
+    for (const config of GAME_CONFIG.landPlots.slice(1)) {
+      const plot = base.landPlots.find(item => item.id === config.id);
+      if (!plot) continue;
+      const [x, z] = config.position;
+      const claimed = plot.status === 'claimed';
+      const clearing = new THREE.Mesh(
+        new THREE.CircleGeometry(5.25, 10),
+        new THREE.MeshStandardMaterial({ color: claimed ? 0x405b49 : plot.status === 'approved' ? 0x636044 : 0x344537, roughness: 1, transparent: true, opacity: 0.83 }),
+      );
+      clearing.rotation.x = -Math.PI / 2;
+      clearing.position.set(x, 0.07, z);
+      clearing.receiveShadow = true;
+      clearing.userData.ownedTerrain = true;
+      landScenery.add(clearing);
+      for (let i = 0; i < config.trees; i++) {
+        const a = i * 2.39996 + config.hall;
+        const radius = 1.4 + (i % 3) * 0.8;
+        const standing = i < plot.treesRemaining;
+        const asset = models[standing ? `pine_l0${config.hall}` : 'pine_stump'].clone();
+        asset.position.set(x + Math.cos(a) * radius, 0.09, z + Math.sin(a) * radius);
+        asset.rotation.y = a;
+        asset.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        landScenery.add(asset);
+        if (standing) {
+          const pick = new THREE.Mesh(landPickGeometry, landPickMaterial);
+          pick.position.set(asset.position.x, 2.75, asset.position.z);
+          pick.userData.plotId = config.id;
+          landScenery.add(pick);
+          landTreePicks.push(pick);
+        }
+      }
+      if (claimed) {
+        const marker = models.claim_marker.clone();
+        marker.position.set(x, 0.09, z);
+        landScenery.add(marker);
+        for (let i = 0; i < plot.barricades; i++) {
+          const logs = models.pine_log_stack.clone();
+          const a = i * Math.PI * 2 / 3;
+          logs.position.set(x + Math.cos(a) * 4.1, 0.09, z + Math.sin(a) * 4.1);
+          logs.rotation.y = a + Math.PI / 2;
+          landScenery.add(logs);
+        }
+      }
+    }
+    for (let i = 0; i < 100; i++) {
+      const a = i * 2.39996;
+      const radius = 32 + (i % 13) * 2.25;
+      const asset = models[i % 8 === 0 ? 'granite_boulder' : `pine_l0${1 + (i % 5)}`].clone();
+      asset.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
+      asset.rotation.y = a;
+      landScenery.add(asset);
+    }
+  } catch (error) {
+    console.error('Scenery GLB import failed; base preview remains available.', error);
+  }
+}
 let displayedCommunityId = service.profile()?.communityId || null;
 let renderedBuildingLevels = {};
 
@@ -689,6 +787,7 @@ function renderIdentityOptions() {
     selectedKey = null;
     closePanel();
     reconcileBasePresentation();
+    reconcileLandScenery();
     updateHud();
     updateBuildingList();
     toast(`Preview identity: ${service.profile().name}`);
@@ -726,6 +825,7 @@ function updateHud() {
   $('communityBadge').textContent = `${access.allowed ? '●' : '🔒'} ${community.name} · ${community.proActive ? 'OWNER PRO ACTIVE' : 'PRO INACTIVE'} · ${profile.role.toUpperCase()}`;
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
+  $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
   $('treasury').textContent = access.allowed ? `🏦 ${Math.floor(state.treasury)} Unallocated` : '🏦 Locked';
   $('collectBtn').textContent = `Collect +${Math.floor(state.stored)}`;
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
@@ -948,6 +1048,60 @@ function showProgressionPanel() {
   $('closeBtn').onclick = closePanel;
 }
 
+function showLandPanel() {
+  const access = service.getAccess();
+  if (!access.allowed) {
+    openPanel(`<h2>Land & Forest</h2><p class="notice warn">${escapeHTML(access.reason)}</p><p>Shared land and personal Timber stay saved while access is locked.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+    $('closeBtn').onclick = closePanel;
+    return;
+  }
+  const snapshot = service.snapshot();
+  const hall = snapshot.base.levels.hq;
+  const cards = GAME_CONFIG.landPlots.slice(1).map(config => {
+    const plot = snapshot.base.landPlots.find(item => item.id === config.id);
+    const locked = hall < config.hall;
+    const status = locked ? `Requires Command Hall L${config.hall}` : plot.status === 'wild'
+      ? `${plot.treesRemaining}/${config.trees} trees standing` : plot.status === 'cleared'
+        ? 'Cleared · awaiting owner approval' : plot.status === 'approved'
+          ? `Approved · ${plot.timberFunded}/${config.timberCost} Timber donated` : `Claimed · ${plot.barricades}/${GAME_CONFIG.maxBarricadesPerPlot} barricades`;
+    const button = locked ? '' : plot.status === 'wild'
+      ? `<button data-chop="${config.id}">Chop one tree · +${GAME_CONFIG.timberPerTree} Timber</button>`
+      : plot.status === 'cleared' && isLeadership()
+        ? `<button data-approve-land="${config.id}">Approve shared land claim</button>`
+        : plot.status === 'approved'
+          ? `<button data-contribute-timber="${config.id}" ${snapshot.member.timber < 1 ? 'disabled' : ''}>Donate Timber to claim</button>`
+          : plot.status === 'claimed'
+            ? `<button data-barricade="${config.id}" ${snapshot.member.timber < GAME_CONFIG.barricadeTimberCost || plot.barricades >= GAME_CONFIG.maxBarricadesPerPlot ? 'disabled' : ''}>Build barricade · ${GAME_CONFIG.barricadeTimberCost} Timber</button>`
+            : '';
+    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div></article>`;
+  }).join('');
+  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Owner/admin approval opens each shared land claim. Any verified member can fund the claim and build barricades.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p>${cards}<p class="help">Barricades become frozen defence in the next local war snapshot. Existing wars do not change when the base changes.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('closeBtn').onclick = closePanel;
+  panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
+    const result = service.chopTree(service.state.currentIdentityId, button.dataset.chop);
+    if (!result.ok) toast(result.error); else { toast(`+${result.timberEarned} Timber · ${result.treesRemaining} trees left`); reconcileLandScenery(); updateHud(); }
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-approve-land]').forEach(button => button.onclick = () => {
+    const result = service.approveLandClaim(service.state.currentIdentityId, button.dataset.approveLand);
+    if (!result.ok) toast(result.error); else { toast('Owner approved the shared land claim.'); reconcileLandScenery(); }
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-contribute-timber]').forEach(button => button.onclick = () => {
+    const config = GAME_CONFIG.landPlots.find(item => item.id === button.dataset.contributeTimber);
+    const plot = service.community().saved.base.landPlots.find(item => item.id === config.id);
+    const amount = Math.min(service.member().timber, config.timberCost - plot.timberFunded);
+    const result = service.contributeTimber(service.state.currentIdentityId, config.id, amount);
+    if (!result.ok) toast(result.error); else { toast(result.status === 'claimed' ? 'New land claimed for the whole community.' : `${result.accepted} Timber donated.`); reconcileLandScenery(); updateHud(); }
+    showLandPanel();
+  });
+  panel.querySelectorAll('[data-barricade]').forEach(button => button.onclick = () => {
+    const result = service.buildBarricade(service.state.currentIdentityId, button.dataset.barricade);
+    if (!result.ok) toast(result.error); else { toast('Barricade built by a community member.'); reconcileLandScenery(); updateHud(); }
+    showLandPanel();
+  });
+}
+
 function checkUpgrades() {
   const completed = service.processLegacyJobs();
   for (const key of completed) {
@@ -968,6 +1122,7 @@ $('collectBtn').onclick = () => {
 $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
 $('progressionBtn').onclick = showProgressionPanel;
+$('landBtn').onclick = showLandPanel;
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();
   const result = service.setOwnerProActive(service.state.currentIdentityId, !community.proActive);
@@ -983,6 +1138,7 @@ $('muteBtn').onclick = () => {
 };
 renderIdentityOptions();
 renderAppearanceGallery();
+reconcileLandScenery();
 updateHud();
 
 // ---------- War Table & raid ----------
@@ -1001,7 +1157,7 @@ function warTimelineHTML(war) {
 
 function warSnapshotLine(side) {
   const levels = side.base.levels;
-  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier}`;
+  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0}`;
 }
 
 function renderWarRecord(war, currentCommunityId, currentIdentity) {
@@ -1037,7 +1193,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
-      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Score = clamp(20 + Hall×12 + Tower×16 + Comms×4 − enemy Hall×4 − enemy Tower×10, 0–100). Strong firepower, heavier counterfire.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Score = clamp(15 + Hall×7 + Tower×3 + Comms×18 + Workshop×3 − enemy Comms×10 − enemy Tower×4, 0–100). Comms-focused, lighter counterfire.</p></div></div>
+      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Enemy barricades reduce Assault by 3 points each. Strong firepower, heavier counterfire.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Enemy barricades reduce Recon by 1 point each. Comms-focused, lighter counterfire.</p></div></div>
       ${canAttack ? `<div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Deploy Assault squad</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Deploy Recon squad</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
       ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve when attack cap is reached or timer ends'}</button></div>` : ''}`;
   } else if (war.state === 'resolved') {
@@ -1365,6 +1521,13 @@ function pickBuildingAtClient(clientX, clientY) {
   }
   return selected;
 }
+function pickLandTreeAtClient(clientX, clientY) {
+  if (fallback2D || !landTreePicks.length) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const hit = raycaster.intersectObjects(landTreePicks, false)[0];
+  return hit?.object.userData.plotId || null;
+}
 renderer.domElement.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 1) {
@@ -1407,7 +1570,13 @@ renderer.domElement.addEventListener('pointerup', e => {
       beep(740);
       showBuildingPanel(key);
     } else {
-      closePanel();
+      const plotId = pickLandTreeAtClient(e.clientX, e.clientY);
+      if (plotId) {
+        const result = service.chopTree(service.state.currentIdentityId, plotId);
+        toast(result.ok ? `Tree cleared · +${result.timberEarned} Timber` : result.error);
+        if (result.ok) { reconcileLandScenery(); updateHud(); }
+        showLandPanel();
+      } else closePanel();
     }
   }
 });

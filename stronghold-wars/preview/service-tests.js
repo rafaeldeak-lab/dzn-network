@@ -98,6 +98,27 @@ export function runServiceTests() {
   assert(service.getAccess('violet-member').allowed, 'reactivating owner Pro restores access to the preserved base');
   checks.push('member sharing, community isolation, verification, Free tier and inactive owner Pro entitlement');
 
+  const landStorage = new MemoryStorage();
+  let landService = new LocalGameService({ storage: landStorage, now: () => clock });
+  assert(!landService.chopTree('iron-member', 'timberline-depot', 'land-too-low').ok, 'Hall level gates work on new districts');
+  landService.community('iron-owner').saved.base.levels.hq = 2;
+  assert(!landService.chopTree('iron-unverified', 'timberline-depot', 'land-unverified').ok, 'unverified identity cannot earn Timber');
+  assert(!landService.chopTree('free-owner', 'timberline-depot', 'land-free').ok, 'Free preview identity cannot clear trees');
+  assert(!landService.approveLandClaim('iron-owner', 'timberline-depot', 'land-too-early').ok, 'owner cannot approve a standing forest');
+  for (let i = 0; i < 3; i++) assert(landService.chopTree('iron-member', 'timberline-depot', `land-chop-${i}`).ok, 'verified member can clear a tree');
+  const timberBeforeReplay = landService.member('iron-member').timber;
+  assert(landService.chopTree('iron-member', 'timberline-depot', 'land-chop-0').replay && landService.member('iron-member').timber === timberBeforeReplay, 'replayed chop does not grant Timber again');
+  assert(!landService.chopTree('iron-admin', 'timberline-depot', 'land-chop-0').ok, 'a chop action ID cannot be reused by another actor');
+  assert(landService.snapshot('iron-owner').base.landPlots[1].status === 'cleared', 'tree clearing changes shared plot state');
+  assert(!landService.approveLandClaim('iron-member', 'timberline-depot', 'land-member-approve').ok, 'member cannot approve main infrastructure');
+  assert(landService.approveLandClaim('iron-owner', 'timberline-depot', 'land-owner-approve').ok, 'owner approves shared claim');
+  assert(landService.contributeTimber('iron-member', 'timberline-depot', 60, 'land-fund').status === 'claimed', 'member Timber funds and claims shared land');
+  assert(landService.buildBarricade('iron-member', 'timberline-depot', 'land-barricade').ok, 'member builds a defence on claimed land');
+  assert(!landService.buildBarricade('iron-member', 'timberline-depot', 'land-no-wood').ok, 'barricade cost cannot be bypassed');
+  landService = new LocalGameService({ storage: landStorage, now: () => clock });
+  assert(landService.snapshot('iron-owner').base.landPlots[1].barricades === 1 && landService.member('iron-member').timber === 0, 'claimed land, defence and exact remaining Timber survive reload');
+  checks.push('tree clearing, personal Timber, owner approval, member construction, entitlement gates, action replay and save persistence');
+
   const trainingService = new LocalGameService({ storage: new MemoryStorage(), now: () => clock });
   const trainingStartParts = trainingService.snapshot('iron-owner').member.parts;
   assert(!trainingService.recordTrainingVictory('iron-owner', 1, 300).ok, 'an unrecorded training encounter cannot claim a reward');
@@ -248,6 +269,10 @@ export function runServiceTests() {
   warService.state.communities['violet-ridge'].base.levels.hq = 3;
   assert(!warService.challengeWar('iron-member', 'violet-ridge', 'war-member-challenge').ok, 'ordinary members cannot issue challenges');
   assert(!warService.challengeWar('iron-owner', 'iron-pines', 'war-self-challenge').ok, 'self-challenges are rejected');
+  for (let i = 0; i < 3; i++) assert(warService.chopTree('violet-member', 'timberline-depot', `war-defence-chop-${i}`).ok, 'defending community clears its land');
+  assert(warService.approveLandClaim('violet-owner', 'timberline-depot', 'war-defence-approve').ok, 'defending owner approves land');
+  assert(warService.contributeTimber('violet-member', 'timberline-depot', 60, 'war-defence-fund').ok, 'defending member funds land');
+  assert(warService.buildBarricade('violet-member', 'timberline-depot', 'war-defence-barricade').ok, 'defending member builds barricade');
   checks.push('war eligibility gates for owner Pro, Free tier, verification, Hall/support levels and leadership-only challenges');
 
   const challenge = warService.challengeWar('iron-owner', 'violet-ridge', 'war-challenge-once');
@@ -260,8 +285,11 @@ export function runServiceTests() {
   assert(accepted.ok && accepted.state === 'preparation', 'opposing owner accepts and begins finite preparation');
   const warRecord = warService.getWar(challenge.warId);
   assert(warRecord.snapshots.challenger.base.levels.hq === 3 && warRecord.snapshots.defender.base.levels.tower === 2, 'war record locks both communities’ pre-war base snapshots');
+  assert(warRecord.snapshots.defender.stats.fortification === 1 && warRecord.snapshots.defender.base.landPlots[1].barricades === 1, 'war snapshot includes the defender’s built district and barricade');
   warService.state.communities['violet-ridge'].base.levels.tower = 5;
+  warService.state.communities['violet-ridge'].base.landPlots[1].barricades = 0;
   assert(warService.getWar(challenge.warId).snapshots.defender.base.levels.tower === 2, 'later base changes cannot mutate the immutable captured battle stats');
+  assert(warService.getWar(challenge.warId).snapshots.defender.stats.fortification === 1, 'later demolition cannot alter locked defensive fortification');
   assert(!warService.startWar('violet-owner', challenge.warId, 'war-start-too-early').ok, 'war cannot start before the preparation countdown');
   warClock += WAR_RULES.preparationReadyMs;
   const started = warService.startWar('violet-admin', challenge.warId, 'war-start-once');
@@ -271,7 +299,7 @@ export function runServiceTests() {
   const lockedWar = warService.getWar(challenge.warId);
   const attackerStats = lockedWar.snapshots.challenger.base.levels;
   const defenderStats = lockedWar.snapshots.defender.base.levels;
-  const expectedAssault = Math.max(0, Math.min(100, Math.round(20 + attackerStats.hq * 12 + attackerStats.tower * 16 + attackerStats.comms * 4 - defenderStats.hq * 4 - defenderStats.tower * 10)));
+  const expectedAssault = Math.max(0, Math.min(100, Math.round(20 + attackerStats.hq * 12 + attackerStats.tower * 16 + attackerStats.comms * 4 - defenderStats.hq * 4 - defenderStats.tower * 10 - 3)));
   const ironStartParts = warService.snapshot('iron-owner').member.parts;
   const assault = warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'war-iron-assault');
   assert(assault.ok && assault.score === expectedAssault && assault.attackId && assault.feedback.includes('counterfire'), 'Assault score and visible defence feedback derive from locked snapshots');
