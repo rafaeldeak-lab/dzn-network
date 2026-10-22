@@ -20,6 +20,8 @@ const M = {
   fabric: mat(0x31483d), shadow: mat(0x1b2926), armour: mat(0x65746b), steel: mat(0x8a9a97, 0.48),
   visor: mat(0x78e7b2, 0.22), purple: mat(0x9a65d2), amber: mat(0xe3a865),
   skin: mat(0xb58e70), pouch: mat(0x756850), recon: mat(0x405b60), engineer: mat(0x696247),
+  tactical: mat(0x20252d), carbon: mat(0x343b45), obsidian: mat(0x111820), lime: mat(0x9cf765, 0.18),
+  medical: mat(0xd9f6e4), medicCloth: mat(0x456459),
 };
 function mesh(group, geometry, material, name, x = 0, y = 0, z = 0) {
   const item = new THREE.Mesh(geometry, material); item.name = name; item.position.set(x, y, z); group.add(item); return item;
@@ -35,8 +37,8 @@ function beam(g, from, to, radius, m, name) {
 
 function soldier(role, tier) {
   const g = new THREE.Group(); g.name = `${role}_l0${tier}`;
-  const cloth = role === 'recon' ? M.recon : role === 'engineer' ? M.engineer : M.fabric;
-  const glow = role === 'assault' ? M.amber : role === 'recon' ? M.purple : M.visor;
+  const cloth = role === 'recon' ? M.recon : role === 'engineer' ? M.engineer : role === 'sentinel' ? M.tactical : role === 'medic' ? M.medicCloth : M.fabric;
+  const glow = role === 'assault' ? M.amber : role === 'recon' ? M.purple : role === 'sentinel' ? M.lime : M.visor;
   // Feet start on the world plane. Forward is +Z; the runtime animates the named limb pivots.
   box(g, 0.43, 0.58, 0.28, cloth, 'body', 0, 1.07, 0);
   box(g, 0.5, 0.12, 0.3, M.shadow, 'belt', 0, 0.78, 0);
@@ -79,6 +81,42 @@ function soldier(role, tier) {
     box(g, 0.18 + tier * 0.035, 0.1, 0.1, M.shadow, 'scanner', 0.36, 0.99, 0.33);
     box(g, 0.08, 0.06, 0.08, glow, 'scanner_screen', 0.36, 1.05, 0.38);
     if (tier >= 4) for (const side of [-1, 1]) box(g, 0.12, 0.09, 0.15, M.purple, 'optic_wing', side * 0.24, 1.63, 0.16);
+  } else if (role === 'sentinel') {
+    // Black tactical silhouette and green optics from the supplied progression reference.
+    // Geometry and colourway are original, with heavier plates and purple rank details.
+    box(g, 0.37, 0.23, 0.11, M.obsidian, 'full_face_mask', 0, 1.54, 0.17);
+    box(g, 0.34, 0.07, 0.035, M.lime, 'night_optics', 0, 1.64, 0.24);
+    box(g, 0.55 + tier * 0.025, 0.39 + tier * 0.015, 0.14, M.carbon, 'tactical_chest_plate', 0, 1.12, 0.23);
+    box(g, 0.27, 0.055, 0.025, tier >= 4 ? M.purple : M.lime, 'chest_insignia', 0, 1.2, 0.31);
+    for (const side of [-1, 1]) {
+      const arm = g.getObjectByName(side < 0 ? 'left_arm' : 'right_arm');
+      if (tier >= 2) box(arm, 0.29 + tier * 0.015, 0.23, 0.29, M.carbon, 'broad_shoulder_guard', 0, -0.09, 0.025);
+      if (tier >= 3) box(arm, 0.23, 0.19, 0.26, M.obsidian, 'forearm_guard', 0, -0.36, 0.025);
+      if (tier >= 4) box(arm, 0.27, 0.065, 0.29, M.purple, 'purple_rank_trim', 0, -0.08, 0.04);
+    }
+    box(g, 0.17, 0.19, 0.42 + tier * 0.04, M.obsidian, 'heavy_carbine', 0.38, 1.01, 0.34);
+    beam(g, [0.38, 1.07, 0.52], [0.38, 1.07, 0.87 + tier * 0.035], 0.052, M.steel, 'heavy_barrel');
+    box(g, 0.1, 0.08, 0.13, M.lime, 'reflex_sight', 0.38, 1.15, 0.38);
+    if (tier >= 3) box(g, 0.13, 0.24, 0.1, M.obsidian, 'drum_magazine', 0.38, 0.85, 0.37);
+    if (tier === 5) {
+      box(g, 0.41, 0.17, 0.13, M.purple, 'elite_back_plate', 0, 1.28, -0.35);
+      box(g, 0.42, 0.055, 0.1, M.lime, 'elite_brow_light', 0, 1.76, 0.08);
+    }
+  } else if (role === 'medic') {
+    // Field healer with a visible medical pack, injector and progressively tougher protection.
+    box(g, 0.44, 0.48, 0.24, M.medical, 'medical_pack', 0, 1.13, -0.34);
+    box(g, 0.09, 0.33, 0.025, M.lime, 'aid_cross_vertical', 0, 1.15, -0.475);
+    box(g, 0.28, 0.09, 0.025, M.lime, 'aid_cross_horizontal', 0, 1.15, -0.48);
+    box(g, 0.33, 0.11, 0.17, M.medical, 'protective_hood', 0, 1.76, 0.01);
+    box(g, 0.12, 0.31, 0.12, M.steel, 'aid_injector', 0.38, 1.0, 0.3);
+    box(g, 0.09, 0.07, 0.07, M.lime, 'injector_charge', 0.38, 1.19, 0.3);
+    if (tier >= 2) box(g, 0.48, 0.28, 0.1, M.medical, 'reinforced_vest', 0, 1.12, 0.22);
+    if (tier >= 3) box(g, 0.19, 0.22, 0.11, M.medical, 'triage_satchel', -0.31, 0.93, -0.1);
+    if (tier >= 4) box(g, 0.39, 0.08, 0.07, M.purple, 'field_medical_rank', 0, 1.31, 0.28);
+    if (tier === 5) {
+      cyl(g, 0.09, 0.09, 0.22, M.lime, 'elite_aid_beacon', 0, 1.57, -0.36);
+      box(g, 0.32, 0.06, 0.05, M.purple, 'elite_visor_trim', 0, 1.62, 0.2);
+    }
   } else {
     // DZN Fixer: construction/repair specialist, tool harness, timber axe and field repair kit.
     box(g, 0.5, 0.09, 0.39, M.amber, 'safety_helmet_band', 0, 1.75, 0);
@@ -103,6 +141,8 @@ const manifest = {
     assault: 'DZN Warden: direct-push carbine, armour and shield',
     recon: 'DZN Ghost: scout optics, scanner and signal mast',
     engineer: 'DZN Fixer: timber axe, construction and repair kit',
+    sentinel: 'DZN Sentinel: black tactical armour, green optics and heavy carbine',
+    medic: 'DZN Lifeline: field medical pack, injector and squad support',
   },
   assets: {},
 };

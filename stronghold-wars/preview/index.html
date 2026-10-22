@@ -96,11 +96,14 @@
       .war-tactic strong { color: var(--green); font-size: 11px; }
       .war-tactic p { color: var(--muted); font-size: 9px !important; }
       .war-tag { color: var(--purple); font: 700 9px Orbitron, sans-serif; letter-spacing: .07em; }
-      .squad-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
-      .panel:has(.squad-grid) { width: min(700px, calc(100vw - 28px)); }
+      .squad-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 12px; margin: 12px 0; }
+      .panel:has(.squad-grid) { width: min(980px, calc(100vw - 28px)); }
       .squad-card { padding: 11px; border: 1px solid rgba(112,229,154,.26); border-radius: 11px; background: linear-gradient(145deg, rgba(46,68,54,.38), rgba(13,19,16,.4)); }
       .squad-card.recon { border-color: rgba(192,132,252,.38); }
       .squad-card.engineer { border-color: rgba(229,173,101,.38); }
+      .squad-card.sentinel { border-color: rgba(169,114,232,.55); background: linear-gradient(145deg, rgba(40,37,59,.63), rgba(12,17,22,.78)); }
+      .squad-card.medic { border-color: rgba(143,236,197,.55); }
+      .squad-card.locked { border-style: dashed; }
       .squad-card-head { display: flex; gap: 8px; align-items: center; }
       .squad-card-head strong { display: block; color: var(--green); font: 700 12px Orbitron, sans-serif; }
       .squad-card-head small { display: block; color: var(--muted); font-size: 9px; }
@@ -108,13 +111,17 @@
       .squad-emblem { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--green); font-size: 20px; }
       .squad-card.recon .squad-emblem { color: var(--purple); }
       .squad-card.engineer .squad-emblem { color: #e3a865; }
+      .squad-card.sentinel .squad-emblem { color: #a770e8; }
+      .squad-card.medic .squad-emblem { color: #b3f8dc; }
+      .squad-status { color: var(--green); font: 700 9px Orbitron, sans-serif; letter-spacing: .04em; }
+      .squad-card.locked .squad-status { color: #edc78d; }
       .squad-portrait { display: block; width: min(100%, 170px); aspect-ratio: 1; margin: 6px auto; object-fit: contain; border-radius: 9px; background: radial-gradient(circle at 50% 50%, rgba(94,132,112,.18), transparent 67%); }
       .squad-tier-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
       .squad-tier-strip img { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(255,255,255,.025); }
       .squad-tier-strip img.current { border-color: var(--green); box-shadow: 0 0 10px rgba(112,229,154,.22); }
-      .squad-card p { font-size: 10px; line-height: 1.45; }
+      .squad-card p { font-size: 11px; line-height: 1.45; }
       .squad-card ol { list-style: none; margin: 8px 0 0; padding: 0; }
-      .squad-card li { padding: 3px 0; color: #889b90; font-size: 9px; }
+      .squad-card li { padding: 3px 0; color: #a0aea4; font-size: 10px; }
       .squad-card li.equipped { color: #b9f5cc; }
       .squad-card li.equipped::before { content: '✓ '; }
       .world-overlay { position: fixed; z-index: 7; inset: 7vh 4vw auto; max-height: 88vh; display: none; overflow: auto; padding: 18px; border: 1px solid rgba(112,229,154,.65); border-radius: 18px; background: rgba(8,17,17,.97); box-shadow: 0 24px 80px #000b; }

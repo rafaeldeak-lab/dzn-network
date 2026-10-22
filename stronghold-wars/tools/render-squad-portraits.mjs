@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { SQUAD_ROLES } from '../preview/squad-assets.js';
 
 const preview = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview');
 const output = path.join(preview, 'assets/portraits/squads');
@@ -16,7 +17,8 @@ const server = createServer(async (request, response) => {
     response.end('<!doctype html><meta charset="utf-8"><script type="importmap">{"imports":{"three":"https://esm.sh/three@0.184.0","three/":"https://esm.sh/three@0.184.0/"}}</script>');
     return;
   }
-  if (!/^\/assets\/models\/squads\/(assault|recon|engineer)_l0[1-5]\.glb$/.test(pathname)) {
+  const assetName = pathname.match(/^\/assets\/models\/squads\/([a-z]+)_l0[1-5]\.glb$/)?.[1];
+  if (!assetName || !SQUAD_ROLES[assetName]) {
     response.writeHead(404); response.end(); return;
   }
   try {
@@ -71,7 +73,7 @@ try {
     provenance: 'Local Chromium render of original DZN Stronghold Wars squad GLBs; no paid provider or external art.',
     dimensions: [400, 400], assets: {},
   };
-  for (const role of ['assault', 'recon', 'engineer']) for (let tier = 1; tier <= 5; tier++) {
+  for (const role of Object.keys(SQUAD_ROLES)) for (let tier = 1; tier <= 5; tier++) {
     const name = `${role}_l0${tier}`;
     const dataUrl = await page.evaluate(name => window.captureSquadPortrait(name), name);
     const bytes = Buffer.from(dataUrl.split(',')[1], 'base64');

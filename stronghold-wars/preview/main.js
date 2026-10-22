@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
-import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier } from './squad-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 
@@ -890,7 +890,7 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.loadToken = token;
   soldier.clear();
   const silhouette = new THREE.Group();
-  const color = role === 'recon' ? MAT.purple : role === 'engineer' ? MAT.metal : MAT.olive;
+  const color = role === 'recon' ? MAT.purple : role === 'engineer' || role === 'medic' ? MAT.metal : MAT.olive;
   box(silhouette, 0.45, 0.65, 0.3, color, 0, 0.93);
   cyl(silhouette, 0.21, 0.21, 0.25, color, 0, 1.43);
   soldier.add(silhouette);
@@ -917,7 +917,7 @@ function animateSoldier(soldier, phase, pace = 1) {
 // Patrol soldiers
 const patrols = [];
 for (let i = 0; i < 5; i++) {
-  const role = ['assault', 'recon', 'engineer', 'assault', 'recon'][i];
+  const role = ['assault', 'recon', 'engineer', 'sentinel', 'medic'][i];
   const soldier = makeSoldier(role, state.levels);
   scene.add(soldier);
   patrols.push({ mesh: soldier, role, radius: 13 + (i % 2) * 2.5, phase: (i / 5) * Math.PI * 2, speed: 0.12 + i * 0.01 });
@@ -1053,7 +1053,12 @@ function updateHud() {
   defenceChip.hidden = away === 0;
   defenceChip.classList.toggle('exposed', away > 0);
   defenceChip.textContent = `${away} SQUAD${away === 1 ? '' : 'S'} AWAY · HOME EXPOSED`;
-  patrols.forEach((patrol, index) => { patrol.mesh.visible = index >= Math.min(away, 3); });
+  let deployed = 0;
+  patrols.forEach(patrol => {
+    const unlocked = squadUnlocked(patrol.role, state.levels);
+    patrol.mesh.visible = unlocked && deployed >= Math.min(away, 3);
+    if (unlocked) deployed++;
+  });
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -1079,7 +1084,8 @@ function startReveal(key) {
   celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
   for (const [role, definition] of Object.entries(SQUAD_ROLES)) {
     const tier = squadTier(role, state.levels);
-    if (tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit unlocked`, tier, false);
+    if (squadUnlocked(role, state.levels) && !squadUnlocked(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} deployed`, tier, false);
+    else if (squadUnlocked(role, state.levels) && tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit upgraded`, tier, false);
   }
   if (key === 'hq') {
     reconcileLandScenery();
@@ -1250,17 +1256,14 @@ function showSquadPanel() {
   updateBuildingList();
   const levels = state.levels;
   const cards = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
-    const tier = squadTier(role, levels);
+    const profile = squadProfile(role, levels);
+    const tier = profile.tier;
     const sourceName = GAME_CONFIG.buildings[definition.source].name;
-    const equipment = role === 'assault'
-      ? ['Field carbine', 'Shoulder armour', 'Knee plates and spare magazine', 'Forearm shield', 'Illuminated shield rank']
-      : role === 'recon'
-        ? ['Optic visor and scanner', 'Hood and utility armour', 'Longer signal mast', 'Wide optic array', 'Elite signal markers']
-        : ['Field tools and axe', 'Repair canister', 'Reinforced knees', 'Welding guard', 'Elite work lights'];
-    return `<article class="squad-card ${role}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${role === 'assault' ? '◈' : role === 'recon' ? '◇' : '✦'}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>L${tier}</b></div><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} equipped soldier Level ${tier}"><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<img class="${level === tier ? 'current' : ''}" src="${squadPortrait(role, level)}" loading="lazy" alt="Level ${level} gear preview" title="Level ${level} · ${escapeHTML(equipment[level - 1])}">`).join('')}</div><p>${escapeHTML(definition.kit)}. Visual tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><ol>${equipment.map((item, index) => `<li class="${index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)}</li>`).join('')}</ol></article>`;
+    const unlock = profile.unlocked ? `DEPLOYED · L${tier}` : `LOCKED · Hall L${definition.unlockHall} + ${escapeHTML(sourceName)} L${definition.unlockSource}`;
+    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<img class="${level === tier ? 'current' : ''}" src="${squadPortrait(role, level)}" loading="lazy" alt="Level ${level} gear preview" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}">`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
   }).join('');
   const away = currentAwaySquads().length;
-  openPanel(`<h2>DZN Squad Armoury</h2><p>The base patrols, practice raid and war battle now use original equipped soldier models. Every role has five distinct gear tiers.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">Uniforms are visual progression. War scores still use the existing frozen Hall, Watchtower, district and defence rules; this panel cannot unlock a paid action.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Five original DZN roles, each with five outfits and gear stages. Command Hall and specialist buildings determine the active kit. Sentinel and Lifeline join the roster at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
   $('closeBtn').onclick = closePanel;
 }
 
@@ -1513,7 +1516,7 @@ function warTimelineHTML(war) {
 
 function warSnapshotLine(side) {
   const levels = side.base.levels;
-  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0} · Assault +${side.stats.assaultBonus || 0} · Recon +${side.stats.reconBonus || 0} · Works -${side.stats.worksDefence || 0}`;
+  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0} · Assault +${side.stats.assaultBonus || 0} · Recon +${side.stats.reconBonus || 0} · Works -${side.stats.worksDefence || 0} · Warden L${side.stats.assaultKit.leadTier} kit +${side.stats.assaultKit.scoreBonus} / loss shield ${side.stats.assaultKit.casualtyShield} · Ghost L${side.stats.reconKit.leadTier} kit +${side.stats.reconKit.scoreBonus} / loss shield ${side.stats.reconKit.casualtyShield}`;
 }
 
 function renderWarRecord(war, currentCommunityId, currentIdentity) {
@@ -1669,7 +1672,7 @@ function showWorldMap() {
   }).join('');
   const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
   const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
-  const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · gear L${squadTier(role, selected.buildings)}</span>`).join('');
+  const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${squadUnlocked(role, selected.buildings) ? `gear L${squadTier(role, selected.buildings)}` : `locked · Hall L${definition.unlockHall} / ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}`}</span>`).join('');
   const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
   overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
   overlay.style.display = 'block';
@@ -1760,7 +1763,9 @@ function launchWarAttack(warId, tactic) {
   const target = OUTPOST.clone().add(new THREE.Vector3(-3, 0, 0));
   const troops = [];
   for (let i = 0; i < squadSize; i++) {
-    const role = tactic === 'recon' ? 'recon' : 'assault';
+    let role = tactic === 'recon' ? 'recon' : 'assault';
+    if (squadUnlocked('medic', attackingSide.base.levels) && i === squadSize - 1) role = 'medic';
+    else if (tactic === 'assault' && squadUnlocked('sentinel', attackingSide.base.levels) && i % 4 === 3) role = 'sentinel';
     const troop = makeSoldier(role, attackingSide.base.levels);
     const start = new THREE.Vector3(OUTPOST.x - 22, 0, OUTPOST.z + (i - (squadSize - 1) / 2) * 1.15);
     const troopTarget = target.clone().add(new THREE.Vector3(0, 0, (i - (squadSize - 1) / 2) * 0.9));

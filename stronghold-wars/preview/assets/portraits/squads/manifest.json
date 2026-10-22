@@ -80,6 +80,56 @@
       "file": "assets/portraits/squads/engineer_l05.png",
       "sha256": "22d982363112975754685f676f31f5bda6f787c072ec7a3ffb4bb20a7d26f1f5",
       "bytes": 15237
+    },
+    "sentinel_l01": {
+      "file": "assets/portraits/squads/sentinel_l01.png",
+      "sha256": "050a1ee80cf0242d065509aba1ce3579970907f0137d4dbb53b57220970cd4ab",
+      "bytes": 12980
+    },
+    "sentinel_l02": {
+      "file": "assets/portraits/squads/sentinel_l02.png",
+      "sha256": "2ca045796ac2ac15435eb6a2ad3783d253791a2b447f70a623aa9a11af8c05a3",
+      "bytes": 13806
+    },
+    "sentinel_l03": {
+      "file": "assets/portraits/squads/sentinel_l03.png",
+      "sha256": "08d61ae58f747134b576aa3544f4d5011e8f33650d08f6154b8c91858db707d0",
+      "bytes": 14556
+    },
+    "sentinel_l04": {
+      "file": "assets/portraits/squads/sentinel_l04.png",
+      "sha256": "85a88e231f74bd0791cbc01edd63dd675469e3155186a8fd44117d6439668525",
+      "bytes": 15009
+    },
+    "sentinel_l05": {
+      "file": "assets/portraits/squads/sentinel_l05.png",
+      "sha256": "87c8d55e2224ac3ad545e3595aa209b72b2100fedc68c493e06a4cf7c3216b14",
+      "bytes": 15606
+    },
+    "medic_l01": {
+      "file": "assets/portraits/squads/medic_l01.png",
+      "sha256": "f0984816e8c47f6b37330f82035bd6cdd8efaf4321cf6eb99870220417cb78b7",
+      "bytes": 12794
+    },
+    "medic_l02": {
+      "file": "assets/portraits/squads/medic_l02.png",
+      "sha256": "9838e119bb4d04b54f819a06e807af0a8447136f6037672003cc5c02a720159d",
+      "bytes": 13921
+    },
+    "medic_l03": {
+      "file": "assets/portraits/squads/medic_l03.png",
+      "sha256": "8220419dae681b51ed1003034bf46f98de8d84b9731eb88277d55b8552c74dcb",
+      "bytes": 14522
+    },
+    "medic_l04": {
+      "file": "assets/portraits/squads/medic_l04.png",
+      "sha256": "840c4982c719f07be136328b52b097664689cc16e98b030790e1e732b558fc3c",
+      "bytes": 15001
+    },
+    "medic_l05": {
+      "file": "assets/portraits/squads/medic_l05.png",
+      "sha256": "69eea01cf503971dc775070e7bdd78acdb441c83b99b121b61e912d591572ea4",
+      "bytes": 15493
     }
   }
 }

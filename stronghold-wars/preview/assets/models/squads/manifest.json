@@ -7,7 +7,9 @@
   "roles": {
     "assault": "DZN Warden: direct-push carbine, armour and shield",
     "recon": "DZN Ghost: scout optics, scanner and signal mast",
-    "engineer": "DZN Fixer: timber axe, construction and repair kit"
+    "engineer": "DZN Fixer: timber axe, construction and repair kit",
+    "sentinel": "DZN Sentinel: black tactical armour, green optics and heavy carbine",
+    "medic": "DZN Lifeline: field medical pack, injector and squad support"
   },
   "assets": {
     "assault_l01": {
@@ -174,6 +176,116 @@
         0.71
       ],
       "meshes": 40
+    },
+    "sentinel_l01": {
+      "file": "assets/models/squads/sentinel_l01.glb",
+      "sha256": "6f433bed0f9c1d28bce6e71fcc63b1b0c26dec415d8722625cf3dd6410d6d81b",
+      "bytes": 52740,
+      "dimensions": [
+        0.885,
+        1.76,
+        1.28
+      ],
+      "meshes": 26
+    },
+    "sentinel_l02": {
+      "file": "assets/models/squads/sentinel_l02.glb",
+      "sha256": "be57ffb2772fbfdedf0fa2948658011684a304a163fbf17c80389e30ab66cb75",
+      "bytes": 63652,
+      "dimensions": [
+        0.96,
+        1.76,
+        1.315
+      ],
+      "meshes": 32
+    },
+    "sentinel_l03": {
+      "file": "assets/models/squads/sentinel_l03.glb",
+      "sha256": "28b286e5ee451e7ebbf0270522222f63902f18bfe93cb9b5b7ea344aab3f4a38",
+      "bytes": 76412,
+      "dimensions": [
+        0.975,
+        1.76,
+        1.35
+      ],
+      "meshes": 39
+    },
+    "sentinel_l04": {
+      "file": "assets/models/squads/sentinel_l04.glb",
+      "sha256": "8d5c93f2e6d955409f343c625bd27cc1a0ebefcc269db72d289baf1a3ae20c80",
+      "bytes": 87448,
+      "dimensions": [
+        0.99,
+        1.76,
+        1.385
+      ],
+      "meshes": 45
+    },
+    "sentinel_l05": {
+      "file": "assets/models/squads/sentinel_l05.glb",
+      "sha256": "522e8fb4344a9737057aed84e06a777b0819e83d7fbe24612dad2aa3976833d6",
+      "bytes": 92924,
+      "dimensions": [
+        1.005,
+        1.772,
+        1.46
+      ],
+      "meshes": 48
+    },
+    "medic_l01": {
+      "file": "assets/models/squads/medic_l01.glb",
+      "sha256": "e239dd8fb9f516568eef748f680e81b7226ce2196b6f12554518414955da7c43",
+      "bytes": 50064,
+      "dimensions": [
+        0.86,
+        1.8,
+        0.852
+      ],
+      "meshes": 25
+    },
+    "medic_l02": {
+      "file": "assets/models/squads/medic_l02.glb",
+      "sha256": "42dcb54b58a6505d7083ee84a2db36412a2d369b61f1a52e65cdbe0ca9ea5e9a",
+      "bytes": 59176,
+      "dimensions": [
+        0.875,
+        1.8,
+        0.852
+      ],
+      "meshes": 30
+    },
+    "medic_l03": {
+      "file": "assets/models/squads/medic_l03.glb",
+      "sha256": "e89d5bd589bdd6f71e7c34a5d18e50b059793d66fc098d8dcc3b5096beb37844",
+      "bytes": 68284,
+      "dimensions": [
+        0.875,
+        1.8,
+        0.852
+      ],
+      "meshes": 35
+    },
+    "medic_l04": {
+      "file": "assets/models/squads/medic_l04.glb",
+      "sha256": "5e02ac8ce91cc5982a21a2ac08f10bb9ec8abf6cbe8eacb2353ad53d88e6d494",
+      "bytes": 77464,
+      "dimensions": [
+        0.875,
+        1.8,
+        0.852
+      ],
+      "meshes": 40
+    },
+    "medic_l05": {
+      "file": "assets/models/squads/medic_l05.glb",
+      "sha256": "940019a89c07b80c65e56de1a7cacd43dd2cfde85ed54f5ceca441b3f5ebdeff",
+      "bytes": 83960,
+      "dimensions": [
+        0.875,
+        1.8,
+        0.852
+      ],
+      "meshes": 43
     }
   }
 }

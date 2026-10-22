@@ -115,23 +115,29 @@ funding, war scores, DZN rankings or live server data.
 
 ## DZN equipped squads
 
-`tools/generate-squads.mjs` creates 15 original low-poly GLBs: DZN Warden
-(Assault), Ghost (Recon) and Fixer (construction patrol), each at five visibly
-different gear tiers. The models include named arm and leg pivots for walking
-motion, helmets, body armour, role tools and DZN green/purple/amber accents.
-`tools/render-squad-portraits.mjs` renders those same GLBs into 15 transparent
+`tools/generate-squads.mjs` creates 25 original low-poly GLBs: DZN Warden
+(Assault), Ghost (Recon), Fixer (construction patrol), Sentinel (heavy tactical)
+and Lifeline (field medic), each at five visibly different gear tiers. The
+Sentinel follows the supplied recording's black uniform, green optics,
+progressive armour and late purple detailing; these are original project models,
+not exports from the recording. Every model has named arm and leg pivots for
+walking motion. `tools/render-squad-portraits.mjs` renders them into 25 transparent
 400px close-up PNGs for the Armoury, so each gear tier can be inspected. The
 manifests record dimensions, mesh counts and SHA-256; `test-assets.mjs` checks
-all 30 files and the models' animatable limbs.
+all 50 files and the models' animatable limbs.
 
 Base patrols, practice raiders and local war squads now load the actual models.
 The Squads panel explains the current equipment; the World Map shows the
 opponent's visual gear tier from its public building levels. Command Hall caps
-gear, while Watchtower, Communications and Workshop set Warden, Ghost and Fixer
-tiers respectively. An upgrade that raises a tier triggers the existing reveal
-burst and announces the newly equipped role. These are cosmetic tiers: war
-scores still follow the existing frozen rules, and preview gear never supplies
-live DZN ownership, membership or entitlement evidence. A simple silhouette
+gear, while Watchtower, Communications and Workshop set specialist tiers.
+Sentinel unlocks at Hall 4 and Watchtower 3; Lifeline unlocks at Hall 4 and
+Workshop 3. An upgrade that raises a tier or unlocks a specialist triggers the
+existing reveal burst. Each tier has explicit health, damage, armour and ability
+stats. In local preview wars, upgraded kit damage adds a bounded score bonus;
+health, armour and Lifeline support reduce casualties. The kit values are frozen
+with the pre-war base snapshot. They do not grant access or change live DZN
+competition, and preview gear never supplies ownership, membership or
+entitlement evidence. A simple silhouette
 keeps the local scene usable while GLBs load or if one fails.
 
 ## Feasible next game slices

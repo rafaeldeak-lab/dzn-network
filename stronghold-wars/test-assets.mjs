@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
-import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier } from './preview/squad-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
@@ -101,8 +101,10 @@ if (createHash('sha256').update(worldBytes).digest('hex') !== worldManifest.sha2
 console.log(`DZN world map verified: ${worldManifest.dimensions.join('x')} original texture.`);
 const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads/manifest.json'), 'utf8'));
 const squadNames = Object.keys(squadManifest.assets);
-if (squadNames.length !== 15 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain three roles at five levels each.');
+if (squadNames.length !== 25 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain five roles at five levels each.');
 if (squadTier('assault', { hq: 3, tower: 5 }) !== 3 || squadTier('recon', { hq: 5, comms: 2 }) !== 2 || squadTier('engineer', { hq: 4, workshop: 3 }) !== 3) throw new Error('Squad gear must follow the specialist and Hall visual cap.');
+if (squadUnlocked('sentinel', { hq: 3, tower: 5 }) || squadUnlocked('medic', { hq: 4, workshop: 2 }) || !squadUnlocked('sentinel', { hq: 4, tower: 3 }) || !squadUnlocked('medic', { hq: 4, workshop: 3 })) throw new Error('Specialist units must follow Hall and building unlock gates.');
+if (squadProfile('sentinel', { hq: 5, tower: 5 }).maxHealth <= squadProfile('sentinel', { hq: 4, tower: 3 }).maxHealth || squadBattleStats({ hq: 4, tower: 3, workshop: 3 }, 'assault').scoreBonus <= squadBattleStats({ hq: 3, tower: 2, workshop: 2 }, 'assault').scoreBonus || squadBattleStats({ hq: 4, tower: 3, workshop: 3 }, 'assault').casualtyShield <= 0) throw new Error('Upgraded weapons, armour and support must affect local combat.');
 const squadHashes = new Set();
 for (const [name, entry] of Object.entries(squadManifest.assets)) {
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
@@ -120,7 +122,7 @@ for (const [name, entry] of Object.entries(squadManifest.assets)) {
 console.log(`DZN squad kit verified: ${squadNames.length} original, distinct and animatable GLBs.`);
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
-if (portraits.length !== 15) throw new Error('DZN squad kit requires a close-up portrait for every GLB.');
+if (portraits.length !== 25) throw new Error('DZN squad kit requires a close-up portrait for every GLB.');
 const portraitHashes = new Set();
 for (const [name, entry] of portraits) {
   if (!squadManifest.assets[name] || entry.file !== squadPortrait(name.split('_')[0], Number(name.slice(-1)))) throw new Error(`Squad portrait does not match a model: ${name}`);

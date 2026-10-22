@@ -1,5 +1,6 @@
 import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY, LEGACY_STORAGE_KEY, SERVICE_STORAGE_KEY, V2_BACKUP_KEY, V2_STORAGE_KEY, WAR_RULES } from './game-service.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
+import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -208,6 +209,28 @@ export function runServiceTests() {
   const expectedBonusScore = Math.max(0, Math.min(100, Math.round(20 + 5 * 12 + 2 * 16 + 2 * 4 - 5 * 4 - 2 * 10 + 4 - 4)));
   assert(bonusAssault.ok && bonusAssault.score === expectedBonusScore, 'assault applies frozen Range bonus and Works defence exactly once');
   checks.push('four district battle stats, immutable war snapshots and deterministic facility scoring');
+
+  let eliteClock = clock;
+  const eliteService = new LocalGameService({ storage: new MemoryStorage(), now: () => eliteClock });
+  for (const id of ['iron-pines', 'violet-ridge']) eliteService.state.communities[id].base.levels = { hq: 4, workshop: 3, tower: 3, comms: 3 };
+  const eliteChallenge = eliteService.challengeWar('iron-owner', 'violet-ridge', 'elite-challenge');
+  assert(eliteChallenge.ok && eliteService.acceptWarChallenge('violet-owner', eliteChallenge.warId, 'elite-accept').ok, 'upgraded communities can lock specialist squads into a war');
+  const eliteWar = eliteService.getWar(eliteChallenge.warId);
+  const eliteKit = eliteWar.snapshots.challenger.stats.assaultKit;
+  assert(squadUnlocked('sentinel', eliteWar.snapshots.challenger.base.levels) && squadUnlocked('medic', eliteWar.snapshots.challenger.base.levels), 'Hall 4 and specialist Level 3 unlock heavy and medical roles');
+  assert(eliteKit.reinforcementRole === 'sentinel' && eliteKit.supportRole === 'medic' && eliteKit.scoreBonus > 0 && eliteKit.casualtyShield > 0, 'specialist weapon and medical buffs are captured in the pre-war snapshot');
+  eliteService.state.communities['iron-pines'].base.levels = { hq: 5, workshop: 5, tower: 5, comms: 5 };
+  eliteService.save();
+  const reloadedElite = new LocalGameService({ storage: eliteService.storage, now: () => eliteClock });
+  assert(reloadedElite.getWar(eliteChallenge.warId).snapshots.challenger.stats.assaultKit.scoreBonus === eliteKit.scoreBonus, 'save reload preserves frozen kit bonuses despite later base upgrades');
+  eliteClock += WAR_RULES.preparationReadyMs;
+  assert(reloadedElite.startWar('iron-owner', eliteChallenge.warId, 'elite-start').ok, 'upgraded war begins after preparation');
+  const eliteAttack = reloadedElite.submitWarAttack('iron-owner', eliteChallenge.warId, 'assault', 'elite-attack');
+  const baseEliteScore = 20 + 4 * 12 + 3 * 16 + 3 * 4 - 4 * 4 - 3 * 10;
+  const baseEliteLosses = 4 + 3 - Math.floor(3 / 2) + 1;
+  assert(eliteAttack.ok && eliteAttack.score === Math.min(100, baseEliteScore + eliteKit.scoreBonus) && eliteAttack.casualties === Math.max(0, baseEliteLosses - eliteKit.casualtyShield), 'frozen weapon damage adds points while health, armour and Lifeline prevent losses exactly once');
+  assert(squadProfile('sentinel', { hq: 5, tower: 5 }).maxHealth > squadProfile('sentinel', { hq: 4, tower: 3 }).maxHealth && squadBattleStats({ hq: 3, tower: 2, workshop: 2 }).reinforcementRole === '', 'kit progression improves health and keeps advanced roles locked below their gates');
+  checks.push('five-role unit unlocks, frozen upgraded combat stats, saved-war reload and casualty mitigation');
 
   const trainingService = new LocalGameService({ storage: new MemoryStorage(), now: () => clock });
   const trainingStartParts = trainingService.snapshot('iron-owner').member.parts;
