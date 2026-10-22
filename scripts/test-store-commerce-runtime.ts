@@ -386,7 +386,7 @@ async function testWarningClosedRestoresPurchase(db: D1Database, env: Env, publi
 
 async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, publicationId: string) {
   const user: SessionUser = { id: "buyer-five", discord_id: "100000000000000006", username: "buyer-five", avatar: null };
-  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  await resetSettledPublicationStock(db, publicationId, 5);
   const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
     { publicationId, requestKey: "out-of-order-dispute-0001" }, {
@@ -425,6 +425,23 @@ async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, 
     eventType: "charge.dispute.closed", orderLinked: true, livemode: false,
     dispute: { id: "dp_test_outoforder", outcome: "won" },
     providerReferences: { session: true, paymentIntent: true },
+  });
+}
+
+async function resetSettledPublicationStock(db: D1Database, publicationId: string, stockLimit: number) {
+  const heldOrders = await db.prepare(`SELECT id FROM store_commerce_orders
+    WHERE publication_id = ? AND stock_reservation_state = 'held'`).bind(publicationId).all<{ id: string }>();
+  assert.deepEqual(heldOrders.results, [], "prior Store runtime cases must release every stock reservation");
+
+  const reset = await db.prepare(`UPDATE store_catalog_publications
+    SET stock_limit = ?, reserved_quantity = 0, sold_quantity = 0
+    WHERE id = ?`).bind(stockLimit, publicationId).run();
+  assert.equal(reset.meta.changes, 1);
+  assert.deepEqual(await db.prepare(`SELECT stock_limit, reserved_quantity, sold_quantity
+    FROM store_catalog_publications WHERE id = ?`).bind(publicationId).first(), {
+    stock_limit: stockLimit,
+    reserved_quantity: 0,
+    sold_quantity: 0,
   });
 }
 
