@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { answerDznAssist, parseDznAssistRankings } from "../lib/dzn-assist-runtime";
+import { answerDznAssist, parseDznAssistRankings, restoreDznAssistReply } from "../lib/dzn-assist-runtime";
 
 const privateReply = answerDznAssist("Can you see my payment receipt?");
 assert.equal(privateReply.kind, "boundary");
@@ -69,6 +69,14 @@ const updatesReply = answerDznAssist("What is new on DZN?");
 assert.equal(updatesReply.kind, "guidance");
 assert.deepEqual(updatesReply.guideIds, ["dzn-updates"]);
 assert.ok(updatesReply.links.some((link) => link.href === "/updates"));
+const restoredGuidanceReply = restoreDznAssistReply("guidance", ["server-setup"]);
+assert.equal(restoredGuidanceReply.workflows[0]?.id, "server-setup");
+assert.ok(restoredGuidanceReply.links.some((link) => link.href === "/setup"));
+assert.ok(restoredGuidanceReply.suggestedPrompts.length > 0);
+const restoredRankingReply = restoreDznAssistReply("ranking", []);
+assert.equal(restoredRankingReply.wantsRankings, false);
+assert.match(restoredRankingReply.message, /not stored in DZN Assist history/i);
+assert.ok(restoredRankingReply.links.some((link) => link.href === "/leaderboards"));
 assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
 assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 

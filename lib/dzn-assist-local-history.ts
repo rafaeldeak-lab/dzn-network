@@ -3,12 +3,15 @@ export type DznAssistLocalHistoryMessage = {
   role: "assist" | "visitor";
   text: string;
   guideIds?: string[];
+  replyKind?: DznAssistLocalHistoryReplyKind;
 };
 
-type DznAssistLocalHistoryInput = Pick<DznAssistLocalHistoryMessage, "role" | "text" | "guideIds">;
+export type DznAssistLocalHistoryReplyKind = "boundary" | "fallback" | "guidance" | "ranking";
+
+type DznAssistLocalHistoryInput = Pick<DznAssistLocalHistoryMessage, "role" | "text" | "guideIds" | "replyKind">;
 
 export const DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY = "dzn-assist.local-history.v1";
-const HISTORY_VERSION = 1;
+const HISTORY_VERSION = 2;
 const MAX_HISTORY_MESSAGES = 40;
 const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_GUIDE_IDS = 8;
@@ -31,6 +34,7 @@ export function parseDznAssistLocalHistory(value: unknown): DznAssistLocalHistor
 export function serializeDznAssistLocalHistory(messages: readonly DznAssistLocalHistoryInput[]): string | null {
   const saved = messages
     .slice(-MAX_HISTORY_MESSAGES)
+    .filter((message) => message.role !== "assist" || message.replyKind !== undefined)
     .map((message) => parseMessage(message))
     .filter((message): message is Omit<DznAssistLocalHistoryMessage, "id"> => message !== null);
   if (saved.length === 0) return null;
@@ -42,8 +46,14 @@ function parseMessage(value: unknown): Omit<DznAssistLocalHistoryMessage, "id"> 
   const message = value as Record<string, unknown>;
   if ((message.role !== "assist" && message.role !== "visitor") || !validText(message.text)) return null;
   const guideIds = parseGuideIds(message.guideIds);
-  if (guideIds === null) return null;
-  return { role: message.role, text: message.text, ...(guideIds.length > 0 ? { guideIds } : {}) };
+  const replyKind = parseReplyKind(message.replyKind);
+  if (guideIds === null || replyKind === null || (message.role === "assist" && !replyKind) || (message.role === "visitor" && replyKind)) return null;
+  return {
+    role: message.role,
+    text: message.text,
+    ...(guideIds.length > 0 ? { guideIds } : {}),
+    ...(replyKind ? { replyKind } : {}),
+  };
 }
 
 function validText(value: unknown): value is string {
@@ -59,4 +69,11 @@ function parseGuideIds(value: unknown): string[] | null {
     ids.push(item);
   }
   return ids;
+}
+
+function parseReplyKind(value: unknown): DznAssistLocalHistoryReplyKind | undefined | null {
+  if (value === undefined) return undefined;
+  return value === "boundary" || value === "fallback" || value === "guidance" || value === "ranking"
+    ? value
+    : null;
 }

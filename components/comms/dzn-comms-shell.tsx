@@ -387,9 +387,8 @@ export function DznCommsShell() {
         return {
           ...current,
           payload: {
-            ...current.payload,
+            ...earlier,
             messages: [...unseenEarlier, ...current.payload.messages],
-            page: earlier.page,
           },
           message: unseenEarlier.length > 0 ? "Earlier messages loaded. Return to latest messages to refresh this channel." : "No additional earlier messages are available.",
         };

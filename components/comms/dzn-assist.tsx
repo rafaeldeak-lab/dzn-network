@@ -4,7 +4,7 @@ import { Bot, ChevronRight, CircleHelp, Crown, RotateCcw, Send, ShieldCheck, Spa
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import { DZN_ASSIST_GUIDES, type DznAssistLink } from "@/lib/dzn-assist";
+import { DZN_ASSIST_GUIDES, type DznAssistGuide, type DznAssistLink } from "@/lib/dzn-assist";
 import {
   DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY,
   parseDznAssistLocalHistory,
@@ -13,7 +13,9 @@ import {
 import {
   answerDznAssist,
   parseDznAssistRankings,
+  restoreDznAssistReply,
   type DznAssistRankingRow,
+  type DznAssistReplyKind,
   type DznAssistWorkflow,
 } from "@/lib/dzn-assist-runtime";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
@@ -27,6 +29,7 @@ type AssistMessage = {
   workflows?: DznAssistWorkflow[];
   suggestedPrompts?: string[];
   guideIds?: string[];
+  replyKind?: DznAssistReplyKind;
   players?: DznAssistRankingRow[];
   servers?: DznAssistRankingRow[];
   updatedAt?: string | null;
@@ -65,7 +68,7 @@ export function DznAssist() {
     let restored = [] as ReturnType<typeof parseDznAssistLocalHistory>;
     try {
       const saved = window.localStorage.getItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
-      if (saved) restored = parseDznAssistLocalHistory(JSON.parse(saved));
+      if (saved) restored = restoreSavedAssistMessages(parseDznAssistLocalHistory(JSON.parse(saved)), visibleGuides);
     } catch {
       // A blocked or malformed browser store must not prevent public support guidance.
     }
@@ -137,6 +140,7 @@ export function DznAssist() {
       workflows: reply.workflows,
       suggestedPrompts: reply.suggestedPrompts,
       guideIds: reply.guideIds,
+      replyKind: reply.kind,
     }]);
     setThinking(false);
 
@@ -290,6 +294,22 @@ function AssistMessageRow({ message, onPrompt }: { message: AssistMessage; onPro
       </div>
     </article>
   );
+}
+
+function restoreSavedAssistMessages(saved: ReturnType<typeof parseDznAssistLocalHistory>, guides: readonly DznAssistGuide[]): AssistMessage[] {
+  return saved.map((message) => {
+    if (message.role === "visitor") return message;
+    const reply = restoreDznAssistReply(message.replyKind ?? "fallback", message.guideIds, { guides });
+    return {
+      ...message,
+      text: reply.message,
+      links: reply.links,
+      workflows: reply.workflows,
+      suggestedPrompts: reply.suggestedPrompts,
+      guideIds: reply.guideIds,
+      replyKind: reply.kind,
+    };
+  });
 }
 
 function WorkflowRoute({ workflow }: { workflow: DznAssistWorkflow }) {

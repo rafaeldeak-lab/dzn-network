@@ -100,17 +100,21 @@ test("requests an earlier Comms page only with a validated opaque cursor", async
   }));
 });
 
-test("persists only bounded DZN Assist transcript text and guide context locally", () => {
+test("persists only bounded DZN Assist transcript text and reconstructable reply context locally", () => {
   const serialized = serializeDznAssistLocalHistory([
     { role: "visitor", text: "How do I add my server?" },
-    { role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"] },
+    { role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"], replyKind: "guidance" },
+    { role: "assist", text: "Live rankings", replyKind: "ranking" },
+    { role: "assist", text: "Transient public ranking rows are not saved." },
   ]);
   assert.ok(serialized);
   assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(serialized ?? "{}")), [
     { id: "dzn-assist-history-1", role: "visitor", text: "How do I add my server?" },
-    { id: "dzn-assist-history-2", role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"] },
+    { id: "dzn-assist-history-2", role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"], replyKind: "guidance" },
+    { id: "dzn-assist-history-3", role: "assist", text: "Live rankings", replyKind: "ranking" },
   ]);
-  assert.deepEqual(parseDznAssistLocalHistory({ version: 1, messages: [{ role: "visitor", text: "x", guideIds: ["unsafe/id"] }] }), []);
+  assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "visitor", text: "x", guideIds: ["unsafe/id"] }] }), []);
+  assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "assist", text: "x" }] }), []);
   assert.equal(serializeDznAssistLocalHistory([]), null);
 });
 
