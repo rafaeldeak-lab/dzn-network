@@ -55,7 +55,7 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
 }
 console.log(`Stronghold preview assets verified: ${pairs} building level pairs, ${recorded.size} original checksums, ${sceneryNames.length} original scenery GLBs.`);
 const facilityManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/manifest.json'), 'utf8'));
-const families = ['timberline_v3', 'ridgewatch', 'signal', 'highland'];
+const families = ['timberline_v4', 'ridgewatch', 'signal', 'highland'];
 const facilityNames = Object.keys(facilityManifest.assets);
 if (facilityNames.length !== 20 || !families.every(family => [1, 2, 3, 4, 5].every(level => facilityNames.includes(`${family}_l0${level}`)))) throw new Error('Facility kit must contain four distinct five-level families.');
 for (const [name, entry] of Object.entries(facilityManifest.assets)) {
@@ -65,10 +65,11 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
   if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing facility scene JSON: ${name}`);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
   if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete facility GLB scene: ${name}`);
-  if (name.startsWith('timberline_v3_')) {
+  if (name.startsWith('timberline_v4_')) {
     const level = Number(name.slice(-1));
     const nodes = new Set(gltf.nodes.map(node => node.name));
-    const required = ['stone_yard_base', 'roof_spine', 'saw_carriage', 'circular_saw_blade', 'saw_safety_light',
+    const required = ['stone_yard_base', 'roof_spine', 'saw_carriage', 'saw_rotor', 'circular_saw_blade', 'saw_safety_light',
+      'conveyor_roller_0', 'conveyor_roller_10', 'conveyor_roller_20', 'conveyor_roller_30',
       ...(level >= 2 ? ['hydraulic_sorter'] : []), ...(level >= 3 ? ['loading_crane_hook'] : []),
       ...(level >= 4 ? ['auto_feed_motor'] : []), ...(level >= 5 ? ['elite_yard_beacon'] : [])];
     if (required.some(part => !nodes.has(part))) throw new Error(`Incomplete Timberline Level ${level} machinery.`);
@@ -159,6 +160,12 @@ if (squadTier('assault', { hq: 3, tower: 5 }) !== 3 || squadTier('recon', { hq: 
 if (squadUnlocked('sentinel', { hq: 3, tower: 5 }) || squadUnlocked('medic', { hq: 4, workshop: 2 }) || !squadUnlocked('sentinel', { hq: 4, tower: 3 }) || !squadUnlocked('medic', { hq: 4, workshop: 3 })) throw new Error('Specialist units must follow Hall and building unlock gates.');
 if (squadProfile('sentinel', { hq: 5, tower: 5 }).maxHealth <= squadProfile('sentinel', { hq: 4, tower: 3 }).maxHealth || squadBattleStats({ hq: 4, tower: 3, workshop: 3 }, 'assault').scoreBonus <= squadBattleStats({ hq: 3, tower: 2, workshop: 2 }, 'assault').scoreBonus || squadBattleStats({ hq: 4, tower: 3, workshop: 3 }, 'assault').casualtyShield <= 0) throw new Error('Upgraded weapons, armour and support must affect local combat.');
 const squadHashes = new Set();
+const heldSquadParts = {
+  assault: ['carbine_barrel', 'carbine_body', 'carbine_sight'],
+  recon: ['scanner', 'scanner_screen'], engineer: ['axe_handle', 'axe_head'],
+  sentinel: ['heavy_carbine', 'heavy_barrel', 'reflex_sight'],
+  medic: ['aid_injector', 'injector_charge'],
+};
 for (const [name, entry] of Object.entries(squadManifest.assets)) {
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
   if (entry.file !== squadAsset(name.split('_')[0], Number(name.slice(-1))) || bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid squad GLB container: ${name}`);
@@ -167,6 +174,9 @@ for (const [name, entry] of Object.entries(squadManifest.assets)) {
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
   const nodeNames = new Set((gltf.nodes || []).map(node => node.name));
   if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.scenes?.length || !['left_arm', 'right_arm', 'left_leg', 'right_leg'].every(limb => nodeNames.has(limb))) throw new Error(`Incomplete animatable soldier: ${name}`);
+  if (heldSquadParts[name.split('_')[0]].some(part => !nodeNames.has(part))) throw new Error(`Missing animated held equipment: ${name}`);
+  if (name.startsWith('assault_') && Number(name.slice(-1)) >= 4 && !nodeNames.has('forearm_shield')) throw new Error(`Missing upgraded Warden shield: ${name}`);
+  if (name.startsWith('sentinel_') && Number(name.slice(-1)) >= 3 && !nodeNames.has('drum_magazine')) throw new Error(`Missing upgraded Sentinel drum: ${name}`);
   const hash = createHash('sha256').update(bytes).digest('hex');
   if (hash !== entry.sha256 || entry.bytes !== bytes.length || squadHashes.has(hash) || entry.meshes < 20) throw new Error(`Squad integrity or tier distinction failed: ${name}`);
   squadHashes.add(hash);
@@ -177,12 +187,15 @@ const occupied = [
   [0, 0, BUILDING_ASSETS.hq.footprint], [-9, 4, BUILDING_ASSETS.workshop.footprint],
   [8, 6, BUILDING_ASSETS.tower.footprint], [6, -8, BUILDING_ASSETS.comms.footprint],
 ];
+const patrolLayout = defaultLayout();
+const patrolNodes = patrolNodesForLayout(patrolLayout);
 for (const [role, stops] of Object.entries(PATROL_STOPS)) {
   const motion = createPatrolMotion(role);
   const reached = new Set();
   let walking = 0, resting = 0;
   for (let frame = 0; frame < 3600; frame++) {
-    stepPatrolMotion(motion, 0.05);
+    stepPatrolMotion(motion, 0.05, patrolNodes, patrolLayout);
+    if (motion.route.length > 2) throw new Error(`${role} took an unnecessary perimeter circuit`);
     if (motion.moving) walking++; else resting++;
     if (!motion.route.length && motion.wait > 0) reached.add(motion.node);
     for (const [x, z, size] of occupied) {
@@ -202,13 +215,18 @@ movedPatrolLayout.walls.push({ id: 'wall-1', x: 0, z: 6, level: 1 });
 const movedStops = patrolNodesForLayout(movedPatrolLayout);
 const wallDetour = walkablePatrolPath([0, 4], [0, 10], movedPatrolLayout);
 if (movedStops.workshop[0] !== -10 || !wallDetour || wallDetour.length < 2 || wallDetour.some(point => point[0] === 0 && point[1] === 6)) throw new Error('Moved buildings and placed walls must change the squad walking route.');
+const walledHallLayout = defaultLayout();
+for (const [x, z] of [[0, 4], [4, 0], [-4, 0], [0, -4]]) walledHallLayout.walls.push({ id: `wall-${x}-${z}`, x, z, level: 1 });
+const walledHallStop = patrolNodesForLayout(walledHallLayout).hall;
+if (walledHallLayout.walls.some(wall => wall.x === walledHallStop[0] && wall.z === walledHallStop[1]) ||
+    !walkablePatrolPath(PATROL_NODES.camp, walledHallStop, walledHallLayout)) throw new Error('A ring of wall segments must not put the Hall patrol stop inside a wall.');
 console.log('Dynamic patrol nodes and wall-avoiding grid paths verified.');
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (const [post, node] of Object.entries(DEFENDER_POST_NODES)) {
   const motion = createDefenderMotion(role, post);
   const reached = new Set();
   let walking = 0, resting = 0;
   for (let frame = 0; frame < 3600; frame++) {
-    stepPatrolMotion(motion, 0.05);
+    stepPatrolMotion(motion, 0.05, patrolNodes, patrolLayout);
     if (motion.moving) walking++; else resting++;
     if (!motion.route.length && motion.wait > 0) reached.add(motion.node);
     for (const [x, z, size] of occupied) {

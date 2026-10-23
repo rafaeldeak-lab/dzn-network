@@ -1,6 +1,7 @@
 // Walkable links around the four buildings. Stops are outside their footprints.
 // The camp is the squad's home until a dedicated Barracks plot exists.
 import { cellKey, footprintCells } from './layout-grid.js';
+import { BUILDING_ASSETS } from './building-assets.js';
 export const PATROL_NODES = Object.freeze({
   camp: [-4, -12], westSouth: [-9, -8], westLane: [-15, 0], westNorth: [-15, 10],
   workshop: [-9, 9], northWest: [-5, 12], hall: [0, 6],
@@ -35,8 +36,13 @@ export function patrolNodesForLayout(layout) {
   for (const [stop, key] of [['hall', 'hq'], ['workshop', 'workshop'], ['tower', 'tower'], ['comms', 'comms']]) {
     const point = layout?.structures?.[key];
     if (!point) continue;
-    const choices = [[point.x, point.z + 4], [point.x + 4, point.z], [point.x - 4, point.z], [point.x, point.z - 4]];
-    nodes[stop] = choices.find(([x, z]) => x >= -16 && x <= 16 && z >= -14 && z <= 14 && !occupied.has(cellKey(x, z))) || choices[0];
+    const choices = [4, 6, 8, 10].flatMap(radius => [
+      [point.x, point.z + radius], [point.x + radius, point.z],
+      [point.x - radius, point.z], [point.x, point.z - radius],
+      [point.x + radius, point.z + radius], [point.x - radius, point.z + radius],
+      [point.x + radius, point.z - radius], [point.x - radius, point.z - radius],
+    ]);
+    nodes[stop] = choices.find(([x, z]) => !blockedByLayout(x, z, layout) && !occupied.has(cellKey(x, z))) || nodes[stop];
   }
   return nodes;
 }
@@ -77,8 +83,9 @@ export function createDefenderMotion(role, post) {
 
 function blockedByLayout(x, z, layout) {
   if (x < -17 || x > 17 || z < -15 || z > 15) return true;
-  for (const point of Object.values(layout?.structures || {})) {
-    if (Math.abs(point.x) <= 16 && Math.abs(point.z) <= 14 && Math.abs(x - point.x) <= 2 && Math.abs(z - point.z) <= 2) return true;
+  for (const [key, point] of Object.entries(layout?.structures || {})) {
+    const clearance = (BUILDING_ASSETS[key]?.footprint ?? 6) / 2 + .3;
+    if (Math.abs(point.x) <= 16 && Math.abs(point.z) <= 14 && Math.abs(x - point.x) <= clearance && Math.abs(z - point.z) <= clearance) return true;
   }
   for (const wall of layout?.walls || []) if (Math.abs(x - wall.x) <= 1 && Math.abs(z - wall.z) <= 1) return true;
   return false;
@@ -134,7 +141,9 @@ export function stepPatrolMotion(motion, deltaSeconds, nodePositions = PATROL_NO
   }
   if (!motion.route.length) {
     motion.stopIndex = (motion.stopIndex + 1) % motion.stops.length;
-    motion.route = shortestPatrolPath(motion.node, motion.stops[motion.stopIndex]);
+    // Head for the next assigned building directly. The grid path handles
+    // obstacles; the perimeter graph made a commute look like a base circuit.
+    motion.route = [motion.node, motion.stops[motion.stopIndex]];
     motion.routeIndex = 1;
   }
   while (remaining > 0 && motion.routeIndex < motion.route.length) {

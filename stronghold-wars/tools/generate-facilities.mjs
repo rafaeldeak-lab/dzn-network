@@ -1,6 +1,7 @@
 // Original, reproducible DZN Stronghold district kit. No paid asset service.
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -87,7 +88,7 @@ function timberline(level) {
     beam(g, [x, .45, z], [x + (x < 0 ? .8 : -.8), 1.4, z], .065, wood);
   }
   for (const side of [-1, 1]) {
-    const panel = box(g, 2.06, .12, 3.12, roof, -.63 + side * .96, 2.82, -.86);
+    const panel = mesh(g, new RoundedBoxGeometry(2.06, .12, 3.12, 3, .045), roof, -.63 + side * .96, 2.82, -.86);
     panel.rotation.z = side * -.31;
     for (let stripe = 0; stripe < 4; stripe++) {
       const x = -.63 + side * (.25 + stripe * .47);
@@ -98,20 +99,23 @@ function timberline(level) {
   box(g, .15, .12, 3.25, trim, -.63, 3.11, -.86).name = 'roof_spine';
   for (let i = 0; i < 4; i++) box(g, .035, .17, 2.3, woodLight, -2.17 + i * .99, 1.39, -.85);
   for (let i = 0; i < 6; i++) box(g, 3.15, .038, .11, i % 2 ? wood : woodLight, -.64, 1.38, -1.98 + i * .45);
-  box(g, 2.58, .18, 1.18, iron, -.45, .58, 1.55).name = 'saw_carriage';
+  mesh(g, new RoundedBoxGeometry(2.58, .18, 1.18, 3, .055), iron, -.45, .58, 1.55).name = 'saw_carriage';
   for (const x of [-1.48, .62]) {
     const rail = cylinder(.12, 2.62, steel, x, .78, 1.55); rail.rotation.x = Math.PI / 2;
   }
   for (let i = 0; i < 5 + level; i++) timber(1.65, .53 + Math.floor(i / 3) * .38, -1.55 + i % 3 * .41);
   for (let i = 0; i < 2 + Math.floor(level / 2); i++) timber(-1.47 + i * .25, .78, 2.15, 1.4, .12);
-  const blade = cylinder(.61, .065, steel, -.5, 1.25, 1.22, 32);
+  // Keep the complete blade, hub and teeth on one pivot so gameplay can spin the
+  // whole saw, instead of making a moving disk pass through static teeth.
+  const rotor = new THREE.Group(); rotor.name = 'saw_rotor'; rotor.position.set(-.5, 1.25, 1.27); g.add(rotor);
+  const blade = cyl(rotor, .61, .61, .065, steel, 0, 0, -.05, 32);
   blade.rotation.x = Math.PI / 2;
   blade.name = 'circular_saw_blade';
-  const sawRim = mesh(g, new THREE.TorusGeometry(.59, .033, 6, 32), iron, -.5, 1.25, 1.27);
-  cylinder(.13, .12, trim, -.5, 1.25, 1.3).rotation.x = Math.PI / 2;
+  mesh(rotor, new THREE.TorusGeometry(.59, .033, 6, 32), iron, 0, 0, 0);
+  cyl(rotor, .13, .13, .12, trim, 0, 0, .03).rotation.x = Math.PI / 2;
   for (let i = 0; i < 16; i++) {
     const angle = i * Math.PI / 8;
-    const tooth = box(g, .12, .065, .07, steel, -.5 + Math.cos(angle) * .62, 1.25 + Math.sin(angle) * .62, 1.26);
+    const tooth = box(rotor, .12, .065, .07, steel, Math.cos(angle) * .62, Math.sin(angle) * .62, -.01);
     tooth.rotation.z = angle;
   }
   for (const x of [-1.12, .13]) beam(g, [x, .5, .92], [x, 1.75, .92], .035, iron);
@@ -121,6 +125,7 @@ function timberline(level) {
   for (const x of [-1.95, -.95, .05, 1.05]) {
     const roller = cylinder(.13, 1.7, steel, x, .46, 1.95, 22);
     roller.rotation.x = Math.PI / 2;
+    roller.name = `conveyor_roller_${Math.round((x + 1.95) * 10)}`;
     for (const z of [1.26, 2.64]) cylinder(.17, .08, iron, x, .46, z, 18).rotation.x = Math.PI / 2;
   }
   for (const z of [1.05, 2.82]) {
@@ -270,7 +275,7 @@ const manifest = {
   license: 'Project-owned original', unit: 'metre', coordinateSystem: 'Y up', assets: {},
 };
 for (const [family, make] of Object.entries(makers)) for (let level = 1; level <= 5; level++) {
-  const name = `${family === 'timberline' ? 'timberline_v3' : family}_l0${level}`;
+  const name = `${family === 'timberline' ? 'timberline_v4' : family}_l0${level}`;
   const scene = make(level); scene.name = name;
   const exported = Buffer.from(await exporter.parseAsync(scene, { binary: true, onlyVisible: true }));
   const bytes = family === 'timberline' ? embedTimberlineTextures(exported) : exported;

@@ -46,12 +46,15 @@ the attack cap is reached early. This is local preview scoring only.
 
 `tools/generate-walls.mjs` produces five original tiered wall GLBs under
 `preview/assets/models/walls/`. The updated facility generator produces five
-`timberline_v3` models with more detailed saw and log machinery; the updated
+`timberline_v4` models with rounded, textured roofs and moving saw, conveyor,
+carriage and crane machinery; the updated
 squad generator produces 25 `squads-v5` models with curved armour and role
 equipment. These are procedural interpretations of the supplied concepts, not
-fully scanned or rigged character meshes. Patrols now commute between specific
-buildings and camp, pause at stops, and path around occupied grid cells and
-walls. The generators and asset checks are reproducible without paid services.
+fully scanned or rigged character meshes. Their held weapons and tools now
+follow the animated arm pivots. Patrols commute directly between assigned
+buildings and camp, pause for role-specific work at stops, and path
+around occupied grid cells and walls. The generators and asset checks are
+reproducible without paid services.
 
 ## Local review
 

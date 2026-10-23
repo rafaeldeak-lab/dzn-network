@@ -450,7 +450,7 @@ for (let i = 0; i < 48; i++) {
 
 // ---------- Buildings ----------
 const buildings = {};
-const animated = { radars: [], lights: [], chimneys: [] };
+const animated = { radars: [], lights: [], chimneys: [], yards: [] };
 const revealEffects = new Map();
 const celebrations = [];
 let revealBannerTimer = 0;
@@ -544,8 +544,8 @@ async function sceneryModel(name) {
 
 async function facilityModel(name) {
   const key = `facility/${name}`;
-  const assetName = name.startsWith('timberline_l0') ? name.replace('timberline_', 'timberline_v3_') : name;
-  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-pbr-20261023`).then(gltf => gltf.scene).catch(error => {
+  const assetName = name.startsWith('timberline_l0') ? name.replace('timberline_', 'timberline_v4_') : name;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-motion-20261023`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Facility model ${name} could not load; keeping the claimed plot marker.`, error);
     return null;
@@ -614,6 +614,7 @@ async function reconcileLandScenery() {
     for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
     landScenery.clear();
     landTreePicks = [];
+    animated.yards.length = 0;
     const beacon = models[`chronicle_l0${base.levels.hq}`]?.clone(true);
     if (beacon) {
       beacon.position.set(-8, .1, -9);
@@ -677,6 +678,13 @@ async function reconcileLandScenery() {
           facility.position.set(point?.x ?? x, 0.09, point?.z ?? z);
           facility.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
           landScenery.add(facility);
+          if (config.id === 'timberline-depot') animated.yards.push({
+            rotor: facility.getObjectByName('saw_rotor'),
+            rollers: [0, 10, 20, 30].map(index => facility.getObjectByName(`conveyor_roller_${index}`)).filter(Boolean),
+            carriage: facility.getObjectByName('saw_carriage'),
+            hook: facility.getObjectByName('loading_crane_hook'),
+            phase: 0,
+          });
         } else {
           const marker = models.claim_marker.clone();
           marker.position.set(x, 0.09, z);
@@ -987,6 +995,26 @@ applyScaffoldState();
 
 // Keep the owner's detailed character sheets in the Armoury. In the world, load
 // actual three-dimensional GLBs so the named limb pivots can walk and turn.
+function bindSquadEquipment(model, role) {
+  const right = model.getObjectByName('right_arm');
+  const left = model.getObjectByName('left_arm');
+  const held = {
+    assault: ['carbine_barrel', 'carbine_body', 'carbine_sight'],
+    recon: ['scanner', 'scanner_screen'],
+    engineer: ['axe_handle', 'axe_head'],
+    sentinel: ['heavy_carbine', 'heavy_barrel', 'reflex_sight', 'drum_magazine'],
+    medic: ['aid_injector', 'injector_charge'],
+  };
+  model.updateMatrixWorld(true);
+  for (const name of held[role] || []) {
+    const part = model.getObjectByName(name);
+    if (right && part) right.attach(part);
+  }
+  if (role === 'assault' && left) for (const name of ['forearm_shield', 'shield_light']) {
+    const part = model.getObjectByName(name);
+    if (part) left.attach(part);
+  }
+}
 function equipSoldier(soldier, role, tier) {
   const path = squadAsset(role, tier);
   if (soldier.userData.squadAsset === path) return;
@@ -1004,6 +1032,7 @@ function equipSoldier(soldier, role, tier) {
     if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
     const model = template.clone(true);
     model.name = 'squad_model';
+    bindSquadEquipment(model, role);
     model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
     soldier.add(model);
   }).catch(error => {
@@ -1015,12 +1044,34 @@ function makeSoldier(role, levels) {
   equipSoldier(soldier, role, squadTier(role, levels));
   return soldier;
 }
-function animateSoldier(soldier, phase, pace = 1) {
+function animateSoldier(soldier, phase, pace = 1, stop = null) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const swing = Math.sin(phase) * 0.42 * pace;
   for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
     const limb = soldier.getObjectByName(name);
     if (limb) limb.rotation.x = angle;
+  }
+  const model = soldier.getObjectByName('squad_model');
+  if (model) {
+    model.position.y = pace ? Math.abs(Math.sin(phase)) * .035 : Math.sin(phase * .5) * .006;
+    model.rotation.y = !pace && stop ? Math.sin(phase * .35) * .08 : 0;
+  }
+  if (pace || !stop) return;
+  const role = soldier.userData.squadRole;
+  const right = soldier.getObjectByName('right_arm');
+  const left = soldier.getObjectByName('left_arm');
+  if (role === 'engineer' && (stop === 'workshop' || stop === 'hall')) {
+    if (right) right.rotation.x = -.48 + Math.sin(phase * 2.2) * .24;
+    if (left) left.rotation.x = -.2;
+  } else if (role === 'recon' && stop === 'comms') {
+    if (right) right.rotation.x = -.62 + Math.sin(phase) * .06;
+    if (left) left.rotation.x = -.28;
+  } else if (role === 'medic' && stop === 'workshop') {
+    if (right) right.rotation.x = -.5 + Math.sin(phase * 1.4) * .12;
+    if (left) left.rotation.x = -.22;
+  } else if ((role === 'assault' || role === 'sentinel') && (stop === 'tower' || stop === 'hall')) {
+    if (right) right.rotation.x = -.16;
+    if (left) left.rotation.x = -.12;
   }
 }
 
@@ -2470,6 +2521,13 @@ renderer.setAnimationLoop(time => {
       l.flag.rotation.y = Math.sin(elapsed * 3) * 0.3;
     }
   });
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) animated.yards.forEach(yard => {
+    yard.phase += dt;
+    if (yard.rotor) yard.rotor.rotation.z -= dt * 6.2;
+    for (const roller of yard.rollers) roller.rotateY(dt * 1.9);
+    if (yard.carriage) yard.carriage.position.z = 1.55 + Math.sin(yard.phase * 1.25) * .09;
+    if (yard.hook) yard.hook.position.y = 2.54 + Math.sin(yard.phase * .8) * .12;
+  });
   smokeTimer += dt;
   if (smokeTimer > 0.25) {
     smokeTimer = 0;
@@ -2496,7 +2554,7 @@ renderer.setAnimationLoop(time => {
     const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     p.mesh.position.set(motion.x, 0, motion.z);
     p.mesh.rotation.y = motion.yaw;
-    animateSoldier(p.mesh, motion.stride, motion.moving ? 1 : 0.04);
+    animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null);
   });
   for (const patrol of defenderPatrols.values()) {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
