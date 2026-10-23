@@ -41,6 +41,13 @@ try {
     await page.getByLabel("Ask DZN Assist a question").fill("link stats");
     await page.getByLabel("Ask DZN Assist a question").press("Enter");
     await page.getByText("Choose the server you play on and submit the exact gamertag", { exact: false }).waitFor({ state: "visible" });
+    await page.getByLabel("Ask DZN Assist a question").fill("Help me find a server to play on");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("Browse the public Servers directory", { exact: false }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Browse public servers" }).last().waitFor({ state: "visible" });
+    await page.getByLabel("Ask DZN Assist a question").fill("How do I join a server?");
+    await page.getByLabel("Ask DZN Assist a question").press("Enter");
+    await page.getByText("Follow that community's published joining guidance", { exact: false }).waitFor({ state: "visible" });
     for (const [question, reply] of [
       ["How do I set up my server?", "Start from the setup page."],
       ["How do I sign in?", "Use Discord sign-in to reach your private Player Hub."],
