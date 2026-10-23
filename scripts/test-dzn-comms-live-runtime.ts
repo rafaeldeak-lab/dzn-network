@@ -138,7 +138,7 @@ function deleteRequest(path: string, token: string | null, origin = "http://127.
 }
 
 async function payload(response: Response) {
-  return await response.json() as { ok?: boolean; code?: string; replayed?: boolean; message_id?: string };
+  return await response.json() as { ok?: boolean; code?: string; message?: string; replayed?: boolean; message_id?: string };
 }
 
 async function testSendRuntime() {
@@ -186,6 +186,13 @@ async function testSendRuntime() {
     assert.equal((await payload(blocked)).code, "LANGUAGE_FILTERED");
     assert.equal(f.count("dzn_comms_messages"), 2, "Rejected text must not create a visible chat row.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%clit%'").get()?.count, 0, "Rejected text must never be retained in the message table.");
+    const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos" };
+    const englishOnly = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
+    assert.equal(englishOnly.status, 422);
+    assert.deepEqual(await payload(englishOnly), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English." });
+    const englishOnlyReplay = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
+    assert.equal(englishOnlyReplay.status, 422);
+    assert.deepEqual(await payload(englishOnlyReplay), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English.", message_id: null, replayed: true });
   } finally { f.close(); }
 
   const replayQuota = await fixture();

@@ -587,12 +587,7 @@ async function storeRejected(db: D1Database, user: SessionUser, actorReceiptKey:
     if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that safety decision. Retry shortly.");
   }
-  const message = decision === "timeout"
-    ? "This account has a short chat timeout for a safety review."
-    : reason === "ENGLISH_ONLY"
-      ? "DZN Comms is English-only. Please write your message in English."
-      : "That message was blocked by DZN Safety.";
-  return error(status, reason, message);
+  return error(status, reason, rejectedCommsMessage(decision, reason));
 }
 
 async function readReceipt(db: D1Database, actorReceiptKey: string, channel: SendChannel, userId: string, requestId: string) {
@@ -674,7 +669,18 @@ function deleteExpiredReceipt(db: D1Database, actorReceiptKey: string, channelId
 
 function receiptResponse(row: { decision: string; response_status: number; reason_code: string | null; message_id: string | null }, replayed: boolean) {
   const ok = row.decision === "allow";
-  return json({ ok, code: ok ? "MESSAGE_SENT" : row.reason_code, message_id: row.message_id, replayed }, { status: replayed && ok ? 200 : row.response_status, headers: privateNoStoreHeaders() });
+  return json({
+    ok,
+    code: ok ? "MESSAGE_SENT" : row.reason_code,
+    ...(ok ? {} : { message: rejectedCommsMessage(row.decision, row.reason_code) }),
+    message_id: row.message_id,
+    replayed,
+  }, { status: replayed && ok ? 200 : row.response_status, headers: privateNoStoreHeaders() });
+}
+function rejectedCommsMessage(decision: string, reason: string | null) {
+  if (decision === "timeout") return "This account has a short chat timeout for a safety review.";
+  if (reason === "ENGLISH_ONLY") return "DZN Comms is English-only. Please write your message in English.";
+  return "That message was blocked by DZN Safety.";
 }
 function unavailable() { return error(404, "DZN_COMMS_LIVE_DISABLED", "Live DZN Comms is not enabled in this environment."); }
 function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABLE", "This private DZN Comms group is not available to your account."); }
