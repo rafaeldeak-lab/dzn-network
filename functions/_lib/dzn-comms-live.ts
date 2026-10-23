@@ -26,10 +26,11 @@ const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|com
 const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
-const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|pussy|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
+const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
 const targetedProfanityPattern = /\b(?:you(?:\s+)?re\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
-const identitySlurPattern = /\b(?:fag(?:got)?|homo|retard(?:ed)?|trann(?:y|ie))\b/i;
+const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|trann(?:y|ie))\b/i;
 const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
+const contextualAmbiguousAbusePattern = /\b(?:you(?:\s+)?re\s+(?:such\s+)?(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
 const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
 const sexualHarassmentPattern = /\b(?:clit|(?:nice|big|small|show|touch|your|ur|my)\s+cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
 // Common profanity and insults that are often pasted into English-language
@@ -108,10 +109,13 @@ export function moderateDznCommsBody(value: unknown) {
     || identitySlurPattern.test(compact)
     || targetedProfanityPattern.test(compact)
     || targetedIdentityAbusePattern.test(compact)
+    || contextualAmbiguousAbusePattern.test(compact)
     || possessiveIdentityInsultPattern.test(compact)
     || sexualHarassmentPattern.test(compact)
     || multilingualAbusePattern.test(compact)
-    || obfuscatedProfanityPattern.test(folded)
+    // "Homo sapiens" is a biological name, not an identity-directed insult.
+    // Keep the obfuscation rule for every other use so spaced-out slurs remain blocked.
+    || (!/\bhomo\s+sapiens\b/i.test(compact) && obfuscatedProfanityPattern.test(folded))
   ) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
