@@ -1055,10 +1055,23 @@ function equipSoldier(soldier, role, tier) {
     if (rigged) {
       const clip = asset.animations.find(animation => animation.name === 'DZN_Warden_Walk') || asset.animations[0];
       if (!clip) throw new Error(`Animated squad model has no walk clip: ${path}`);
+      // Rosebud's source soldier faces +X. Align its front with the patrol's
+      // +Z heading before applying the route yaw.
+      model.rotation.y = -Math.PI / 2;
       const mixer = new THREE.AnimationMixer(model);
       soldier.userData.walkMixer = mixer;
       soldier.userData.walkAction = mixer.clipAction(clip);
       soldier.userData.walkAction.play();
+      loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
+        if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
+        const carbine = weapon.scene.clone(true);
+        carbine.name = 'warden_carbine';
+        carbine.rotation.y = Math.PI / 2;
+        carbine.scale.setScalar(0.84 + tier * 0.04);
+        carbine.position.set(0.06, 0.86, -0.27);
+        carbine.traverse(item => { if (item.isMesh) item.castShadow = true; });
+        model.add(carbine);
+      }).catch(weaponError => console.warn('DZN Warden carbine could not load.', weaponError));
     }
   }).catch(error => {
     if (soldier.userData.loadToken !== token) return;

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Generated in the owner Rosebud AI account with its Tripo text-to-3D Create option using existing credits. Static source GLBs were separately rigged and animated in Blender; source meshes are retained.",
   "usage": "DZN Stronghold Wars local preview. Rights remain subject to the owner account and Rosebud terms.",
-  "coordinateSystem": "glTF Y-up; character forward +Z",
+  "coordinateSystem": "glTF Y-up; source character faces +X and game placement rotates it toward +Z",
   "assets": {
     "assault_l01": {
       "file": "assets/models/squads-v6/assault_l01.glb",
@@ -68,6 +68,18 @@
       "textures": 3,
       "animation": "DZN_Warden_Walk",
       "heightMetres": 1.8
+    }
+  },
+  "equipment": {
+    "warden_carbine": {
+      "file": "assets/models/squads-v6/warden_carbine.glb",
+      "source": "source-art/squads/warden_carbine_rosebud_tripo.glb",
+      "rosebudJob": "f652da23-b56f-432b-bd03-d2216356123f",
+      "bytes": 2317152,
+      "sha256": "44477ecee542cec1e56faf8ad363ef977c640a5af2c9d71803117dcc5c11ed7a",
+      "sourceSha256": "44477ecee542cec1e56faf8ad363ef977c640a5af2c9d71803117dcc5c11ed7a",
+      "meshes": 1,
+      "textures": 3
     }
   }
 }

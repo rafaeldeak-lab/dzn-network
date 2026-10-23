@@ -212,17 +212,20 @@ Rosebud's Create > 3D Model tool. The static Rosebud source GLBs remain in
 `source-art/squads/`; `tools/rig-rosebud-warden.py` binds each to a skeleton and
 adds a walking clip with Blender. The rigged files live in
 `preview/assets/models/squads-v6/`, whose manifest records Rosebud job IDs,
-source and output hashes, mesh sizes, skins and animation names. The game
+source and output hashes, mesh sizes, skins and animation names. A separate
+textured Rosebud carbine is also stored there and carried at the Warden's
+right side; its source and checksum are in the same manifest. The game
 clones the skinned models per soldier, plays the walk clip while travelling,
 and falls back to the previous Warden model if a new model fails to load.
 The real Rosebud editor has the same five files and game mapping. Its saved
 WebGL preview loaded with no game-console errors and reported all 25 local
 service checks passing. `review/rosebud-rig-l1-frame7.png` through
 `review/rosebud-rig-l5-frame7.png` show one walking frame for every tier;
-`review/rosebud-warden-webgl-preview.png` captures the Rosebud game preview.
-This improves Warden body and outfit detail; the
-generated hands are currently empty, so the carbine and shield still need a
-matching detailed 3D gear pass. The other four classes and base defenders
+`review/rosebud-warden-carbine-webgl-preview.png` captures the current direct
+Rosebud game preview. This improves Warden body, outfit and weapon detail;
+the carbine is carried at the hip while walking rather than gripped by both
+hands. A matching shield and combat-ready carry animation still need a 3D
+gear pass. The other four classes and base defenders
 still use their earlier procedural 3D interpretations.
 
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored

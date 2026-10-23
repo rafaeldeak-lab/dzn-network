@@ -35,8 +35,23 @@ const manifest = {
   schemaVersion: 1,
   provenance: 'Generated in the owner Rosebud AI account with its Tripo text-to-3D Create option using existing credits. Static source GLBs were separately rigged and animated in Blender; source meshes are retained.',
   usage: 'DZN Stronghold Wars local preview. Rights remain subject to the owner account and Rosebud terms.',
-  coordinateSystem: 'glTF Y-up; character forward +Z',
+  coordinateSystem: 'glTF Y-up; source character faces +X and game placement rotates it toward +Z',
   assets,
 };
+const equipmentFile = 'assets/models/squads-v6/warden_carbine.glb';
+const equipmentSource = 'source-art/squads/warden_carbine_rosebud_tripo.glb';
+const equipmentBytes = readFileSync(join(root, 'preview', ...equipmentFile.split('/')));
+const equipmentSourceBytes = readFileSync(join(root, ...equipmentSource.split('/')));
+if (equipmentBytes.toString('ascii', 0, 4) !== 'glTF' || equipmentBytes.readUInt32LE(8) !== equipmentBytes.length) throw new Error('Bad Warden carbine GLB.');
+const equipmentGltf = JSON.parse(equipmentBytes.toString('utf8', 20, 20 + equipmentBytes.readUInt32LE(12)));
+if (!equipmentGltf.meshes?.length || !equipmentGltf.images?.length) throw new Error('Warden carbine is missing mesh or texture.');
+manifest.equipment = {
+  warden_carbine: {
+    file: equipmentFile, source: equipmentSource,
+    rosebudJob: 'f652da23-b56f-432b-bd03-d2216356123f',
+    bytes: equipmentBytes.length, sha256: hash(equipmentBytes), sourceSha256: hash(equipmentSourceBytes),
+    meshes: equipmentGltf.meshes.length, textures: equipmentGltf.images.length,
+  },
+};
 writeFileSync(join(root, 'preview/assets/models/squads-v6/manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-console.log('Wrote five verified Rosebud Warden levels.');
+console.log('Wrote five verified Rosebud Warden levels and one carbine.');

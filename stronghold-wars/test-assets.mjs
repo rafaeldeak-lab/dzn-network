@@ -200,7 +200,14 @@ for (let level = 1; level <= 5; level++) {
   if (!gltf.skins?.length || !gltf.animations?.some(clip => clip.name === 'DZN_Warden_Walk') || !gltf.meshes?.length || !gltf.images?.length) throw new Error(`Warden Level ${level} is missing a skin, walk clip, mesh or texture.`);
   if (!(gltf.animations.find(clip => clip.name === 'DZN_Warden_Walk')?.channels?.length > 0)) throw new Error(`Warden Level ${level} has an empty walk clip.`);
 }
-console.log('Five distinct, textured and skinned Rosebud Warden levels verified with walk clips.');
+const carbine = wardenManifest.equipment?.warden_carbine;
+if (carbine?.file !== 'assets/models/squads-v6/warden_carbine.glb') throw new Error('Rosebud Warden carbine mapping is missing.');
+const carbineBytes = readFileSync(join(root, ...carbine.file.split('/')));
+if (carbineBytes.toString('ascii', 0, 4) !== 'glTF' || carbineBytes.readUInt32LE(8) !== carbineBytes.length
+  || createHash('sha256').update(carbineBytes).digest('hex') !== carbine.sha256) throw new Error('Warden carbine integrity failed.');
+const carbineGltf = JSON.parse(carbineBytes.toString('utf8', 20, 20 + carbineBytes.readUInt32LE(12)));
+if (!carbineGltf.meshes?.length || !carbineGltf.images?.length) throw new Error('Warden carbine lacks a 3D mesh or texture.');
+console.log('Five distinct, textured and skinned Rosebud Warden levels and a textured 3D carbine verified.');
 const occupied = [
   [0, 0, BUILDING_ASSETS.hq.footprint], [-9, 4, BUILDING_ASSETS.workshop.footprint],
   [8, 6, BUILDING_ASSETS.tower.footprint], [6, -8, BUILDING_ASSETS.comms.footprint],
