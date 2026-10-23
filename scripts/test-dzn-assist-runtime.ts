@@ -13,6 +13,12 @@ assert.ok(setupReply.links.some((link) => link.href === "/setup"));
 assert.equal(setupReply.workflows[0]?.id, "server-setup");
 assert.equal(setupReply.workflows[0]?.steps.length, 3);
 
+const serverDiscoveryReply = answerDznAssist("Help me find a server to play on");
+assert.equal(serverDiscoveryReply.kind, "guidance");
+assert.deepEqual(serverDiscoveryReply.guideIds, ["server-discovery"]);
+assert.ok(serverDiscoveryReply.links.some((link) => link.href === "/servers"));
+assert.equal(answerDznAssist("I want to join DZN").workflows[0]?.id, "account-access");
+
 assert.equal(answerDznAssist("How do I create my account?").kind, "guidance");
 assert.equal(answerDznAssist("Where can I view payment plans?").kind, "guidance");
 assert.equal(hasSensitiveDznAssistInput("How do I create my account?"), false);

@@ -58,7 +58,7 @@ const RANKING_REQUEST = /\b(leaderboard|ranking|rankings|ranked)\b|\btop\s*(?:10
 const FOLLOW_UP_REQUEST = /^(?:and\s+)?(?:(?:what\s+)?(?:should\s+i\s+)?do\s+next|what\s+should\s+i\s+do|where\s+do\s+i\s+(?:go|start)|how\s+do\s+i\s+(?:continue|start)|next|continue|more|details|tell\s+me\s+more|how\s+does\s+that\s+work)\??$/i;
 const COMMON_QUERY_TERMS = new Set(["a", "an", "and", "are", "can", "do", "for", "from", "help", "how", "i", "in", "is", "it", "me", "my", "need", "of", "on", "or", "please", "show", "the", "to", "want", "what", "when", "where", "with", "you", "your"]);
 const UNAVAILABLE_LEADERBOARD_SOURCES = new Set(["empty_no_cache", "fallback_empty", "empty_no_db"]);
-const DEFAULT_PROMPTS = ["I want to join DZN", "How do I add my server?", "How do I link my DayZ stats?", "Show the top players"];
+const DEFAULT_PROMPTS = ["I want to join DZN", "Help me find a server", "How do I add my server?", "How do I link my DayZ stats?", "Show the top players"];
 
 export function isPublicRankingRequest(question: string) {
   return RANKING_REQUEST.test(question);
@@ -165,14 +165,15 @@ function findGuides(question: string, guides: readonly DznAssistGuide[], previou
 function workflowOrder(guideId: string) {
   const order: Record<string, number> = {
     "account-access": 10,
-    "server-setup": 20,
-    "server-data": 30,
-    "player-stats-link": 40,
-    "server-owner-discord-access": 50,
-    "plans-and-billing": 60,
-    "comms-safety": 70,
-    "dzn-updates": 80,
-    "events-and-leaderboards": 90,
+    "server-discovery": 20,
+    "server-setup": 30,
+    "server-data": 40,
+    "player-stats-link": 50,
+    "server-owner-discord-access": 60,
+    "plans-and-billing": 70,
+    "comms-safety": 80,
+    "dzn-updates": 90,
+    "events-and-leaderboards": 100,
   };
   return order[guideId] ?? 100;
 }
@@ -181,6 +182,7 @@ function phraseScore(question: string, guideId: string) {
   const matches: Record<string, RegExp> = {
     "account-access": /\b(sign in|log in|login|create (?:(?:an|my) )?account|join dzn)\b/i,
     "player-stats-link": /\b(link|claim|connect).{0,24}\b(dayz|stats|gamertag|profile)\b|\b(dayz stats|player stats|game stats)\b/i,
+    "server-discovery": /\b(find|discover|browse|choose).{0,30}\b(server|community|communities)\b|\b(which server|where can i play)\b/i,
     "server-setup": /\b(add|set up|setup|connect|register).{0,30}\b(server|nitrado|adm)\b|\b(add my server|server setup)\b/i,
     "server-owner-discord-access": /\b(server owner|owner access|verified owner|owner role|private owner)\b/i,
     "server-data": /\b(sync|import|server data|missing data|old data|adm files?)\b/i,

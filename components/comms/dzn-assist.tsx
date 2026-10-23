@@ -43,10 +43,11 @@ const initialMessage: AssistMessage = {
   id: "dzn-assist-intro",
   role: "assist",
   text: "I am DZN Assist, your public DZN support guide. Tell me what you are trying to do and I will give you the clearest next step without exposing private account, player, payment, moderation, Discord, or server information.",
-  suggestedPrompts: ["I want to join DZN", "How do I add my server?", "How do I link my DayZ stats?", "Show the top players"],
+  suggestedPrompts: ["I want to join DZN", "Help me find a server", "How do I add my server?", "How do I link my DayZ stats?", "Show the top players"],
 };
 const topicPrompts = [
   { label: "Getting started", prompt: "I want to join DZN" },
+  { label: "Find a server", prompt: "Help me find a server" },
   { label: "Add a server", prompt: "How do I add my server?" },
   { label: "Player stats", prompt: "How do I link my DayZ stats?" },
   { label: "Plans and billing", prompt: "Compare DZN plans" },

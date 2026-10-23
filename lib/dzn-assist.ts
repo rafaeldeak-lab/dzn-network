@@ -33,6 +33,16 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     links: [{ href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account", label: "Link game stats" }, { href: "/player", label: "View Player Hub" }],
   },
   {
+    id: "server-discovery",
+    category: "Players",
+    title: "Find a DZN server",
+    summary: "Browse the public Servers directory to compare communities that DZN can currently show. Open a server profile before joining and treat current public information as a guide rather than a promise of live availability.",
+    steps: ["Open the public Servers directory.", "Choose a listed community and read its current profile information.", "Follow that community's published joining guidance, then link your DayZ stats later if you want a verified player profile."],
+    nextPrompts: ["How do I link my DayZ stats?", "Show the top servers"],
+    keywords: ["browse", "community", "communities", "directory", "discover", "find", "play", "public", "server"],
+    links: [{ href: "/servers", label: "Browse public servers" }, { href: "/leaderboards", label: "View server standings" }],
+  },
+  {
     id: "server-setup",
     category: "Servers",
     title: "Add or resume a server setup",
