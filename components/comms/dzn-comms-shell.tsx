@@ -168,6 +168,8 @@ export function DznCommsShell() {
           || selectedChannelRef.current !== selectedChannel
         ) return;
         if (selectedChannel !== "global-chat") {
+          setLoadingEarlierMessages(false);
+          setHistoryPageMode("latest");
           setHistory({
             status: "loading",
             payload: staticPayload,
@@ -315,6 +317,7 @@ export function DznCommsShell() {
         setDraft("");
         setComposerMessage(`Message sent to ${payload.channel.name}.`);
       }
+      setLoadingEarlierMessages(false);
       setHistoryPageMode("latest");
       const requestGeneration = ++historyRequestGenerationRef.current;
       try {
@@ -357,6 +360,7 @@ export function DznCommsShell() {
     } catch (error) {
       throw error;
     }
+    setLoadingEarlierMessages(false);
     setHistoryPageMode("latest");
     const requestGeneration = ++historyRequestGenerationRef.current;
     try {

@@ -65,6 +65,7 @@ export function DznAssist() {
     [],
   );
   const busy = thinking || loadingRankings;
+  const interactionLocked = busy || !localHistoryReady;
 
   useEffect(() => {
     let restored = [] as ReturnType<typeof parseDznAssistLocalHistory>;
@@ -74,12 +75,13 @@ export function DznAssist() {
     } catch {
       // A blocked or malformed browser store must not prevent public support guidance.
     }
-    const timer = window.setTimeout(() => {
-      if (restored.length > 0) setMessages([initialMessage, ...restored]);
-      setLocalHistoryReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+    if (restored.length > 0) {
+      setMessages((current) => current.length === 1 && current[0]?.id === initialMessage.id
+        ? [initialMessage, ...restored]
+        : current);
+    }
+    setLocalHistoryReady(true);
+  }, [visibleGuides]);
 
   useEffect(() => {
     if (!localHistoryReady) return;
@@ -124,7 +126,7 @@ export function DznAssist() {
 
   async function sendQuestion(question: string) {
     const text = question.trim().slice(0, 360);
-    if (!text || busy) return;
+    if (!text || interactionLocked) return;
     const requestId = ++requestRef.current;
     const previousGuideIds = [...messages].reverse().find((message) => message.role === "assist" && message.guideIds?.length)?.guideIds;
     const reply = answerDznAssist(text, { guides: visibleGuides, previousGuideIds });
@@ -200,6 +202,7 @@ export function DznAssist() {
   }
 
   function clearConversation() {
+    if (!localHistoryReady) return;
     requestRef.current += 1;
     setDraft("");
     setThinking(false);
@@ -229,7 +232,7 @@ export function DznAssist() {
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-2 border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs font-black uppercase text-emerald-100"><span className="h-2 w-2 rounded-full bg-emerald-300" aria-hidden="true" /> Public guide online</span>
-          <button type="button" onClick={clearConversation} className="grid h-9 w-9 place-items-center border border-white/12 text-zinc-300 transition hover:border-violet-300/40 hover:bg-violet-300/10 hover:text-white" aria-label="Clear DZN Assist conversation" title="Clear conversation"><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
+          <button type="button" onClick={clearConversation} disabled={!localHistoryReady} className="grid h-9 w-9 place-items-center border border-white/12 text-zinc-300 transition hover:border-violet-300/40 hover:bg-violet-300/10 hover:text-white disabled:cursor-wait disabled:opacity-60" aria-label="Clear DZN Assist conversation" title="Clear conversation"><RotateCcw className="h-4 w-4" aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -237,7 +240,7 @@ export function DznAssist() {
         <aside className="border-b border-white/10 bg-black/15 p-3 xl:border-b-0 xl:border-r">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Start here</p>
           <div className="mt-3 grid gap-1">
-            {topicPrompts.map((topic) => <button key={topic.label} type="button" onClick={() => void sendQuestion(topic.prompt)} disabled={busy} className="group flex min-h-10 items-center justify-between border-l-2 border-transparent px-3 text-left text-xs font-bold text-zinc-300 transition hover:border-violet-300 hover:bg-violet-300/8 hover:text-white disabled:cursor-wait disabled:opacity-60"><span>{topic.label}</span><ChevronRight className="h-3.5 w-3.5 text-zinc-600 transition group-hover:text-violet-200" aria-hidden="true" /></button>)}
+            {topicPrompts.map((topic) => <button key={topic.label} type="button" onClick={() => void sendQuestion(topic.prompt)} disabled={interactionLocked} className="group flex min-h-10 items-center justify-between border-l-2 border-transparent px-3 text-left text-xs font-bold text-zinc-300 transition hover:border-violet-300 hover:bg-violet-300/8 hover:text-white disabled:cursor-wait disabled:opacity-60"><span>{topic.label}</span><ChevronRight className="h-3.5 w-3.5 text-zinc-600 transition group-hover:text-violet-200" aria-hidden="true" /></button>)}
           </div>
           <div className="mt-4 border-t border-white/8 pt-4">
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Conversation scope</p>
@@ -252,7 +255,7 @@ export function DznAssist() {
           </div>
 
           <div ref={transcriptRef} role="log" aria-live="polite" aria-relevant="additions text" className="h-[min(30rem,48svh)] min-h-72 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 [scrollbar-gutter:stable] sm:px-5">
-            {messages.map((message) => <AssistMessageRow key={message.id} message={message} onPrompt={(prompt) => void sendQuestion(prompt)} />)}
+            {messages.map((message) => <AssistMessageRow key={message.id} message={message} onPrompt={(prompt) => void sendQuestion(prompt)} disabled={interactionLocked} />)}
             {thinking ? <div className="flex items-center gap-3 text-xs font-bold text-violet-100"><span className="grid h-8 w-8 place-items-center border border-violet-300/25 bg-violet-300/10"><Bot className="h-4 w-4" aria-hidden="true" /></span><span className="inline-flex items-center gap-1" aria-label="DZN Assist is preparing a reply"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-200 [animation-delay:-0.2s]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-200 [animation-delay:-0.1s]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-200" /></span></div> : null}
             {loadingRankings ? <div className="flex items-center gap-2 text-xs font-bold text-violet-100"><span className="h-2 w-2 animate-pulse rounded-full bg-violet-300" aria-hidden="true" />Checking the current public standings…</div> : null}
           </div>
@@ -260,8 +263,8 @@ export function DznAssist() {
           <form onSubmit={onSubmit} className="border-t border-white/10 bg-black/20 p-3 sm:p-4" aria-label="Ask DZN Assist">
             <div className="flex items-center gap-2 border border-white/12 bg-[#090a16] p-2 focus-within:border-violet-300/50">
               <CircleHelp className="ml-1 h-5 w-5 shrink-0 text-violet-200" aria-hidden="true" />
-              <input aria-label="Ask DZN Assist a question" value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={busy} placeholder="Ask about DZN, a server, player stats, or public standings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
-              <button type="submit" disabled={!draft.trim() || busy} className="grid h-10 w-10 shrink-0 place-items-center border border-violet-300/30 bg-violet-300/12 text-violet-100 transition enabled:hover:border-violet-200 enabled:hover:bg-violet-300/20 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send question to DZN Assist"><Send className="h-4 w-4" aria-hidden="true" /></button>
+              <input aria-label="Ask DZN Assist a question" value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={interactionLocked} placeholder="Ask about DZN, a server, player stats, or public standings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
+              <button type="submit" disabled={!draft.trim() || interactionLocked} className="grid h-10 w-10 shrink-0 place-items-center border border-violet-300/30 bg-violet-300/12 text-violet-100 transition enabled:hover:border-violet-200 enabled:hover:bg-violet-300/20 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send question to DZN Assist"><Send className="h-4 w-4" aria-hidden="true" /></button>
             </div>
             <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">Questions stay in this browser. This conversation is saved only on this device, and DZN Assist uses verified public guidance and only requests the public leaderboard when you ask for it.</p>
           </form>
@@ -281,7 +284,7 @@ export function DznAssist() {
   );
 }
 
-function AssistMessageRow({ message, onPrompt }: { message: AssistMessage; onPrompt: (prompt: string) => void }) {
+function AssistMessageRow({ message, onPrompt, disabled }: { message: AssistMessage; onPrompt: (prompt: string) => void; disabled: boolean }) {
   const isAssist = message.role === "assist";
   return (
     <article className={isAssist ? "flex gap-3" : "flex justify-end"}>
@@ -294,7 +297,7 @@ function AssistMessageRow({ message, onPrompt }: { message: AssistMessage; onPro
         {message.servers?.length ? <RankingList icon={Crown} label="Top servers" rows={message.servers} /> : null}
         {message.updatedAt ? <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-500">Public board refreshed {new Date(message.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</p> : null}
         {!message.workflows?.length && message.links?.length ? <ActionLinks links={message.links} /> : null}
-        {isAssist && message.suggestedPrompts?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.suggestedPrompts.map((prompt) => <button key={`${message.id}:${prompt}`} type="button" onClick={() => onPrompt(prompt)} className="border border-white/12 bg-white/[0.035] px-2.5 py-1.5 text-left text-[11px] font-bold text-zinc-300 transition hover:border-violet-300/35 hover:bg-violet-300/10 hover:text-white">{prompt}</button>)}</div> : null}
+        {isAssist && message.suggestedPrompts?.length ? <div className="mt-3 flex flex-wrap gap-2">{message.suggestedPrompts.map((prompt) => <button key={`${message.id}:${prompt}`} type="button" onClick={() => onPrompt(prompt)} disabled={disabled} className="border border-white/12 bg-white/[0.035] px-2.5 py-1.5 text-left text-[11px] font-bold text-zinc-300 transition hover:border-violet-300/35 hover:bg-violet-300/10 hover:text-white disabled:cursor-wait disabled:opacity-60">{prompt}</button>)}</div> : null}
       </div>
     </article>
   );
