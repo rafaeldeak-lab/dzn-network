@@ -30,8 +30,10 @@
       button:disabled { opacity: .43; cursor: not-allowed; transform: none; }
       select, input { background: #18221c; border: 1px solid rgba(112, 229, 154, .48); border-radius: 8px; padding: 8px 9px; min-width: 0; }
       :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-      #hud { position: fixed; z-index: 5; top: 12px; left: 14px; right: 14px; display: flex; gap: 7px; align-items: center; flex-wrap: wrap; pointer-events: none; }
-      #hud > * { pointer-events: auto; }
+      #hud { position: fixed; z-index: 5; top: 12px; left: 14px; right: 14px; display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; pointer-events: none; }
+      #hud::-webkit-scrollbar { display: none; }
+      #hud > * { pointer-events: auto; flex-shrink: 0; }
+      #hud button { padding: 7px 8px; font-size: 10px; }
       .chip { padding: 8px 11px; background: rgba(13, 20, 16, .9); border: 1px solid rgba(112, 229, 154, .38); border-radius: 9px; box-shadow: 0 5px 20px rgba(0,0,0,.23); font-size: 12px; font-weight: 700; white-space: nowrap; }
       .title { font: 700 12px Orbitron, sans-serif; color: var(--purple); border-color: rgba(192,132,252,.7); letter-spacing: .05em; }
       .badge { color: var(--green); }
@@ -131,11 +133,30 @@
       .world-overlay h2 { margin: 0; color: var(--green); font: 700 18px Orbitron, sans-serif; }
       .world-overlay p { color: #c4d2c9; font-size: 11px; line-height: 1.5; }
       .world-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(265px, 1fr); gap: 14px; }
-      .world-map { position: relative; align-self: start; border: 1px solid #667f76; border-radius: 13px; overflow: hidden; background: #071b20; box-shadow: inset 0 0 36px #000; }
-      .world-map img { display: block; width: 100%; height: auto; }
-      .world-pin { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; min-width: 34px; min-height: 34px; padding: 5px; border: 2px solid #8ce4ac; background: #172d26; color: #d9ffe4; box-shadow: 0 0 0 5px #70e59a33, 0 0 22px #70e59a88; font-size: 16px; }
-      .world-pin.selected { border-color: #d5a8ff; box-shadow: 0 0 0 7px #c084fc55, 0 0 32px #c084fc; }
-      .world-pin.view-only { border-color: #d5aa6d; box-shadow: 0 0 0 5px #ffc27a33; }
+      .world-map { align-self: start; min-width: 0; border: 1px solid #667f76; border-radius: 13px; overflow: hidden; background: #071b20; box-shadow: inset 0 0 36px #000; }
+      .world-map-toolbar { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 9px; background: #101c1b; }
+      .world-search-label { display: grid; flex: 1; min-width: 190px; gap: 3px; color: #a9c3b5; font-size: 10px; }
+      .world-search-label input { width: 100%; padding: 8px 10px; border: 1px solid #628272; border-radius: 8px; background: #071617; color: #ecfff2; font: inherit; font-size: 12px; }
+      .world-zoom-controls { display: flex; align-items: center; gap: 5px; }
+      .world-zoom-controls button { min-width: 28px; padding: 5px 7px; }
+      .world-zoom-controls span { min-width: 38px; color: #d6f7df; text-align: center; font-size: 10px; }
+      .world-map-viewport { position: relative; width: 100%; aspect-ratio: 2 / 1; overflow: hidden; cursor: grab; touch-action: none; outline-offset: -4px; }
+      .world-map-viewport:active { cursor: grabbing; }
+      .world-map-content { position: absolute; inset: 0; transform-origin: center; will-change: transform; }
+      .world-map-content img { display: block; width: 100%; height: 100%; user-select: none; pointer-events: none; }
+      .world-pin { position: absolute; transform: translate(-50%, -50%) scale(var(--pin-inverse, 1)); border-radius: 50%; width: 21px; height: 21px; min-width: 21px; min-height: 21px; padding: 0; border: 1px solid #8ce4ac; background: #172d26; color: #d9ffe4; box-shadow: 0 0 0 3px #70e59a33, 0 0 12px #70e59a88; font-size: 10px; line-height: 19px; }
+      .world-pin.selected { border-color: #d5a8ff; box-shadow: 0 0 0 4px #c084fc55, 0 0 16px #c084fc; }
+      .world-pin.view-only { border-color: #d5aa6d; box-shadow: 0 0 0 3px #ffc27a33; }
+      .world-pin[hidden], .world-result[hidden] { display: none; }
+      .world-results { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-top: 1px solid #344b41; }
+      .world-result { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 175px; padding: 6px 8px; border: 1px solid #467059; border-radius: 7px; background: #15261e; text-align: left; font-size: 10px; }
+      .world-result small { color: #90d4a8; font-size: 8px; white-space: nowrap; }
+      #worldSearchStatus { margin: 0 8px 7px; }
+      .world-route { margin: 7px 0 12px; padding: 9px; border: 1px solid #88714c; border-radius: 9px; background: linear-gradient(125deg, #292319, #1a2522); }
+      .world-route strong { color: #ffe1a2; font-size: 10px; }
+      .world-route-stats { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-top: 8px; }
+      .world-route-stats span { padding: 5px; border-radius: 5px; background: #0f1a17; color: #aec4b4; font-size: 9px; }
+      .world-route-stats b { display: block; color: #ecffc9; font-size: 12px; }
       .world-details { border: 1px solid #43584d; border-radius: 13px; padding: 12px; background: #121e19; max-height: 70vh; overflow: auto; }
       .world-details h3 { margin: 4px 0 8px; color: #d8b1ff; font: 700 13px Orbitron, sans-serif; }
       .world-buildings { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
@@ -153,8 +174,20 @@
       .world-kit b { color: var(--green); }
       .world-mission { padding: 8px; margin: 7px 0; border: 1px solid #6f538c; border-radius: 9px; background: #211b2b; }
       .world-mission strong { color: #ddb8ff; font-size: 10px; }
+      .panel:has(.collectible-grid) { width: min(950px, calc(100vw - 28px)); }
+      .collectible-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
+      .collectible-card { min-width: 0; padding: 8px; border: 1px solid #5e497a; border-radius: 11px; background: linear-gradient(160deg,#292339,#111a17); box-shadow: inset 0 0 18px #0009; }
+      .collectible-card.earned { border-color: #a4e980; box-shadow: 0 0 18px #79db5b33, inset 0 0 18px #0009; }
+      .collectible-card-art { perspective: 800px; overflow: hidden; border-radius: 7px; }
+      .collectible-card img { display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover; transition: transform .3s ease, filter .3s ease; filter: saturate(.9); }
+      .collectible-card:hover img { transform: rotateY(5deg) scale(1.035); filter: saturate(1.15); }
+      .collectible-card strong { display: block; margin-top: 7px; color: #e3c0ff; font: 700 11px Orbitron,sans-serif; }
+      .collectible-card span { color: #b4e8ae; font-size: 10px; }
+      .collectible-card p { color: #bac9be; font-size: 10px; }
       @media (prefers-reduced-motion: reduce) { .world-building.constructing::after { animation: none; } }
-      @media (max-width: 760px) { .world-overlay { inset: 5vh 2vw auto; max-height: 93vh; } .world-layout { grid-template-columns: 1fr; } .world-details { max-height: none; } }
+      @media (prefers-reduced-motion: reduce) { .collectible-card img { transition: none; } .collectible-card:hover img { transform: none; } }
+      @media (max-width: 760px) { .world-overlay { inset: 5vh 2vw auto; max-height: 93vh; } .world-layout { grid-template-columns: 1fr; } .world-details { max-height: none; } .collectible-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+      @media (max-width: 440px) { .collectible-grid { grid-template-columns: 1fr; } }
       #toast { position: fixed; z-index: 10; top: 70px; left: 50%; transform: translateX(-50%); padding: 8px 13px; border-radius: 9px; background: rgba(8,12,9,.82); color: var(--green); font: 700 11px Orbitron, sans-serif; text-align: center; text-shadow: 0 1px 8px #000; pointer-events: none; }
       #upgradeReveal { position: fixed; z-index: 9; top: 28%; left: 50%; width: min(460px, calc(100vw - 30px)); transform: translate(-50%, 18px) scale(.92); opacity: 0; pointer-events: none; text-align: center; padding: 17px 25px; border: 1px solid rgba(112,229,154,.75); border-radius: 16px; background: radial-gradient(ellipse at top, rgba(75,45,100,.95), rgba(9,20,15,.95)); box-shadow: 0 0 0 6px rgba(192,132,252,.1), 0 0 50px rgba(112,229,154,.35), 0 18px 60px rgba(0,0,0,.65); transition: opacity .25s, transform .35s cubic-bezier(.16,1,.3,1); }
       #upgradeReveal.active { opacity: 1; transform: translate(-50%, 0) scale(1); }
@@ -283,6 +316,7 @@
       <button id="chronicleBtn">Chronicle</button>
       <button id="warBtn">War Table</button>
       <button id="worldBtn">World Map</button>
+      <button id="cardsBtn">Cards</button>
       <button id="muteBtn" aria-label="Toggle sound">🔊</button>
     </header>
     <section id="worldMapOverlay" class="world-overlay" role="dialog" aria-modal="true" aria-label="Stronghold world map"></section>

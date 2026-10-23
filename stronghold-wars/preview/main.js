@@ -7,6 +7,8 @@ import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMo
 import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
+import { connectedProMatches, routeBriefing } from './world-map.js';
+import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -507,14 +509,17 @@ let sceneryRequest = 0;
 
 async function sceneryModel(name) {
   if (!sceneryTemplates.has(name)) {
-    sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${name}.glb`).then(gltf => gltf.scene));
+    const upgradedScenery = /^(pine_l0[1-5]|granite_boulder|claim_marker)$/.test(name);
+    const assetName = upgradedScenery ? `${name}-2` : name;
+    sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${assetName}.glb?v=forest-20261023`).then(gltf => gltf.scene));
   }
   return sceneryTemplates.get(name);
 }
 
 async function facilityModel(name) {
   const key = `facility/${name}`;
-  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${name}.glb`).then(gltf => gltf.scene).catch(error => {
+  const assetName = name.startsWith('timberline_l0') ? `${name}-2` : name;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-pbr-20261023`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Facility model ${name} could not load; keeping the claimed plot marker.`, error);
     return null;
@@ -556,7 +561,7 @@ async function reconcileLandScenery() {
   const request = ++sceneryRequest;
   const base = service.community()?.saved.base;
   if (!base) return;
-  const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder'];
+  const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder', 'fallen_trunk', 'fern_patch', 'mossy_rock_cluster', 'brush_pile', 'lumber_pallet'];
   try {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
       .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
@@ -645,6 +650,22 @@ async function reconcileLandScenery() {
           logs.rotation.y = a + Math.PI / 2;
           landScenery.add(logs);
         }
+        if (config.id === 'timberline-depot') {
+          const pallet = models.lumber_pallet.clone(true);
+          pallet.position.set(x + 3.9, .1, z + 2.1);
+          pallet.rotation.y = -.45;
+          landScenery.add(pallet);
+        }
+      }
+      for (const [name, ox, oz, rotation] of [
+        ['fern_patch', -4.75, -1.2, .3], ['mossy_rock_cluster', 4.75, 1.25, .8],
+        [plot.treesRemaining ? 'brush_pile' : 'fallen_trunk', -4.65, 2.5, 1.25],
+      ]) {
+        const detail = models[name].clone(true);
+        detail.position.set(x + ox, .09, z + oz);
+        detail.rotation.y = rotation;
+        detail.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        landScenery.add(detail);
       }
     }
     for (let i = 0; i < 100; i++) {
@@ -654,6 +675,12 @@ async function reconcileLandScenery() {
       asset.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
       asset.rotation.y = a;
       landScenery.add(asset);
+      if (i % 4 === 0) {
+        const detail = models[i % 12 === 0 ? 'fallen_trunk' : i % 8 === 0 ? 'mossy_rock_cluster' : 'fern_patch'].clone(true);
+        detail.position.set(Math.cos(a + .07) * (radius + 2.1), .03, Math.sin(a + .07) * (radius + 2.1));
+        detail.rotation.y = a;
+        landScenery.add(detail);
+      }
     }
   } catch (error) {
     console.error('Scenery GLB import failed; base preview remains available.', error);
@@ -1812,7 +1839,38 @@ function showWarTable(errorMessage = '') {
 }
 $('warBtn').onclick = showWarTable;
 
+function showCardVault() {
+  const base = service.community()?.saved.base;
+  const cards = FIRST_EDITION_CARDS.map(card => {
+    const earned = cardEarned(card.id, base);
+    return `<article class="collectible-card ${earned ? 'earned' : ''}"><div class="collectible-card-art"><img src="${escapeHTML(card.image)}" alt="${escapeHTML(card.name)} First Edition card art" loading="lazy"></div><strong>${escapeHTML(card.name)}</strong><span>${escapeHTML(card.rarity)} · ${earned ? 'Earned in this preview' : 'Discoverable'}</span><p>${earned ? 'Milestone reached. This local collection mark follows the current base.' : escapeHTML(card.condition)}</p></article>`;
+  }).join('');
+  openPanel(`<h2>DZN First Edition Cards</h2><p>Guardian, Ghost and Fixer bring DZN's squads and base upgrades into a collectible art series. Milestones reveal cards in this local preview.</p><div class="collectible-grid">${cards}</div><p class="help">Artwork and milestones are real preview assets. Globally limited numbers, ownership, trading and any gameplay buffs need a reviewed DZN Network issuance system; no scarce cards have been minted.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('closeBtn').onclick = closePanel;
+}
+$('cardsBtn').onclick = showCardVault;
+
 let selectedWorldCommunityId = 'iron-pines';
+let worldSearch = '';
+const worldMapView = { scale: 1, x: 0, y: 0 };
+function applyWorldMapView(overlay) {
+  const viewport = overlay.querySelector('.world-map-viewport');
+  const content = overlay.querySelector('.world-map-content');
+  if (!viewport || !content) return;
+  const maxX = (worldMapView.scale - 1) * viewport.clientWidth / 2;
+  const maxY = (worldMapView.scale - 1) * viewport.clientHeight / 2;
+  worldMapView.x = THREE.MathUtils.clamp(worldMapView.x, -maxX, maxX);
+  worldMapView.y = THREE.MathUtils.clamp(worldMapView.y, -maxY, maxY);
+  content.style.transform = `translate3d(${worldMapView.x}px, ${worldMapView.y}px, 0) scale(${worldMapView.scale})`;
+  content.style.setProperty('--pin-inverse', String(1 / worldMapView.scale));
+  const label = overlay.querySelector('#worldZoomStatus');
+  if (label) label.textContent = `${Math.round(worldMapView.scale * 100)}%`;
+}
+function setWorldMapZoom(overlay, scale) {
+  worldMapView.scale = THREE.MathUtils.clamp(Math.round(scale * 10) / 10, 1, 4);
+  if (worldMapView.scale === 1) { worldMapView.x = 0; worldMapView.y = 0; }
+  applyWorldMapView(overlay);
+}
 function showWorldMap() {
   closePanel();
   const overlay = $('worldMapOverlay');
@@ -1826,7 +1884,11 @@ function showWorldMap() {
   const reports = war ? service.getScoutReports(profile.id, war.id) : [];
   const canScout = Boolean(war && access.allowed && selected.id !== profile.communityId && service.getWarReadiness(profile.communityId, profile.id).eligible && war.roster[profile.communityId]?.some(member => member.identityId === profile.id) && !reports.some(report => report.identityId === profile.id) && reports.length < WAR_RULES.maxScoutsPerSide);
   const away = war ? service.getAwaySquads(selected.id, war.id) : [];
-  const pins = communities.map(community => `<button class="world-pin ${community.id === selected.id ? 'selected' : ''} ${community.accessTier === 'view only' ? 'view-only' : ''}" style="left:${community.map[0]}%;top:${community.map[1]}%" data-world-community="${escapeHTML(community.id)}" aria-label="Inspect ${escapeHTML(community.name)}">${community.construction.length ? '⚒' : '⌂'}</button>`).join('');
+  const pins = communities.map(community => `<button class="world-pin ${community.id === selected.id ? 'selected' : ''} ${community.accessTier === 'view only' ? 'view-only' : ''}" style="left:${community.map[0]}%;top:${community.map[1]}%" data-world-community="${escapeHTML(community.id)}" data-world-name="${escapeHTML(community.name.toLocaleLowerCase())}" aria-label="Inspect ${escapeHTML(community.name)}">${community.construction.length ? '⚒' : '◆'}</button>`).join('');
+  const proResults = connectedProMatches(communities).map(community => `<button class="world-result" data-world-community="${escapeHTML(community.id)}" data-world-name="${escapeHTML(community.name.toLocaleLowerCase())}"><span>◆ ${escapeHTML(community.name)}</span><small>PRO · Hall L${community.hallLevel}</small></button>`).join('');
+  const origin = communities.find(community => community.id === profile.communityId);
+  const route = origin && selected.id !== origin.id && selected.accessTier !== 'view only' ? routeBriefing(origin, selected) : null;
+  const routePanel = route ? `<div class="world-route"><strong>Route briefing · ${escapeHTML(origin.name)} → ${escapeHTML(selected.name)}</strong><div class="world-route-stats"><span><b>${route.distanceKm.toLocaleString()} km</b> great-circle</span><span><b>~${route.travelHours} h</b> travel + mobilisation</span><span><b>${escapeHTML(route.riskLabel)}</b> risk ${route.risk}/5</span><span><b>×${route.rewardMultiplier.toFixed(2)}</b> victory Parts</span></div><p>Planning estimate from fictional regional markers, using 850 km/h plus 1.5 hours mobilisation. Risk reflects distance, Hall level and assigned defenders. A local war victory earns the capped risk multiplier from the accepted, frozen bases; scores and rankings stay unchanged. Travel time is strategic context while preview battles retain accelerated mission timers.</p></div>` : '';
   const buildings = Object.entries(selected.buildings).map(([key, level]) => {
     const asset = getBuildingAsset(key, level);
     const construction = selected.construction.find(project => project.key === key);
@@ -1840,8 +1902,49 @@ function showWorldMap() {
     return `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${unit?.level ? `L${unit.level} · ${unit.post ? escapeHTML(DEFENDER_POSTS[unit.post]) : 'reserve'}` : 'locked'}</span>`;
   }).join('');
   const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades and assigned Hounds. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
-  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Explore three fictional communities. The Pro search is populated from this preview roster; a reviewed DZN Network connection can later supply eligible servers using coarse public regions. No player or server coordinates are shown.</p><div class="world-layout"><div class="world-map"><div class="world-map-toolbar"><label class="world-search-label" for="worldSearch">Find connected Pro stronghold<input id="worldSearch" type="search" autocomplete="off" placeholder="Search Pro servers" value="${escapeHTML(worldSearch)}"></label><div class="world-zoom-controls"><button id="worldZoomOut" aria-label="Zoom out">−</button><span id="worldZoomStatus" aria-live="polite">100%</span><button id="worldZoomIn" aria-label="Zoom in">+</button><button id="worldZoomReset">Reset</button></div></div><div class="world-map-viewport" tabindex="0" aria-label="World map. Drag to move; use plus, minus, Home and arrow keys to navigate"><div class="world-map-content"><img src="assets/world/stronghold-world.png" draggable="false" alt="Stylized world map showing continents and illustrative community markers">${pins}</div></div><div class="world-results" aria-label="Connected Pro preview servers">${proResults}</div><p id="worldSearchStatus" class="help" role="status"></p></div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p>${routePanel}<div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
   overlay.style.display = 'block';
+  applyWorldMapView(overlay);
+  const updateWorldSearch = () => {
+    worldSearch = $('worldSearch').value;
+    const matches = connectedProMatches(communities, worldSearch);
+    const needle = worldSearch.trim().toLocaleLowerCase();
+    overlay.querySelectorAll('[data-world-name]').forEach(item => { item.hidden = !!needle && !item.dataset.worldName.includes(needle); });
+    $('worldSearchStatus').textContent = `${matches.length} connected Pro ${matches.length === 1 ? 'server' : 'servers'} in this preview${needle ? ' match your search' : ''}.`;
+  };
+  $('worldSearch').oninput = updateWorldSearch;
+  updateWorldSearch();
+  const viewport = overlay.querySelector('.world-map-viewport');
+  let drag = null;
+  viewport.onpointerdown = event => {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    viewport.setPointerCapture(event.pointerId);
+  };
+  viewport.onpointermove = event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    worldMapView.x += event.clientX - drag.x;
+    worldMapView.y += event.clientY - drag.y;
+    drag.x = event.clientX; drag.y = event.clientY;
+    applyWorldMapView(overlay);
+  };
+  viewport.onpointerup = viewport.onpointercancel = () => { drag = null; };
+  viewport.onwheel = event => { event.preventDefault(); setWorldMapZoom(overlay, worldMapView.scale + (event.deltaY < 0 ? .2 : -.2)); };
+  viewport.ondblclick = () => setWorldMapZoom(overlay, worldMapView.scale + .5);
+  viewport.onkeydown = event => {
+    if (event.key === '+' || event.key === '=') setWorldMapZoom(overlay, worldMapView.scale + .2);
+    else if (event.key === '-') setWorldMapZoom(overlay, worldMapView.scale - .2);
+    else if (event.key === 'Home') { worldMapView.scale = 1; worldMapView.x = 0; worldMapView.y = 0; applyWorldMapView(overlay); }
+    else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+      worldMapView.x += event.key === 'ArrowLeft' ? 25 : event.key === 'ArrowRight' ? -25 : 0;
+      worldMapView.y += event.key === 'ArrowUp' ? 25 : event.key === 'ArrowDown' ? -25 : 0;
+      applyWorldMapView(overlay);
+    } else return;
+    event.preventDefault();
+  };
+  $('worldZoomIn').onclick = () => setWorldMapZoom(overlay, worldMapView.scale + .25);
+  $('worldZoomOut').onclick = () => setWorldMapZoom(overlay, worldMapView.scale - .25);
+  $('worldZoomReset').onclick = () => { worldMapView.scale = 1; worldMapView.x = 0; worldMapView.y = 0; applyWorldMapView(overlay); };
   $('closeWorldBtn').onclick = () => { overlay.style.display = 'none'; $('worldBtn').focus(); };
   $('worldWarBtn').onclick = () => { overlay.style.display = 'none'; showWarTable(); };
   overlay.querySelectorAll('[data-world-community]').forEach(button => button.onclick = () => { selectedWorldCommunityId = button.dataset.worldCommunity; showWorldMap(); });

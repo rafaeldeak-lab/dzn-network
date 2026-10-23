@@ -6,6 +6,7 @@
  */
 import { squadBattleStats } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
+import { routeBriefing } from './world-map.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -936,16 +937,26 @@ export class LocalGameService {
     war.tie = challengerScore === defenderScore;
     war.winnerCommunityId = war.tie ? null : challengerScore > defenderScore ? war.challengerCommunityId : war.defenderCommunityId;
     war.state = 'resolved'; war.resolvedAt = now;
+    const winnerSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    const loserSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    const winnerRegion = COMMUNITIES.find(item => item.id === war.winnerCommunityId);
+    const loserRegion = COMMUNITIES.find(item => item.id === loserSide.communityId);
+    const victoryMultiplier = war.tie ? 1 : routeBriefing(
+      { map: winnerRegion.map, hallLevel: winnerSide.base.levels.hq },
+      { map: loserRegion.map, hallLevel: loserSide.base.levels.hq, defenders: loserSide.base.defenders },
+    ).rewardMultiplier;
     const rewards = [];
     for (const identity of [...new Set(war.attacks.map(attack => attack.identityId))]) {
       const ledgerId = `war-reward:${war.id}:${identity}`;
       if (this.state.warRewardLedger.some(entry => entry.id === ledgerId)) continue;
       const member = this.member(identity);
       if (!member) continue;
-      member.parts += WAR_RULES.localRewardParts;
-      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount: WAR_RULES.localRewardParts, at: now });
+      const attacker = war.attacks.find(attack => attack.identityId === identity);
+      const amount = attacker.communityId === war.winnerCommunityId ? Math.round(WAR_RULES.localRewardParts * victoryMultiplier) : WAR_RULES.localRewardParts;
+      member.parts += amount;
+      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount, at: now });
       war.rewardLedgerIds.push(ledgerId);
-      rewards.push({ identityId: identity, amount: WAR_RULES.localRewardParts, ledgerId });
+      rewards.push({ identityId: identity, amount, ledgerId });
     }
     war.replay = { version: 1, attackIds: [...war.attackIds], attacks: clone(war.attacks), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;

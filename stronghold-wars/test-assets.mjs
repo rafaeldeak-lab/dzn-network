@@ -6,6 +6,8 @@ import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
 import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, shortestPatrolPath, stepPatrolMotion } from './preview/patrol-routes.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
+import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
+import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
@@ -35,7 +37,7 @@ for (const [key, definition] of Object.entries(BUILDING_ASSETS)) {
 if (pairs !== 20 || recorded.size !== 44) throw new Error(`Expected 20 building pairs and 44 assets, got ${pairs} and ${recorded.size}`);
 const sceneryManifest = JSON.parse(readFileSync(join(root, 'assets/models/scenery/manifest.json'), 'utf8'));
 const sceneryNames = Object.keys(sceneryManifest.assets);
-if (sceneryNames.length !== 9 || ![1, 2, 3, 4, 5].every(level => sceneryNames.includes(`pine_l0${level}`))) throw new Error('Scenery kit must contain five tree stages and four clearing props.');
+if (sceneryNames.length !== 14 || ![1, 2, 3, 4, 5].every(level => sceneryNames.includes(`pine_l0${level}`)) || !['fallen_trunk', 'fern_patch', 'mossy_rock_cluster', 'brush_pile', 'lumber_pallet'].every(name => sceneryNames.includes(name))) throw new Error('Scenery kit must contain five tree stages, four clearing props and five forest details.');
 for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
   if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid GLB container: ${name}`);
@@ -45,6 +47,10 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
   if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete GLB scene: ${name}`);
   if (bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Scenery integrity mismatch: ${name}`);
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid model bounds: ${name}`);
+  if (/^(pine_l0[1-5]|granite_boulder|claim_marker)$/.test(name)) {
+    const rosebudVariant = readFileSync(join(root, 'assets/models/scenery', `${name}-2.glb`));
+    if (!rosebudVariant.equals(bytes)) throw new Error(`Rosebud scenery variant differs from review asset: ${name}`);
+  }
 }
 console.log(`Stronghold preview assets verified: ${pairs} building level pairs, ${recorded.size} original checksums, ${sceneryNames.length} original scenery GLBs.`);
 const facilityManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/manifest.json'), 'utf8'));
@@ -58,6 +64,17 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
   if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing facility scene JSON: ${name}`);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
   if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete facility GLB scene: ${name}`);
+  if (name.startsWith('timberline_')) {
+    const level = Number(name.slice(-1));
+    const nodes = new Set(gltf.nodes.map(node => node.name));
+    const required = ['stone_yard_base', 'roof_spine', 'saw_carriage', 'circular_saw_blade', 'saw_safety_light',
+      ...(level >= 2 ? ['hydraulic_sorter'] : []), ...(level >= 3 ? ['loading_crane_hook'] : []),
+      ...(level >= 4 ? ['auto_feed_motor'] : []), ...(level >= 5 ? ['elite_yard_beacon'] : [])];
+    if (required.some(part => !nodes.has(part))) throw new Error(`Incomplete Timberline Level ${level} machinery.`);
+    if ((gltf.images?.length || 0) < 2 || (gltf.textures?.length || 0) < 2) throw new Error(`Timberline Level ${level} is missing embedded textures.`);
+    const rosebudVariant = readFileSync(join(root, 'assets/models/facilities', `${name}-2.glb`));
+    if (!rosebudVariant.equals(bytes)) throw new Error(`Rosebud Timberline variant differs from review asset: ${name}`);
+  }
   if (bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Facility integrity mismatch: ${name}`);
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid facility model bounds: ${name}`);
 }
@@ -101,6 +118,24 @@ const worldBytes = readFileSync(join(root, ...worldManifest.asset.split('/')));
 if (worldBytes.toString('latin1', 0, 4) !== '\x89PNG' || worldBytes.readUInt32BE(16) !== worldManifest.dimensions[0] || worldBytes.readUInt32BE(20) !== worldManifest.dimensions[1]) throw new Error('Invalid Stronghold world texture size or PNG signature.');
 if (createHash('sha256').update(worldBytes).digest('hex') !== worldManifest.sha256) throw new Error('Stronghold world texture checksum mismatch.');
 console.log(`DZN world map verified: ${worldManifest.dimensions.join('x')} original texture.`);
+if (greatCircleKm([47, 29], [47, 29]) !== 0 || greatCircleKm([23, 32], [47, 29]) !== greatCircleKm([47, 29], [23, 32])) throw new Error('World route geometry must be zero at origin and symmetric.');
+const demoWorld = [
+  { name: 'Iron Pines', accessTier: 'owner Pro active', map: [47, 29], hallLevel: 2, defenders: {} },
+  { name: 'Violet Ridge', accessTier: 'owner Pro active', map: [23, 32], hallLevel: 4, defenders: { guardian: { level: 1, post: 'gate' } } },
+  { name: 'Mossback Free', accessTier: 'view only', map: [82, 38], hallLevel: 1, defenders: {} },
+];
+const route = routeBriefing(demoWorld[0], demoWorld[1]);
+if (route.distanceKm < 1000 || route.travelHours <= 1.5 || route.risk < 2 || route.rewardMultiplier <= 1 || connectedProMatches(demoWorld, 'IRON').length !== 1 || connectedProMatches(demoWorld).length !== 2) throw new Error('World search or route briefing regressed.');
+const cardManifest = JSON.parse(readFileSync(join(root, 'assets/cards/manifest.json'), 'utf8'));
+if (FIRST_EDITION_CARDS.length !== 3 || Object.keys(cardManifest.assets).length !== 3) throw new Error('First Edition card series is incomplete.');
+for (const card of FIRST_EDITION_CARDS) {
+  const entry = cardManifest.assets[card.id];
+  if (!entry || entry.file !== card.image) throw new Error(`Missing First Edition card ${card.id}.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('latin1', 0, 4) !== '\x89PNG' || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`First Edition art integrity mismatch: ${card.id}`);
+}
+if (!cardEarned('fixer', { landPlots: [{ id: 'timberline-depot', facilityLevel: 2 }] }) || cardEarned('guardian', { defenders: { guardian: { level: 1, post: '' } } }) || !cardEarned('ghost', { levels: { comms: 3 } })) throw new Error('Card milestones must follow base progress.');
+console.log('World route/search preview and three First Edition card assets verified.');
 const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v2/manifest.json'), 'utf8'));
 const squadNames = Object.keys(squadManifest.assets);
 if (squadNames.length !== 25 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain five roles at five levels each.');

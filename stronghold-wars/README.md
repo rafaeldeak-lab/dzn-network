@@ -34,9 +34,10 @@ not use.
 
 ## Land and scenery stage
 
-The review copy adds nine original, reproducible low-poly GLBs under
-`preview/assets/models/scenery/`: five pine growth stages, a stump, a log stack,
-a boulder and a claim marker. `tools/generate-scenery.mjs` generates them with
+The review copy has fourteen original, reproducible scenery GLBs under
+`preview/assets/models/scenery/`: five revised pine growth stages, a stump,
+log stack, boulder, claim marker, fallen trunk, ferns, mossy rock cluster,
+brush pile and lumber pallet. `tools/generate-scenery.mjs` creates them with
 project-owned geometry, and `manifest.json` records dimensions and SHA-256
 hashes. The existing 20 building levels remain intact. The local scene uses
 the new trees and props for a denser, deterministic forest and visible plot
@@ -79,6 +80,34 @@ sound cadence, world rings, spark burst and light beam. The banner stays visible
 in Canvas 2D, and reduced-motion settings disable the new motion effects.
 The local service tests cover funding, replay, entitlement, cooldown, reload and
 frozen battle scores; `test-assets.mjs` validates all 20 new GLBs.
+
+The five Timberline Lumber Yard GLBs now have distinct tier machinery, sawing
+equipment, log handling, roofs and embedded wood/metal textures. The model
+files are larger because the textures are packed into each GLB for Rosebud.
+Rosebud retained the previous asset names when the upgraded files were
+uploaded and assigned the new uploads `-2` suffixes. The preview loads those
+new variants; the review copy includes identical `-2` files so the same paths
+work locally. No paid model generation or credits were used.
+
+## World routes and First Edition cards
+
+The existing world texture now sits in a draggable, keyboard-accessible zoom
+viewport with smaller map pins. Search filters the fictional Pro server roster,
+and selecting another base opens a read-only construction and equipment view.
+The route briefing uses illustrative regional markers to estimate great-circle
+distance, mobilisation and travel time. It also shows a bounded risk tier.
+Winning a local preview war grants participating players on the winning side
+up to 1.6 times the usual preview Parts reward, with the same once-only ledger
+IDs and immutable war snapshots. Travel is a planning estimate; preview attacks
+still use accelerated timers. Neither coordinates nor the Pro roster come from
+live DZN accounts.
+
+Guardian, Ghost and Fixer First Edition artwork is stored under
+`preview/assets/cards/` with checksums. The Cards panel ties its three local
+collection marks to existing base milestones. The art and milestones are real
+preview content; no globally scarce number, ownership, trade or card buff has
+been issued. A production card system would need a reviewed server-side ledger
+with explicit issuance rules and abuse controls.
 
 ## DZN supply routes
 
@@ -176,6 +205,14 @@ entitlement evidence.
 3. **Scenery with purpose:** add repairable barricades after battles, patrol
    posts, weather visibility and cosmetic server banners. These can build on
    the existing art and deterministic map without paid asset or AI services.
+4. **Travel with consequences:** stage supply convoys and return trips using
+   coarse server regions, visible departure and arrival times, recall rules,
+   defence exposure, and one-time reward settlement. Keep travel estimates
+   independent of private DayZ coordinates and account locations.
+5. **DZN collectibles:** award card appearances for Chronicle milestones, then
+   consider numbered seasonal editions only after server-side issuance,
+   ownership and transfer rules have been reviewed. Cosmetic flair can include
+   a reveal animation and a display case beside the Command Hall.
 
 ## Production integration gate
 

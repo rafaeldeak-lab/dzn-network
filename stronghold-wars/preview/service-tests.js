@@ -468,8 +468,10 @@ export function runServiceTests() {
   assert(warService.getWars('iron-admin')[0].id === warService.getWars('violet-owner')[0].id, 'both communities see the same service-owned active war after identity switching');
   const resolved = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
   assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === assault.score + ironRecon.score, 'war resolves once with deterministic score totals after both attack caps');
-  assert(resolved.rewards.length === 4 && resolved.rewards.every(reward => reward.amount === WAR_RULES.localRewardParts && reward.ledgerId.startsWith(`war-reward:${challenge.warId}:`)), 'local preview Parts rewards use stable per-identity ledger IDs');
-  assert(warService.snapshot('iron-owner').member.parts === ironStartParts + WAR_RULES.localRewardParts, 'war reward credits only local preview inventory');
+  const winnerRewards = resolved.rewards.filter(reward => warService.profile(reward.identityId).communityId === resolved.winnerCommunityId);
+  const otherRewards = resolved.rewards.filter(reward => warService.profile(reward.identityId).communityId !== resolved.winnerCommunityId);
+  assert(resolved.rewards.length === 4 && winnerRewards.length === 2 && winnerRewards.every(reward => reward.amount > WAR_RULES.localRewardParts && reward.amount <= Math.round(WAR_RULES.localRewardParts * 1.6)) && otherRewards.every(reward => reward.amount === WAR_RULES.localRewardParts) && resolved.rewards.every(reward => reward.ledgerId.startsWith(`war-reward:${challenge.warId}:`)), 'frozen high-risk victory pays bounded extra local Parts without changing scores or ledger IDs');
+  assert(warService.snapshot('iron-owner').member.parts === ironStartParts + resolved.rewards.find(reward => reward.identityId === 'iron-owner').amount, 'war reward credits only local preview inventory');
   const repeatedResolve = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
   assert(repeatedResolve.ok && repeatedResolve.replay && warService.state.warRewardLedger.length === 4, 'same resolve action replays without a second reward ledger credit');
   assert(warService.getChronicle('iron-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1 && warService.getChronicle('violet-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1, 'both war participants receive exactly one cosmetic Chronicle result');

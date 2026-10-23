@@ -7,52 +7,52 @@
   "assets": {
     "timberline_l01": {
       "file": "assets/models/facilities/timberline_l01.glb",
-      "sha256": "d6ecbd1c404f38411ac8a76eb9d368a4bb5eade61c9c7e41e02164c5c5f8da3f",
-      "bytes": 74244,
+      "sha256": "3158d3ad9b7bf96eab10f24f15076577e99daa2c4c5eac1e6895dea66ac9921e",
+      "bytes": 1064416,
       "dimensions": [
-        6.6,
-        2.45,
-        6.2
+        6.5,
+        3.191,
+        6.1
       ]
     },
     "timberline_l02": {
       "file": "assets/models/facilities/timberline_l02.glb",
-      "sha256": "8d699bd245657a5c7177d6b9bd6998f128dd808806f57f0f279cb563177c08ca",
-      "bytes": 85844,
+      "sha256": "6ed68698549141ce7de84309c780e9aa70f63b3127a013bd4f67883b0bec036b",
+      "bytes": 1154356,
       "dimensions": [
-        6.6,
-        2.59,
-        6.2
+        6.5,
+        3.191,
+        6.1
       ]
     },
     "timberline_l03": {
       "file": "assets/models/facilities/timberline_l03.glb",
-      "sha256": "34c8f93dd5e8524400324a71b4c3b80ae3c3f9412f35f62875c805c609b69e48",
-      "bytes": 100832,
+      "sha256": "bde318e39e2ad2b82a90d3cf9aedb0e318a46e40ea01bfd96fd93185da9f2474",
+      "bytes": 1207384,
       "dimensions": [
-        6.6,
-        3.778,
-        6.2
+        6.5,
+        3.958,
+        6.1
       ]
     },
     "timberline_l04": {
       "file": "assets/models/facilities/timberline_l04.glb",
-      "sha256": "f31d23b062a40cc8a32895f983062f37815040f2b68727500af74f1d1a7141ec",
-      "bytes": 113956,
+      "sha256": "5a237d3f3d14ca6862626f56617f97236e57b7c6edad118496e06f53584de6ff",
+      "bytes": 1300628,
       "dimensions": [
-        6.6,
-        3.778,
-        6.2
+        6.5,
+        3.958,
+        6.1
       ]
     },
     "timberline_l05": {
       "file": "assets/models/facilities/timberline_l05.glb",
-      "sha256": "81489a093ae8c29133b00d80dfab7d3f1a744a6ce71ffc4239a8f5be408338e5",
-      "bytes": 128116,
+      "sha256": "364686a5645ee71c9454ef5f130d6feb3edbebeb5eb0da695ec2eee96d2c5821",
+      "bytes": 1352672,
       "dimensions": [
-        6.6,
-        4.2,
-        6.2
+        6.5,
+        4.46,
+        6.1
       ]
     },
     "ridgewatch_l01": {
