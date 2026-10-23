@@ -117,6 +117,29 @@ function timberline(level) {
   for (const x of [-1.12, .13]) beam(g, [x, .5, .92], [x, 1.75, .92], .035, iron);
   beam(g, [-1.12, 1.75, .92], [.13, 1.75, .92], .038, iron);
   box(g, 1.25, .06, .13, glow, -.5, 1.76, .92).name = 'saw_safety_light';
+  // The unloading bay remains open, with readable machinery even from the game camera.
+  for (const x of [-1.95, -.95, .05, 1.05]) {
+    const roller = cylinder(.13, 1.7, steel, x, .46, 1.95, 22);
+    roller.rotation.x = Math.PI / 2;
+    for (const z of [1.26, 2.64]) cylinder(.17, .08, iron, x, .46, z, 18).rotation.x = Math.PI / 2;
+  }
+  for (const z of [1.05, 2.82]) {
+    beam(g, [-2.55, .42, z], [1.63, .42, z], .06, trim);
+    for (const x of [-2.3, 1.4]) cylinder(.12, .29, steel, x, .48, z);
+  }
+  for (const x of [-2.75, 1.75]) {
+    beam(g, [x, .28, .63], [x, 1.33, .63], .045, steel);
+    box(g, .3, .12, .1, glow, x, 1.38, .63).name = 'yard_safety_lamp';
+  }
+  const extractor = cylinder(.33, 1.25, iron, -.65, 3.02, -1.37, 24);
+  extractor.rotation.x = Math.PI / 2;
+  cylinder(.47, .16, steel, -.65, 3.03, -.7, 24).rotation.x = Math.PI / 2;
+  for (let i = 0; i < 10; i++) {
+    const a = i * Math.PI * 2 / 10;
+    const chip = mesh(g, new THREE.IcosahedronGeometry(.12 + i % 3 * .025, 0), i % 2 ? woodLight : endGrain,
+      2.18 + Math.cos(a) * .42, .38 + i % 4 * .11, -1.15 + Math.sin(a) * .3);
+    chip.rotation.set(a * .3, a, a * .5);
+  }
   if (level >= 2) {
     box(g, 1.08, 1.18, 1.05, iron, 2.1, .91, 1.2).name = 'hydraulic_sorter';
     for (let i = 0; i < 4; i++) box(g, .17, .33, .04, glow, 1.75 + i * .23, 1.3, 1.75);
@@ -247,7 +270,7 @@ const manifest = {
   license: 'Project-owned original', unit: 'metre', coordinateSystem: 'Y up', assets: {},
 };
 for (const [family, make] of Object.entries(makers)) for (let level = 1; level <= 5; level++) {
-  const name = `${family}_l0${level}`;
+  const name = `${family === 'timberline' ? 'timberline_v3' : family}_l0${level}`;
   const scene = make(level); scene.name = name;
   const exported = Buffer.from(await exporter.parseAsync(scene, { binary: true, onlyVisible: true }));
   const bytes = family === 'timberline' ? embedTimberlineTextures(exported) : exported;

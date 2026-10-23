@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
-import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, shortestPatrolPath, stepPatrolMotion } from './preview/patrol-routes.js';
+import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
+import { defaultLayout } from './preview/layout-grid.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
@@ -54,7 +55,7 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
 }
 console.log(`Stronghold preview assets verified: ${pairs} building level pairs, ${recorded.size} original checksums, ${sceneryNames.length} original scenery GLBs.`);
 const facilityManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/manifest.json'), 'utf8'));
-const families = ['timberline', 'ridgewatch', 'signal', 'highland'];
+const families = ['timberline_v3', 'ridgewatch', 'signal', 'highland'];
 const facilityNames = Object.keys(facilityManifest.assets);
 if (facilityNames.length !== 20 || !families.every(family => [1, 2, 3, 4, 5].every(level => facilityNames.includes(`${family}_l0${level}`)))) throw new Error('Facility kit must contain four distinct five-level families.');
 for (const [name, entry] of Object.entries(facilityManifest.assets)) {
@@ -64,7 +65,7 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
   if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Missing facility scene JSON: ${name}`);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
   if (gltf.asset?.version !== '2.0' || !gltf.meshes?.length || !gltf.nodes?.length || !gltf.scenes?.length) throw new Error(`Incomplete facility GLB scene: ${name}`);
-  if (name.startsWith('timberline_')) {
+  if (name.startsWith('timberline_v3_')) {
     const level = Number(name.slice(-1));
     const nodes = new Set(gltf.nodes.map(node => node.name));
     const required = ['stone_yard_base', 'roof_spine', 'saw_carriage', 'circular_saw_blade', 'saw_safety_light',
@@ -72,13 +73,28 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
       ...(level >= 4 ? ['auto_feed_motor'] : []), ...(level >= 5 ? ['elite_yard_beacon'] : [])];
     if (required.some(part => !nodes.has(part))) throw new Error(`Incomplete Timberline Level ${level} machinery.`);
     if ((gltf.images?.length || 0) < 2 || (gltf.textures?.length || 0) < 2) throw new Error(`Timberline Level ${level} is missing embedded textures.`);
-    const rosebudVariant = readFileSync(join(root, 'assets/models/facilities', `${name}-2.glb`));
-    if (!rosebudVariant.equals(bytes)) throw new Error(`Rosebud Timberline variant differs from review asset: ${name}`);
+    if (!nodes.has('yard_safety_lamp')) throw new Error(`Timberline Level ${level} is missing its detailed working bay.`);
   }
   if (bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Facility integrity mismatch: ${name}`);
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid facility model bounds: ${name}`);
 }
 console.log(`Additional district facilities verified: ${facilityNames.length} original GLBs across four five-level families.`);
+const wallManifest = JSON.parse(readFileSync(join(root, 'assets/models/walls/manifest.json'), 'utf8'));
+if (Object.keys(wallManifest.assets).length !== 5) throw new Error('Five wall stages are required.');
+const wallHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `wall_l0${level}`, entry = wallManifest.assets[name];
+  if (!entry) throw new Error(`Wall Level ${level} is missing.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length || bytes.length !== entry.bytes || hash !== entry.sha256 || wallHashes.has(hash)) throw new Error(`Wall Level ${level} integrity failed.`);
+  wallHashes.add(hash);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  const nodes = new Set(gltf.nodes.map(node => node.name));
+  if (!nodes.has(level <= 2 ? 'reclaimed_timber' : 'armoured_barrier') || (level === 5 && !nodes.has('active_defence_node'))) throw new Error(`Wall Level ${level} geometry is incomplete.`);
+}
+console.log('Five distinct DZN perimeter wall GLBs verified.');
 const routeManifest = JSON.parse(readFileSync(join(root, 'assets/models/routes/manifest.json'), 'utf8'));
 const routeNames = Object.keys(routeManifest.assets);
 if (routeNames.length !== 5 || ![1, 2, 3, 4, 5].every(level => routeNames.includes(`supply_route_l0${level}`))) throw new Error('Supply route kit must contain five distinct visual tiers.');
@@ -136,7 +152,7 @@ for (const card of FIRST_EDITION_CARDS) {
 }
 if (!cardEarned('fixer', { landPlots: [{ id: 'timberline-depot', facilityLevel: 2 }] }) || cardEarned('guardian', { defenders: { guardian: { level: 1, post: '' } } }) || !cardEarned('ghost', { levels: { comms: 3 } })) throw new Error('Card milestones must follow base progress.');
 console.log('World route/search preview and three First Edition card assets verified.');
-const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v2/manifest.json'), 'utf8'));
+const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v3/manifest.json'), 'utf8'));
 const squadNames = Object.keys(squadManifest.assets);
 if (squadNames.length !== 25 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain five roles at five levels each.');
 if (squadTier('assault', { hq: 3, tower: 5 }) !== 3 || squadTier('recon', { hq: 5, comms: 2 }) !== 2 || squadTier('engineer', { hq: 4, workshop: 3 }) !== 3) throw new Error('Squad gear must follow the specialist and Hall visual cap.');
@@ -180,6 +196,13 @@ for (const [role, stops] of Object.entries(PATROL_STOPS)) {
   for (const stop of stops) if (!PATROL_NODES[stop] || !shortestPatrolPath('camp', stop).length) throw new Error(`${role} has an unreachable stop`);
 }
 console.log('DZN patrols verified: five roles visit assigned buildings and camp, pause, and avoid building footprints.');
+const movedPatrolLayout = defaultLayout();
+movedPatrolLayout.structures.workshop = { x: -10, z: 4 };
+movedPatrolLayout.walls.push({ id: 'wall-1', x: 0, z: 6, level: 1 });
+const movedStops = patrolNodesForLayout(movedPatrolLayout);
+const wallDetour = walkablePatrolPath([0, 4], [0, 10], movedPatrolLayout);
+if (movedStops.workshop[0] !== -10 || !wallDetour || wallDetour.length < 2 || wallDetour.some(point => point[0] === 0 && point[1] === 6)) throw new Error('Moved buildings and placed walls must change the squad walking route.');
+console.log('Dynamic patrol nodes and wall-avoiding grid paths verified.');
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (const [post, node] of Object.entries(DEFENDER_POST_NODES)) {
   const motion = createDefenderMotion(role, post);
   const reached = new Set();

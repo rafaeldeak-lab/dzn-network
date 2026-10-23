@@ -7,6 +7,7 @@
 import { squadBattleStats } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
 import { routeBriefing } from './world-map.js';
+import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -25,6 +26,11 @@ export const WAR_RULES = Object.freeze({
   squadReturnMs: 90 * 1000,
   maxScoutsPerSide: 2,
 });
+export const WAR_STAGE_DEFS = Object.freeze([
+  Object.freeze({ id: 'forge-convoy', name: 'Forge Convoy', building: 'Workshop / Forge', key: 'workshop', parts: 30, timber: 10, objective: 'Dispatch repair kits and Timber to the front.' }),
+  Object.freeze({ id: 'relay-capture', name: 'Relay Capture', building: 'Communications', key: 'comms', parts: 40, timber: 0, objective: 'Secure the DZN signal link before the rival side.' }),
+  Object.freeze({ id: 'tower-stand', name: 'Tower Stand', building: 'Watchtower', key: 'tower', parts: 25, timber: 15, objective: 'Hold the perimeter through the final timed phase.' }),
+]);
 
 export const GAME_CONFIG = Object.freeze({
   maxLevel: 5,
@@ -127,6 +133,7 @@ function emptyBase(treasury = 200) {
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
+    layout: defaultLayout(),
     defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
@@ -225,7 +232,13 @@ function normalizeWarRecord(war) {
       const status = saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild';
       return { id: config.id, status, barricades: status === 'claimed' ? Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) : 0, facilityLevel: status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.facilityLevel)) : 0 };
     });
-    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0);
+    const structures = defaultLayout().structures;
+    for (const key of Object.keys(structures)) {
+      const point = source?.base?.layout?.structures?.[key];
+      if (isGridCell(point?.x, point?.z)) structures[key] = { x: point.x, z: point.z };
+    }
+    const walls = Array.isArray(source?.base?.layout?.walls) ? source.base.layout.walls.filter(wall => wall && /^wall-\d+$/.test(wall.id) && isGridCell(wall.x, wall.z)).map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: Math.min(hq, Math.max(1, safeInt(wall.level, 1))) })).slice(0, MAX_WALLS_PER_HALL[hq]) : [];
+    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
     const defenders = Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => {
       const saved = source?.base?.defenders?.[role];
@@ -236,7 +249,7 @@ function normalizeWarRecord(war) {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
-      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders },
+      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders, layout: { structures, walls } },
       stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -258,6 +271,11 @@ function normalizeWarRecord(war) {
     returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
   })) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
+  const stages = Array.isArray(war.stages) ? war.stages.filter(item => WAR_STAGE_DEFS.some(def => def.id === item?.id)).slice(0, WAR_STAGE_DEFS.length).map(item => ({
+    id: item.id, opensAt: safeInt(item.opensAt), closesAt: safeInt(item.closesAt),
+    completedBy: Object.fromEntries(communities.map(id => [id, item.completedBy?.[id] && typeof item.completedBy[id].identityId === 'string'
+      ? { identityId: item.completedBy[id].identityId, at: safeInt(item.completedBy[id].at), points: Math.min(20, safeInt(item.completedBy[id].points)) } : null])),
+  })) : [];
   return {
     id: war.id, challengerCommunityId: war.challengerCommunityId, defenderCommunityId: war.defenderCommunityId,
     challengerIdentityId: String(war.challengerIdentityId || ''), state,
@@ -265,7 +283,7 @@ function normalizeWarRecord(war) {
     acceptedAt: safeInt(war.acceptedAt), prepReadyAt: safeInt(war.prepReadyAt), prepDeadlineAt: safeInt(war.prepDeadlineAt),
     startedBy: String(war.startedBy || ''), startedAt: safeInt(war.startedAt), attackEndsAt: safeInt(war.attackEndsAt),
     resolvedAt: safeInt(war.resolvedAt), declinedAt: safeInt(war.declinedAt), expiredAt: safeInt(war.expiredAt),
-    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score,
+    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score, stages,
     winnerCommunityId: communities.includes(war.winnerCommunityId) ? war.winnerCommunityId : null, tie: Boolean(war.tie),
     rewardLedgerIds: Array.isArray(war.rewardLedgerIds) ? war.rewardLedgerIds.filter(id => typeof id === 'string') : [],
     events: Array.isArray(war.events) ? war.events.filter(e => e && typeof e.type === 'string').map(e => ({ type: String(e.type), at: safeInt(e.at), actorId: String(e.actorId || ''), text: String(e.text || ''), details: e.details && typeof e.details === 'object' ? clone(e.details) : {} })) : [],
@@ -356,6 +374,23 @@ function normalizeLoadedState(raw) {
         };
       }
     }
+    const claimed = new Set(normalized.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const savedLayout = base.layout && typeof base.layout === 'object' ? base.layout : {};
+    for (const key of Object.keys(normalized.layout.structures)) {
+      const point = savedLayout.structures?.[key];
+      if (isGridCell(point?.x, point?.z) && !validateLayoutPosition(normalized.layout, claimed, key, point.x, point.z))
+        normalized.layout.structures[key] = { x: point.x, z: point.z };
+    }
+    const wallIds = new Set();
+    for (const wall of Array.isArray(savedLayout.walls) ? savedLayout.walls : []) {
+      if (normalized.layout.walls.length >= MAX_WALLS_PER_HALL[normalized.levels.hq]) break;
+      if (!wall || typeof wall.id !== 'string' || !/^wall-\d+$/.test(wall.id) || wallIds.has(wall.id)) continue;
+      if (!isGridCell(wall.x, wall.z) || validateWallPosition(normalized.layout, claimed, wall.x, wall.z)) continue;
+      const level = Math.min(normalized.levels.hq, GAME_CONFIG.maxLevel, Math.max(1, safeInt(wall.level, 1)));
+      normalized.layout.walls.push({ id: wall.id, x: wall.x, z: wall.z, level });
+      wallIds.add(wall.id);
+    }
+    normalized.layout.nextWallNumber = Math.max(1, safeInt(savedLayout.nextWallNumber, 1), ...normalized.layout.walls.map(wall => Number(wall.id.slice(5)) + 1));
     normalized.legacyJobs = Array.isArray(base.legacyJobs) ? base.legacyJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.buildings[j.key] && Number.isFinite(Number(j.end))).map(j => ({ id: j.id, key: j.key, targetLevel: normalizeLevel(j.targetLevel, 1), end: Number(j.end), migratedPaid: true })) : [];
     fresh.communities[community.id] = { proActive: community.eligible ? Boolean(savedCommunity.proActive) : false, base: normalized };
   }
@@ -545,6 +580,8 @@ export class LocalGameService {
         id: definition.id, name: definition.name, map: [...definition.map], illustrative: true,
         accessTier: definition.eligible && saved.proActive ? 'owner Pro active' : 'view only',
         hallLevel: base.levels.hq,
+        wallSegments: base.layout.walls.length,
+        wallTierTotal: base.layout.walls.reduce((sum, wall) => sum + wall.level, 0),
         buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
         defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
         districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
@@ -652,12 +689,14 @@ export class LocalGameService {
     const levels = { ...base.levels };
     const hall = levels.hq;
     const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0, facilityLevel: plot.status === 'claimed' ? plot.facilityLevel : 0 }));
-    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0);
+    const structures = clone(base.layout.structures);
+    const walls = base.layout.walls.map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: wall.level }));
+    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
     const defenders = Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
-      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders },
+      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders, layout: { structures, walls } },
       stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -728,7 +767,7 @@ export class LocalGameService {
       resolvedAt: 0, declinedAt: 0, expiredAt: 0,
       snapshots: { challenger: this._warSideSnapshot(communityId), defender: this._warSideSnapshot(opponentCommunityId) },
       roster: { [communityId]: this._warRoster(communityId), [opponentCommunityId]: this._warRoster(opponentCommunityId) },
-      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 },
+      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 }, stages: [],
       winnerCommunityId: null, tie: false, rewardLedgerIds: [], events: [], replay: null,
     };
     war.events.push({ type: 'challenge', at: now, actorId: identityId, text: `${this.community(identityId).definition.name} challenged ${COMMUNITIES.find(item => item.id === opponentCommunityId).name}.`, details: { challengeExpiresAt: war.challengeExpiresAt } });
@@ -798,9 +837,45 @@ export class LocalGameService {
     if (now < war.prepReadyAt) return { ok: false, error: `Preparation is still underway for ${Math.ceil((war.prepReadyAt - now) / 1000)} seconds.` };
     if (now > war.prepDeadlineAt) return { ok: false, error: 'The preparation window has ended.' };
     war.state = 'active'; war.startedBy = identityId; war.startedAt = now; war.attackEndsAt = now + WAR_RULES.attackWindowMs;
+    const stageLength = WAR_RULES.attackWindowMs / WAR_STAGE_DEFS.length;
+    war.stages = WAR_STAGE_DEFS.map((stage, index) => ({ id: stage.id, opensAt: now + stageLength * index,
+      closesAt: now + stageLength * (index + 1), completedBy: { [war.challengerCommunityId]: null, [war.defenderCommunityId]: null } }));
     war.events.push({ type: 'started', at: now, actorId: identityId, text: 'War started. Each side may deploy up to two verified roster members before the attack window closes.', details: { attackEndsAt: war.attackEndsAt, attackCap: WAR_RULES.maxAttacksPerSide } });
     const result = { ok: true, warId, state: war.state, attackEndsAt: war.attackEndsAt };
     this._recordWarAction(identityId, actionId, 'start', result);
+    this.save();
+    return result;
+  }
+
+  completeWarStage(identityId, warId, stageId, actionId = this.newActionId('war-stage')) {
+    const replay = this._warActionReplay(identityId, actionId, `stage:${warId}:${stageId}`);
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    const definition = WAR_STAGE_DEFS.find(item => item.id === stageId);
+    if (!war || !profile || !definition) return { ok: false, error: 'Choose a valid active war stage.' };
+    const communityId = profile.communityId;
+    if (![war.challengerCommunityId, war.defenderCommunityId].includes(communityId)) return { ok: false, error: 'Only a participating server can complete this stage.' };
+    const accessError = this._warIdentityError(identityId, communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'Only a verified member on the accepted-war roster can take part.' };
+    if (war.state !== 'active') return { ok: false, error: 'Stages run only during an active war.' };
+    const stage = war.stages?.find(item => item.id === stageId);
+    const now = this.now();
+    if (!stage || now < stage.opensAt || now >= stage.closesAt) return { ok: false, error: 'This timed stage is not open.' };
+    if (stage.completedBy[communityId]) return { ok: false, error: 'Your server has already completed this stage.' };
+    const member = this.member(identityId);
+    if (member.parts < definition.parts || member.timber < definition.timber) return { ok: false, error: `Need ${definition.parts} Parts and ${definition.timber} Timber for ${definition.name}.` };
+    const side = war.snapshots.challenger.communityId === communityId ? war.snapshots.challenger : war.snapshots.defender;
+    const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const firstBonus = stage.completedBy[opponentId] ? 0 : 2;
+    const points = 6 + Math.min(5, side.base.levels[definition.key]) + firstBonus;
+    member.parts -= definition.parts; member.timber -= definition.timber;
+    stage.completedBy[communityId] = { identityId, at: now, points };
+    war.score[communityId] += points;
+    war.events.push({ type: 'stage', at: now, actorId: identityId, text: `${profile.name} completed ${definition.name} at ${definition.building} · +${points} local war points.`, details: { stageId, communityId, points, firstBonus } });
+    const result = { ok: true, warId, stageId, points, firstBonus, totalScore: war.score[communityId] };
+    this._recordWarAction(identityId, actionId, `stage:${warId}:${stageId}`, result);
     this.save();
     return result;
   }
@@ -930,6 +1005,7 @@ export class LocalGameService {
     if (war.state !== 'active') return { ok: false, error: `War has already ended or cannot resolve from state ${war.state}.` };
     const challengerCount = war.attacks.filter(attack => attack.communityId === war.challengerCommunityId).length;
     const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
+    if (war.stages?.length && this.now() < war.attackEndsAt) return { ok: false, error: 'The three timed build challenges must finish before this war can resolve.' };
     if (this.now() < war.attackEndsAt && (challengerCount < WAR_RULES.maxAttacksPerSide || defenderCount < WAR_RULES.maxAttacksPerSide)) return { ok: false, error: 'Resolve when both attack caps are reached or after the attack window ends.' };
     const now = this.now();
     const challengerScore = war.score[war.challengerCommunityId];
@@ -958,7 +1034,7 @@ export class LocalGameService {
       war.rewardLedgerIds.push(ledgerId);
       rewards.push({ identityId: identity, amount, ledgerId });
     }
-    war.replay = { version: 1, attackIds: [...war.attackIds], attacks: clone(war.attacks), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
+    war.replay = { version: 2, attackIds: [...war.attackIds], attacks: clone(war.attacks), stages: clone(war.stages || []), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;
     war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards) } });
     for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
@@ -1258,6 +1334,103 @@ export class LocalGameService {
     plot.barricades += 1;
     const result = { ok: true, plotId, barricades: plot.barricades };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  _layoutContext(identityId, actionId, operation, request) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return { error: 'Community or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `layout-${operation}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind && prior.result.request === request
+      ? { replay: { ...clone(prior.result), replay: true } }
+      : { error: 'This action ID was already used for another layout action.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    const roleError = this._roleError(identityId, ['owner']);
+    if (roleError) return { error: roleError };
+    return { entry, member, base: entry.saved.base, kind, request };
+  }
+
+  moveStructure(identityId, key, x, z, actionId = this.newActionId('move-structure')) {
+    const context = this._layoutContext(identityId, actionId, 'move-structure', `${key}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateLayoutPosition(base.layout, claimed, key, x, z);
+    if (error) return { ok: false, error };
+    base.layout.structures[key] = { x, z };
+    const result = { ok: true, key, x, z, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  placeWallRow(identityId, start, end = start, actionId = this.newActionId('wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    if (base.layout.walls.length + cells.length > MAX_WALLS_PER_HALL[base.levels.hq]) return { ok: false, error: 'Command Hall wall capacity reached.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    for (const cell of cells) {
+      const error = validateWallPosition(base.layout, claimed, cell.x, cell.z);
+      if (error) return { ok: false, error: `${error} Row unchanged.` };
+    }
+    const cost = WALL_COSTS[1];
+    const partsCost = cost.parts * cells.length, timberCost = cost.timber * cells.length;
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this row.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    const walls = cells.map(cell => ({ id: `wall-${base.layout.nextWallNumber++}`, ...cell, level: 1 }));
+    base.layout.walls.push(...walls);
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  moveWall(identityId, wallId, x, z, actionId = this.newActionId('move-wall')) {
+    const context = this._layoutContext(identityId, actionId, 'move-wall', `${wallId}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const wall = base.layout.walls.find(item => item.id === wallId);
+    if (!wall) return { ok: false, error: 'Choose a wall in this base.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateWallPosition(base.layout, claimed, x, z, wallId);
+    if (error) return { ok: false, error };
+    wall.x = x; wall.z = z;
+    const result = { ok: true, wall: clone(wall), request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  upgradeWallRow(identityId, start, end = start, actionId = this.newActionId('upgrade-wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'upgrade-wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    const walls = cells.map(cell => base.layout.walls.find(wall => wall.x === cell.x && wall.z === cell.z));
+    if (walls.some(wall => !wall)) return { ok: false, error: 'Every cell in the upgrade row needs an existing wall.' };
+    if (walls.some(wall => wall.level >= base.levels.hq || wall.level >= GAME_CONFIG.maxLevel)) return { ok: false, error: 'Unlock a higher Command Hall tier before upgrading this whole row.' };
+    const partsCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].parts, 0);
+    const timberCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].timber, 0);
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this upgrade.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    for (const wall of walls) wall.level++;
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
     this.save();
     return result;
   }

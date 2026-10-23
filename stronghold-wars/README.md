@@ -19,6 +19,40 @@ subscription. It returns `readOnly: true`, `gameplayReady: false`, and false
 gameplay capabilities. Do not treat that response as permission to write game
 state or expose the local preview as a live multiplayer game.
 
+The newest local-preview stage adds an owner-controlled base layout, five-tier
+wall segments, timed war objectives, and revised 3D Lumber Yard and squad
+models. These remain fictional browser-saved gameplay. The real DZN bootstrap
+below is still read-only; no live server member can change a base or start a
+war through the DZN backend yet.
+
+## Base layout and timed war objectives
+
+`preview/layout-grid.js` defines the two-metre grid, four district boundaries,
+building footprints, collision checks, and wall tier costs. The owner preview
+role can move structures within unlocked land, place individual walls or a
+straight row, move wall segments, and upgrade a single segment or a row.
+Actions spend personal Parts and Timber atomically, reject overlap and locked
+plots, and use action IDs so retries do not double charge. The Hall caps wall
+count and tiers. Building positions and wall tiers persist with older V3 saves,
+and war snapshots freeze the defended layout when a challenge is accepted.
+Canvas 2D retains usable layout controls when WebGL is unavailable.
+
+The active war's ten-minute attack period has three one-time objectives:
+Forge Convoy, Relay Capture, and Tower Stand. Each opens in a timed stage,
+requires the corresponding support building and personal resources, and can be
+completed by an eligible member on the frozen roster. Both sides see stage
+progress and scores. War resolution waits for the full attack period, even if
+the attack cap is reached early. This is local preview scoring only.
+
+`tools/generate-walls.mjs` produces five original tiered wall GLBs under
+`preview/assets/models/walls/`. The updated facility generator produces five
+`timberline_v3` models with more detailed saw and log machinery; the updated
+squad generator produces 25 `squads-v3` models with rounder bodies and role
+equipment. These are procedural interpretations of the supplied concepts, not
+fully scanned or rigged character meshes. Patrols now commute between specific
+buildings and camp, pause at stops, and path around occupied grid cells and
+walls. The generators and asset checks are reproducible without paid services.
+
 ## Local review
 
 Run `npm run test:stronghold-preview` from the repository root for the game
@@ -164,9 +198,10 @@ pause at assigned stops, and turn toward their next destination. The exact
 owner-supplied artwork remains in the Armoury; Canvas 2D uses flat portraits
 as a compatibility fallback. The new procedural models are game-scale
 interpretations of the single-view concept sheets, not exact textured 3D
-reconstructions. The previous blocky models remain under
-`preview/assets/models/squads/` and are no longer selected in WebGL.
-`tools/generate-squads.mjs` creates the replacement `squads-v2` kit.
+reconstructions. The earlier models remain under
+`preview/assets/models/squads/` and `preview/assets/models/squads-v2/` for
+comparison and are no longer selected in WebGL. `tools/generate-squads.mjs`
+creates the current `squads-v3` kit.
 
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
 unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs

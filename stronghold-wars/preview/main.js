@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
+import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
-import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, stepPatrolMotion } from './patrol-routes.js';
+import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
 import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
+import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy } from './layout-grid.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -18,6 +19,22 @@ const DEFS = {
   tower: { name: 'Watchtower', pos: [8, 6] },
   comms: { name: 'Communications', pos: [6, -8] },
 };
+let activePatrolNodes = PATROL_NODES;
+const patrols = [];
+const defenderPatrols = new Map();
+function syncLayoutPositions() {
+  const layout = service.community()?.saved.base.layout;
+  if (!layout) return;
+  activePatrolNodes = patrolNodesForLayout(layout);
+  for (const patrol of patrols || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
+  for (const patrol of defenderPatrols?.values?.() || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
+  for (const key of Object.keys(DEFS)) {
+    const point = layout.structures[key];
+    if (!point) continue;
+    DEFS[key].pos = [point.x, point.z];
+    if (buildings[key]) buildings[key].group.position.set(point.x, .05, point.z);
+  }
+}
 const PREVIEW_SERVICE_CHECKS = runServiceTests();
 console.info(`DZN local service checks passed (${PREVIEW_SERVICE_CHECKS.passed}).`);
 const state = new Proxy({}, {
@@ -227,7 +244,8 @@ function drawCompatibilityScene() {
     ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#e8f1e9';
     ctx.fillText(`${config.name} · ${plot.status}`, label.x, label.y);
     if (plot.status === 'claimed') {
-      const center = project(x, z);
+      const facilityPoint = service.community()?.saved.base.layout?.structures[config.id];
+      const center = project(facilityPoint?.x ?? x, facilityPoint?.z ?? z);
       if (plot.facilityLevel > 0) {
         const size = Math.max(16, unit * 2.6);
         ctx.fillStyle = '#29382f'; ctx.fillRect(center.x - size * .5, center.y - size * .75, size, size * .75);
@@ -264,6 +282,14 @@ function drawCompatibilityScene() {
   for (const [x, z] of [[-17, -17], [17, -17], [17, 17], [-17, 17]]) wall.push(project(x, z));
   ctx.beginPath(); ctx.moveTo(wall[0].x, wall[0].y); wall.slice(1).forEach(pt => ctx.lineTo(pt.x, pt.y)); ctx.closePath();
   ctx.strokeStyle = `rgba(174,188,156,${0.44 + (state.levels?.hq || 1) * 0.07})`; ctx.lineWidth = Math.max(2, unit * (0.12 + (state.levels?.hq || 1) * 0.015)); ctx.stroke();
+  for (const segment of service.community()?.saved.base.layout?.walls || []) {
+    const p = project(segment.x, segment.z);
+    const size = Math.max(5, unit * .7);
+    ctx.fillStyle = segment.level >= 4 ? '#8154ae' : segment.level >= 3 ? '#75827e' : '#76543a';
+    ctx.fillRect(p.x - size, p.y - size * .75, size * 2, size * .9);
+    ctx.strokeStyle = segment.level >= 4 ? '#a5ff7b' : '#bbc5b4';
+    ctx.lineWidth = 2; ctx.strokeRect(p.x - size, p.y - size * .75, size * 2, size * .9);
+  }
 
   if (camTarget.x > 35) {
     diamond(55, -10, 19, 17, '#454a3e', '#7b7c66');
@@ -518,7 +544,7 @@ async function sceneryModel(name) {
 
 async function facilityModel(name) {
   const key = `facility/${name}`;
-  const assetName = name.startsWith('timberline_l0') ? `${name}-2` : name;
+  const assetName = name.startsWith('timberline_l0') ? name.replace('timberline_', 'timberline_v3_') : name;
   if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-pbr-20261023`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Facility model ${name} could not load; keeping the claimed plot marker.`, error);
@@ -547,6 +573,16 @@ async function chronicleModel(level) {
   return sceneryTemplates.get(key);
 }
 
+async function wallModel(level) {
+  const key = `wall/${level}`;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+    sceneryTemplates.delete(key);
+    console.warn(`Wall Level ${level} model could not load.`, error);
+    return null;
+  }));
+  return sceneryTemplates.get(key);
+}
+
 function supplyRouteEndpoints([x, z]) {
   const distance = Math.hypot(x, z);
   const sideX = z / distance, sideZ = -x / distance;
@@ -566,10 +602,12 @@ async function reconcileLandScenery() {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
       .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
     const routeLevels = [...new Set(base.landPlots.filter(plot => plot.status === 'claimed' && plot.routeLevel > 0).map(plot => plot.routeLevel))];
+    const wallLevels = [...new Set(base.layout.walls.map(wall => wall.level))];
     const models = Object.fromEntries(await Promise.all([
       ...names.map(async name => [name, await sceneryModel(name)]),
       ...facilityNames.map(async name => [name, await facilityModel(name)]),
       ...routeLevels.map(async level => [`route_l0${level}`, await routeModel(level)]),
+      ...wallLevels.map(async level => [`wall_l0${level}`, await wallModel(level)]),
       [`chronicle_l0${base.levels.hq}`, await chronicleModel(base.levels.hq)],
     ]));
     if (request !== sceneryRequest) return;
@@ -635,7 +673,8 @@ async function reconcileLandScenery() {
         const name = plot.facilityLevel > 0 ? `${GAME_CONFIG.facilities[config.id].model}_l0${plot.facilityLevel}` : null;
         if (name && models[name]) {
           const facility = models[name].clone(true);
-          facility.position.set(x, 0.09, z);
+          const point = base.layout.structures[config.id];
+          facility.position.set(point?.x ?? x, 0.09, point?.z ?? z);
           facility.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
           landScenery.add(facility);
         } else {
@@ -667,6 +706,17 @@ async function reconcileLandScenery() {
         detail.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
         landScenery.add(detail);
       }
+    }
+    for (const wall of base.layout.walls) {
+      const template = models[`wall_l0${wall.level}`];
+      if (!template) continue;
+      const segment = template.clone(true);
+      segment.position.set(wall.x, .09, wall.z);
+      const horizontal = base.layout.walls.some(other => other.id !== wall.id && other.level === wall.level && other.z === wall.z && Math.abs(other.x - wall.x) === GRID_STEP);
+      const vertical = base.layout.walls.some(other => other.id !== wall.id && other.level === wall.level && other.x === wall.x && Math.abs(other.z - wall.z) === GRID_STEP);
+      if (vertical && !horizontal) segment.rotation.y = Math.PI / 2;
+      segment.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+      landScenery.add(segment);
     }
     for (let i = 0; i < 100; i++) {
       const a = i * 2.39996;
@@ -931,6 +981,7 @@ for (const key of Object.keys(DEFS)) {
   buildings[key] = building;
   renderedBuildingLevels[key] = state.levels[key];
 }
+syncLayoutPositions();
 if (!fallback2D) for (const key of Object.keys(DEFS)) requestBuildingModel(key, state.levels[key]);
 applyScaffoldState();
 
@@ -974,7 +1025,6 @@ function animateSoldier(soldier, phase, pace = 1) {
 }
 
 // Patrol soldiers
-const patrols = [];
 for (let i = 0; i < 5; i++) {
   const role = ['assault', 'recon', 'engineer', 'sentinel', 'medic'][i];
   const soldier = makeSoldier(role, state.levels);
@@ -984,7 +1034,6 @@ for (let i = 0; i < 5; i++) {
   patrols.push({ mesh: soldier, role, motion });
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
-const defenderPatrols = new Map();
 function syncDefenderPatrols() {
   const assigned = service.community()?.saved.base.defenders || {};
   for (const role of Object.keys(DEFENDER_CONCEPTS)) {
@@ -1127,6 +1176,7 @@ function renderIdentityOptions() {
     service.selectIdentity(select.value);
     selectedKey = null;
     closePanel();
+    syncLayoutPositions();
     reconcileBasePresentation();
     reconcileLandScenery();
     syncPatrolKits();
@@ -1670,6 +1720,73 @@ $('forgeBtn').onclick = showForgePanel;
 $('squadsBtn').onclick = showSquadPanel;
 $('progressionBtn').onclick = showProgressionPanel;
 $('landBtn').onclick = showLandPanel;
+
+let layoutZone = 'command-compound';
+let layoutMode = 'move-building';
+let layoutStructure = 'hq';
+let layoutStart = null;
+let layoutWallId = null;
+const layoutModes = {
+  'move-building': 'Move building', 'build-wall': 'Build one wall', 'build-row': 'Build wall row',
+  'upgrade-wall': 'Upgrade one wall', 'upgrade-row': 'Upgrade wall row', 'move-wall': 'Move wall',
+};
+function showLayoutPanel(errorMessage = '') {
+  selectedKey = null;
+  updateBuildingList();
+  const snapshot = service.snapshot();
+  const base = snapshot.base;
+  const owner = snapshot.profile.role === 'owner' && snapshot.access.allowed;
+  const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+  if (!claimed.has(layoutZone)) layoutZone = 'command-compound';
+  const bounds = LAYOUT_ZONES[layoutZone];
+  const keys = layoutZone === 'command-compound' ? Object.keys(CORE_DEFAULTS) : [layoutZone];
+  if (!keys.includes(layoutStructure)) layoutStructure = keys[0];
+  const centers = Object.fromEntries(Object.entries(base.layout.structures).filter(([key]) => key in CORE_DEFAULTS || claimed.has(key))
+    .map(([key, point]) => [`${point.x},${point.z}`, key]));
+  const walls = new Map(base.layout.walls.map(wall => [`${wall.x},${wall.z}`, wall]));
+  const occupied = layoutOccupancy(base.layout, claimed);
+  const columns = (bounds.maxX - bounds.minX) / GRID_STEP + 1;
+  const rows = (bounds.maxZ - bounds.minZ) / GRID_STEP + 1;
+  const cells = [];
+  for (let z = bounds.minZ; z <= bounds.maxZ; z += GRID_STEP) for (let x = bounds.minX; x <= bounds.maxX; x += GRID_STEP) {
+    const key = `${x},${z}`, structure = centers[key], wall = walls.get(key);
+    const chosen = layoutStart?.x === x && layoutStart?.z === z;
+    const label = structure ? (GAME_CONFIG.buildings[structure]?.name || GAME_CONFIG.facilities[structure]?.name || structure) : wall ? `Wall Level ${wall.level}` : occupied.has(key) ? 'Reserved building or camp space' : 'Empty grid space';
+    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'WT' : structure === 'comms' ? 'CM' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
+  }
+  const stageHint = layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the map.';
+  const zoneOptions = GAME_CONFIG.landPlots.filter(plot => claimed.has(plot.id)).map(plot => `<option value="${plot.id}">${escapeHTML(plot.name)}</option>`).join('');
+  openPanel(`<h2>DZN Base Layout</h2><p>The server owner arranges buildings and perimeter segments on unlocked land. Every wall uses the same shared save as the 3D base; upgrades are capped by Command Hall tier.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!owner ? `<p class="notice warn">${escapeHTML(snapshot.access.allowed ? 'Only this server owner can edit the layout.' : snapshot.access.reason)}</p>` : ''}<p class="notice">Your Parts: ${snapshot.member.parts} · Timber: ${snapshot.member.timber} · Walls: ${base.layout.walls.length}/${MAX_WALLS_PER_HALL[base.levels.hq]} · Hall L${base.levels.hq}</p><div class="layout-toolbar"><label>District<select id="layoutZone">${zoneOptions}</select></label><label>Action<select id="layoutMode">${Object.entries(layoutModes).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></label><label>Building<select id="layoutStructure" ${layoutMode === 'move-building' ? '' : 'disabled'}>${keys.map(key => `<option value="${key}">${escapeHTML(GAME_CONFIG.buildings[key]?.name || GAME_CONFIG.facilities[key]?.name || key)}</option>`).join('')}</select></label></div><p class="help">${stageHint} · New wall: ${WALL_COSTS[1].parts} Parts + ${WALL_COSTS[1].timber} Timber each. Moving is free; row purchases and upgrades charge all cells together.</p><div class="layout-scroll"><div class="layout-grid" style="grid-template-columns:repeat(${columns},36px)" aria-label="${escapeHTML(layoutZone)} build grid">${cells.join('')}</div></div><div class="layout-key"><span>HQ Command Hall</span><span>FG Forge</span><span>WT Watchtower</span><span>CM Communications</span><span>YD district facility</span><span>W# wall tier</span></div><p class="help">Empty cells are 2 metres apart. Buildings need their full 3 × 3 footprint. A row can be up to 16 cells and cannot cross locked land or occupied cells.</p><div class="row"><button id="layoutCancelStart" ${layoutStart ? '' : 'disabled'}>Cancel selection</button><button id="closeBtn">Close</button></div>`);
+  $('layoutZone').value = layoutZone;
+  $('layoutMode').value = layoutMode;
+  $('layoutStructure').value = layoutStructure;
+  $('layoutZone').onchange = e => { layoutZone = e.target.value; layoutStart = null; layoutWallId = null; showLayoutPanel(); };
+  $('layoutMode').onchange = e => { layoutMode = e.target.value; layoutStart = null; layoutWallId = null; showLayoutPanel(); };
+  $('layoutStructure').onchange = e => { layoutStructure = e.target.value; };
+  $('layoutCancelStart').onclick = () => { layoutStart = null; layoutWallId = null; showLayoutPanel(); };
+  $('closeBtn').onclick = closePanel;
+  panel.querySelectorAll('[data-layout-x]').forEach(button => button.onclick = () => {
+    const point = { x: Number(button.dataset.layoutX), z: Number(button.dataset.layoutZ) };
+    const existingWall = base.layout.walls.find(wall => wall.x === point.x && wall.z === point.z);
+    let result;
+    if (layoutMode === 'move-building') result = service.moveStructure(snapshot.profile.id, layoutStructure, point.x, point.z);
+    else if (layoutMode === 'build-wall') result = service.placeWallRow(snapshot.profile.id, point);
+    else if (layoutMode === 'upgrade-wall') result = service.upgradeWallRow(snapshot.profile.id, point);
+    else if (!layoutStart) {
+      if (layoutMode === 'move-wall' && !existingWall) { showLayoutPanel('Select an existing wall first.'); return; }
+      layoutStart = point; layoutWallId = existingWall?.id || null; showLayoutPanel(); return;
+    } else if (layoutMode === 'move-wall') result = service.moveWall(snapshot.profile.id, layoutWallId, point.x, point.z);
+    else if (layoutMode === 'build-row') result = service.placeWallRow(snapshot.profile.id, layoutStart, point);
+    else result = service.upgradeWallRow(snapshot.profile.id, layoutStart, point);
+    if (!result.ok) { showLayoutPanel(result.error); return; }
+    layoutStart = null; layoutWallId = null;
+    syncLayoutPositions(); reconcileLandScenery(); updateHud(); playClank();
+    if (layoutMode.startsWith('upgrade')) celebrateUpgrade(point.x, point.z, 'Perimeter wall', result.walls[0].level);
+    toast(layoutMode === 'move-building' ? 'Building repositioned.' : layoutMode === 'move-wall' ? 'Wall moved.' : `${result.walls.length} wall segment${result.walls.length === 1 ? '' : 's'} ${layoutMode.startsWith('upgrade') ? 'upgraded' : 'built'}.`);
+    showLayoutPanel();
+  });
+}
+$('layoutBtn').onclick = () => showLayoutPanel();
 $('chronicleBtn').onclick = showChroniclePanel;
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();
@@ -1722,7 +1839,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   const challengerCount = war.attacks.filter(attack => attack.communityId === war.challengerCommunityId).length;
   const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
   const atCap = challengerCount >= WAR_RULES.maxAttacksPerSide && defenderCount >= WAR_RULES.maxAttacksPerSide;
-  const canResolve = war.state === 'active' && leadership && (atCap || Date.now() >= war.attackEndsAt);
+  const canResolve = war.state === 'active' && leadership && (war.stages?.length ? Date.now() >= war.attackEndsAt : atCap || Date.now() >= war.attackEndsAt);
   const currentSide = isChallenger ? challenger : defender;
   const enemySide = isChallenger ? defender : challenger;
   let actions = '';
@@ -1743,7 +1860,15 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
       <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit adds +${currentSide.stats.assaultKit.scoreBonus} score and shields ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with Sentinel reinforcement' : ''}${currentSide.stats.assaultKit.supportRole ? ' and Lifeline support' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit adds +${currentSide.stats.reconKit.scoreBonus} score and shields ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with Lifeline support' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
       ${canAttack ? `<div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Deploy Assault squad</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Deploy Recon squad</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
-      ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve when attack cap is reached or timer ends'}</button></div>` : ''}`;
+      ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve after all timed stages close'}</button></div>` : ''}`;
+    if (war.stages?.length) actions += `<h3>Timed build challenges</h3><p class="help">One verified roster member per server completes each stage from the locked building tier. Stages open in sequence; first completion earns +2. Costs use personal DZN Parts and Timber, and points stay in this local war.</p>${war.stages.map(stage => {
+      const definition = WAR_STAGE_DEFS.find(item => item.id === stage.id);
+      if (!definition) return '';
+      const own = stage.completedBy[currentCommunityId], enemyId = currentCommunityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+      const enemy = stage.completedBy[enemyId];
+      const now = Date.now(), open = now >= stage.opensAt && now < stage.closesAt;
+      return `<article class="war-card ${open ? 'ready' : ''}"><b>${escapeHTML(definition.name)} · ${escapeHTML(definition.building)}</b><p>${escapeHTML(definition.objective)}</p><p class="help">${now < stage.opensAt ? `Opens in ${formatRemaining(stage.opensAt)}` : now < stage.closesAt ? `Closes in ${formatRemaining(stage.closesAt)}` : 'Closed'} · ${definition.parts} Parts + ${definition.timber} Timber · Your side: ${own ? `+${own.points} points` : 'pending'} · Rival: ${enemy ? `+${enemy.points} points` : 'pending'}</p>${!own && hasRoster && readiness.eligible && open ? `<button data-war-stage="${escapeHTML(stage.id)}" data-war-id="${escapeHTML(war.id)}">Complete ${escapeHTML(definition.name)}</button>` : ''}</article>`;
+    }).join('')}<button data-war-refresh="${escapeHTML(war.id)}">Refresh stage timers</button>`;
   } else if (war.state === 'resolved') {
     const winner = war.tie ? 'TIE · no winner' : warCommunityName(war.winnerCommunityId);
     const localReward = war.rewards?.length || war.rewardLedgerIds?.length || 0;
@@ -1815,6 +1940,13 @@ function showWarTable(errorMessage = '') {
     toast('War active · two deployments per side.'); showWarTable();
   });
   panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => launchWarAttack(button.dataset.warId, button.dataset.warAttack));
+  panel.querySelectorAll('[data-war-stage]').forEach(button => button.onclick = () => {
+    const result = service.completeWarStage(profile.id, button.dataset.warId, button.dataset.warStage);
+    if (!result.ok) { showWarTable(result.error); return; }
+    toast(`${WAR_STAGE_DEFS.find(stage => stage.id === result.stageId).name} complete · +${result.points} local points.`);
+    updateHud(); showWarTable();
+  });
+  panel.querySelectorAll('[data-war-refresh]').forEach(button => button.onclick = () => showWarTable());
   panel.querySelectorAll('[data-war-scout]').forEach(button => button.onclick = () => {
     const result = service.dispatchScout(profile.id, button.dataset.warScout);
     toast(result.ok ? 'Scout dispatched · home defence exposed until return or recall.' : result.error);
@@ -1837,7 +1969,7 @@ function showWarTable(errorMessage = '') {
     showWarTable();
   });
 }
-$('warBtn').onclick = showWarTable;
+$('warBtn').onclick = () => showWarTable();
 
 function showCardVault() {
   const base = service.community()?.saved.base;
@@ -1902,7 +2034,7 @@ function showWorldMap() {
     return `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${unit?.level ? `L${unit.level} · ${unit.post ? escapeHTML(DEFENDER_POSTS[unit.post]) : 'reserve'}` : 'locked'}</span>`;
   }).join('');
   const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades and assigned Hounds. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
-  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Explore three fictional communities. The Pro search is populated from this preview roster; a reviewed DZN Network connection can later supply eligible servers using coarse public regions. No player or server coordinates are shown.</p><div class="world-layout"><div class="world-map"><div class="world-map-toolbar"><label class="world-search-label" for="worldSearch">Find connected Pro stronghold<input id="worldSearch" type="search" autocomplete="off" placeholder="Search Pro servers" value="${escapeHTML(worldSearch)}"></label><div class="world-zoom-controls"><button id="worldZoomOut" aria-label="Zoom out">−</button><span id="worldZoomStatus" aria-live="polite">100%</span><button id="worldZoomIn" aria-label="Zoom in">+</button><button id="worldZoomReset">Reset</button></div></div><div class="world-map-viewport" tabindex="0" aria-label="World map. Drag to move; use plus, minus, Home and arrow keys to navigate"><div class="world-map-content"><img src="assets/world/stronghold-world.png" draggable="false" alt="Stylized world map showing continents and illustrative community markers">${pins}</div></div><div class="world-results" aria-label="Connected Pro preview servers">${proResults}</div><p id="worldSearchStatus" class="help" role="status"></p></div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p>${routePanel}<div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Explore three fictional communities. The Pro search is populated from this preview roster; a reviewed DZN Network connection can later supply eligible servers using coarse public regions. No player or server coordinates are shown.</p><div class="world-layout"><div class="world-map"><div class="world-map-toolbar"><label class="world-search-label" for="worldSearch">Find connected Pro stronghold<input id="worldSearch" type="search" autocomplete="off" placeholder="Search Pro servers" value="${escapeHTML(worldSearch)}"></label><div class="world-zoom-controls"><button id="worldZoomOut" aria-label="Zoom out">−</button><span id="worldZoomStatus" aria-live="polite">100%</span><button id="worldZoomIn" aria-label="Zoom in">+</button><button id="worldZoomReset">Reset</button></div></div><div class="world-map-viewport" tabindex="0" aria-label="World map. Drag to move; use plus, minus, Home and arrow keys to navigate"><div class="world-map-content"><img src="assets/world/stronghold-world.png" draggable="false" alt="Stylized world map showing continents and illustrative community markers">${pins}</div></div><div class="world-results" aria-label="Connected Pro preview servers">${proResults}</div><p id="worldSearchStatus" class="help" role="status"></p></div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><p class="help">DZN perimeter: ${selected.wallSegments} wall segments · ${selected.wallTierTotal} combined wall tiers.</p>${routePanel}<div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
   overlay.style.display = 'block';
   applyWorldMapView(overlay);
   const updateWorldSearch = () => {
@@ -1985,8 +2117,9 @@ function refreshWarTableTimers() {
       const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
       const capped = challengerCount >= WAR_RULES.maxAttacksPerSide && defenderCount >= WAR_RULES.maxAttacksPerSide;
       const resolve = card.querySelector('[data-war-resolve]');
-      if (resolve) resolve.disabled = !(leadership && readiness.eligible && (closed || capped));
-      if (resolve && leadership && readiness.eligible && (closed || capped)) resolve.textContent = 'Resolve war · lock result';
+      const readyToResolve = closed || (!war.stages?.length && capped);
+      if (resolve) resolve.disabled = !(leadership && readiness.eligible && readyToResolve);
+      if (resolve && leadership && readiness.eligible && readyToResolve) resolve.textContent = 'Resolve war · lock result';
     }
   }
 }
@@ -1996,7 +2129,7 @@ function clearWarBaseVisuals() {
   for (const defender of warDefenderMeshes) scene.remove(defender.mesh);
   warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
-    child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+    if (!child.userData.sharedTemplate) child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
     warBaseGroup.remove(child);
   }
 }
@@ -2008,9 +2141,17 @@ function buildWarBaseVisual(side) {
   warBaseGroup.position.set(OUTPOST.x, 0, OUTPOST.z);
   for (const [key, building] of Object.entries(DEFS)) {
     const model = buildModel(key, side.base.levels[key]);
-    model.position.set(building.pos[0], 0.05, building.pos[1]);
+    const point = side.base.layout?.structures?.[key];
+    model.position.set(point?.x ?? building.pos[0], 0.05, point?.z ?? building.pos[1]);
     warBaseGroup.add(model);
   }
+  for (const wall of side.base.layout?.walls || []) wallModel(wall.level).then(template => {
+    if (token !== warDefenderToken || !template) return;
+    const segment = template.clone(true);
+    segment.position.set(wall.x, .09, wall.z);
+    segment.userData.sharedTemplate = true;
+    warBaseGroup.add(segment);
+  });
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, -17);
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, 17);
   box(warBaseGroup, 0.65, 0.45, 34, MAT.dark, -17, 0, 0);
@@ -2352,13 +2493,13 @@ renderer.setAnimationLoop(time => {
     }
   }
   patrols.forEach(p => {
-    const motion = stepPatrolMotion(p.motion, dt);
+    const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     p.mesh.position.set(motion.x, 0, motion.z);
     p.mesh.rotation.y = motion.yaw;
     animateSoldier(p.mesh, motion.stride, motion.moving ? 1 : 0.04);
   });
   for (const patrol of defenderPatrols.values()) {
-    const motion = stepPatrolMotion(patrol.motion, dt);
+    const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     patrol.mesh.position.set(motion.x, 0, motion.z);
     patrol.mesh.rotation.y = motion.yaw;
     animateDefender(patrol);

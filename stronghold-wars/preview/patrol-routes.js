@@ -1,5 +1,6 @@
 // Walkable links around the four buildings. Stops are outside their footprints.
 // The camp is the squad's home until a dedicated Barracks plot exists.
+import { cellKey, footprintCells } from './layout-grid.js';
 export const PATROL_NODES = Object.freeze({
   camp: [-4, -12], westSouth: [-9, -8], westLane: [-15, 0], westNorth: [-15, 10],
   workshop: [-9, 9], northWest: [-5, 12], hall: [0, 6],
@@ -18,13 +19,27 @@ const neighbours = Object.fromEntries(Object.keys(PATROL_NODES).map(key => [key,
 for (const [a, b] of links) { neighbours[a].push(b); neighbours[b].push(a); }
 
 export const PATROL_STOPS = Object.freeze({
-  assault: ['camp', 'tower', 'hall', 'camp'],
-  recon: ['comms', 'tower', 'comms'],
+  assault: ['camp', 'tower', 'camp'],
+  recon: ['camp', 'comms', 'camp'],
   engineer: ['workshop', 'hall', 'camp', 'workshop'],
-  sentinel: ['tower', 'northWest', 'hall', 'tower'],
-  medic: ['camp', 'hall', 'workshop', 'camp'],
+  sentinel: ['camp', 'tower', 'hall', 'camp'],
+  medic: ['camp', 'workshop', 'camp'],
 });
 export const DEFENDER_POST_NODES = Object.freeze({ gate: 'southLane', hall: 'hall', tower: 'tower', comms: 'comms', workshop: 'workshop' });
+
+export function patrolNodesForLayout(layout) {
+  const nodes = Object.fromEntries(Object.entries(PATROL_NODES).map(([key, point]) => [key, [...point]]));
+  const occupied = new Set();
+  for (const point of Object.values(layout?.structures || {})) for (const cell of footprintCells(point.x, point.z)) occupied.add(cell);
+  for (const wall of layout?.walls || []) occupied.add(cellKey(wall.x, wall.z));
+  for (const [stop, key] of [['hall', 'hq'], ['workshop', 'workshop'], ['tower', 'tower'], ['comms', 'comms']]) {
+    const point = layout?.structures?.[key];
+    if (!point) continue;
+    const choices = [[point.x, point.z + 4], [point.x + 4, point.z], [point.x - 4, point.z], [point.x, point.z - 4]];
+    nodes[stop] = choices.find(([x, z]) => x >= -16 && x <= 16 && z >= -14 && z <= 14 && !occupied.has(cellKey(x, z))) || choices[0];
+  }
+  return nodes;
+}
 
 export function shortestPatrolPath(start, end) {
   if (!PATROL_NODES[start] || !PATROL_NODES[end]) throw new Error('Unknown patrol stop');
@@ -60,7 +75,57 @@ export function createDefenderMotion(role, post) {
   return motion;
 }
 
-export function stepPatrolMotion(motion, deltaSeconds) {
+function blockedByLayout(x, z, layout) {
+  if (x < -17 || x > 17 || z < -15 || z > 15) return true;
+  for (const point of Object.values(layout?.structures || {})) {
+    if (Math.abs(point.x) <= 16 && Math.abs(point.z) <= 14 && Math.abs(x - point.x) <= 2 && Math.abs(z - point.z) <= 2) return true;
+  }
+  for (const wall of layout?.walls || []) if (Math.abs(x - wall.x) <= 1 && Math.abs(z - wall.z) <= 1) return true;
+  return false;
+}
+
+// Four-way A* stays off the occupied footprint. Compress collinear cells so units
+// walk fluidly between the camp and building entrances instead of orbiting a base.
+export function walkablePatrolPath(from, to, layout) {
+  const start = [Math.round(from[0]), Math.round(from[1])];
+  const end = [Math.round(to[0]), Math.round(to[1])];
+  const key = ([x, z]) => `${x},${z}`;
+  const endKey = key(end), startKey = key(start);
+  const open = [{ point: start, cost: 0, estimate: Math.abs(start[0] - end[0]) + Math.abs(start[1] - end[1]) }];
+  const best = new Map([[startKey, 0]]), previous = new Map();
+  while (open.length) {
+    open.sort((a, b) => a.cost + a.estimate - b.cost - b.estimate);
+    const current = open.shift();
+    const currentKey = key(current.point);
+    if (current.cost !== best.get(currentKey)) continue;
+    if (currentKey === endKey) {
+      const path = [end];
+      let cursor = endKey;
+      while (cursor !== startKey) { cursor = previous.get(cursor); if (!cursor) return null; path.push(cursor.split(',').map(Number)); }
+      path.reverse();
+      const turns = [];
+      for (let i = 1; i < path.length; i++) {
+        const direction = [path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]];
+        const next = path[i + 1];
+        if (!next || next[0] - path[i][0] !== direction[0] || next[1] - path[i][1] !== direction[1]) turns.push(path[i]);
+      }
+      if (!turns.length || turns.at(-1)[0] !== to[0] || turns.at(-1)[1] !== to[1]) turns.push([...to]);
+      return turns;
+    }
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const next = [current.point[0] + dx, current.point[1] + dz];
+      const nextKey = key(next);
+      if (nextKey !== endKey && blockedByLayout(next[0], next[1], layout)) continue;
+      const cost = current.cost + 1;
+      if (cost >= (best.get(nextKey) ?? Infinity)) continue;
+      best.set(nextKey, cost); previous.set(nextKey, currentKey);
+      open.push({ point: next, cost, estimate: Math.abs(next[0] - end[0]) + Math.abs(next[1] - end[1]) });
+    }
+  }
+  return null;
+}
+
+export function stepPatrolMotion(motion, deltaSeconds, nodePositions = PATROL_NODES, layout = null) {
   let remaining = Math.max(0, Math.min(deltaSeconds, 0.1));
   motion.moving = false;
   if (motion.wait > 0) {
@@ -74,14 +139,21 @@ export function stepPatrolMotion(motion, deltaSeconds) {
   }
   while (remaining > 0 && motion.routeIndex < motion.route.length) {
     const nextNode = motion.route[motion.routeIndex];
-    const [tx, tz] = PATROL_NODES[nextNode];
-    const dx = tx - motion.x, dz = tz - motion.z;
+    const [tx, tz] = nodePositions[nextNode];
+    if (layout && motion.waypointNode !== nextNode) {
+      motion.waypoints = walkablePatrolPath([motion.x, motion.z], [tx, tz], layout);
+      motion.waypointNode = nextNode;
+      if (!motion.waypoints) { motion.route = []; motion.wait = 4; motion.moving = false; return motion; }
+    }
+    const [targetX, targetZ] = layout ? motion.waypoints[0] || [tx, tz] : [tx, tz];
+    const dx = targetX - motion.x, dz = targetZ - motion.z;
     const distance = Math.hypot(dx, dz);
     const distanceStep = motion.speed * remaining;
     if (distance < 0.001 || distance <= distanceStep) {
-      motion.x = tx; motion.z = tz; motion.node = nextNode;
+      motion.x = targetX; motion.z = targetZ;
       remaining -= distance / motion.speed;
-      motion.routeIndex++;
+      if (layout && motion.waypoints.length) motion.waypoints.shift();
+      if (!layout || !motion.waypoints.length) { motion.node = nextNode; motion.routeIndex++; motion.waypointNode = null; }
     } else {
       motion.x += dx / distance * distanceStep;
       motion.z += dz / distance * distanceStep;
@@ -96,7 +168,8 @@ export function stepPatrolMotion(motion, deltaSeconds) {
   }
   if (motion.routeIndex >= motion.route.length) {
     motion.route = [];
-    motion.wait = motion.node === 'camp' ? 5 : motion.node === 'hall' ? 3.5 : 2.5;
+    motion.waypoints = null;
+    motion.wait = motion.node === 'camp' ? 13 : motion.node === 'hall' ? 8 : 6;
     motion.moving = false;
   }
   if (motion.moving) motion.stride += deltaSeconds * motion.speed * 4.8;

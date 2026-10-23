@@ -175,6 +175,20 @@
       .world-mission { padding: 8px; margin: 7px 0; border: 1px solid #6f538c; border-radius: 9px; background: #211b2b; }
       .world-mission strong { color: #ddb8ff; font-size: 10px; }
       .panel:has(.collectible-grid) { width: min(950px, calc(100vw - 28px)); }
+      .panel:has(.layout-grid) { width: min(870px, calc(100vw - 28px)); max-height: 82vh; }
+      .layout-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+      .layout-toolbar label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+      .layout-toolbar select { min-width: 130px; }
+      .layout-scroll { overflow: auto; max-width: 100%; padding: 8px; border: 1px solid #466454; border-radius: 11px; background: radial-gradient(circle, #203f31, #14271e); }
+      .layout-grid { display: grid; gap: 3px; width: max-content; }
+      .layout-cell { width: 36px; height: 36px; padding: 0; border: 1px solid #4e6d5a; border-radius: 5px; background: #2c4835; font-size: 9px; color: #dcf5df; }
+      .layout-cell:hover:not(:disabled) { background: #416c49; }
+      .layout-cell.occupied { background: #374944; border-color: #b69add; }
+      .layout-cell.wall { background: #654b76; border-color: #c9a3ef; font-weight: 800; }
+      .layout-cell.chosen { outline: 2px solid #b5ff70; outline-offset: -2px; }
+      .layout-cell.locked { opacity: .35; }
+      .layout-key { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0; color: #c5d2c9; font-size: 10px; }
+      .layout-key span { border: 1px solid #5a725f; border-radius: 6px; padding: 4px 6px; }
       .collectible-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
       .collectible-card { min-width: 0; padding: 8px; border: 1px solid #5e497a; border-radius: 11px; background: linear-gradient(160deg,#292339,#111a17); box-shadow: inset 0 0 18px #0009; }
       .collectible-card.earned { border-color: #a4e980; box-shadow: 0 0 18px #79db5b33, inset 0 0 18px #0009; }
@@ -313,6 +327,7 @@
       <button id="squadsBtn">Squads</button>
       <button id="progressionBtn">Progression</button>
       <button id="landBtn">Land &amp; Forest</button>
+      <button id="layoutBtn">Base Layout</button>
       <button id="chronicleBtn">Chronicle</button>
       <button id="warBtn">War Table</button>
       <button id="worldBtn">World Map</button>

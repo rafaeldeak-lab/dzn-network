@@ -13,7 +13,7 @@ if (!globalThis.FileReader) {
   };
 }
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads-v2');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads-v3');
 await mkdir(root, { recursive: true });
 const exporter = new GLTFExporter();
 const mat = (color, metalness = 0, emissive = 0) => new THREE.MeshStandardMaterial({
@@ -35,6 +35,7 @@ function box(g, w, h, d, m, name, x = 0, y = 0, z = 0) {
   return mesh(g, new RoundedBoxGeometry(w, h, d, 3, radius), m, name, x, y, z);
 }
 function cyl(g, top, bottom, h, m, name, x = 0, y = 0, z = 0, sides = 8) { return mesh(g, new THREE.CylinderGeometry(top, bottom, h, sides), m, name, x, y, z); }
+function tapered(g, top, bottom, h, m, name, x = 0, y = 0, z = 0) { return cyl(g, top, bottom, h, m, name, x, y, z, 18); }
 function orb(g, radius, m, name, x = 0, y = 0, z = 0) {
   return mesh(g, new THREE.SphereGeometry(radius, 16, 12), m, name, x, y, z);
 }
@@ -50,12 +51,17 @@ export function soldier(role, tier) {
   const cloth = role === 'recon' ? M.recon : role === 'engineer' ? M.engineer : role === 'sentinel' ? M.tactical : role === 'medic' ? M.medicCloth : M.fabric;
   const glow = role === 'assault' ? M.amber : role === 'recon' ? M.purple : role === 'sentinel' ? M.lime : M.visor;
   // Feet start on the world plane. Forward is +Z; the runtime animates the named limb pivots.
-  box(g, 0.43, 0.58, 0.28, cloth, 'body', 0, 1.07, 0);
+  tapered(g, .24, .18, .62, cloth, 'body', 0, 1.08, 0);
+  tapered(g, .21, .23, .19, M.shadow, 'waist_flex', 0, .83, 0);
   box(g, 0.5, 0.12, 0.3, M.shadow, 'belt', 0, 0.78, 0);
-  box(g, 0.52, 0.41, 0.16, M.carbon, 'segmented_vest', 0, 1.15, 0.16);
+  box(g, 0.5, 0.4, 0.12, M.carbon, 'segmented_vest', 0, 1.15, 0.16);
+  for (const side of [-1, 1]) {
+    tapered(g, .04, .055, .42, M.steel, 'vest_side_rail', side * .25, 1.14, .03);
+    box(g, .15, .08, .12, M.armour, 'clavicle_plate', side * .17, 1.41, .12);
+  }
   box(g, 0.35, 0.095, 0.035, glow, 'dzn_chest_flash', 0, 1.2, 0.253);
   orb(g, 0.21 + tier * 0.004, M.carbon, 'rounded_helmet', 0, 1.66, 0);
-  box(g, 0.37, 0.19, 0.16, M.obsidian, 'enclosed_mask', 0, 1.53, 0.13);
+  orb(g, .175, M.obsidian, 'enclosed_mask', 0, 1.52, .13);
   box(g, 0.4, 0.07, 0.13, M.armour, 'helmet_brow', 0, 1.67, 0.16);
   for (const side of [-1, 1]) {
     orb(g, 0.074, M.visor, side < 0 ? 'left_optic' : 'right_optic', side * 0.105, 1.61, 0.227);
@@ -65,20 +71,23 @@ export function soldier(role, tier) {
   box(g, 0.16, 0.09, 0.07, M.steel, 'respirator', 0, 1.51, 0.25);
   for (const side of [-1, 1]) {
     const arm = new THREE.Group(); arm.name = side < 0 ? 'left_arm' : 'right_arm'; arm.position.set(side * 0.32, 1.34, 0); g.add(arm);
-    box(arm, 0.22, 0.48, 0.22, cloth, 'sleeve', 0, -0.23, 0);
+    tapered(arm, .117, .083, .47, cloth, 'sleeve', 0, -0.23, 0);
     orb(arm, 0.135, M.armour, 'shoulder_joint', 0, -0.04, 0);
     box(arm, 0.2, 0.12, 0.22, M.shadow, 'glove', 0, -0.51, 0);
-    box(arm, 0.24, 0.19, 0.25, M.carbon, 'forearm_plate', 0, -0.34, 0.025);
+    box(arm, 0.22, 0.18, 0.22, M.carbon, 'forearm_plate', 0, -0.34, 0.025);
+    tapered(arm, .046, .045, .34, M.steel, 'forearm_seam', side * .105, -.29, .015);
     const leg = new THREE.Group(); leg.name = side < 0 ? 'left_leg' : 'right_leg'; leg.position.set(side * 0.13, 0.77, 0); g.add(leg);
-    box(leg, 0.22, 0.57, 0.25, cloth, 'trouser', 0, -0.29, 0);
+    tapered(leg, .14, .1, .56, cloth, 'trouser', 0, -0.29, 0);
     box(leg, 0.24, 0.21, 0.33, M.shadow, 'boot', 0, -0.65, 0.05);
     box(leg, 0.25, 0.2, 0.3, M.carbon, 'shaped_knee_guard', 0, -0.43, 0.06);
     box(leg, 0.23, 0.16, 0.28, tier >= 4 ? M.purple : M.armour, 'shin_plate', 0, -0.56, 0.035);
+    tapered(leg, .055, .045, .32, M.steel, 'shin_frame', side * .12, -.48, -.04);
     if (tier >= 2) box(arm, 0.23, 0.18, 0.24, M.armour, 'shoulder_plate', 0, -0.08, 0);
     if (tier >= 3) box(leg, 0.23, 0.22, 0.28, M.armour, 'knee_plate', 0, -0.49, 0.035);
     if (tier >= 4) box(arm, 0.22, 0.16, 0.25, glow, 'rank_stripe', 0, -0.23, 0);
   }
   box(g, 0.36 + tier * 0.035, 0.45 + tier * 0.035, 0.23, M.pouch, 'field_pack', 0, 1.11, -0.26);
+  for (const side of [-1, 1]) tapered(g, .045, .055, .46, M.shadow, 'vest_tether', side * .205, 1.14, .2);
   for (const side of [-1, 1]) {
     box(g, 0.08, 0.52, 0.075, M.steel, 'pack_harness', side * 0.23, 1.15, 0.05);
     box(g, 0.14, 0.08, 0.035, tier >= 4 ? M.purple : M.lime, 'shoulder_light', side * 0.33, 1.31, 0.15);
@@ -178,7 +187,7 @@ for (const role of Object.keys(manifest.roles)) for (let tier = 1; tier <= 5; ti
   const size = bounds.getSize(new THREE.Vector3());
   await writeFile(path.join(root, `${name}.glb`), bytes);
   manifest.assets[name] = {
-    file: `assets/models/squads-v2/${name}.glb`,
+    file: `assets/models/squads-v3/${name}.glb`,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
     dimensions: size.toArray().map(value => Number(value.toFixed(3))),
