@@ -17,7 +17,10 @@ const serverDiscoveryReply = answerDznAssist("Help me find a server to play on")
 assert.equal(serverDiscoveryReply.kind, "guidance");
 assert.deepEqual(serverDiscoveryReply.guideIds, ["server-discovery"]);
 assert.ok(serverDiscoveryReply.links.some((link) => link.href === "/servers"));
+assert.deepEqual(answerDznAssist("How do I join a server?").guideIds, ["server-discovery"]);
 assert.equal(answerDznAssist("I want to join DZN").workflows[0]?.id, "account-access");
+assert.ok(!answerDznAssist("How do I make my profile public?").guideIds.includes("server-discovery"));
+assert.deepEqual(answerDznAssist("How can I play an event?").guideIds, ["events-and-leaderboards"]);
 
 assert.equal(answerDznAssist("How do I create my account?").kind, "guidance");
 assert.equal(answerDznAssist("Where can I view payment plans?").kind, "guidance");

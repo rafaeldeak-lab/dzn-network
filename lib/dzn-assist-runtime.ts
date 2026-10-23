@@ -144,7 +144,12 @@ function findGuides(question: string, guides: readonly DznAssistGuide[], previou
       const matches = terms.filter((term) => guideTokens.has(term));
       const phraseBonus = phraseScore(question, guide.id);
       const score = matches.reduce((total, term) => total + (guideTermCounts.get(term) === 1 ? 3 : 1), 0) + phraseBonus;
-      return { guide, score, confident: phraseBonus > 0 || matches.length >= 2 || matches.some((term) => guideTermCounts.get(term) === 1) };
+      const hasDiscoveryContext = guide.id !== "server-discovery" || /\b(server|servers|community|communities)\b/i.test(question);
+      return {
+        guide,
+        score,
+        confident: hasDiscoveryContext && (phraseBonus > 0 || matches.length >= 2 || matches.some((term) => guideTermCounts.get(term) === 1)),
+      };
     })
     .filter((item) => item.confident)
     .sort((left, right) => right.score - left.score || left.guide.title.localeCompare(right.guide.title));
@@ -182,7 +187,7 @@ function phraseScore(question: string, guideId: string) {
   const matches: Record<string, RegExp> = {
     "account-access": /\b(sign in|log in|login|create (?:(?:an|my) )?account|join dzn)\b/i,
     "player-stats-link": /\b(link|claim|connect).{0,24}\b(dayz|stats|gamertag|profile)\b|\b(dayz stats|player stats|game stats)\b/i,
-    "server-discovery": /\b(find|discover|browse|choose).{0,30}\b(server|community|communities)\b|\b(which server|where can i play)\b/i,
+    "server-discovery": /\b(join|find|discover|browse|choose).{0,30}\b(server|community|communities)\b|\b(which server|where can i play)\b/i,
     "server-setup": /\b(add|set up|setup|connect|register).{0,30}\b(server|nitrado|adm)\b|\b(add my server|server setup)\b/i,
     "server-owner-discord-access": /\b(server owner|owner access|verified owner|owner role|private owner)\b/i,
     "server-data": /\b(sync|import|server data|missing data|old data|adm files?)\b/i,
