@@ -63,7 +63,9 @@ export function squadBattleStats(levels = {}, tactic = 'assault') {
 }
 
 export function squadAsset(key, tier) {
-  return SQUAD_ROLES[key] ? `assets/models/squads-v5/${key}_l0${boundedLevel(tier)}.glb` : null;
+  if (!SQUAD_ROLES[key]) return null;
+  if (key === 'assault') return `assets/models/squads-v6/assault_l0${boundedLevel(tier)}.glb`;
+  return `assets/models/squads-v5/${key}_l0${boundedLevel(tier)}.glb`;
 }
 
 export function squadPortrait(key, tier) {

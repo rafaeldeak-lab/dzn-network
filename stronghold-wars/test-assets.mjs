@@ -168,7 +168,7 @@ const heldSquadParts = {
 };
 for (const [name, entry] of Object.entries(squadManifest.assets)) {
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
-  if (entry.file !== squadAsset(name.split('_')[0], Number(name.slice(-1))) || bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid squad GLB container: ${name}`);
+  if (entry.file !== `assets/models/squads-v5/${name}.glb` || bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid squad GLB container: ${name}`);
   const jsonLength = bytes.readUInt32LE(12);
   if (bytes.toString('ascii', 16, 20) !== 'JSON' || jsonLength < 50 || jsonLength > bytes.length - 20) throw new Error(`Invalid squad scene JSON: ${name}`);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
@@ -183,6 +183,24 @@ for (const [name, entry] of Object.entries(squadManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(d => !Number.isFinite(d) || d <= 0)) throw new Error(`Invalid squad bounds: ${name}`);
 }
 console.log(`DZN squad kit verified: ${squadNames.length} original, distinct and animatable GLBs.`);
+const wardenManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v6/manifest.json'), 'utf8'));
+if (Object.keys(wardenManifest.assets).length !== 5) throw new Error('Rosebud Warden upgrade set must have five levels.');
+const wardenHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `assault_l0${level}`;
+  const entry = wardenManifest.assets[name];
+  if (!entry || entry.file !== squadAsset('assault', level)) throw new Error(`Warden Level ${level} asset mapping is missing.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Warden Level ${level} GLB is invalid.`);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (hash !== entry.sha256 || bytes.length !== entry.bytes || wardenHashes.has(hash)) throw new Error(`Warden Level ${level} integrity or distinction failed.`);
+  wardenHashes.add(hash);
+  if (!gltf.skins?.length || !gltf.animations?.some(clip => clip.name === 'DZN_Warden_Walk') || !gltf.meshes?.length || !gltf.images?.length) throw new Error(`Warden Level ${level} is missing a skin, walk clip, mesh or texture.`);
+  if (!(gltf.animations.find(clip => clip.name === 'DZN_Warden_Walk')?.channels?.length > 0)) throw new Error(`Warden Level ${level} has an empty walk clip.`);
+}
+console.log('Five distinct, textured and skinned Rosebud Warden levels verified with walk clips.');
 const occupied = [
   [0, 0, BUILDING_ASSETS.hq.footprint], [-9, 4, BUILDING_ASSETS.workshop.footprint],
   [8, 6, BUILDING_ASSETS.tower.footprint], [6, -8, BUILDING_ASSETS.comms.footprint],

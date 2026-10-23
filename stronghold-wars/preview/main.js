@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
@@ -525,6 +526,7 @@ function updateCelebrations(now) {
 const gltfLoader = new GLTFLoader();
 const modelTemplateCache = new Map();
 const modelLoadPromises = new Map();
+const animatedSquadTemplates = new Map();
 const landScenery = new THREE.Group();
 scene.add(landScenery);
 const sceneryTemplates = new Map();
@@ -864,6 +866,16 @@ function loadBuildingTemplate(path) {
   return promise;
 }
 
+function loadAnimatedSquad(path) {
+  if (!animatedSquadTemplates.has(path)) {
+    animatedSquadTemplates.set(path, gltfLoader.loadAsync(path).catch(error => {
+      animatedSquadTemplates.delete(path);
+      throw error;
+    }));
+  }
+  return animatedSquadTemplates.get(path);
+}
+
 function normalizeBuildingClone(template, key, level) {
   const asset = getBuildingAsset(key, level);
   const source = template.clone(true);
@@ -1023,20 +1035,44 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.squadTier = tier;
   const token = (soldier.userData.loadToken || 0) + 1;
   soldier.userData.loadToken = token;
+  soldier.userData.walkMixer?.stopAllAction();
+  soldier.userData.walkMixer = null;
+  soldier.userData.walkAction = null;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.025;
   soldier.add(shadow);
-  loadBuildingTemplate(path).then(template => {
+  const rigged = role === 'assault';
+  const request = rigged ? loadAnimatedSquad(path) : loadBuildingTemplate(path);
+  request.then(asset => {
     if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
-    const model = template.clone(true);
+    const model = rigged ? cloneSkeleton(asset.scene) : asset.clone(true);
     model.name = 'squad_model';
-    bindSquadEquipment(model, role);
+    if (!rigged) bindSquadEquipment(model, role);
     model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
     soldier.add(model);
+    if (rigged) {
+      const clip = asset.animations.find(animation => animation.name === 'DZN_Warden_Walk') || asset.animations[0];
+      if (!clip) throw new Error(`Animated squad model has no walk clip: ${path}`);
+      const mixer = new THREE.AnimationMixer(model);
+      soldier.userData.walkMixer = mixer;
+      soldier.userData.walkAction = mixer.clipAction(clip);
+      soldier.userData.walkAction.play();
+    }
   }).catch(error => {
-    if (soldier.userData.loadToken === token) console.warn(`DZN squad model could not load: ${path}`, error);
+    if (soldier.userData.loadToken !== token) return;
+    console.warn(`DZN squad model could not load: ${path}`, error);
+    if (!rigged) return;
+    const current = soldier.getObjectByName('squad_model');
+    if (current) soldier.remove(current);
+    loadBuildingTemplate(`assets/models/squads-v5/assault_l0${tier}.glb`).then(template => {
+      if (soldier.userData.loadToken !== token) return;
+      const fallback = template.clone(true);
+      fallback.name = 'squad_model';
+      bindSquadEquipment(fallback, role);
+      soldier.add(fallback);
+    }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
 function makeSoldier(role, levels) {
@@ -1044,8 +1080,14 @@ function makeSoldier(role, levels) {
   equipSoldier(soldier, role, squadTier(role, levels));
   return soldier;
 }
-function animateSoldier(soldier, phase, pace = 1, stop = null) {
+function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (soldier.userData.walkMixer) {
+    if (pace > 0) soldier.userData.walkMixer.update(Math.max(0, dt) * pace);
+    const model = soldier.getObjectByName('squad_model');
+    if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
+    return;
+  }
   const swing = Math.sin(phase) * 0.42 * pace;
   for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
     const limb = soldier.getObjectByName(name);
@@ -2270,7 +2312,7 @@ function updateWarBattle(dt) {
     troop.mesh.position.lerpVectors(troop.start, troop.target, progress);
     troop.mesh.position.y = Math.abs(Math.sin(warBattle.time * 8 + troop.phase)) * 0.08;
     troop.mesh.rotation.y = Math.PI / 2;
-    animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase);
+    animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, 1, null, dt);
   }
   for (const defender of warDefenderMeshes) animateDefender({ ...defender, motion: { stride: warBattle.time * 2, moving: false } });
   warBattle.smokeTimer += dt;
@@ -2340,9 +2382,9 @@ function updateRaid(dt) {
     if (dir.length() > 4) {
       t.position.addScaledVector(dir.normalize(), dt * 5);
       t.rotation.y = Math.atan2(dir.x, dir.z);
-      animateSoldier(t, raid.time * 8 + t.userData.stride);
+      animateSoldier(t, raid.time * 8 + t.userData.stride, 1, null, dt);
     } else {
-      animateSoldier(t, raid.time * 2 + t.userData.stride, 0.22);
+      animateSoldier(t, raid.time * 2 + t.userData.stride, 0.22, null, dt);
       target.userData.hp -= firepower * dt;
       if (Math.random() < dt * 6) {
         spawnSmoke(target.position.clone().add(new THREE.Vector3(0, 1, 0)));
@@ -2554,7 +2596,7 @@ renderer.setAnimationLoop(time => {
     const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     p.mesh.position.set(motion.x, 0, motion.z);
     p.mesh.rotation.y = motion.yaw;
-    animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null);
+    animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null, dt);
   });
   for (const patrol of defenderPatrols.values()) {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
