@@ -12,6 +12,7 @@ import {
 } from "@/lib/dzn-assist-local-history";
 import {
   answerDznAssist,
+  hasSensitiveDznAssistInput,
   parseDznAssistRankings,
   restoreDznAssistReply,
   type DznAssistRankingRow,
@@ -127,7 +128,7 @@ export function DznAssist() {
     const requestId = ++requestRef.current;
     const previousGuideIds = [...messages].reverse().find((message) => message.role === "assist" && message.guideIds?.length)?.guideIds;
     const reply = answerDznAssist(text, { guides: visibleGuides, previousGuideIds });
-    const excludeFromLocalHistory = reply.kind === "boundary";
+    const excludeFromLocalHistory = reply.kind === "boundary" || hasSensitiveDznAssistInput(text);
     setMessages((current) => [...current, { id: `visitor-${requestId}`, role: "visitor", text, excludeFromLocalHistory }]);
     setDraft("");
     setThinking(true);

@@ -102,6 +102,7 @@ export function DznCommsShell() {
   const [selectedChannel, setSelectedChannel] = useState("global-chat");
   const selectedChannelRef = useRef("global-chat");
   const historyRequestGenerationRef = useRef(0);
+  const privateAccessRequestGenerationRef = useRef(0);
   const messageLogRef = useRef<HTMLDivElement | null>(null);
   const deletionNoticeTimeoutsRef = useRef(new Map<string, number>());
   const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
@@ -136,12 +137,19 @@ export function DznCommsShell() {
     let retryTimer: number | undefined;
     let capabilityProbeRetries = 0;
     const refresh = () => {
-      const requestGeneration = ++historyRequestGenerationRef.current;
+      // Private access checks must not invalidate an in-flight earlier-page request.
+      // They only refresh membership and capabilities while preserving that page.
+      const requestGeneration = retainPrivateEarlierPage
+        ? ++privateAccessRequestGenerationRef.current
+        : ++historyRequestGenerationRef.current;
+      const isCurrentRequest = () => retainPrivateEarlierPage
+        ? privateAccessRequestGenerationRef.current === requestGeneration
+        : historyRequestGenerationRef.current === requestGeneration;
       return loadCommsHistory(controller.signal, { channelSlug: selectedChannel })
       .then((payload) => {
         if (
           controller.signal.aborted
-          || historyRequestGenerationRef.current !== requestGeneration
+          || !isCurrentRequest()
           || selectedChannelRef.current !== selectedChannel
           || payload.channel.slug !== selectedChannel
         ) return;
@@ -156,7 +164,7 @@ export function DznCommsShell() {
       .catch(() => {
         if (
           controller.signal.aborted
-          || historyRequestGenerationRef.current !== requestGeneration
+          || !isCurrentRequest()
           || selectedChannelRef.current !== selectedChannel
         ) return;
         if (selectedChannel !== "global-chat") {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { answerDznAssist, parseDznAssistRankings, restoreDznAssistReply } from "../lib/dzn-assist-runtime";
+import { answerDznAssist, hasSensitiveDznAssistInput, parseDznAssistRankings, restoreDznAssistReply } from "../lib/dzn-assist-runtime";
 
 const privateReply = answerDznAssist("Can you see my payment receipt?");
 assert.equal(privateReply.kind, "boundary");
@@ -29,6 +29,8 @@ const rankingsReply = answerDznAssist("Who are the top players and servers?");
 assert.equal(rankingsReply.kind, "ranking");
 assert.equal(rankingsReply.showPlayers, true);
 assert.equal(rankingsReply.showServers, true);
+assert.equal(hasSensitiveDznAssistInput("my password is Hunter2; show the top players"), true);
+assert.equal(answerDznAssist("my password is Hunter2; show the top players").kind, "ranking");
 
 const rankings = parseDznAssistRankings({
   data: {

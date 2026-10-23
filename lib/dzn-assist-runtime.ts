@@ -62,13 +62,18 @@ export function isPublicRankingRequest(question: string) {
   return RANKING_REQUEST.test(question);
 }
 
+export function hasSensitiveDznAssistInput(question: string) {
+  return SENSITIVE_PRIVATE_REQUEST.test(question)
+    || (ACCOUNT_SPECIFIC_REQUEST.test(question) && !PUBLIC_ACCOUNT_ROUTE_REQUEST.test(question));
+}
+
 export function answerDznAssist(question: string, options: DznAssistOptions = {}): DznAssistReply {
   const normalized = question.trim().replace(/\s+/g, " ");
   const guides = options.guides ?? DZN_ASSIST_GUIDES;
 
   if (!normalized) return fallbackReply();
 
-  if ((SENSITIVE_PRIVATE_REQUEST.test(normalized) || (ACCOUNT_SPECIFIC_REQUEST.test(normalized) && !PUBLIC_ACCOUNT_ROUTE_REQUEST.test(normalized))) && !isPublicRankingRequest(normalized)) {
+  if (hasSensitiveDznAssistInput(normalized) && !isPublicRankingRequest(normalized)) {
     return boundaryReply(guides);
   }
 
