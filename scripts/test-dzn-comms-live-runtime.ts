@@ -877,6 +877,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
   for (const body of [
     "your gay",
+    "your gay.",
     "ur a faggot",
     "suck your mum",
     "suck your mums left clit",
@@ -889,7 +890,7 @@ function testAutomaticLanguageFilter() {
     const result = moderateDznCommsBody(body);
     assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
   }
-  for (const body of ["mierda", "scheisse", "scheiße", "vaffanculo", "kurwa"]) {
+  for (const body of ["mierda", "scheisse", "scheiße", "SCHEIẞE", "vaffanculo", "kurwa"]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
   }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");

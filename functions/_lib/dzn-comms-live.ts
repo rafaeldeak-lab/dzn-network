@@ -29,7 +29,7 @@ const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|dan
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dick(?:head)?|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|pussy|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
 const identitySlurPattern = /\b(?:fag(?:got)?|homo|retard(?:ed)?|trann(?:y|ie))\b/i;
 const targetedIdentityAbusePattern = /\b(?:you(?:'|\u2019)?re|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
-const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*$/i;
+const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
 const sexualHarassmentPattern = /\b(?:clit|cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
 // Common profanity and insults that are often pasted into English-language
 // chat in another language. This supplements the script/phrase guards above;
@@ -681,7 +681,7 @@ function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABL
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function booleanFlag(value: unknown) { return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
-function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").replace(/ß/g, "ss").toLowerCase(); }
+function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/ß/g, "ss"); }
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }
