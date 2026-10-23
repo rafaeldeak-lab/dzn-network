@@ -859,6 +859,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("Homo sapiens is our species.").decision, "allow", "A biological reference must not be treated as identity abuse.");
   assert.equal(moderateDznCommsBody("Pussy willow is a plant.").decision, "allow", "A plant name must not be treated as profanity.");
   assert.equal(moderateDznCommsBody("h.o.m.o").decision, "block", "Punctuation must not bypass the identity-abuse filter.");
+  assert.equal(moderateDznCommsBody("Homo sapiens f.u.c.k you").decision, "block", "A benign biological reference must not disable the rest of the safety filter.");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
@@ -895,6 +896,7 @@ function testAutomaticLanguageFilter() {
     "you're a dick",
     "That's a dick move",
     "you're a pussy",
+    "ur a pussy",
     "you're a homo",
     "you're gay",
     "ur a faggot",
