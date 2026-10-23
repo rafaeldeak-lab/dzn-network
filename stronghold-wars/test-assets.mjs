@@ -48,7 +48,7 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
   if (bytes.length !== entry.bytes || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Scenery integrity mismatch: ${name}`);
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid model bounds: ${name}`);
   if (/^(pine_l0[1-5]|granite_boulder|claim_marker)$/.test(name)) {
-    const rosebudVariant = readFileSync(join(root, 'assets/models/scenery', `${name}-2.glb`));
+    const rosebudVariant = readFileSync(join(root, 'assets/models/scenery', `${name}${name.startsWith('pine_') ? '-3' : '-2'}.glb`));
     if (!rosebudVariant.equals(bytes)) throw new Error(`Rosebud scenery variant differs from review asset: ${name}`);
   }
 }

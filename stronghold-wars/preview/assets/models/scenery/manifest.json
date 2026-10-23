@@ -7,52 +7,52 @@
   "assets": {
     "pine_l01": {
       "file": "assets/models/scenery/pine_l01.glb",
-      "sha256": "828cf1ed3d6a71fa210e23f07f41b16baa7c2544da68bf3d436e487d8213cecb",
-      "bytes": 47048,
+      "sha256": "bbd11942da613cce5c168c32954b0ad1fc5ebe8a2e4fe2a7723432d6fd866df8",
+      "bytes": 343488,
       "dimensions": [
-        1.36,
-        3.04,
-        1.36
+        1.679,
+        2.53,
+        1.75
       ]
     },
     "pine_l02": {
       "file": "assets/models/scenery/pine_l02.glb",
-      "sha256": "4cddfa83d3107639d8fab179ee8ba7f549a909d1fcb40f655f3acee8a21a2441",
-      "bytes": 56320,
+      "sha256": "666ba7b7e7e08b26f007b5755d34b9636823a48f220437925d93a33279440a66",
+      "bytes": 486288,
       "dimensions": [
-        1.72,
-        3.774,
-        1.72
+        2,
+        3.05,
+        2.117
       ]
     },
     "pine_l03": {
       "file": "assets/models/scenery/pine_l03.glb",
-      "sha256": "87e43f2c65a8e755d90045dde34e99065c12d34cf7f60f8e2e56a40fd995f591",
-      "bytes": 65584,
+      "sha256": "df52112ed1af39fb135b316632ed33e185dd6cb4c893be9d434cf8a477977b14",
+      "bytes": 651052,
       "dimensions": [
-        2.08,
-        4.506,
-        2.08
+        2.409,
+        3.57,
+        2.451
       ]
     },
     "pine_l04": {
       "file": "assets/models/scenery/pine_l04.glb",
-      "sha256": "daf8cff21410c57e21a3811d31c3930280e13a268a1310add5ef5f6ee07c0de2",
-      "bytes": 74836,
+      "sha256": "a5a6c1b0b7d81782728353e38bba5b9a3047c79b4c1eb4de5032524cf3d9c900",
+      "bytes": 837764,
       "dimensions": [
-        2.44,
-        5.237,
-        2.44
+        2.786,
+        4.09,
+        2.879
       ]
     },
     "pine_l05": {
       "file": "assets/models/scenery/pine_l05.glb",
-      "sha256": "3126e651c670aa5996e22d0bc608d90dff5587a19cf8651243586b17f34946fe",
-      "bytes": 74812,
+      "sha256": "1771e145c5c355ac6c0dd7691481827d3e8d401c1cb2e33a7ba5006eeb6133d3",
+      "bytes": 964072,
       "dimensions": [
-        2.8,
-        5.988,
-        2.8
+        3.17,
+        4.61,
+        3.263
       ]
     },
     "pine_stump": {

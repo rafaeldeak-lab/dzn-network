@@ -509,8 +509,8 @@ let sceneryRequest = 0;
 
 async function sceneryModel(name) {
   if (!sceneryTemplates.has(name)) {
-    const upgradedScenery = /^(pine_l0[1-5]|granite_boulder|claim_marker)$/.test(name);
-    const assetName = upgradedScenery ? `${name}-2` : name;
+    const assetName = /^pine_l0[1-5]$/.test(name) ? `${name}-3`
+      : /^(granite_boulder|claim_marker)$/.test(name) ? `${name}-2` : name;
     sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${assetName}.glb?v=forest-20261023`).then(gltf => gltf.scene));
   }
   return sceneryTemplates.get(name);

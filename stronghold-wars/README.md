@@ -35,7 +35,8 @@ not use.
 ## Land and scenery stage
 
 The review copy has fourteen original, reproducible scenery GLBs under
-`preview/assets/models/scenery/`: five revised pine growth stages, a stump,
+`preview/assets/models/scenery/`: five revised pine growth stages with separate
+3D boughs and needle sprays, a stump,
 log stack, boulder, claim marker, fallen trunk, ferns, mossy rock cluster,
 brush pile and lumber pallet. `tools/generate-scenery.mjs` creates them with
 project-owned geometry, and `manifest.json` records dimensions and SHA-256
@@ -85,9 +86,10 @@ The five Timberline Lumber Yard GLBs now have distinct tier machinery, sawing
 equipment, log handling, roofs and embedded wood/metal textures. The model
 files are larger because the textures are packed into each GLB for Rosebud.
 Rosebud retained the previous asset names when the upgraded files were
-uploaded and assigned the new uploads `-2` suffixes. The preview loads those
-new variants; the review copy includes identical `-2` files so the same paths
-work locally. No paid model generation or credits were used.
+uploaded and assigned numbered suffixes (`-2` for the yards and some props,
+`-3` for the final revised pines). The preview loads those new variants; the
+review copy includes identical aliases so the same paths work locally. No
+paid model generation or credits were used.
 
 ## World routes and First Edition cards
 

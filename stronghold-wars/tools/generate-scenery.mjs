@@ -45,31 +45,47 @@ function box(group, w, h, d, material, x, y, z) {
 function tree(level) {
   const group = new THREE.Group();
   group.name = `pine_l0${level}`;
-  const trunkHeight = 1.1 + level * 0.48;
-  const trunkRadius = 0.13 + level * 0.045;
-  cylinder(group, trunkRadius * .72, trunkRadius, trunkHeight, bark, 0, trunkHeight / 2, 0, 14).name = 'tapered_trunk';
-  cylinder(group, trunkRadius * .86, trunkRadius * 1.4, .12, barkDark, 0, .06, 0, 14);
-  const crownCount = 3 + Math.min(level, 4);
-  const crownBase = .35 + trunkHeight * .35;
-  const crownTop = trunkHeight + 1.08 + level * .25;
-  const leaves = [];
-  for (let i = 0; i < crownCount; i++) {
-    const t = i / crownCount;
-    const radius = (.5 + level * .18) * (1 - t * .66);
-    const y = crownBase + i * (crownTop - crownBase) / crownCount;
-    const h = (crownTop - crownBase) / crownCount * 1.8;
-    const core = new THREE.ConeGeometry(radius, h, 12);
-    core.translate(0, y + h * .2, 0);
-    leaves.push(core);
-    for (let branch = 0; branch < 3; branch++) {
-      const a = branch * Math.PI * 2 / 3 + i * .65;
-      const tuft = new THREE.SphereGeometry(1, 8, 6);
-      tuft.scale(radius * .45, h * .25, radius * .36);
-      tuft.translate(Math.sin(a) * radius * .56, y - h * .02, Math.cos(a) * radius * .56);
-      leaves.push(tuft);
+  const trunkHeight = 1.35 + level * .52;
+  const trunkRadius = .105 + level * .033;
+  cylinder(group, trunkRadius * .51, trunkRadius, trunkHeight, bark, 0, trunkHeight / 2, 0, 16).name = 'tapered_trunk';
+  cylinder(group, trunkRadius * .88, trunkRadius * 1.58, .15, barkDark, 0, .075, 0, 16).name = 'root_flare';
+  const rings = 5 + level * 2;
+  const crownBase = .42 + level * .12;
+  const crownTop = trunkHeight + .31;
+  const clusters = foliage.map(() => []);
+  const twigs = [];
+  for (let ring = 0; ring < rings; ring++) {
+    const t = ring / Math.max(1, rings - 1);
+    const y = crownBase + (crownTop - crownBase) * t;
+    const spread = (.58 + level * .19) * Math.pow(1 - t, .82) + .09;
+    const count = 7 + Math.min(level, 4) + ring % 2;
+    for (let branch = 0; branch < count; branch++) {
+      const a = branch * Math.PI * 2 / count + ring * 1.83;
+      const jitter = Math.sin((ring + 1) * 13.7 + branch * 8.33) * .065;
+      const length = spread * (.79 + jitter);
+      const direction = new THREE.Vector3(Math.sin(a), -.18 + t * .49, Math.cos(a)).normalize();
+      const origin = new THREE.Vector3(Math.sin(a) * trunkRadius * .53, y, Math.cos(a) * trunkRadius * .53);
+      const twig = new THREE.CylinderGeometry(.006, .027 + .009 * (1 - t), length * .83, 6);
+      twig.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction));
+      twig.translate(...origin.clone().addScaledVector(direction, length * .42).toArray());
+      twigs.push(twig);
+      for (let spray = 0; spray < 3; spray++) {
+        const fan = a + (spray - 1) * .27;
+        const out = new THREE.Vector3(Math.sin(fan), direction.y + (spray === 1 ? .02 : .11), Math.cos(fan)).normalize();
+        const fanLength = length * (.55 + spray * .11);
+        const needles = new THREE.ConeGeometry((.10 + level * .012) * (1 - t * .42), fanLength, 9, 1);
+        needles.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), out));
+        needles.translate(...origin.clone().addScaledVector(direction, length * (.32 + spray * .16)).addScaledVector(out, fanLength * .18).toArray());
+        clusters[(ring + branch + spray) % clusters.length].push(needles);
+      }
     }
   }
-  mesh(group, mergeGeometries(leaves, false), foliage[level - 1]).name = 'layered_branch_crown';
+  mesh(group, mergeGeometries(twigs, false), barkDark).name = 'radial_wood_branches';
+  for (let index = 0; index < clusters.length; index++) {
+    mesh(group, mergeGeometries(clusters[index], false), foliage[index]).name = `needle_sprays_${index + 1}`;
+  }
+  const tip = cylinder(group, .012, .055, .46, barkDark, 0, crownTop + .12, 0, 7);
+  tip.name = 'leader_tip';
   return group;
 }
 function stump() {
