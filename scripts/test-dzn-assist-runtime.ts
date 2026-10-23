@@ -15,6 +15,10 @@ assert.equal(setupReply.workflows[0]?.steps.length, 3);
 
 assert.equal(answerDznAssist("How do I create my account?").kind, "guidance");
 assert.equal(answerDznAssist("Where can I view payment plans?").kind, "guidance");
+assert.equal(hasSensitiveDznAssistInput("How do I create my account?"), false);
+assert.equal(hasSensitiveDznAssistInput("How do I log into my account?"), false);
+assert.equal(hasSensitiveDznAssistInput("Compare plans; show my payment"), true);
+assert.equal(answerDznAssist("Compare plans; show my payment").kind, "boundary");
 
 const combinedReply = answerDznAssist("How do I add my DayZ server and see player stats?");
 assert.equal(combinedReply.kind, "guidance");

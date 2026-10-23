@@ -68,19 +68,27 @@ export function DznAssist() {
   const interactionLocked = busy || !localHistoryReady;
 
   useEffect(() => {
-    let restored = [] as ReturnType<typeof parseDznAssistLocalHistory>;
-    try {
-      const saved = window.localStorage.getItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
-      if (saved) restored = restoreSavedAssistMessages(parseDznAssistLocalHistory(JSON.parse(saved)), visibleGuides);
-    } catch {
-      // A blocked or malformed browser store must not prevent public support guidance.
-    }
-    if (restored.length > 0) {
-      setMessages((current) => current.length === 1 && current[0]?.id === initialMessage.id
-        ? [initialMessage, ...restored]
-        : current);
-    }
-    setLocalHistoryReady(true);
+    let cancelled = false;
+    const restoreTimer = window.setTimeout(() => {
+      let restored = [] as ReturnType<typeof parseDznAssistLocalHistory>;
+      try {
+        const saved = window.localStorage.getItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
+        if (saved) restored = restoreSavedAssistMessages(parseDznAssistLocalHistory(JSON.parse(saved)), visibleGuides);
+      } catch {
+        // A blocked or malformed browser store must not prevent public support guidance.
+      }
+      if (cancelled) return;
+      if (restored.length > 0) {
+        setMessages((current) => current.length === 1 && current[0]?.id === initialMessage.id
+          ? [initialMessage, ...restored]
+          : current);
+      }
+      setLocalHistoryReady(true);
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(restoreTimer);
+    };
   }, [visibleGuides]);
 
   useEffect(() => {

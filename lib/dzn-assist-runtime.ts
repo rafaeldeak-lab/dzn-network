@@ -46,7 +46,7 @@ type DznAssistOptions = {
 
 const SENSITIVE_PRIVATE_REQUEST = /\b(card number|cvv|cvc|password|passcode|token|secret|credential|api key|bank|account number|private message|dm|server file)\b/i;
 const ACCOUNT_SPECIFIC_REQUEST = /\b(my account|my payment|my bill|my invoice|my receipt|my subscription|my discord|reported me|reporter|appeal|ban)\b/i;
-const PUBLIC_ACCOUNT_ROUTE_REQUEST = /\b(sign in|log in(?:to)?|login|create (?:(?:an|my) )?account|join dzn)\b|\b(?:view|show|see|compare|learn about)\b[\s\S]{0,24}\b(?:plans?|pricing|subscriptions?)\b/i;
+const PUBLIC_ACCOUNT_ROUTE_ONLY_REQUEST = /^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?(?:sign in|log in(?:to)?|login)(?:\s+(?:to\s+)?(?:my\s+)?account)?\??$|^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?create\s+(?:(?:an|my)\s+)?account\??$|^join\s+dzn\??$/i;
 const RANKING_TERMS = "(?:top|leaderboard|rankings?|ranked|best)";
 const PLAYER_RANKING_TERMS = "(?:players?|survivors?|kills?)";
 const SERVER_RANKING_TERMS = "(?:servers?|communities)";
@@ -64,7 +64,7 @@ export function isPublicRankingRequest(question: string) {
 
 export function hasSensitiveDznAssistInput(question: string) {
   return SENSITIVE_PRIVATE_REQUEST.test(question)
-    || (ACCOUNT_SPECIFIC_REQUEST.test(question) && !PUBLIC_ACCOUNT_ROUTE_REQUEST.test(question));
+    || (ACCOUNT_SPECIFIC_REQUEST.test(question) && !PUBLIC_ACCOUNT_ROUTE_ONLY_REQUEST.test(question.trim()));
 }
 
 export function answerDznAssist(question: string, options: DznAssistOptions = {}): DznAssistReply {
