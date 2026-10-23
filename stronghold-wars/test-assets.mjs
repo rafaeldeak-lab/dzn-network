@@ -152,7 +152,7 @@ for (const card of FIRST_EDITION_CARDS) {
 }
 if (!cardEarned('fixer', { landPlots: [{ id: 'timberline-depot', facilityLevel: 2 }] }) || cardEarned('guardian', { defenders: { guardian: { level: 1, post: '' } } }) || !cardEarned('ghost', { levels: { comms: 3 } })) throw new Error('Card milestones must follow base progress.');
 console.log('World route/search preview and three First Edition card assets verified.');
-const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v3/manifest.json'), 'utf8'));
+const squadManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v5/manifest.json'), 'utf8'));
 const squadNames = Object.keys(squadManifest.assets);
 if (squadNames.length !== 25 || Object.keys(SQUAD_ROLES).some(role => [1, 2, 3, 4, 5].some(level => !squadNames.includes(`${role}_l0${level}`)))) throw new Error('DZN squad kit must contain five roles at five levels each.');
 if (squadTier('assault', { hq: 3, tower: 5 }) !== 3 || squadTier('recon', { hq: 5, comms: 2 }) !== 2 || squadTier('engineer', { hq: 4, workshop: 3 }) !== 3) throw new Error('Squad gear must follow the specialist and Hall visual cap.');

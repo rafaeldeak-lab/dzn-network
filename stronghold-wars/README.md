@@ -47,7 +47,7 @@ the attack cap is reached early. This is local preview scoring only.
 `tools/generate-walls.mjs` produces five original tiered wall GLBs under
 `preview/assets/models/walls/`. The updated facility generator produces five
 `timberline_v3` models with more detailed saw and log machinery; the updated
-squad generator produces 25 `squads-v3` models with rounder bodies and role
+squad generator produces 25 `squads-v5` models with curved armour and role
 equipment. These are procedural interpretations of the supplied concepts, not
 fully scanned or rigged character meshes. Patrols now commute between specific
 buildings and camp, pause at stops, and path around occupied grid cells and
@@ -199,9 +199,9 @@ owner-supplied artwork remains in the Armoury; Canvas 2D uses flat portraits
 as a compatibility fallback. The new procedural models are game-scale
 interpretations of the single-view concept sheets, not exact textured 3D
 reconstructions. The earlier models remain under
-`preview/assets/models/squads/` and `preview/assets/models/squads-v2/` for
-comparison and are no longer selected in WebGL. `tools/generate-squads.mjs`
-creates the current `squads-v3` kit.
+`preview/assets/models/squads/`, `preview/assets/models/squads-v2/`, and
+`preview/assets/models/squads-v3/` for comparison and are no longer selected
+in WebGL. `tools/generate-squads.mjs` creates the current `squads-v5` kit.
 
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
 unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs

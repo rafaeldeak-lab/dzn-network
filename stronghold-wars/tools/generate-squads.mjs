@@ -13,7 +13,7 @@ if (!globalThis.FileReader) {
   };
 }
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads-v3');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../preview/assets/models/squads-v5');
 await mkdir(root, { recursive: true });
 const exporter = new GLTFExporter();
 const mat = (color, metalness = 0, emissive = 0) => new THREE.MeshStandardMaterial({
@@ -39,6 +39,28 @@ function tapered(g, top, bottom, h, m, name, x = 0, y = 0, z = 0) { return cyl(g
 function orb(g, radius, m, name, x = 0, y = 0, z = 0) {
   return mesh(g, new THREE.SphereGeometry(radius, 16, 12), m, name, x, y, z);
 }
+function ellipsoid(g, rx, ry, rz, m, name, x = 0, y = 0, z = 0) {
+  const item = orb(g, 1, m, name, x, y, z);
+  item.scale.set(rx, ry, rz);
+  return item;
+}
+function armourShell(g, width, height, depth, m, name, x = 0, y = 0, z = 0) {
+  const w = width / 2, h = height / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-w * .68, h);
+  shape.quadraticCurveTo(-w, h * .95, -w, h * .56);
+  shape.lineTo(-w * .9, -h * .62);
+  shape.quadraticCurveTo(-w * .76, -h, -w * .36, -h);
+  shape.lineTo(w * .36, -h);
+  shape.quadraticCurveTo(w * .76, -h, w * .9, -h * .62);
+  shape.lineTo(w, h * .56);
+  shape.quadraticCurveTo(w, h * .95, w * .68, h);
+  shape.closePath();
+  return mesh(g, new THREE.ExtrudeGeometry(shape, {
+    depth, steps: 1, bevelEnabled: true, bevelThickness: .018,
+    bevelSize: .018, bevelSegments: 4, curveSegments: 8,
+  }), m, name, x, y, z);
+}
 function beam(g, from, to, radius, m, name) {
   const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to), delta = b.clone().sub(a);
   const item = cyl(g, radius, radius, delta.length(), m, name, ...a.clone().add(b).multiplyScalar(0.5).toArray(), 6);
@@ -54,10 +76,10 @@ export function soldier(role, tier) {
   tapered(g, .24, .18, .62, cloth, 'body', 0, 1.08, 0);
   tapered(g, .21, .23, .19, M.shadow, 'waist_flex', 0, .83, 0);
   box(g, 0.5, 0.12, 0.3, M.shadow, 'belt', 0, 0.78, 0);
-  box(g, 0.5, 0.4, 0.12, M.carbon, 'segmented_vest', 0, 1.15, 0.16);
+  armourShell(g, .49, .51, .08, M.carbon, 'contoured_vest', 0, 1.16, .105);
   for (const side of [-1, 1]) {
     tapered(g, .04, .055, .42, M.steel, 'vest_side_rail', side * .25, 1.14, .03);
-    box(g, .15, .08, .12, M.armour, 'clavicle_plate', side * .17, 1.41, .12);
+    ellipsoid(g, .09, .06, .075, M.armour, 'clavicle_plate', side * .17, 1.4, .115);
   }
   box(g, 0.35, 0.095, 0.035, glow, 'dzn_chest_flash', 0, 1.2, 0.253);
   orb(g, 0.21 + tier * 0.004, M.carbon, 'rounded_helmet', 0, 1.66, 0);
@@ -73,20 +95,20 @@ export function soldier(role, tier) {
     const arm = new THREE.Group(); arm.name = side < 0 ? 'left_arm' : 'right_arm'; arm.position.set(side * 0.32, 1.34, 0); g.add(arm);
     tapered(arm, .117, .083, .47, cloth, 'sleeve', 0, -0.23, 0);
     orb(arm, 0.135, M.armour, 'shoulder_joint', 0, -0.04, 0);
-    box(arm, 0.2, 0.12, 0.22, M.shadow, 'glove', 0, -0.51, 0);
-    box(arm, 0.22, 0.18, 0.22, M.carbon, 'forearm_plate', 0, -0.34, 0.025);
+    ellipsoid(arm, .11, .075, .12, M.shadow, 'glove', 0, -.51, .015);
+    ellipsoid(arm, .125, .14, .11, M.carbon, 'curved_forearm_guard', 0, -.34, .025);
     tapered(arm, .046, .045, .34, M.steel, 'forearm_seam', side * .105, -.29, .015);
     const leg = new THREE.Group(); leg.name = side < 0 ? 'left_leg' : 'right_leg'; leg.position.set(side * 0.13, 0.77, 0); g.add(leg);
     tapered(leg, .14, .1, .56, cloth, 'trouser', 0, -0.29, 0);
-    box(leg, 0.24, 0.21, 0.33, M.shadow, 'boot', 0, -0.65, 0.05);
-    box(leg, 0.25, 0.2, 0.3, M.carbon, 'shaped_knee_guard', 0, -0.43, 0.06);
-    box(leg, 0.23, 0.16, 0.28, tier >= 4 ? M.purple : M.armour, 'shin_plate', 0, -0.56, 0.035);
+    ellipsoid(leg, .14, .115, .205, M.shadow, 'rounded_boot', 0, -.65, .065);
+    ellipsoid(leg, .145, .12, .145, M.carbon, 'shaped_knee_guard', 0, -.43, .065);
+    ellipsoid(leg, .12, .115, .13, tier >= 4 ? M.purple : M.armour, 'shin_plate', 0, -.56, .035);
     tapered(leg, .055, .045, .32, M.steel, 'shin_frame', side * .12, -.48, -.04);
-    if (tier >= 2) box(arm, 0.23, 0.18, 0.24, M.armour, 'shoulder_plate', 0, -0.08, 0);
-    if (tier >= 3) box(leg, 0.23, 0.22, 0.28, M.armour, 'knee_plate', 0, -0.49, 0.035);
+    if (tier >= 2) ellipsoid(arm, .155, .115, .15, M.armour, 'shoulder_plate', 0, -.08, 0);
+    if (tier >= 3) ellipsoid(leg, .145, .135, .15, M.armour, 'knee_plate', 0, -.49, .035);
     if (tier >= 4) box(arm, 0.22, 0.16, 0.25, glow, 'rank_stripe', 0, -0.23, 0);
   }
-  box(g, 0.36 + tier * 0.035, 0.45 + tier * 0.035, 0.23, M.pouch, 'field_pack', 0, 1.11, -0.26);
+  ellipsoid(g, .18 + tier * .017, .225 + tier * .017, .14, M.pouch, 'shaped_field_pack', 0, 1.11, -.255);
   for (const side of [-1, 1]) tapered(g, .045, .055, .46, M.shadow, 'vest_tether', side * .205, 1.14, .2);
   for (const side of [-1, 1]) {
     box(g, 0.08, 0.52, 0.075, M.steel, 'pack_harness', side * 0.23, 1.15, 0.05);
@@ -96,7 +118,7 @@ export function soldier(role, tier) {
 
   if (role === 'assault') {
     // DZN Warden: progressively armoured direct-push unit, with a stylised carbine and shield.
-    box(g, 0.22, 0.31 + tier * 0.025, 0.08, M.armour, 'front_plate', 0, 1.06, 0.23);
+    armourShell(g, .3, .31 + tier * .025, .045, M.armour, 'front_plate', 0, 1.06, .2);
     beam(g, [0.38, 1.0, 0.22], [0.38, 1.0, 0.78], 0.045, M.steel, 'carbine_barrel');
     box(g, 0.13, 0.14, 0.31, M.shadow, 'carbine_body', 0.38, 0.98, 0.34);
     box(g, 0.08, 0.08, 0.12, glow, 'carbine_sight', 0.38, 1.1, 0.37);
@@ -105,7 +127,7 @@ export function soldier(role, tier) {
     if (tier === 5) box(g, 0.36, 0.07, 0.09, M.visor, 'shield_light', -0.44, 1.15, 0.25);
   } else if (role === 'recon') {
     // DZN Ghost: hood, sensor visor, map satchel, tiered signal mast.
-    box(g, 0.49, 0.22, 0.36, cloth, 'hood', 0, 1.75, -0.05);
+    ellipsoid(g, .265, .155, .22, cloth, 'hood', 0, 1.75, -.055);
     box(g, 0.35, 0.08, 0.06, M.purple, 'optic_band', 0, 1.62, 0.2);
     box(g, 0.33, 0.3, 0.16, M.pouch, 'map_satchel', -0.33, 0.98, -0.11);
     beam(g, [0.19, 1.22, -0.31], [0.19, 1.78 + tier * 0.13, -0.31], 0.018, M.steel, 'signal_mast');
@@ -116,14 +138,14 @@ export function soldier(role, tier) {
   } else if (role === 'sentinel') {
     // Black tactical silhouette and green optics from the supplied progression reference.
     // Geometry and colourway are original, with heavier plates and purple rank details.
-    box(g, 0.37, 0.23, 0.11, M.obsidian, 'full_face_mask', 0, 1.54, 0.17);
+    ellipsoid(g, .195, .14, .095, M.obsidian, 'full_face_mask', 0, 1.54, .17);
     box(g, 0.34, 0.07, 0.035, M.lime, 'night_optics', 0, 1.64, 0.24);
-    box(g, 0.55 + tier * 0.025, 0.39 + tier * 0.015, 0.14, M.carbon, 'tactical_chest_plate', 0, 1.12, 0.23);
+    armourShell(g, .54 + tier * .025, .38 + tier * .015, .07, M.carbon, 'contoured_tactical_plate', 0, 1.12, .19);
     box(g, 0.27, 0.055, 0.025, tier >= 4 ? M.purple : M.lime, 'chest_insignia', 0, 1.2, 0.31);
     for (const side of [-1, 1]) {
       const arm = g.getObjectByName(side < 0 ? 'left_arm' : 'right_arm');
-      if (tier >= 2) box(arm, 0.29 + tier * 0.015, 0.23, 0.29, M.carbon, 'broad_shoulder_guard', 0, -0.09, 0.025);
-      if (tier >= 3) box(arm, 0.23, 0.19, 0.26, M.obsidian, 'forearm_guard', 0, -0.36, 0.025);
+      if (tier >= 2) ellipsoid(arm, .175 + tier * .008, .14, .175, M.carbon, 'broad_shoulder_guard', 0, -.09, .025);
+      if (tier >= 3) ellipsoid(arm, .145, .13, .15, M.obsidian, 'forearm_guard', 0, -.36, .025);
       if (tier >= 4) box(arm, 0.27, 0.065, 0.29, M.purple, 'purple_rank_trim', 0, -0.08, 0.04);
     }
     box(g, 0.17, 0.19, 0.42 + tier * 0.04, M.obsidian, 'heavy_carbine', 0.38, 1.01, 0.34);
@@ -136,13 +158,13 @@ export function soldier(role, tier) {
     }
   } else if (role === 'medic') {
     // Field healer with a visible medical pack, injector and progressively tougher protection.
-    box(g, 0.44, 0.48, 0.24, M.medical, 'medical_pack', 0, 1.13, -0.34);
+    ellipsoid(g, .225, .255, .155, M.medical, 'medical_pack', 0, 1.13, -.34);
     box(g, 0.09, 0.33, 0.025, M.lime, 'aid_cross_vertical', 0, 1.15, -0.475);
     box(g, 0.28, 0.09, 0.025, M.lime, 'aid_cross_horizontal', 0, 1.15, -0.48);
-    box(g, 0.33, 0.11, 0.17, M.medical, 'protective_hood', 0, 1.76, 0.01);
+    ellipsoid(g, .2, .085, .135, M.medical, 'protective_hood', 0, 1.76, .01);
     box(g, 0.12, 0.31, 0.12, M.steel, 'aid_injector', 0.38, 1.0, 0.3);
     box(g, 0.09, 0.07, 0.07, M.lime, 'injector_charge', 0.38, 1.19, 0.3);
-    if (tier >= 2) box(g, 0.48, 0.28, 0.1, M.medical, 'reinforced_vest', 0, 1.12, 0.22);
+    if (tier >= 2) armourShell(g, .48, .28, .06, M.medical, 'reinforced_vest', 0, 1.12, .19);
     if (tier >= 3) box(g, 0.19, 0.22, 0.11, M.medical, 'triage_satchel', -0.31, 0.93, -0.1);
     if (tier >= 4) box(g, 0.39, 0.08, 0.07, M.purple, 'field_medical_rank', 0, 1.31, 0.28);
     if (tier === 5) {
@@ -187,7 +209,7 @@ for (const role of Object.keys(manifest.roles)) for (let tier = 1; tier <= 5; ti
   const size = bounds.getSize(new THREE.Vector3());
   await writeFile(path.join(root, `${name}.glb`), bytes);
   manifest.assets[name] = {
-    file: `assets/models/squads-v3/${name}.glb`,
+    file: `assets/models/squads-v5/${name}.glb`,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
     dimensions: size.toArray().map(value => Number(value.toFixed(3))),
