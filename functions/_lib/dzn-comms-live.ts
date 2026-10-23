@@ -141,7 +141,7 @@ export function moderateDznCommsBody(value: unknown) {
   if (severeAbusePattern.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
-  const translatedBody = localEnglishTranslations.get(compact.trim().replace(/\s+/g, " "));
+  const translatedBody = localEnglishTranslations.get(compact.trim().replace(/\s+/g, " ").replace(/[.!?]+$/g, ""));
   if (translatedBody) {
     return { decision: "allow" as const, code: "MESSAGE_TRANSLATED", body: translatedBody };
   }

@@ -870,6 +870,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("hola amigos word").decision, "block", "A foreign-language post must not bypass the filter by appending an English keyword.");
   assert.deepEqual(moderateDznCommsBody("hola amigos"), { decision: "allow", code: "MESSAGE_TRANSLATED", body: "Hello, friends." }, "A supported phrase must be converted to English before it is retained.");
   assert.deepEqual(moderateDznCommsBody("Bonjour tout le monde!"), { decision: "allow", code: "MESSAGE_TRANSLATED", body: "Hello, everyone." }, "Punctuation must not prevent a supported phrase from being converted.");
+  assert.deepEqual(moderateDznCommsBody("hola."), { decision: "allow", code: "MESSAGE_TRANSLATED", body: "Hello." }, "Terminal punctuation must not prevent a supported phrase from being converted.");
   assert.equal(moderateDznCommsBody("h.o.m.o").decision, "block", "Punctuation must not bypass the identity-abuse filter.");
   assert.equal(moderateDznCommsBody("Homo sapiens f.u.c.k you").decision, "block", "A benign biological reference must not disable the rest of the safety filter.");
   const filtered = moderateDznCommsBody("This is bullshit");
