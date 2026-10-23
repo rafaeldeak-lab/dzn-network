@@ -23,21 +23,60 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // detector. They cover common attempts to post a non-English message written
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
 const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao)\b/i;
+const likelyNonEnglishPhrasePattern = /\b(?:no\s+hablo\s+ingles|me\s+llamo|quiero\s+(?:jugar|un\s+servidor)|necesito\s+ayuda|bonjour\s+je\s+ne\s+parle\s+pas|je\s+suis|salut\s+(?:tout\s+le\s+monde|les\s+amis)|ich\s+bin|ich\s+mochte|ola\s+preciso\s+de\s+ajuda|quero\s+jogar|nao\s+entendo|non\s+capisco|voglio\s+giocare|ho\s+bisogno\s+di\s+aiuto|nie\s+rozumiem|potrzebuje\s+pomocy)\b/i;
 const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
 const foreignPhraseExplanationPattern = /^(?:(?:i|we|they|he|she)\s+(?:explain(?:ed|s|ing)?|said|wrote)\b.*\b(?:means?|translates?)\b|use\s+.+\s+when\s+(?:asking|saying|writing)\b)/i;
+// Exact, safe everyday phrases are translated locally. Unknown foreign text
+// remains blocked instead of being sent to an external translation service.
+const localEnglishTranslations = new Map<string, string>([
+  ["hola", "Hello."],
+  ["hola amigos", "Hello, friends."],
+  ["hola a todos", "Hello, everyone."],
+  ["buenos dias", "Good morning."],
+  ["buenas tardes", "Good afternoon."],
+  ["buenas noches", "Good evening."],
+  ["como estas", "How are you?"],
+  ["como esta", "How are you?"],
+  ["por favor", "Please."],
+  ["gracias", "Thank you."],
+  ["merci", "Thank you."],
+  ["merci beaucoup", "Thank you very much."],
+  ["bonjour", "Hello."],
+  ["bonjour tout le monde", "Hello, everyone."],
+  ["bonsoir", "Good evening."],
+  ["ciao", "Hello."],
+  ["ciao come stai", "Hello, how are you?"],
+  ["come stai", "How are you?"],
+  ["per favore", "Please."],
+  ["hallo", "Hello."],
+  ["hallo zusammen", "Hello, everyone."],
+  ["wie geht es dir", "How are you?"],
+  ["danke", "Thank you."],
+  ["ola", "Hello."],
+  ["ola pessoal", "Hello, everyone."],
+  ["obrigado", "Thank you."],
+  ["obrigada", "Thank you."],
+  ["privet", "Hello."],
+  ["privet drug", "Hello, friend."],
+  ["spasibo", "Thank you."],
+  ["ni hao", "Hello."],
+  ["namaste", "Hello."],
+  ["czesc", "Hello."],
+  ["dziekuje", "Thank you."],
+]);
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
-const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
+const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bloody|bollocks|bullshit|bugger|crap|cunt|damn|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|piss(?:ed|ing|off)?|prick|shit(?:ty|head)?|slut|sod(?:\s+off)?|tosser|twat|wanker|whore)\b/i;
 const targetedProfanityPattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
-const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|trann(?:y|ie))\b/i;
+const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|spastic|trann(?:y|ie))\b/i;
 const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
 const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
-const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
+const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:g(?:ay|[4@]y)?|ay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
 const sexualHarassmentPattern = /\b(?:clit|(?:nice|big|small|show|touch|your|ur|my)\s+cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
 // Common profanity and insults that are often pasted into English-language
 // chat in another language. This supplements the script/phrase guards above;
 // it is not represented as a complete global language catalogue.
-const multilingualAbusePattern = /\b(?:arschloch|cabron|caralho|cazzo|chinga(?:do)?|connard|encule|filho\s+da\s+puta|joder|kurwa|merde|mierda|pendejo|pierdol|puta|putain|scheisse|schei(?:ss|ß)e|stronzo|vaffanculo|verga)\b/i;
+const multilingualAbusePattern = /\b(?:arschloch|blyat|cabron|caralho|cazzo|chinga(?:do)?|connard|encule|filho\s+da\s+puta|hijo\s+(?:de\s+)?puta|joder|kurwa|kurva|maricon|merde|mierda|pendejo|pierdol|pizda|puta|putain|puto|scheisse|schei(?:ss|ß)e|stronzo|suka|vaffanculo|verga)\b/i;
 const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i;
 // A separate expression catches blocked roots when their letters are
 // deliberately separated. It never collapses arbitrary words, so ordinary
@@ -102,8 +141,12 @@ export function moderateDznCommsBody(value: unknown) {
   if (severeAbusePattern.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
+  const translatedBody = localEnglishTranslations.get(compact.trim().replace(/\s+/g, " "));
+  if (translatedBody) {
+    return { decision: "allow" as const, code: "MESSAGE_TRANSLATED", body: translatedBody };
+  }
   const explainsForeignPhrase = foreignPhraseExplanationPattern.test(body);
-  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || (nonEnglishPhrasePattern.test(compact) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
+  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || ((nonEnglishPhrasePattern.test(compact) || likelyNonEnglishPhrasePattern.test(compact)) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
     return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
   }
   if (
@@ -685,7 +728,7 @@ function receiptResponse(row: { decision: string; response_status: number; reaso
 }
 function rejectedCommsMessage(decision: string, reason: string | null) {
   if (decision === "timeout") return "This account has a short chat timeout for a safety review.";
-  if (reason === "ENGLISH_ONLY") return "DZN Comms is English-only. Please write your message in English.";
+  if (reason === "ENGLISH_ONLY") return "DZN Comms only posts English. This message could not be translated automatically, so please send it in English.";
   return "That message was blocked by DZN Safety.";
 }
 function unavailable() { return error(404, "DZN_COMMS_LIVE_DISABLED", "Live DZN Comms is not enabled in this environment."); }

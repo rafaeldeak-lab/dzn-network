@@ -186,13 +186,19 @@ async function testSendRuntime() {
     assert.equal((await payload(blocked)).code, "LANGUAGE_FILTERED");
     assert.equal(f.count("dzn_comms_messages"), 2, "Rejected text must not create a visible chat row.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%clit%'").get()?.count, 0, "Rejected text must never be retained in the message table.");
-    const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos" };
+    const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos please help me" };
     const englishOnly = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
     assert.equal(englishOnly.status, 422);
-    assert.deepEqual(await payload(englishOnly), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English." });
+    assert.deepEqual(await payload(englishOnly), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms only posts English. This message could not be translated automatically, so please send it in English." });
     const englishOnlyReplay = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
     assert.equal(englishOnlyReplay.status, 422);
-    assert.deepEqual(await payload(englishOnlyReplay), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English.", message_id: null, replayed: true });
+    assert.deepEqual(await payload(englishOnlyReplay), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms only posts English. This message could not be translated automatically, so please send it in English.", message_id: null, replayed: true });
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const translated = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-local-translation", body: "hola amigos",
+    }), f.env);
+    assert.equal(translated.status, 201, "A supported foreign phrase should be converted before it is stored.");
+    assert.equal(f.sqlite.prepare("SELECT body FROM dzn_comms_messages WHERE id = ?").get((await payload(translated)).message_id)?.body, "Hello, friends.");
   } finally { f.close(); }
 
   const replayQuota = await fixture();
@@ -862,6 +868,8 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("Use por favor when asking politely.").decision, "allow", "An English usage explanation must remain allowed.");
   assert.equal(moderateDznCommsBody("She explained that Привет means hello.").decision, "allow", "An English explanation of a native-script phrase must remain allowed.");
   assert.equal(moderateDznCommsBody("hola amigos word").decision, "block", "A foreign-language post must not bypass the filter by appending an English keyword.");
+  assert.deepEqual(moderateDznCommsBody("hola amigos"), { decision: "allow", code: "MESSAGE_TRANSLATED", body: "Hello, friends." }, "A supported phrase must be converted to English before it is retained.");
+  assert.deepEqual(moderateDznCommsBody("Bonjour tout le monde!"), { decision: "allow", code: "MESSAGE_TRANSLATED", body: "Hello, everyone." }, "Punctuation must not prevent a supported phrase from being converted.");
   assert.equal(moderateDznCommsBody("h.o.m.o").decision, "block", "Punctuation must not bypass the identity-abuse filter.");
   assert.equal(moderateDznCommsBody("Homo sapiens f.u.c.k you").decision, "block", "A benign biological reference must not disable the rest of the safety filter.");
   const filtered = moderateDznCommsBody("This is bullshit");
@@ -897,6 +905,8 @@ function testAutomaticLanguageFilter() {
   for (const body of [
     "your gay",
     "your gay.",
+    "your ay",
+    "ur g@y",
     "you're a dick",
     "you are a dick",
     "ur a dick",
@@ -917,11 +927,11 @@ function testAutomaticLanguageFilter() {
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
   }
-  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet drug", "Привет", "hola", "bonsoir", "danke", "namaste"]) {
+  for (const body of ["hola amigos please help", "bonjour je ne parle pas anglais", "ciao come stai oggi", "Hallo wie geht es dir heute", "privet drug pomogi", "Привет", "no hablo ingles", "je suis nouveau", "ich bin neu", "ola preciso de ajuda"]) {
     const result = moderateDznCommsBody(body);
     assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
   }
-  for (const body of ["mierda", "scheisse", "scheiße", "SCHEIẞE", "vaffanculo", "kurwa"]) {
+  for (const body of ["mierda", "scheisse", "scheiße", "SCHEIẞE", "vaffanculo", "kurwa", "blyat", "hijo de puta", "puto"]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
   }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
