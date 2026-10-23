@@ -6,7 +6,7 @@ export const DEFENDER_CONCEPTS = Object.freeze({
   trapper: { name: 'DZN Trapper', role: 'Perimeter snares', detail: 'Engineer carrying three deployable snare modules.', hall: 2, support: 'workshop', supportLevel: 2, ability: 'Snare field · -1 attack point per tier' },
   hound: { name: 'DZN Hound', role: 'Robotic patrol', detail: 'Four-legged tracker built for perimeter response.', hall: 3, support: 'workshop', supportLevel: 3, ability: 'Home tracking · reduces away-squad exposure bonus' },
 });
-export const DEFENDER_POSTS = Object.freeze({ gate: 'South gate', hall: 'Command Hall', tower: 'Watchtower', comms: 'Communications', workshop: 'Workshop / Forge' });
+export const DEFENDER_POSTS = Object.freeze({ gate: 'South gate', hall: 'Command Hall', tower: 'Arc Battery', comms: 'Communications', workshop: 'Workshop / Forge' });
 export const DEFENDER_COSTS = Object.freeze([0, 180, 350, 600, 900, 1300]);
 export function defenderBattleEffect(defenders, tactic) {
   const tier = role => {

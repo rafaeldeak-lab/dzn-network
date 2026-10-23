@@ -23,14 +23,14 @@ export const BUILDING_ASSETS = Object.freeze({
     ]),
   }),
   tower: Object.freeze({
-    family: 'watchtower',
+    family: 'arc-battery',
     footprint: 4.8,
     levels: Object.freeze([
-      { glb: 'assets/models/watchtower_l01.glb', png: 'assets/watchtower_l01.png', yawDegrees: 0 },
-      { glb: 'assets/models/watchtower_l02.glb', png: 'assets/watchtower_l02.png', yawDegrees: 0 },
-      { glb: 'assets/models/watchtower_l03.glb', png: 'assets/watchtower_l03.png', yawDegrees: 180 },
-      { glb: 'assets/models/watchtower_l04.glb', png: 'assets/watchtower_l04.png', yawDegrees: 0 },
-      { glb: 'assets/models/watchtower_l05.glb', png: 'assets/watchtower_l05.png', yawDegrees: 90 },
+      { glb: 'assets/models/defense-towers/one-complete-static-textured-3d-game-asset-dzn-arc-battery-defence-tower-level-1.glb', png: 'assets/watchtower_l01.png', yawDegrees: 0 },
+      { glb: 'assets/models/defense-towers/dzn-arc-battery-defence-tower-level-2-one-complete-static-textured-3d-game-asset.glb', png: 'assets/watchtower_l02.png', yawDegrees: 0 },
+      { glb: 'assets/models/defense-towers/dzn-arc-battery-defence-tower-level-3-a-single-complete-textured-3d-game-asset-e.glb', png: 'assets/watchtower_l03.png', yawDegrees: 0 },
+      { glb: 'assets/models/defense-towers/dzn-arc-battery-defence-tower-level-4-one-complete-high-detail-textured-3d-game.glb', png: 'assets/watchtower_l04.png', yawDegrees: 0 },
+      { glb: 'assets/models/defense-towers/dzn-arc-battery-level-5-elite-defence-tower-single-finished-realistic-textured-3.glb', png: 'assets/watchtower_l05.png', yawDegrees: 0 },
     ]),
   }),
   comms: Object.freeze({

@@ -22,6 +22,11 @@ c843e7a547fb56571be634b1b4f14bebb41eb0efdc6aaa2c52e79405205073f5 assets/hq_l01.p
 4a22de7660c8c2e64293f86ddec43c27eb8e8e11bb7185568e76f2fa17fcd83b assets/models/comms_l03.glb
 0566b7e44976ee31f3d784e301b3816356aac7bccdc5e7b8e9b1e62a79a42199 assets/models/comms_l04.glb
 76f2f15dd4dd1c52784fdac0806ea67224b00d5a0493de4bcfa46fc1617621f0 assets/models/comms_l05.glb
+c726a8304d781511d56ce4cf5adacae89b816add53cb6bedcd327425d177ec3b assets/models/defense-towers/dzn-arc-battery-defence-tower-level-2-one-complete-static-textured-3d-game-asset.glb
+fdc4a7c23f67feab3e7cbbde83ea6f3bfe9e46a337cfe444a4acfc8abb0e2cdc assets/models/defense-towers/dzn-arc-battery-defence-tower-level-3-a-single-complete-textured-3d-game-asset-e.glb
+90b7bcd6b5fd532dec4ffb7390940d616cad783a7a5fb5e00c4ca19a7a7d577a assets/models/defense-towers/dzn-arc-battery-defence-tower-level-4-one-complete-high-detail-textured-3d-game.glb
+e073c89027cad6f523a8fcf8786df861b2d8094c6fe347c73a581fc097c6d3b4 assets/models/defense-towers/dzn-arc-battery-level-5-elite-defence-tower-single-finished-realistic-textured-3.glb
+bdc305e91bc89089e69c789185245c1557cb8d5f7b6ed3ee4cf6370e35694e2b assets/models/defense-towers/one-complete-static-textured-3d-game-asset-dzn-arc-battery-defence-tower-level-1.glb
 f695dbc03b2b5cb05ef1bb47c536231c0fad702ee12f9847ddc17cea94c9ef00 assets/models/forge_l01.glb
 e21f3d7b5db75c0d51539803cd068b2fcb2c27e7b4b9eccf1fec92401ac2191d assets/models/forge_l02.glb
 db9b926ead2d224e8d7faf107e248fc9a168f5db2b7a7fa98b807f7c42ace50a assets/models/forge_l03.glb

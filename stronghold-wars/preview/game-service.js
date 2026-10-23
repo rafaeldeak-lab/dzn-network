@@ -29,7 +29,7 @@ export const WAR_RULES = Object.freeze({
 export const WAR_STAGE_DEFS = Object.freeze([
   Object.freeze({ id: 'forge-convoy', name: 'Forge Convoy', building: 'Workshop / Forge', key: 'workshop', parts: 30, timber: 10, objective: 'Dispatch repair kits and Timber to the front.' }),
   Object.freeze({ id: 'relay-capture', name: 'Relay Capture', building: 'Communications', key: 'comms', parts: 40, timber: 0, objective: 'Secure the DZN signal link before the rival side.' }),
-  Object.freeze({ id: 'tower-stand', name: 'Tower Stand', building: 'Watchtower', key: 'tower', parts: 25, timber: 15, objective: 'Hold the perimeter through the final timed phase.' }),
+  Object.freeze({ id: 'tower-stand', name: 'Tower Stand', building: 'Arc Battery', key: 'tower', parts: 25, timber: 15, objective: 'Hold the perimeter through the final timed phase.' }),
 ]);
 
 export const GAME_CONFIG = Object.freeze({
@@ -82,7 +82,7 @@ export const GAME_CONFIG = Object.freeze({
       benefits: Object.freeze(['2 Parts/sec; personal Forge access', '4 Parts/sec', '6 Parts/sec', '8 Parts/sec', '10 Parts/sec']),
     }),
     tower: Object.freeze({
-      name: 'Watchtower', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
+      name: 'Arc Battery', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
       stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ firepowerPercent: level * 25 }))),
       benefits: Object.freeze([25, 50, 75, 100, 125].map(value => `Training squad firepower +${value}%`)),
     }),
@@ -959,7 +959,7 @@ export class LocalGameService {
     const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure)));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
     const returnAt = now + WAR_RULES.squadReturnMs;
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, score, casualties, feedback };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
