@@ -12,6 +12,7 @@ import { connectedProMatches, routeBriefing } from './world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
+import { operativeAsset } from './operative-assets.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -25,12 +26,14 @@ const DEFS = {
 let activePatrolNodes = PATROL_NODES;
 const patrols = [];
 const defenderPatrols = new Map();
+let operativePatrol = null;
 function syncLayoutPositions() {
   const layout = service.community()?.saved.base.layout;
   if (!layout) return;
   activePatrolNodes = patrolNodesForLayout(layout);
   for (const patrol of patrols || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
   for (const patrol of defenderPatrols?.values?.() || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
+  if (operativePatrol?.motion) { operativePatrol.motion.waypointNode = null; operativePatrol.motion.waypoints = null; }
   for (const key of Object.keys(DEFS)) {
     const point = layout.structures[key];
     if (!point) continue;
@@ -1166,6 +1169,58 @@ for (let i = 0; i < 5; i++) {
   patrols.push({ mesh: soldier, role, motion });
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
+// One chosen commander is physically present at the bivouac while at home.
+// Its existing role route leads to a useful building and back, with the same
+// wall/building avoidance as the ordinary patrols.
+const operativeMesh = new THREE.Group();
+scene.add(operativeMesh);
+operativePatrol = { mesh: operativeMesh, id: null, motion: null, loadToken: 0, mixer: null, action: null, actionName: null, away: false };
+function syncOperativePatrol() {
+  const identityId = service.state.currentIdentityId;
+  const id = operations.selected(identityId);
+  const role = OPERATIVES[id]?.role;
+  const access = service.getAccess().allowed;
+  const away = operations.current(identityId)?.status === 'active';
+  const visible = Boolean(!fallback2D && access && role && !away);
+  operativeMesh.visible = visible;
+  if (!visible) { operativePatrol.away = away; return; }
+  if (operativePatrol.id === id && !operativePatrol.away) return;
+  operativePatrol.away = false;
+  operativePatrol.id = id;
+  operativePatrol.loadToken++;
+  operativePatrol.mixer?.stopAllAction();
+  operativePatrol.mixer = null;
+  operativePatrol.action = null;
+  operativePatrol.actionName = null;
+  operativeMesh.clear();
+  const motion = createPatrolMotion(role, role === 'engineer' ? 2 : 0);
+  motion.wait = 3;
+  operativePatrol.motion = motion;
+  operativeMesh.position.set(motion.x, 0, motion.z);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.48, .57, 32),
+    new THREE.MeshBasicMaterial({ color: OPERATIVES[id].colour, transparent: true, opacity: .76, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = .045;
+  ring.name = 'commander_ground_marker';
+  operativeMesh.add(ring);
+  const token = operativePatrol.loadToken;
+  const path = operativeAsset(id);
+  loadAnimatedSquad(path).then(asset => {
+    if (token !== operativePatrol.loadToken || operativePatrol.id !== id) return;
+    const model = cloneSkeleton(asset.scene);
+    model.name = 'operative_model';
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    operativeMesh.add(model);
+    const walk = asset.animations.find(clip => clip.name === 'DZN_Operative_Walk');
+    const idle = asset.animations.find(clip => clip.name === 'DZN_Operative_Idle');
+    if (!walk || !idle) throw new Error(`DZN operative is missing walk or idle animation: ${path}`);
+    operativePatrol.mixer = new THREE.AnimationMixer(model);
+    operativePatrol.actions = { walk: operativePatrol.mixer.clipAction(walk), idle: operativePatrol.mixer.clipAction(idle) };
+    operativePatrol.action = operativePatrol.actions.idle;
+    operativePatrol.actionName = 'idle';
+    operativePatrol.action.play();
+  }).catch(error => console.warn(`DZN operative 3D model could not load: ${path}`, error));
+}
 function syncDefenderPatrols() {
   const assigned = service.community()?.saved.base.defenders || {};
   for (const role of Object.keys(DEFENDER_CONCEPTS)) {
@@ -1365,6 +1420,7 @@ function updateHud() {
     if (unlocked) deployed++;
   });
   for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
+  syncOperativePatrol();
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -2145,7 +2201,7 @@ function showOperationsBoard(message = '') {
     missionHTML = `<div class="war-card ready"><h3>Outpost Ember · ${escapeHTML(OPERATIVES[attempt.operativeId].name)}</h3><p>Attempt ${escapeHTML(attempt.id)} · ${active ? `window closes in <b id="opsCountdown">${formatRemaining(attempt.deadlineAt)}</b>` : escapeHTML(attempt.status)}</p>${track}<div class="operation-statline"><b>Health ${attempt.health}/100</b><b>Shield ${attempt.shield}</b><b>Incapacitated ${attempt.casualties}</b><b>Recovered ${attempt.recovered}</b><b>Recovery charges ${attempt.recoveriesLeft}</b><b>Cargo ${attempt.cargo} Parts</b></div>${actions}<div class="operation-log"><strong>Field record</strong>${attempt.events.slice().reverse().map(event => `<p>${escapeHTML(event.text)}</p>`).join('')}</div></div>`;
   }
   const pings = board.pings.slice().reverse().map(ping => `<div class="operation-ping"><strong>${escapeHTML(PING_TYPES[ping.type])} · ${escapeHTML(ping.target)}</strong><span>${escapeHTML(ping.author)} · expires in ${formatRemaining(ping.expiresAt)} · ${ping.acknowledgedBy.length} acknowledged · suggestion</span>${!ping.acknowledgedBy.includes(identityId) ? `<button data-ack-ping="${escapeHTML(ping.id)}">Acknowledge</button>` : ''}</div>`).join('');
-  openPanel(`<h2>DZN Operations Board</h2><p>One operative commands the ordinary army. Tactical choices, recovery and Field Upgrades belong to one local PvE attempt. Shared construction and local wars keep their existing rules. <span class="sim">[LOCAL PREVIEW]</span></p>${message ? `<p class="notice" role="status">${escapeHTML(message)}</p>` : ''}<div class="operations-layout"><div><h3>Operative Bay</h3><div class="operative-roster">${roster}</div>${missionHTML}</div><aside class="operations-side"><h3>Community signals</h3><p class="help">Suggestions are visible only to this eligible preview community. They expire after 15 minutes; acknowledgement is not owner approval.</p><label class="field-label" for="opsPingType">Signal</label><select id="opsPingType">${Object.entries(PING_TYPES).map(([id, name]) => `<option value="${id}">${escapeHTML(name)}</option>`).join('')}</select><label class="field-label" for="opsPingTarget">Target or objective</label><input id="opsPingTarget" maxlength="70" placeholder="e.g. west shutter"><div class="row"><button id="opsPostPing">Place signal</button></div>${pings || '<p class="help">No active signals.</p>'}<h3>Personal showcase</h3><p>${profile.completed} extracted mission${profile.completed === 1 ? '' : 's'} · ${mastery}</p>${badges}<p class="help">These are local PvE achievements with attempt evidence. Calling cards are cosmetic and never grant combat power.</p></aside></div><div class="row"><button id="closeBtn">Return to base</button></div>`);
+  openPanel(`<h2>DZN Operations Board</h2><p>One operative commands the ordinary army. The selected commander is a textured, animated 3D character at the bivouac while home and leaves the base during an expedition. Shared construction and local wars keep their existing rules. <span class="sim">[LOCAL PREVIEW]</span></p>${message ? `<p class="notice" role="status">${escapeHTML(message)}</p>` : ''}<div class="operations-layout"><div><h3>Operative Bay</h3><div class="operative-roster">${roster}</div>${missionHTML}</div><aside class="operations-side"><h3>Community signals</h3><p class="help">Suggestions are visible only to this eligible preview community. They expire after 15 minutes; acknowledgement is not owner approval.</p><label class="field-label" for="opsPingType">Signal</label><select id="opsPingType">${Object.entries(PING_TYPES).map(([id, name]) => `<option value="${id}">${escapeHTML(name)}</option>`).join('')}</select><label class="field-label" for="opsPingTarget">Target or objective</label><input id="opsPingTarget" maxlength="70" placeholder="e.g. west shutter"><div class="row"><button id="opsPostPing">Place signal</button></div>${pings || '<p class="help">No active signals.</p>'}<h3>Personal showcase</h3><p>${profile.completed} extracted mission${profile.completed === 1 ? '' : 's'} · ${mastery}</p>${badges}<p class="help">These are local PvE achievements with attempt evidence. Calling cards are cosmetic and never grant combat power.</p></aside></div><div class="row"><button id="closeBtn">Return to base</button></div>`);
   $('closeBtn').onclick = closePanel;
   panel.querySelectorAll('[data-select-operative]').forEach(button => button.onclick = () => { const result = operations.selectOperative(identityId, button.dataset.selectOperative); showOperationsBoard(result.ok ? `${OPERATIVES[result.operativeId].name} assigned to your command slot.` : result.error); });
   const troopFields = [...panel.querySelectorAll('[data-ops-troop]')];
@@ -2732,6 +2788,20 @@ renderer.setAnimationLoop(time => {
     patrol.mesh.position.set(motion.x, 0, motion.z);
     patrol.mesh.rotation.y = motion.yaw;
     animateDefender(patrol);
+  }
+  if (operativeMesh.visible && operativePatrol.motion) {
+    const motion = stepPatrolMotion(operativePatrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
+    operativeMesh.position.set(motion.x, 0, motion.z);
+    operativeMesh.rotation.y = motion.yaw;
+    const name = motion.moving ? 'walk' : 'idle';
+    if (operativePatrol.mixer && operativePatrol.actionName !== name) {
+      const next = operativePatrol.actions[name];
+      next.reset().fadeIn(.18).play();
+      operativePatrol.action?.fadeOut(.18);
+      operativePatrol.action = next;
+      operativePatrol.actionName = name;
+    }
+    operativePatrol.mixer?.update(dt);
   }
   Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {

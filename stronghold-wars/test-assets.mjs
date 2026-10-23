@@ -9,6 +9,7 @@ import { defaultLayout } from './preview/layout-grid.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
+import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
@@ -218,6 +219,22 @@ if (carbineBytes.toString('ascii', 0, 4) !== 'glTF' || carbineBytes.readUInt32LE
 const carbineGltf = JSON.parse(carbineBytes.toString('utf8', 20, 20 + carbineBytes.readUInt32LE(12)));
 if (!carbineGltf.meshes?.length || !carbineGltf.images?.length) throw new Error('Warden carbine lacks a 3D mesh or texture.');
 console.log('Five distinct, textured and skinned Rosebud Warden levels and a textured 3D carbine verified.');
+const operativeManifest = JSON.parse(readFileSync(join(root, 'assets/models/operatives/manifest.json'), 'utf8'));
+const operativeHashes = new Set();
+if (Object.keys(operativeManifest.assets).length !== 3 || operativeAsset('unknown') !== null) throw new Error('Expected exactly three named DZN commander models.');
+for (const [id, entry] of Object.entries(operativeManifest.assets)) {
+  if (OPERATIVE_MODELS[id] !== entry.file) throw new Error(`Operative mapping mismatch: ${id}`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length || bytes.length !== entry.bytes || hash !== entry.sha256 || operativeHashes.has(hash)) throw new Error(`Operative mesh integrity or distinction failed: ${id}`);
+  operativeHashes.add(hash);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  const walk = gltf.animations?.find(clip => clip.name === 'DZN_Operative_Walk');
+  const idle = gltf.animations?.find(clip => clip.name === 'DZN_Operative_Idle');
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 15 || !gltf.images?.length || !gltf.materials?.length || !walk?.channels?.length || !idle?.channels?.length) throw new Error(`Operative ${id} lacks textured, skinned walk/idle geometry.`);
+}
+console.log('Three distinct Rosebud DZN commanders verified with embedded textures and skinned walk/idle clips.');
 const occupied = [
   [0, 0, BUILDING_ASSETS.hq.footprint], [-9, 4, BUILDING_ASSETS.workshop.footprint],
   [8, 6, BUILDING_ASSETS.tower.footprint], [6, -8, BUILDING_ASSETS.comms.footprint],

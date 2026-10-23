@@ -230,6 +230,23 @@ hands. A matching shield and combat-ready carry animation still need a 3D
 gear pass. The other four classes and base defenders
 still use their earlier procedural 3D interpretations.
 
+The Operations Board now has three Rosebud-generated, textured 3D commanders:
+Rivet, Signal and Remedy. Their original GLBs are retained in
+`source-assets/operatives/`; the game-ready GLBs are in
+`preview/assets/models/operatives/`. `tools/rig-rosebud-operative.py` binds each
+mesh to a 17-bone rig and exports walk and idle clips. At home, the selected
+commander follows its role route between the bivouac and a useful building,
+using the existing obstacle-aware patrol grid. It leaves the visible base for
+an active expedition and returns when the attempt ends. The three characters
+are local-preview operatives; their 3D appearance does not grant membership or
+change combat statistics. `test-assets.mjs` verifies the meshes, textures,
+rigs, clips and hashes. Blender frame proofs are in `proof/`, and
+`review/operative-rosebud-board.png` and `review/operative-rosebud-live.png`
+show the published Rosebud Operations Board and base. These are a first 3D
+asset pass, with simpler outfit and motion detail
+than the owner's full concept sheets. The ordinary squad roles still use their
+existing levelled models.
+
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
 unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs
 in `preview/assets/models/defenders/` cover their five appearance levels.
