@@ -117,9 +117,11 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel, draft, pendingAttempt\.requestId\)/, "The composer target must match the channel represented by the visible validated payload.");
   assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "A stale mutation refresh must not replace a newer channel selection.");
   assert.match(shell, /const historyRequestGenerationRef = useRef\(0\)/, "History reads must share a monotonic request generation.");
+  assert.match(shell, /const privateAccessRequestGenerationRef = useRef\(0\)/, "Private capability checks need an independent generation while an earlier page is loading.");
   assert.ok((shell.match(/const requestGeneration = \+\+historyRequestGenerationRef\.current/g) ?? []).length >= 3, "Polling, send refreshes and reaction refreshes must all advance the shared request generation.");
   assert.ok((shell.match(/historyRequestGenerationRef\.current === requestGeneration/g) ?? []).length >= 3, "All successful history refresh paths must reject older same-channel responses.");
-  assert.match(shell, /historyRequestGenerationRef\.current !== requestGeneration[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
+  assert.match(shell, /const isCurrentRequest = \(\) => retainPrivateEarlierPage[\s\S]*privateAccessRequestGenerationRef\.current === requestGeneration[\s\S]*historyRequestGenerationRef\.current === requestGeneration/, "Private capability checks must not cancel pagination while retaining a stale-response guard.");
+  assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
