@@ -255,7 +255,7 @@ export function DznAssist() {
               <input aria-label="Ask DZN Assist a question" value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={busy} placeholder="Ask about DZN, a server, player stats, or public standings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
               <button type="submit" disabled={!draft.trim() || busy} className="grid h-10 w-10 shrink-0 place-items-center border border-violet-300/30 bg-violet-300/12 text-violet-100 transition enabled:hover:border-violet-200 enabled:hover:bg-violet-300/20 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send question to DZN Assist"><Send className="h-4 w-4" aria-hidden="true" /></button>
             </div>
-            <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">This conversation is saved only in this browser. DZN Assist uses verified public guidance and only requests the public leaderboard when you ask for it.</p>
+            <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">Questions stay in this browser. This conversation is saved only on this device, and DZN Assist uses verified public guidance and only requests the public leaderboard when you ask for it.</p>
           </form>
         </div>
 
