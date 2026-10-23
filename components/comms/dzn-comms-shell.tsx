@@ -317,6 +317,7 @@ export function DznCommsShell() {
         setDraft("");
         setComposerMessage(`Message sent to ${payload.channel.name}.`);
       }
+      if (selectedChannelRef.current !== targetChannel) return;
       setLoadingEarlierMessages(false);
       setHistoryPageMode("latest");
       const requestGeneration = ++historyRequestGenerationRef.current;
@@ -360,6 +361,7 @@ export function DznCommsShell() {
     } catch (error) {
       throw error;
     }
+    if (selectedChannelRef.current !== targetChannel) return;
     setLoadingEarlierMessages(false);
     setHistoryPageMode("latest");
     const requestGeneration = ++historyRequestGenerationRef.current;
