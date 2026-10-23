@@ -24,11 +24,11 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
 const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao)\b/i;
 const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
-const foreignPhraseExplanationPattern = /\b(?:explained|means?|meaning|word|phrase|called|named|translat(?:e|ed|ing|ion)|language|asking)\b/i;
+const foreignPhraseExplanationPattern = /^(?:(?:i|we|they|he|she)\s+(?:explain(?:ed|s|ing)?|said|wrote)\b.*\b(?:means?|translates?)\b|use\s+.+\s+when\s+(?:asking|saying|writing)\b)/i;
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
-const targetedProfanityPattern = /\b(?:(?:you(?:\s+)?re|you\s+are)\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
+const targetedProfanityPattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
 const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|trann(?:y|ie))\b/i;
 const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
 const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
@@ -102,7 +102,8 @@ export function moderateDznCommsBody(value: unknown) {
   if (severeAbusePattern.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
-  if (nonLatinScriptPattern.test(body) || (nonEnglishPhrasePattern.test(compact) && !foreignPhraseExplanationPattern.test(compact)) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
+  const explainsForeignPhrase = foreignPhraseExplanationPattern.test(body);
+  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || (nonEnglishPhrasePattern.test(compact) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
     return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
   }
   if (

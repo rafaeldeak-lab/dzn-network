@@ -860,6 +860,8 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("Pussy willow is a plant.").decision, "allow", "A plant name must not be treated as profanity.");
   assert.equal(moderateDznCommsBody("She explained that como estas means how are you.").decision, "allow", "An English explanation of a foreign phrase must remain allowed.");
   assert.equal(moderateDznCommsBody("Use por favor when asking politely.").decision, "allow", "An English usage explanation must remain allowed.");
+  assert.equal(moderateDznCommsBody("She explained that Привет means hello.").decision, "allow", "An English explanation of a native-script phrase must remain allowed.");
+  assert.equal(moderateDznCommsBody("hola amigos word").decision, "block", "A foreign-language post must not bypass the filter by appending an English keyword.");
   assert.equal(moderateDznCommsBody("h.o.m.o").decision, "block", "Punctuation must not bypass the identity-abuse filter.");
   assert.equal(moderateDznCommsBody("Homo sapiens f.u.c.k you").decision, "block", "A benign biological reference must not disable the rest of the safety filter.");
   const filtered = moderateDznCommsBody("This is bullshit");
@@ -897,6 +899,8 @@ function testAutomaticLanguageFilter() {
     "your gay.",
     "you're a dick",
     "you are a dick",
+    "ur a dick",
+    "u r a dick",
     "That's a dick move",
     "you're a pussy",
     "you are a pussy",
