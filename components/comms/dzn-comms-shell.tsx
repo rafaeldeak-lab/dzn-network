@@ -141,7 +141,7 @@ export function DznCommsShell() {
         setHistory({
           status: "ready",
           payload,
-          message: payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
+          message: payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. English only. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
         });
       })
       .catch(() => {
@@ -499,7 +499,7 @@ export function DznCommsShell() {
               <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/8 p-3">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>
                 <p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">
-                  Do not post invites, secrets, threats or personal information. Report abuse instead of replying to it.
+                  English only. Do not post abuse, invites, secrets, threats or personal information. Report abuse instead of replying to it.
                 </p>
               </div>
             </aside>
@@ -592,7 +592,7 @@ export function DznCommsShell() {
                   <SafetyCard icon={MessageCircle} label="Global Chat" value="Player conversation stays in its own moderated channel." />
                 </> : <>
                   <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
-                  <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
+                  <SafetyCard icon={AlertTriangle} label="Moderation" value="English-only filters, reports and owner actions" />
                   <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
                 </>}
               </div>

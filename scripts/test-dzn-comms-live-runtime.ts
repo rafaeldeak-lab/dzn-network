@@ -178,6 +178,14 @@ async function testSendRuntime() {
     const receiptKeys = f.sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts ORDER BY created_at, id").all();
     assert.equal(receiptKeys.length, 2);
     assert.notEqual(receiptKeys[0]?.actor_receipt_key, receiptKeys[1]?.actor_receipt_key, "Separate requests from one account must not share a correlatable receipt key.");
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const blocked = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-language-filter", body: "suck your mums left clit",
+    }), f.env);
+    assert.equal(blocked.status, 422, "Abusive language must be rejected by the send route.");
+    assert.equal((await payload(blocked)).code, "LANGUAGE_FILTERED");
+    assert.equal(f.count("dzn_comms_messages"), 2, "Rejected text must not create a visible chat row.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%clit%'").get()?.count, 0, "Rejected text must never be retained in the message table.");
   } finally { f.close(); }
 
   const replayQuota = await fixture();
@@ -836,6 +844,7 @@ function testPrivateLedgerMigrationRejectsActiveQuotas() {
 
 function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
+  assert.equal(moderateDznCommsBody("Gay pride event details are available in the DZN Updates feed.").decision, "allow", "Identity terms must not be treated as abuse without a hostile context.");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
@@ -863,6 +872,23 @@ function testAutomaticLanguageFilter() {
   }
   assert.equal(moderateDznCommsBody("s h 1 t happens").decision, "block", "Spaced leetspeak must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
+  for (const body of [
+    "your gay",
+    "ur a faggot",
+    "suck your mum",
+    "suck your mums left clit",
+    "what an asshole",
+    "f.u.c.k off",
+  ]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
+  }
+  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet", "Привет"] ) {
+    const result = moderateDznCommsBody(body);
+    assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
+  }
+  for (const body of ["mierda", "scheisse", "vaffanculo", "kurwa"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
+  }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
 }
