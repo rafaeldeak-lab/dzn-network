@@ -22,12 +22,14 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // These are high-confidence whole phrases, not a pretend general language
 // detector. They cover common attempts to post a non-English message written
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
-const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola(?:\s+(?:amigos|a\s+todos|chicos))?|gracias(?:\s+muchas)?|bonjour|bonsoir|merci(?:\s+beaucoup)?|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao|grazie|come\s+stai|per\s+favore|hallo|danke|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|ola|obrigad[oa]|como\s+voce\s+esta|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet\s+(?:drug|druzya)|spasibo|ni\s+hao|namaste)\b/i;
+const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola(?:\s+(?:amigos|a\s+todos|chicos))?|gracias(?:\s+muchas)?|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|bonsoir|merci(?:\s+beaucoup)?|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|grazie|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|danke|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|ola|obrigad[oa]|como\s+voce\s+esta|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet\s+(?:drug|druzya)|spasibo|ni\s+hao)\b/i;
+const nonEnglishGreetingOnlyPattern = /^(?:bonjour|ciao|hallo|namaste)\s*[.!?]*$/i;
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dick(?:head)?|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|pussy|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
 const identitySlurPattern = /\b(?:fag(?:got)?|homo|retard(?:ed)?|trann(?:y|ie))\b/i;
-const targetedIdentityAbusePattern = /\b(?:you(?:'|\u2019)?re|your|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
+const targetedIdentityAbusePattern = /\b(?:you(?:'|\u2019)?re|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
+const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*$/i;
 const sexualHarassmentPattern = /\b(?:clit|cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
 // Common profanity and insults that are often pasted into English-language
 // chat in another language. This supplements the script/phrase guards above;
@@ -97,13 +99,14 @@ export function moderateDznCommsBody(value: unknown) {
   if (severeAbusePattern.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
-  if (nonLatinScriptPattern.test(body) || nonEnglishPhrasePattern.test(compact)) {
+  if (nonLatinScriptPattern.test(body) || nonEnglishPhrasePattern.test(compact) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
     return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
   }
   if (
     profanityPattern.test(compact)
     || identitySlurPattern.test(compact)
     || targetedIdentityAbusePattern.test(compact)
+    || possessiveIdentityInsultPattern.test(compact)
     || sexualHarassmentPattern.test(compact)
     || multilingualAbusePattern.test(compact)
     || obfuscatedProfanityPattern.test(folded)

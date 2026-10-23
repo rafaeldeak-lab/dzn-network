@@ -845,6 +845,7 @@ function testPrivateLedgerMigrationRejectsActiveQuotas() {
 function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
   assert.equal(moderateDznCommsBody("Gay pride event details are available in the DZN Updates feed.").decision, "allow", "Identity terms must not be treated as abuse without a hostile context.");
+  assert.equal(moderateDznCommsBody("Your gay teammate is welcome.").decision, "allow", "Possessive identity references must not be treated as abuse without hostile context.");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
@@ -882,7 +883,7 @@ function testAutomaticLanguageFilter() {
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
   }
-  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet drug", "Привет"] ) {
+  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet drug", "Привет", "namaste"]) {
     const result = moderateDznCommsBody(body);
     assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
   }
@@ -892,6 +893,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
   assert.equal(moderateDznCommsBody("Take cover behind the privet hedge.").decision, "allow", "Ambiguous English words must not trigger the English-only filter.");
   assert.equal(moderateDznCommsBody("The report is filed with comment CA.").decision, "allow", "Ambiguous English abbreviations must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("She signed off with ciao.").decision, "allow", "Borrowed greeting words inside English sentences must not trigger the English-only filter.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
   assert.deepEqual(
     moderateDznCommsBody("kill yourself Привет"),
