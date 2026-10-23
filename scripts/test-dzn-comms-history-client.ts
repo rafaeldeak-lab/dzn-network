@@ -119,6 +119,19 @@ test("persists only bounded DZN Assist transcript text and reconstructable reply
     { role: "visitor", text: "password is private", excludeFromLocalHistory: true },
     { role: "assist", text: "Use private support.", replyKind: "boundary", excludeFromLocalHistory: true },
   ]), null);
+  const retainedHistory = serializeDznAssistLocalHistory([
+    { role: "visitor", text: "Earlier safe question" },
+    { role: "assist", text: "Earlier safe answer", replyKind: "guidance" },
+    ...Array.from({ length: 40 }, (_, index) => ({
+      role: "visitor" as const,
+      text: `Sensitive question ${index + 1}`,
+      excludeFromLocalHistory: true,
+    })),
+  ]);
+  assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(retainedHistory ?? "{}")), [
+    { id: "dzn-assist-history-1", role: "visitor", text: "Earlier safe question" },
+    { id: "dzn-assist-history-2", role: "assist", text: "Earlier safe answer", replyKind: "guidance" },
+  ]);
   assert.equal(serializeDznAssistLocalHistory([]), null);
 });
 

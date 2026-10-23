@@ -35,8 +35,8 @@ export function parseDznAssistLocalHistory(value: unknown): DznAssistLocalHistor
 
 export function serializeDznAssistLocalHistory(messages: readonly DznAssistLocalHistoryInput[]): string | null {
   const saved = messages
-    .slice(-MAX_HISTORY_MESSAGES)
     .filter((message) => !message.excludeFromLocalHistory && (message.role !== "assist" || message.replyKind !== undefined))
+    .slice(-MAX_HISTORY_MESSAGES)
     .map((message) => parseMessage(message))
     .filter((message): message is Omit<DznAssistLocalHistoryMessage, "id"> => message !== null);
   if (saved.length === 0) return null;
