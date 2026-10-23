@@ -44,7 +44,7 @@ type DznAssistOptions = {
   previousGuideIds?: readonly string[];
 };
 
-const SENSITIVE_PRIVATE_REQUEST = /\b(?:card number|cvv|cvc|password|passcode|token|secret|credential|api key|private key|bank|account number|private message|dm|server file|session cookie|authorization\s*:\s*(?:bearer|basic))\b|\bcookie\s*:/i;
+const SENSITIVE_PRIVATE_REQUEST = /\b(?:card number|cvv|cvc|password|passcode|token|secret|credential|api key|private key|bank|account number|private message|dm|server file|session cookie)\b|\bauthorization\s*:|\bcookie\s*:/i;
 const SENSITIVE_CREDENTIAL_ASSIGNMENT = /\b(?:[a-z0-9]+[-_])*(?:token|secret|password|passcode|credential|api[-_\s]?key|private[-_\s]?key|cookie)(?:[-_][a-z0-9]+)*\s*(?::|=)/i;
 const ACCOUNT_SPECIFIC_REQUEST = /\b(my account|my payment|my bill|my invoice|my receipt|my subscription|my discord|reported me|reporter|appeal|ban)\b/i;
 const PUBLIC_ACCOUNT_ROUTE_ONLY_REQUEST = /^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?(?:sign in|log in(?:to)?|login)(?:\s+(?:to\s+)?(?:my\s+)?account)?\??$|^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?create\s+(?:(?:an|my)\s+)?account\??$|^join\s+dzn\??$/i;
