@@ -19,7 +19,7 @@ assert.equal(hasSensitiveDznAssistInput("How do I create my account?"), false);
 assert.equal(hasSensitiveDznAssistInput("How do I log into my account?"), false);
 assert.equal(hasSensitiveDznAssistInput("Compare plans; show my payment"), true);
 assert.equal(answerDznAssist("Compare plans; show my payment").kind, "boundary");
-for (const prompt of ["my private key is abc", "here is my session cookie xyz", "Authorization: Bearer abc.def.ghi", "Authorization: Basic dXNlcjpwYXNz", "Cookie: sessionid=abc123", "X-API-Key: abc123", "Api-Key: abc123"]) {
+for (const prompt of ["my private key is abc", "here is my session cookie xyz", "Authorization: Bearer abc.def.ghi", "Authorization: Basic dXNlcjpwYXNz", "Cookie: sessionid=abc123", "X-API-Key: abc123", "Api-Key: abc123", "API_KEY=abc123", "X-API-Key=abc123"]) {
   assert.equal(hasSensitiveDznAssistInput(prompt), true, `Sensitive credentials must not be retained: ${prompt}`);
   assert.equal(answerDznAssist(prompt).kind, "boundary");
 }

@@ -43,6 +43,21 @@ export function serializeDznAssistLocalHistory(messages: readonly DznAssistLocal
   return JSON.stringify({ version: HISTORY_VERSION, messages: saved });
 }
 
+export function selectCompletedDznAssistLocalHistoryTurns(messages: readonly DznAssistLocalHistoryInput[]): DznAssistLocalHistoryInput[] {
+  const completed: DznAssistLocalHistoryInput[] = [];
+  let pendingVisitor: DznAssistLocalHistoryInput | null = null;
+  for (const message of messages) {
+    if (message.role === "visitor") {
+      pendingVisitor = message;
+      continue;
+    }
+    if (!pendingVisitor || message.replyKind === undefined) continue;
+    completed.push(pendingVisitor, message);
+    pendingVisitor = null;
+  }
+  return completed;
+}
+
 function parseMessage(value: unknown): Omit<DznAssistLocalHistoryMessage, "id"> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const message = value as Record<string, unknown>;

@@ -8,6 +8,7 @@ import { DZN_ASSIST_GUIDES, type DznAssistGuide, type DznAssistLink } from "@/li
 import {
   DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY,
   parseDznAssistLocalHistory,
+  selectCompletedDznAssistLocalHistoryTurns,
   serializeDznAssistLocalHistory,
 } from "@/lib/dzn-assist-local-history";
 import {
@@ -94,7 +95,7 @@ export function DznAssist() {
   useEffect(() => {
     if (!localHistoryReady) return;
     try {
-      const saved = serializeDznAssistLocalHistory(messages.slice(1));
+      const saved = serializeDznAssistLocalHistory(selectCompletedDznAssistLocalHistoryTurns(messages.slice(1)));
       if (saved) window.localStorage.setItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY, saved);
       else window.localStorage.removeItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
     } catch {

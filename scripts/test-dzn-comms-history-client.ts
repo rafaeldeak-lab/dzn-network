@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction, sendCommsMessage } from "../components/comms/comms-history-client";
 import { recentVisibleSpeakers } from "../components/comms/dzn-comms-shell";
-import { parseDznAssistLocalHistory, serializeDznAssistLocalHistory } from "../lib/dzn-assist-local-history";
+import { parseDznAssistLocalHistory, selectCompletedDznAssistLocalHistoryTurns, serializeDznAssistLocalHistory } from "../lib/dzn-assist-local-history";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
@@ -131,6 +131,14 @@ test("persists only bounded DZN Assist transcript text and reconstructable reply
   assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(retainedHistory ?? "{}")), [
     { id: "dzn-assist-history-1", role: "visitor", text: "Earlier safe question" },
     { id: "dzn-assist-history-2", role: "assist", text: "Earlier safe answer", replyKind: "guidance" },
+  ]);
+  assert.deepEqual(selectCompletedDznAssistLocalHistoryTurns([
+    { role: "visitor", text: "Completed question" },
+    { role: "assist", text: "Completed answer", replyKind: "guidance" },
+    { role: "visitor", text: "Unanswered question" },
+  ]), [
+    { role: "visitor", text: "Completed question" },
+    { role: "assist", text: "Completed answer", replyKind: "guidance" },
   ]);
   assert.equal(serializeDznAssistLocalHistory([]), null);
 });
