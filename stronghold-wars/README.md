@@ -106,8 +106,8 @@ manifest records file hashes and bounds, and `test-assets.mjs` checks every GLB.
 The in-world beacon follows the saved Command Hall level. Hall upgrades also
 trigger a second reveal burst at the beacon; Canvas 2D has a tiered fallback.
 
-The Server Chronicle records completed Hall/support projects, land claims,
-district facilities, supply routes and resolved local wars in a bounded,
+The Server Chronicle records completed Hall/support projects, defender upgrades,
+land claims, district facilities, supply routes and resolved local wars in a bounded,
 replay-safe per-community log. Verified preview members can view their own
 community's history while owner Pro is active. Older saves display completed
 work without fabricating dates. The Chronicle is cosmetic and never changes
@@ -140,9 +140,15 @@ reconstructions. The previous blocky models remain under
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
 unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs
 in `preview/assets/models/defenders/` cover their five appearance levels.
-The Armoury can place one 3D defender concept beside the camp for inspection.
-Defender slots, combat abilities and upgrade access have not been added for
-these concepts; their preview has no battle effect.
+The Armoury lets leadership approve a shared Level 1–5 defender upgrade and
+assign its post once members fund it with personal Parts. Each role requires
+Command Hall and its specialist building at the appropriate level. Assigned
+3D defenders walk between camp and their post; reserve units stay out of
+combat. Guardian weakens Assault, Aegis weakens Recon, Trapper delays either
+tactic, and Hound reduces the advantage from squads away from home. These
+bounded local-preview effects use the accepted-war base snapshot. The Armoury
+also lets players inspect any 3D tier at camp without equipping it. The World
+Map shows public defender tiers, posts and funding progress.
 The Squads panel explains the current equipment; the World Map shows the
 opponent's visual gear tier from its public building levels. Command Hall caps
 gear, while Watchtower, Communications and Workshop set specialist tiers.

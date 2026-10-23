@@ -5,6 +5,7 @@
  * intentionally local-only; it is not an authentication or security boundary.
  */
 import { squadBattleStats } from './squad-assets.js';
+import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -125,6 +126,7 @@ function emptyBase(treasury = 200) {
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
+    defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
       timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null,
@@ -224,11 +226,16 @@ function normalizeWarRecord(war) {
     });
     const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0);
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => {
+      const saved = source?.base?.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      return [role, { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null }];
+    }));
     return {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
-      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots },
+      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders },
       stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -247,7 +254,7 @@ function normalizeWarRecord(war) {
   const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => ({
     attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
     tactic: a.tactic === 'recon' ? 'recon' : 'assault', at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
-    returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus),
+    returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
   })) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
   return {
@@ -280,6 +287,17 @@ function normalizeLoadedState(raw) {
     const base = savedCommunity.base || {};
     const normalized = emptyBase(safeInt(base.treasury));
     for (const key of Object.keys(GAME_CONFIG.buildings)) normalized.levels[key] = normalizeLevel(base.levels?.[key], 1);
+    for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+      const saved = base.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      const targetLevel = level + 1;
+      const cost = DEFENDER_COSTS[targetLevel];
+      const project = cost && saved?.project?.targetLevel === targetLevel ? {
+        targetLevel, cost, funded: Math.min(cost, safeInt(saved.project.funded)),
+        donors: Array.isArray(saved.project.donors) ? saved.project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), amount: safeInt(d.amount), at: safeInt(d.at) })) : [],
+      } : null;
+      normalized.defenders[role] = { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null, project };
+    }
     normalized.projects = Array.isArray(base.projects) ? base.projects.filter(p => p && typeof p.id === 'string' && GAME_CONFIG.buildings[p.key]).map(p => ({
       id: p.id, key: p.key, targetLevel: normalizeLevel(p.targetLevel, 1), targetAmount: safeInt(p.targetAmount),
       funded: Math.min(safeInt(p.funded), safeInt(p.targetAmount)), benefit: String(p.benefit || ''),
@@ -293,10 +311,10 @@ function normalizeLoadedState(raw) {
     normalized.actionRecords = Array.isArray(base.actionRecords) ? base.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [];
     const chronicleIds = new Set();
     normalized.chronicle = Array.isArray(base.chronicle) ? base.chronicle.filter(item => {
-      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
+      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war|defender):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
       chronicleIds.add(item.id);
       return true;
-    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
+    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war', 'defender'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
     normalized.raidCount = safeInt(base.raidCount);
     normalized.lastRaidClaimed = safeInt(base.lastRaidClaimed);
     normalized.raidCount = Math.max(normalized.raidCount, normalized.lastRaidClaimed);
@@ -527,6 +545,7 @@ export class LocalGameService {
         accessTier: definition.eligible && saved.proActive ? 'owner Pro active' : 'view only',
         hallLevel: base.levels.hq,
         buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
+        defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
         districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
           facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades })),
         construction: base.projects.filter(project => project.status === 'approved').map(project => ({
@@ -537,7 +556,10 @@ export class LocalGameService {
             percent: Math.floor(100 * (plot.facilityProject.partsFunded + plot.facilityProject.timberFunded) / (plot.facilityProject.partsCost + plot.facilityProject.timberCost)) } : null,
           plot.routeProject ? { kind: 'route', name: 'Supply route', targetLevel: plot.routeProject.targetLevel,
             percent: Math.floor(100 * (plot.routeProject.partsFunded + plot.routeProject.timberFunded) / (plot.routeProject.partsCost + plot.routeProject.timberCost)) } : null,
-        ].filter(Boolean))),
+        ].filter(Boolean))).concat(Object.entries(base.defenders).flatMap(([role, defender]) => defender.project ? [{
+          kind: 'defender', name: DEFENDER_CONCEPTS[role].name, key: role, targetLevel: defender.project.targetLevel,
+          percent: Math.floor(100 * defender.project.funded / defender.project.cost),
+        }] : [])),
       };
     });
   }
@@ -631,9 +653,10 @@ export class LocalGameService {
     const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0, facilityLevel: plot.status === 'claimed' ? plot.facilityLevel : 0 }));
     const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0);
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
-      base: { levels, treasury: safeInt(base.treasury), landPlots },
+      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders },
       stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -853,18 +876,19 @@ export class LocalGameService {
       ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
       : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
     const awaySquads = this.getAwaySquads(defender.communityId, warId).length;
-    const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2)));
+    const defence = defenderBattleEffect(defender.base.defenders, tactic);
+    const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2) - defence.exposureShield));
     const scoutBonus = this.getScoutReports(identityId, warId).some(scout => scout.warId === warId && scout.arrived) ? 4 : 0;
-    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus)));
-    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield)));
+    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus - defence.scorePenalty)));
+    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure)));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
     const returnAt = now + WAR_RULES.squadReturnMs;
-    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, score, casualties, feedback };
+    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, score, casualties, feedback };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, returnAt, exposureBonus, scoutBonus, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
+    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
     this.save();
     return result;
@@ -989,6 +1013,9 @@ export class LocalGameService {
       if (plot.facilityLevel) addEarlier(`facility:${plot.id}:${plot.facilityLevel}`, 'facility', `${GAME_CONFIG.facilities[plot.id].name} reached Level ${plot.facilityLevel}.`);
       if (plot.routeLevel) addEarlier(`route:${plot.id}:${plot.routeLevel}`, 'route', `${config.name} supply route reached Level ${plot.routeLevel}.`);
     }
+    for (const [role, defender] of Object.entries(base.defenders)) {
+      for (let level = 1; level <= defender.level; level++) addEarlier(`defender:${role}:${level}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${level}.`);
+    }
     for (const war of this.state.wars.filter(item => item.state === 'resolved' && [item.challengerCommunityId, item.defenderCommunityId].includes(entry.definition.id))) {
       const opponentId = war.challengerCommunityId === entry.definition.id ? war.defenderCommunityId : war.challengerCommunityId;
       const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
@@ -1049,6 +1076,94 @@ export class LocalGameService {
 
   _findAction(records, id) {
     return records.find(record => record.id === id) || null;
+  }
+
+  getDefenderRequirement(identityId, role) {
+    const config = DEFENDER_CONCEPTS[role];
+    const entry = this.community(identityId);
+    if (!config || !entry) return { ok: false, role, prerequisites: ['Defender unavailable.'] };
+    const base = entry.saved.base;
+    const defender = base.defenders[role];
+    const targetLevel = defender.level + 1;
+    const prerequisites = [];
+    const accessError = this._accessError(identityId);
+    if (accessError) prerequisites.push(accessError);
+    if (targetLevel > GAME_CONFIG.maxLevel) prerequisites.push('Maximum defender level reached.');
+    if (base.levels.hq < Math.max(config.hall, targetLevel)) prerequisites.push(`Command Hall Level ${Math.max(config.hall, targetLevel)} required.`);
+    if (base.levels[config.support] < Math.max(config.supportLevel, targetLevel)) prerequisites.push(`${GAME_CONFIG.buildings[config.support].name} Level ${Math.max(config.supportLevel, targetLevel)} required.`);
+    if (defender.project) prerequisites.push('An approved upgrade is already being funded.');
+    return { ok: prerequisites.length === 0, role, level: defender.level, targetLevel,
+      cost: DEFENDER_COSTS[targetLevel] || 0, prerequisites, project: clone(defender.project), post: defender.post };
+  }
+
+  _defenderContext(identityId, role, actionId, operation) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member || !DEFENDER_CONCEPTS[role]) return { error: 'Defender or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `defender-${operation}-${role}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind ? { replay: { ...clone(prior.result), replay: true } } : { error: 'This action ID was already used for another action or identity.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    return { entry, member, defender: entry.saved.base.defenders[role], kind };
+  }
+
+  approveDefender(identityId, role, actionId = this.newActionId('defender-approve')) {
+    const context = this._defenderContext(identityId, role, actionId, 'approve');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const requirement = this.getDefenderRequirement(identityId, role);
+    if (!requirement.ok) return { ok: false, error: requirement.prerequisites.join(' ') };
+    context.defender.project = { targetLevel: requirement.targetLevel, cost: requirement.cost, funded: 0, donors: [] };
+    const result = { ok: true, role, targetLevel: requirement.targetLevel, cost: requirement.cost };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  fundDefender(identityId, role, amount, actionId = this.newActionId('defender-fund')) {
+    const context = this._defenderContext(identityId, role, actionId, 'fund');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const numeric = Number(amount);
+    if (!Number.isSafeInteger(numeric) || numeric < 1) return { ok: false, error: 'Enter a positive whole number of Parts.' };
+    const project = context.defender.project;
+    if (!project) return { ok: false, error: 'Leadership must approve this defender upgrade before funding.' };
+    const accepted = Math.min(numeric, project.cost - project.funded, context.member.parts);
+    if (accepted < 1) return { ok: false, error: 'No personal Parts are available or the project is fully funded.' };
+    context.member.parts -= accepted;
+    context.member.lifetimeContributed += accepted;
+    project.funded += accepted;
+    project.donors.push({ identityId, name: this.profile(identityId).name, amount: accepted, at: this.now() });
+    project.donors = project.donors.slice(-8);
+    const completed = project.funded === project.cost && context.defender.level === project.targetLevel - 1;
+    if (completed) {
+      context.defender.level = project.targetLevel;
+      context.defender.project = null;
+      this._recordChronicle(context.entry.saved.base, `defender:${role}:${project.targetLevel}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${project.targetLevel}.`);
+    }
+    const result = { ok: true, role, accepted, remaining: completed ? 0 : project.cost - project.funded, completed, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  assignDefender(identityId, role, post, actionId = this.newActionId('defender-assign')) {
+    const context = this._defenderContext(identityId, role, actionId, 'assign');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (!context.defender.level) return { ok: false, error: 'Unlock this defender before assigning a post.' };
+    if (post !== null && !DEFENDER_POSTS[post]) return { ok: false, error: 'Choose a valid defensive post or stand down.' };
+    context.defender.post = post;
+    const result = { ok: true, role, post, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
   }
 
   _landContext(identityId, plotId, actionId, kind) {

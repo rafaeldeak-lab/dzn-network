@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
-import { PATROL_NODES, PATROL_STOPS, createPatrolMotion, shortestPatrolPath, stepPatrolMotion } from './preview/patrol-routes.js';
+import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, shortestPatrolPath, stepPatrolMotion } from './preview/patrol-routes.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
@@ -145,6 +145,22 @@ for (const [role, stops] of Object.entries(PATROL_STOPS)) {
   for (const stop of stops) if (!PATROL_NODES[stop] || !shortestPatrolPath('camp', stop).length) throw new Error(`${role} has an unreachable stop`);
 }
 console.log('DZN patrols verified: five roles visit assigned buildings and camp, pause, and avoid building footprints.');
+for (const role of Object.keys(DEFENDER_CONCEPTS)) for (const [post, node] of Object.entries(DEFENDER_POST_NODES)) {
+  const motion = createDefenderMotion(role, post);
+  const reached = new Set();
+  let walking = 0, resting = 0;
+  for (let frame = 0; frame < 3600; frame++) {
+    stepPatrolMotion(motion, 0.05);
+    if (motion.moving) walking++; else resting++;
+    if (!motion.route.length && motion.wait > 0) reached.add(motion.node);
+    for (const [x, z, size] of occupied) {
+      const clearance = size / 2 + 0.15;
+      if (Math.abs(motion.x - x) < clearance && Math.abs(motion.z - z) < clearance) throw new Error(`${role} crossed a building en route to ${post}`);
+    }
+  }
+  if (!walking || !resting || !reached.has('camp') || !reached.has(node)) throw new Error(`${role} did not walk between camp and ${post}`);
+}
+console.log('DZN defenders verified: four 3D roles reach every assigned post and return to camp without crossing buildings.');
 const defenderManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders/manifest.json'), 'utf8'));
 const defenderHashes = new Set();
 const defenderParts = {

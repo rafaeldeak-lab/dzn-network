@@ -1,6 +1,7 @@
 import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY, LEGACY_STORAGE_KEY, SERVICE_STORAGE_KEY, V2_BACKUP_KEY, V2_STORAGE_KEY, WAR_RULES } from './game-service.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
+import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -100,6 +101,43 @@ export function runServiceTests() {
   service.setOwnerProActive('violet-owner', true);
   assert(service.getAccess('violet-member').allowed, 'reactivating owner Pro restores access to the preserved base');
   checks.push('member sharing, community isolation, verification, Free tier and inactive owner Pro entitlement');
+
+  let defenderClock = clock + 12_000;
+  const defenderStorage = new MemoryStorage();
+  let defenderService = new LocalGameService({ storage: defenderStorage, now: () => defenderClock });
+  assert(Object.keys(defenderService.snapshot('iron-owner').base.defenders).length === 4 && Object.values(defenderService.snapshot('iron-owner').base.defenders).every(unit => unit.level === 0 && unit.post === null), 'four defender classes start locked and unassigned');
+  assert(!defenderService.approveDefender('iron-owner', 'guardian', 'defender-early').ok, 'defender unlock waits for Hall and specialist progress');
+  for (const id of ['iron-pines', 'violet-ridge']) defenderService.state.communities[id].base.levels = { hq: 3, workshop: 3, tower: 3, comms: 3 };
+  assert(!defenderService.approveDefender('iron-member', 'guardian', 'defender-member-approval').ok && !defenderService.approveDefender('iron-unverified', 'guardian', 'defender-unverified-approval').ok && !defenderService.approveDefender('free-owner', 'guardian', 'defender-free-approval').ok, 'only eligible verified leadership approves shared defenders');
+  const guardianApproval = defenderService.approveDefender('iron-owner', 'guardian', 'defender-guardian-approval');
+  assert(guardianApproval.ok && guardianApproval.targetLevel === 1 && !defenderService.approveDefender('iron-owner', 'guardian', 'defender-duplicate-approval').ok, 'one owner-approved defender project opens at a time');
+  assert(defenderService.approveDefender('iron-owner', 'guardian', 'defender-guardian-approval').replay, 'approval action replay cannot open another project');
+  const guardianPartial = defenderService.fundDefender('iron-member', 'guardian', 80, 'defender-guardian-partial');
+  assert(guardianPartial.ok && guardianPartial.accepted === 80 && !guardianPartial.completed, 'verified member funds an approved defender from personal Parts');
+  const afterPartial = defenderService.snapshot('iron-member').member.parts;
+  assert(defenderService.fundDefender('iron-member', 'guardian', 80, 'defender-guardian-partial').replay && defenderService.snapshot('iron-member').member.parts === afterPartial, 'funding action replay never double debits');
+  assert(!defenderService.fundDefender('iron-unverified', 'guardian', 10, 'defender-unverified-fund').ok && !defenderService.fundDefender('free-owner', 'guardian', 10, 'defender-free-fund').ok, 'unverified and Free identities cannot fund the defender');
+  const guardianFinish = defenderService.fundDefender('iron-admin', 'guardian', 100, 'defender-guardian-complete');
+  assert(guardianFinish.ok && guardianFinish.completed && guardianFinish.level === 1 && defenderService.snapshot('iron-owner').base.defenders.guardian.project === null, 'exact funding completes the shared tier once');
+  assert(!defenderService.fundDefender('iron-admin', 'guardian', 1, 'defender-guardian-after-complete').ok && !defenderService.assignDefender('iron-member', 'guardian', 'gate', 'defender-member-assign').ok, 'completed funding closes and members cannot assign posts');
+  assert(defenderService.assignDefender('iron-owner', 'guardian', 'gate', 'defender-guardian-assign').ok && !defenderService.assignDefender('iron-owner', 'guardian', 'invalid', 'defender-bad-post').ok, 'leadership assigns an unlocked unit only to a real defensive post');
+  assert(defenderService.getWorldMap().find(item => item.id === 'iron-pines').defenders.guardian.post === 'gate' && defenderService.getWorldMap().find(item => item.id === 'violet-ridge').defenders.guardian.level === 0, 'public defender posts are scoped by community');
+  defenderService = new LocalGameService({ storage: defenderStorage, now: () => defenderClock });
+  assert(defenderService.snapshot('iron-owner').base.defenders.guardian.level === 1 && defenderService.snapshot('iron-member').base.defenders.guardian.post === 'gate' && defenderService.getChronicle('iron-member').entries.some(item => item.id === 'defender:guardian:1'), 'defender level, post and milestone survive reload for the community');
+  const effects = defenderBattleEffect({ guardian: { level: 5, post: 'gate' }, aegis: { level: 4, post: 'comms' }, trapper: { level: 3, post: 'tower' }, hound: { level: 3, post: 'hall' } }, 'assault');
+  assert(effects.scorePenalty === 14 && effects.exposureShield === 3 && effects.casualtyPressure === 1 && defenderBattleEffect({ guardian: { level: 5, post: null } }, 'assault').scorePenalty === 0, 'distinct assigned units have bounded effects and reserve units have none');
+  assert(defenderBattleEffect({ guardian: { level: 5, post: 'gate' }, aegis: { level: 4, post: 'comms' }, trapper: { level: 3, post: 'tower' } }, 'recon').scorePenalty === 11, 'Aegis intercepts Recon while Guardian is Assault-specific');
+  assert(Object.keys(DEFENDER_CONCEPTS).length === 4, 'every owner-supplied defender concept has a playable rule');
+  const defenderWar = defenderService.challengeWar('violet-owner', 'iron-pines', 'defender-war-challenge');
+  assert(defenderWar.ok && defenderService.acceptWarChallenge('iron-owner', defenderWar.warId, 'defender-war-accept').ok, 'eligible communities can freeze assigned defenders into a war');
+  assert(defenderService.getWar(defenderWar.warId).snapshots.defender.base.defenders.guardian.post === 'gate', 'accepted war records the assigned Guardian');
+  assert(defenderService.assignDefender('iron-owner', 'guardian', null, 'defender-stand-down-after-snapshot').ok && defenderService.getWar(defenderWar.warId).snapshots.defender.base.defenders.guardian.post === 'gate', 'later owner reassignment does not change frozen war defences');
+  defenderClock += WAR_RULES.preparationReadyMs;
+  assert(defenderService.startWar('iron-owner', defenderWar.warId, 'defender-war-start').ok, 'war starts after preparation');
+  const defendedAttack = defenderService.submitWarAttack('violet-owner', defenderWar.warId, 'assault', 'defender-war-assault');
+  assert(defendedAttack.ok && defendedAttack.defenderPenalty === 2 && defendedAttack.feedback.includes('assigned defenders -2'), 'assigned Guardian affects the frozen Assault result even after being stood down at home');
+  assert(new LocalGameService({ storage: defenderStorage, now: () => defenderClock }).getWar(defenderWar.warId).attacks[0].defenderPenalty === 2, 'defender battle result survives reload');
+  checks.push('four defenders: Pro and leadership gates, shared funding, replay, post assignment, frozen war effects and reload');
 
   const landStorage = new MemoryStorage();
   let landService = new LocalGameService({ storage: landStorage, now: () => clock });

@@ -3,8 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
-import { createPatrolMotion, stepPatrolMotion } from './patrol-routes.js';
-import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './defender-assets.js';
+import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, stepPatrolMotion } from './patrol-routes.js';
+import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 
@@ -957,6 +957,45 @@ for (let i = 0; i < 5; i++) {
   patrols.push({ mesh: soldier, role, motion });
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
+const defenderPatrols = new Map();
+function syncDefenderPatrols() {
+  const assigned = service.community()?.saved.base.defenders || {};
+  for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+    const unit = assigned[role];
+    const previous = defenderPatrols.get(role);
+    if (previous && unit?.level === previous.level && unit?.post === previous.post) continue;
+    if (previous) { previous.active = false; scene.remove(previous.mesh); defenderPatrols.delete(role); }
+    if (!unit?.level || !unit.post || fallback2D) continue;
+    const mesh = new THREE.Group();
+    const motion = createDefenderMotion(role, unit.post);
+    mesh.position.set(motion.x, 0, motion.z);
+    scene.add(mesh);
+    const patrol = { role, level: unit.level, post: unit.post, mesh, motion, active: true };
+    defenderPatrols.set(role, patrol);
+    loadBuildingTemplate(defenderAsset(role, unit.level)).then(template => {
+      if (!patrol.active) return;
+      const model = template.clone(true);
+      model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+      mesh.add(model);
+    }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
+  }
+}
+function animateDefender(patrol) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const { mesh, motion, role } = patrol;
+  if (role === 'hound') {
+    const swing = Math.sin(motion.stride) * (motion.moving ? 0.36 : 0.025);
+    for (const [name, sign] of [['left_front_leg', 1], ['right_rear_leg', 1], ['right_front_leg', -1], ['left_rear_leg', -1]]) {
+      const leg = mesh.getObjectByName(name);
+      if (leg) leg.rotation.x = swing * sign;
+    }
+  } else animateSoldier(mesh, motion.stride, motion.moving ? 1 : 0.04);
+  if (role === 'aegis') for (const [index, name] of ['left_drone', 'right_drone'].entries()) {
+    const drone = mesh.getObjectByName(name);
+    if (drone) { drone.position.y = 1.72 + patrol.level * 0.025 + Math.sin(motion.stride * 0.55 + index * Math.PI) * 0.09; drone.rotation.y += 0.012; }
+  }
+}
+syncDefenderPatrols();
 let defenderPreview = null;
 let defenderPreviewToken = 0;
 function placeDefenderPreview(role, level) {
@@ -997,6 +1036,8 @@ const warBaseGroup = new THREE.Group();
 warBaseGroup.visible = false;
 scene.add(warBaseGroup);
 const warTroopMeshes = [];
+const warDefenderMeshes = [];
+let warDefenderToken = 0;
 function buildOutpost() {
   outpostBlocks.forEach(b => scene.remove(b));
   outpostBlocks.length = 0;
@@ -1062,6 +1103,7 @@ function renderIdentityOptions() {
     reconcileBasePresentation();
     reconcileLandScenery();
     syncPatrolKits();
+    syncDefenderPatrols();
     updateHud();
     updateBuildingList();
     toast(`Preview identity: ${service.profile().name}`);
@@ -1113,6 +1155,7 @@ function updateHud() {
     patrol.mesh.visible = unlocked && deployed >= Math.min(away, 3);
     if (unlocked) deployed++;
   });
+  for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -1305,6 +1348,23 @@ function showForgePanel() {
   });
 }
 
+function defenderCardsHTML() {
+  const base = service.community().saved.base;
+  const leadership = isLeadership();
+  const access = service.getAccess().allowed;
+  return Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
+    const defender = base.defenders[role];
+    const requirement = service.getDefenderRequirement(service.state.currentIdentityId, role);
+    const project = defender.project;
+    const tier = Math.max(1, defender.level);
+    const post = defender.post ? DEFENDER_POSTS[defender.post] : 'Reserve at camp';
+    const progress = project ? `<p class="help">Approved L${project.targetLevel} · ${project.funded}/${project.cost} Parts funded</p><div class="row"><input type="number" min="1" step="1" value="${Math.max(1, project.cost - project.funded)}" data-defender-amount="${role}" aria-label="Parts for ${escapeHTML(definition.name)}"><button data-defender-fund="${role}" ${access ? '' : 'disabled'}>Contribute Parts</button></div>` : '';
+    const approval = !project && defender.level < 5 ? `<p class="help">Next L${requirement.targetLevel}: ${requirement.cost} Parts · ${requirement.prerequisites.length ? escapeHTML(requirement.prerequisites.join(' ')) : 'Ready for leadership approval.'}</p><button data-defender-approve="${role}" ${leadership && requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button>` : '';
+    const assignment = defender.level ? `<div class="row"><select data-defender-post="${role}" aria-label="${escapeHTML(definition.name)} defensive post" ${leadership && access ? '' : 'disabled'}><option value="">Reserve at camp</option>${Object.entries(DEFENDER_POSTS).map(([key, label]) => `<option value="${key}" ${defender.post === key ? 'selected' : ''}>${escapeHTML(label)}</option>`).join('')}</select><button data-defender-assign="${role}" ${leadership && access ? '' : 'disabled'}>Assign post</button></div>` : '';
+    return `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.role)}</small></div><b>${defender.level ? `L${defender.level}` : 'LOCKED'}</b></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(definition.name)} supplied design"><p>${escapeHTML(definition.detail)}</p><p><b>Ability:</b> ${escapeHTML(definition.ability)}<br><b>Post:</b> ${escapeHTML(post)}</p>${approval}${progress}${assignment}<p class="help">Inspect any 3D appearance at camp without unlocking or equipping it:</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(definition.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`;
+  }).join('');
+}
+
 function showSquadPanel() {
   selectedKey = null;
   updateBuildingList();
@@ -1317,8 +1377,8 @@ function showSquadPanel() {
     return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
   }).join('');
   const away = currentAwaySquads().length;
-  const defenderCards = Object.entries(DEFENDER_CONCEPTS).map(([role, defender]) => `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(defender.name)}</strong><small>${escapeHTML(defender.role)}</small></div></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(defender.name)} supplied design"><p>${escapeHTML(defender.detail)}</p><p class="help">Choose an L1–L5 3D concept to place beside the squad camp. Preview only; no defender slot or battle effect yet.</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(defender.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`).join('');
-  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles use the owner's detailed Level 1–5 artwork in this Armoury and articulated 3D models in the base and battles. Choose a thumbnail to inspect an outfit; this does not change equipped level. Command Hall and specialist buildings determine active kit. Sentinel and Lifeline join at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><h3>DZN Defender Concepts · 3D previews</h3><p>Guardian, Aegis, Trapper and Hound are based on the supplied designs. Their 3D appearance tiers can be inspected at the camp; defence mechanics and owner-assigned slots are still in design.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  const defenderCards = defenderCardsHTML();
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles use the owner's detailed Level 1–5 artwork in this Armoury and articulated 3D models in the base and battles. Choose a thumbnail to inspect an outfit; this does not change equipped level. Command Hall and specialist buildings determine active kit. Sentinel and Lifeline join at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves each shared upgrade and assigns posts. Verified members fund approved projects with personal Parts. Assigned defenders walk from camp to their posts and contribute bounded defence from the accepted-war snapshot. Reserve units have no battle effect.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
   panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
     const role = button.dataset.squadPreview;
     const level = Number(button.dataset.level);
@@ -1340,6 +1400,31 @@ function showSquadPanel() {
     if (!Number.isInteger(level) || level < 1 || level > 5) return;
     placeDefenderPreview(button.dataset.defenderPreview, level);
     closePanel();
+  }));
+  panel.querySelectorAll('[data-defender-approve]').forEach(button => button.addEventListener('click', () => {
+    const result = service.approveDefender(service.state.currentIdentityId, button.dataset.defenderApprove);
+    toast(result.ok ? `${DEFENDER_CONCEPTS[button.dataset.defenderApprove].name} L${result.targetLevel} approved for shared funding` : result.error);
+    showSquadPanel();
+  }));
+  panel.querySelectorAll('[data-defender-fund]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.defenderFund;
+    const amount = Number(panel.querySelector(`[data-defender-amount="${role}"]`)?.value);
+    const result = service.fundDefender(service.state.currentIdentityId, role, amount);
+    if (result.ok && result.completed && !result.replay) {
+      syncDefenderPatrols();
+      celebrateUpgrade(-4, -12, DEFENDER_CONCEPTS[role].name, result.level);
+      playClank();
+    }
+    toast(result.ok ? `${DEFENDER_CONCEPTS[role].name}: +${result.accepted} Parts${result.completed ? ` · Level ${result.level} complete` : ''}` : result.error);
+    showSquadPanel(); updateHud();
+  }));
+  panel.querySelectorAll('[data-defender-assign]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.defenderAssign;
+    const selected = panel.querySelector(`[data-defender-post="${role}"]`)?.value || null;
+    const result = service.assignDefender(service.state.currentIdentityId, role, selected);
+    if (result.ok) syncDefenderPatrols();
+    toast(result.ok ? `${DEFENDER_CONCEPTS[role].name} assigned: ${selected ? DEFENDER_POSTS[selected] : 'reserve at camp'}` : result.error);
+    showSquadPanel();
   }));
   $('closeBtn').onclick = closePanel;
 }
@@ -1750,8 +1835,12 @@ function showWorldMap() {
   const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
   const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
   const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${squadUnlocked(role, selected.buildings) ? `gear L${squadTier(role, selected.buildings)}` : `locked · Hall L${definition.unlockHall} / ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}`}</span>`).join('');
-  const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
-  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  const visibleDefenders = Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
+    const unit = selected.defenders?.[role];
+    return `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${unit?.level ? `L${unit.level} · ${unit.post ? escapeHTML(DEFENDER_POSTS[unit.post]) : 'reserve'}` : 'locked'}</span>`;
+  }).join('');
+  const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades and assigned Hounds. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Watchtower L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Illustrative global preview of three fictional communities. Markers show approximate demo placement, never actual server or player coordinates. Select a marker to inspect public build progress.</p><div class="world-layout"><div class="world-map"><img src="assets/world/stronghold-world.png" alt="Stylized world map showing continents and illustrative community markers">${pins}</div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
   overlay.style.display = 'block';
   $('closeWorldBtn').onclick = () => { overlay.style.display = 'none'; $('worldBtn').focus(); };
   $('worldWarBtn').onclick = () => { overlay.style.display = 'none'; showWarTable(); };
@@ -1800,6 +1889,9 @@ function refreshWarTableTimers() {
 }
 
 function clearWarBaseVisuals() {
+  warDefenderToken++;
+  for (const defender of warDefenderMeshes) scene.remove(defender.mesh);
+  warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
     child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
     warBaseGroup.remove(child);
@@ -1808,6 +1900,7 @@ function clearWarBaseVisuals() {
 
 function buildWarBaseVisual(side) {
   clearWarBaseVisuals();
+  const token = warDefenderToken;
   const animationCounts = { radars: animated.radars.length, lights: animated.lights.length, chimneys: animated.chimneys.length };
   warBaseGroup.position.set(OUTPOST.x, 0, OUTPOST.z);
   for (const [key, building] of Object.entries(DEFS)) {
@@ -1823,6 +1916,20 @@ function buildWarBaseVisual(side) {
   animated.lights.length = animationCounts.lights;
   animated.chimneys.length = animationCounts.chimneys;
   warBaseGroup.visible = true;
+  for (const [role, defender] of Object.entries(side.base.defenders || {})) {
+    const node = DEFENDER_POST_NODES[defender.post];
+    if (!defender.level || !node) continue;
+    const [x, z] = PATROL_NODES[node];
+    const mesh = new THREE.Group();
+    mesh.position.set(OUTPOST.x + x, 0, OUTPOST.z + z);
+    mesh.rotation.y = -Math.PI / 2;
+    scene.add(mesh);
+    warDefenderMeshes.push({ role, level: defender.level, mesh });
+    loadBuildingTemplate(defenderAsset(role, defender.level)).then(template => {
+      if (token !== warDefenderToken) return;
+      mesh.add(template.clone(true));
+    }).catch(error => console.warn(`War defender model could not load: ${role}`, error));
+  }
 }
 
 function launchWarAttack(warId, tactic) {
@@ -1870,6 +1977,7 @@ function updateWarBattle(dt) {
     troop.mesh.rotation.y = Math.PI / 2;
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase);
   }
+  for (const defender of warDefenderMeshes) animateDefender({ ...defender, motion: { stride: warBattle.time * 2, moving: false } });
   warBattle.smokeTimer += dt;
   if (warBattle.smokeTimer >= 0.8 && progress > 0.65) {
     warBattle.smokeTimer = 0;
@@ -2146,6 +2254,12 @@ renderer.setAnimationLoop(time => {
     p.mesh.rotation.y = motion.yaw;
     animateSoldier(p.mesh, motion.stride, motion.moving ? 1 : 0.04);
   });
+  for (const patrol of defenderPatrols.values()) {
+    const motion = stepPatrolMotion(patrol.motion, dt);
+    patrol.mesh.position.set(motion.x, 0, motion.z);
+    patrol.mesh.rotation.y = motion.yaw;
+    animateDefender(patrol);
+  }
   Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {
       b.scaffold.userData.crane.rotation.y = elapsed * 0.8;

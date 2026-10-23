@@ -24,6 +24,7 @@ export const PATROL_STOPS = Object.freeze({
   sentinel: ['tower', 'northWest', 'hall', 'tower'],
   medic: ['camp', 'hall', 'workshop', 'camp'],
 });
+export const DEFENDER_POST_NODES = Object.freeze({ gate: 'southLane', hall: 'hall', tower: 'tower', comms: 'comms', workshop: 'workshop' });
 
 export function shortestPatrolPath(start, end) {
   if (!PATROL_NODES[start] || !PATROL_NODES[end]) throw new Error('Unknown patrol stop');
@@ -46,6 +47,17 @@ export function createPatrolMotion(role, index = 0) {
     route: [], routeIndex: 0, x: PATROL_NODES[stop][0], z: PATROL_NODES[stop][1],
     yaw: Math.PI, stride: index * 0.9, wait: 2 + index * 0.75, moving: false,
     speed: role === 'sentinel' ? 1.35 : role === 'engineer' ? 1.55 : 1.7 };
+}
+
+export function createDefenderMotion(role, post) {
+  const node = DEFENDER_POST_NODES[post];
+  if (!node) throw new Error(`Unknown defender post: ${post}`);
+  const motion = createPatrolMotion('assault');
+  motion.role = role;
+  motion.stops = ['camp', node, 'camp'];
+  motion.speed = role === 'hound' ? 2.3 : role === 'guardian' ? 1.2 : 1.55;
+  motion.wait = 0.7;
+  return motion;
 }
 
 export function stepPatrolMotion(motion, deltaSeconds) {
