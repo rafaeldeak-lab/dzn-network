@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction, sendCommsMessage } from "../components/comms/comms-history-client";
 import { recentVisibleSpeakers } from "../components/comms/dzn-comms-shell";
+import { parseDznAssistLocalHistory, serializeDznAssistLocalHistory } from "../lib/dzn-assist-local-history";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
@@ -83,6 +84,34 @@ test("accepts only a membership-scoped private group projection", async () => {
     fetcher: async (url) => { requested = String(url); return jsonResponse(input); },
   });
   assert.equal(requested, "/api/comms/message-history?channel=pandora-squad&limit=30");
+});
+
+test("requests an earlier Comms page only with a validated opaque cursor", async () => {
+  const cursor = "YXJyYXktdGllLTAwMDE";
+  let requested = "";
+  await loadCommsHistory(new AbortController().signal, {
+    cursor,
+    fetcher: async (url) => { requested = String(url); return jsonResponse(commsHistoryFixture()); },
+  });
+  assert.equal(requested, `/api/comms/message-history?channel=global-chat&limit=30&cursor=${cursor}`);
+  await assert.rejects(loadCommsHistory(new AbortController().signal, {
+    cursor: "not+a+cursor",
+    fetcher: async () => jsonResponse(commsHistoryFixture()),
+  }));
+});
+
+test("persists only bounded DZN Assist transcript text and guide context locally", () => {
+  const serialized = serializeDznAssistLocalHistory([
+    { role: "visitor", text: "How do I add my server?" },
+    { role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"] },
+  ]);
+  assert.ok(serialized);
+  assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(serialized ?? "{}")), [
+    { id: "dzn-assist-history-1", role: "visitor", text: "How do I add my server?" },
+    { id: "dzn-assist-history-2", role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"] },
+  ]);
+  assert.deepEqual(parseDznAssistLocalHistory({ version: 1, messages: [{ role: "visitor", text: "x", guideIds: ["unsafe/id"] }] }), []);
+  assert.equal(serializeDznAssistLocalHistory([]), null);
 });
 
 test("rejects unlisted, duplicate, role-mismatched or disabled private channel projections", () => {

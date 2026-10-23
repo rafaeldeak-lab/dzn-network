@@ -6,6 +6,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DZN_ASSIST_GUIDES, type DznAssistLink } from "@/lib/dzn-assist";
 import {
+  DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY,
+  parseDznAssistLocalHistory,
+  serializeDznAssistLocalHistory,
+} from "@/lib/dzn-assist-local-history";
+import {
   answerDznAssist,
   parseDznAssistRankings,
   type DznAssistRankingRow,
@@ -45,6 +50,7 @@ const topicPrompts = [
 export function DznAssist() {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<AssistMessage[]>([initialMessage]);
+  const [localHistoryReady, setLocalHistoryReady] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [loadingRankings, setLoadingRankings] = useState(false);
   const requestRef = useRef(0);
@@ -54,6 +60,32 @@ export function DznAssist() {
     [],
   );
   const busy = thinking || loadingRankings;
+
+  useEffect(() => {
+    let restored = [] as ReturnType<typeof parseDznAssistLocalHistory>;
+    try {
+      const saved = window.localStorage.getItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
+      if (saved) restored = parseDznAssistLocalHistory(JSON.parse(saved));
+    } catch {
+      // A blocked or malformed browser store must not prevent public support guidance.
+    }
+    const timer = window.setTimeout(() => {
+      if (restored.length > 0) setMessages([initialMessage, ...restored]);
+      setLocalHistoryReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!localHistoryReady) return;
+    try {
+      const saved = serializeDznAssistLocalHistory(messages.slice(1));
+      if (saved) window.localStorage.setItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY, saved);
+      else window.localStorage.removeItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
+    } catch {
+      // Local browser storage is optional; no transcript is sent elsewhere as a fallback.
+    }
+  }, [localHistoryReady, messages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +197,11 @@ export function DznAssist() {
     setThinking(false);
     setLoadingRankings(false);
     setMessages([initialMessage]);
+    try {
+      window.localStorage.removeItem(DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY);
+    } catch {
+      // The state reset remains useful even where browser storage is blocked.
+    }
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -203,7 +240,7 @@ export function DznAssist() {
         <div className="min-w-0 bg-[linear-gradient(180deg,rgba(17,17,34,0.56),transparent_8rem)]">
           <div className="flex items-center justify-between border-b border-white/8 px-4 py-3 sm:px-5">
             <div className="flex min-w-0 items-center gap-2"><Sparkles className="h-4 w-4 shrink-0 text-violet-200" aria-hidden="true" /><div className="min-w-0"><p className="text-xs font-black uppercase tracking-[0.16em] text-white">DZN support desk</p><p className="mt-0.5 truncate text-[11px] font-semibold text-zinc-500">Ask naturally. I will guide you through the next public step.</p></div></div>
-            <span className="hidden shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 sm:block">This browser only</span>
+            <span className="hidden shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 sm:block">Saved on this device</span>
           </div>
 
           <div ref={transcriptRef} role="log" aria-live="polite" aria-relevant="additions text" className="h-[min(30rem,48svh)] min-h-72 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 [scrollbar-gutter:stable] sm:px-5">
@@ -218,7 +255,7 @@ export function DznAssist() {
               <input aria-label="Ask DZN Assist a question" value={draft} onChange={(event) => setDraft(event.target.value.slice(0, 360))} disabled={busy} placeholder="Ask about DZN, a server, player stats, or public standings…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm font-semibold text-white placeholder:text-zinc-500 focus:outline-none disabled:opacity-60" />
               <button type="submit" disabled={!draft.trim() || busy} className="grid h-10 w-10 shrink-0 place-items-center border border-violet-300/30 bg-violet-300/12 text-violet-100 transition enabled:hover:border-violet-200 enabled:hover:bg-violet-300/20 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send question to DZN Assist"><Send className="h-4 w-4" aria-hidden="true" /></button>
             </div>
-            <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">Questions stay in this browser. DZN Assist uses verified public guidance and only requests the public leaderboard when you ask for it.</p>
+            <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">This conversation is saved only in this browser. DZN Assist uses verified public guidance and only requests the public leaderboard when you ask for it.</p>
           </form>
         </div>
 
