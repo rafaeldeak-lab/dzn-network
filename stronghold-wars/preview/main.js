@@ -425,20 +425,18 @@ function cyl(parent, rt, rb, h, mat, x = 0, y = 0, z = 0, seg = 12) {
 // structures, stop to work or guard, then return here.
 const campMat = new THREE.MeshStandardMaterial({ color: 0x182520, roughness: 0.9 });
 const campAccent = new THREE.MeshStandardMaterial({ color: 0x7542a4, metalness: 0.35, roughness: 0.55 });
-const campGround = new THREE.Mesh(new THREE.CircleGeometry(2.6, 24), new THREE.MeshStandardMaterial({ color: 0x3c413a, roughness: 1 }));
-campGround.rotation.x = -Math.PI / 2;
-campGround.position.set(-4, 0.055, -12);
-scene.add(campGround);
+const campFallback = new THREE.Group();
+scene.add(campFallback);
 const campTent = new THREE.Mesh(new THREE.ConeGeometry(1.45, 1.35, 4), campMat);
 campTent.rotation.y = Math.PI / 4;
 campTent.position.set(-6.6, 0.74, -13.1);
 campTent.castShadow = true;
-scene.add(campTent);
-box(scene, 1.2, 0.8, 0.85, MAT.dark, -6.6, 0, -13.1);
-box(scene, 1.5, 0.15, 0.38, campAccent, -6.6, 1.34, -13.1);
-for (const x of [-2.8, -1.7]) box(scene, 0.62, 0.53, 0.68, MAT.dark, x, 0, -13.7);
-const campBeacon = cyl(scene, 0.1, 0.18, 1.45, MAT.dark, -2.1, 0, -10.5);
-box(scene, 0.4, 0.19, 0.4, MAT.green, -2.1, 1.46, -10.5);
+campFallback.add(campTent);
+box(campFallback, 1.2, 0.8, 0.85, MAT.dark, -6.6, 0, -13.1);
+box(campFallback, 1.5, 0.15, 0.38, campAccent, -6.6, 1.34, -13.1);
+for (const x of [-2.8, -1.7]) box(campFallback, 0.62, 0.53, 0.68, MAT.dark, x, 0, -13.7);
+const campBeacon = cyl(campFallback, 0.1, 0.18, 1.45, MAT.dark, -2.1, 0, -10.5);
+box(campFallback, 0.4, 0.19, 0.4, MAT.green, -2.1, 1.46, -10.5);
 
 // Perimeter fence posts
 for (let i = 0; i < 48; i++) {
@@ -865,6 +863,32 @@ function loadBuildingTemplate(path) {
   modelLoadPromises.set(path, promise);
   return promise;
 }
+
+// Keep the squad home beside the camp route node so patrols walk to its open
+// entrance. The procedural shelter remains available only if the GLB fails.
+const campAssetPath = 'assets/models/camps/dzn-squad-bivouac-for-a-realistic-isometric-3d-survival-strategy-game-one-open-s.glb';
+if (!fallback2D) loadBuildingTemplate(campAssetPath).then(template => {
+  const shelter = template.clone(true);
+  shelter.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(shelter);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const footprint = Math.max(size.x, size.z);
+  if (!Number.isFinite(footprint) || footprint <= 0 || !Number.isFinite(bounds.min.y)) throw new Error('Camp GLB has empty bounds.');
+  shelter.position.set(-center.x, -bounds.min.y, -center.z);
+  shelter.traverse(object => {
+    if (object.isMesh) {
+      object.castShadow = true;
+      object.receiveShadow = true;
+    }
+  });
+  const camp = new THREE.Group();
+  camp.position.set(-6, 0.05, -12.2);
+  camp.scale.setScalar(4 / footprint);
+  camp.add(shelter);
+  scene.add(camp);
+  campFallback.visible = false;
+}).catch(error => console.warn(`Unable to load DZN squad camp GLB (${campAssetPath}); keeping fallback shelter.`, error));
 
 function loadAnimatedSquad(path) {
   if (!animatedSquadTemplates.has(path)) {

@@ -54,6 +54,15 @@ for (const [name, entry] of Object.entries(sceneryManifest.assets)) {
   }
 }
 console.log(`Stronghold preview assets verified: ${pairs} building level pairs, ${recorded.size} original checksums, ${sceneryNames.length} original scenery GLBs.`);
+const campManifest = JSON.parse(readFileSync(join(root, 'assets/models/camps/manifest.json'), 'utf8'));
+const campEntry = campManifest.assets?.squad_bivouac;
+if (!campEntry || !/^assets\/models\/camps\/[\w-]+\.glb$/.test(campEntry.file)) throw new Error('DZN squad camp asset mapping is missing.');
+const campBytes = readFileSync(join(root, ...campEntry.file.split('/')));
+if (campBytes.toString('ascii', 0, 4) !== 'glTF' || campBytes.readUInt32LE(4) !== 2 || campBytes.readUInt32LE(8) !== campBytes.length || campBytes.length !== campEntry.bytes || createHash('sha256').update(campBytes).digest('hex') !== campEntry.sha256) throw new Error('DZN squad camp GLB integrity failed.');
+const campJsonLength = campBytes.readUInt32LE(12);
+const campGltf = JSON.parse(campBytes.toString('utf8', 20, 20 + campJsonLength));
+if (!campGltf.meshes?.length || !campGltf.materials?.length || !campGltf.textures?.length || !campGltf.images?.length || !campGltf.scenes?.length || !Array.isArray(campEntry.dimensions) || campEntry.dimensions.some(dimension => dimension <= 0)) throw new Error('DZN squad camp has incomplete geometry or textures.');
+console.log('Textured DZN squad bivouac GLB verified.');
 const facilityManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/manifest.json'), 'utf8'));
 const families = ['timberline_v4', 'ridgewatch', 'signal', 'highland'];
 const facilityNames = Object.keys(facilityManifest.assets);
