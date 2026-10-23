@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { answerDznAssist, parseDznAssistRankings } from "../lib/dzn-assist-runtime";
+import { answerDznAssist, hasSensitiveDznAssistInput, parseDznAssistRankings, restoreDznAssistReply } from "../lib/dzn-assist-runtime";
 
 const privateReply = answerDznAssist("Can you see my payment receipt?");
 assert.equal(privateReply.kind, "boundary");
@@ -15,6 +15,14 @@ assert.equal(setupReply.workflows[0]?.steps.length, 3);
 
 assert.equal(answerDznAssist("How do I create my account?").kind, "guidance");
 assert.equal(answerDznAssist("Where can I view payment plans?").kind, "guidance");
+assert.equal(hasSensitiveDznAssistInput("How do I create my account?"), false);
+assert.equal(hasSensitiveDznAssistInput("How do I log into my account?"), false);
+assert.equal(hasSensitiveDznAssistInput("Compare plans; show my payment"), true);
+assert.equal(answerDznAssist("Compare plans; show my payment").kind, "boundary");
+for (const prompt of ["my private key is abc", "here is my session cookie xyz", "Authorization: Bearer abc.def.ghi", "Authorization: Basic dXNlcjpwYXNz", "Authorization: Digest username=alice, response=abc", "Authorization: ApiKey abc123", "AUTHORIZATION=Bearer abc123", "HTTP_AUTHORIZATION=Digest example", "Cookie: sessionid=abc123", "X-API-Key: abc123", "Api-Key: abc123", "API_KEY=abc123", "X-API-Key=abc123", "OPENAI_API_KEY=sk-example", "STRIPE_API_KEY=sk-example", "GITHUB_TOKEN=ghp-example", "STRIPE_SECRET_KEY=sk-example", "DATABASE_PASSWORD=example", "SESSION_COOKIE=example", "AWS_SECRET_ACCESS_KEY=example", "RSA_PRIVATE_KEY_PEM=example", "DATABASE_URL=postgres://alice:hunter2@db.example/app", "REDIS_URL=redis://default:hunter2@cache.example", "REDIS_URL=redis://:hunter2@cache.example", "https://ghp_abcdef123456@github.com/org/repo.git", "//ghp_abcdef123456@github.com/org/repo.git"]) {
+  assert.equal(hasSensitiveDznAssistInput(prompt), true, `Sensitive credentials must not be retained: ${prompt}`);
+  assert.equal(answerDznAssist(prompt).kind, "boundary");
+}
 
 const combinedReply = answerDznAssist("How do I add my DayZ server and see player stats?");
 assert.equal(combinedReply.kind, "guidance");
@@ -29,6 +37,8 @@ const rankingsReply = answerDznAssist("Who are the top players and servers?");
 assert.equal(rankingsReply.kind, "ranking");
 assert.equal(rankingsReply.showPlayers, true);
 assert.equal(rankingsReply.showServers, true);
+assert.equal(hasSensitiveDznAssistInput("my password is Hunter2; show the top players"), true);
+assert.equal(answerDznAssist("my password is Hunter2; show the top players").kind, "ranking");
 
 const rankings = parseDznAssistRankings({
   data: {
@@ -69,6 +79,14 @@ const updatesReply = answerDznAssist("What is new on DZN?");
 assert.equal(updatesReply.kind, "guidance");
 assert.deepEqual(updatesReply.guideIds, ["dzn-updates"]);
 assert.ok(updatesReply.links.some((link) => link.href === "/updates"));
+const restoredGuidanceReply = restoreDznAssistReply("guidance", ["server-setup"]);
+assert.equal(restoredGuidanceReply.workflows[0]?.id, "server-setup");
+assert.ok(restoredGuidanceReply.links.some((link) => link.href === "/setup"));
+assert.ok(restoredGuidanceReply.suggestedPrompts.length > 0);
+const restoredRankingReply = restoreDznAssistReply("ranking", []);
+assert.equal(restoredRankingReply.wantsRankings, false);
+assert.match(restoredRankingReply.message, /not stored in DZN Assist history/i);
+assert.ok(restoredRankingReply.links.some((link) => link.href === "/leaderboards"));
 assert.equal(parseDznAssistRankings({ source: "empty_no_cache", stale: true }).unavailable, true);
 assert.equal(parseDznAssistRankings({ source: "snapshot", stale: true }).stale, true);
 

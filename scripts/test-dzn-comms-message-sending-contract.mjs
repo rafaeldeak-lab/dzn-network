@@ -9,6 +9,7 @@ const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sq
 const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
+const assist = read("components/comms/dzn-assist.tsx");
 const deletionNotices = read("components/comms/deletion-notices.ts");
 const client = read("components/comms/comms-history-client.ts");
 const env = read(".env.example");
@@ -117,9 +118,14 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel, draft, pendingAttempt\.requestId\)/, "The composer target must match the channel represented by the visible validated payload.");
   assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "A stale mutation refresh must not replace a newer channel selection.");
   assert.match(shell, /const historyRequestGenerationRef = useRef\(0\)/, "History reads must share a monotonic request generation.");
+  assert.match(shell, /const privateAccessRequestGenerationRef = useRef\(0\)/, "Private capability checks need an independent generation while an earlier page is loading.");
   assert.ok((shell.match(/const requestGeneration = \+\+historyRequestGenerationRef\.current/g) ?? []).length >= 3, "Polling, send refreshes and reaction refreshes must all advance the shared request generation.");
   assert.ok((shell.match(/historyRequestGenerationRef\.current === requestGeneration/g) ?? []).length >= 3, "All successful history refresh paths must reject older same-channel responses.");
-  assert.match(shell, /historyRequestGenerationRef\.current !== requestGeneration[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
+  assert.match(shell, /const isCurrentRequest = \(\) => retainPrivateEarlierPage[\s\S]*privateAccessRequestGenerationRef\.current === requestGeneration[\s\S]*historyRequestGenerationRef\.current === requestGeneration/, "Private capability checks must not cancel pagination while retaining a stale-response guard.");
+  assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
+  assert.match(shell, /if \(selectedChannel !== "global-chat"\) \{\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "Private access recovery must reset pagination before loading Global Chat.");
+  assert.match(shell, /await sendCommsMessage[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful message send must release an earlier-history loading state only for its original channel.");
+  assert.match(shell, /reactionAttemptRef\.current\.delete\(removeAttemptKey\);[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful reaction must release an earlier-history loading state only for its original channel.");
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
@@ -155,5 +161,9 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /current\.status === "ready"[\s\S]*last received messages/, "A failed poll after a successful load must preserve real history.");
   assert.match(shell, /const CAPABILITY_PROBE_RETRY_LIMIT = 3/, "A failed initial capability probe must retry without relying on a browser reload.");
   assert.match(shell, /poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT[\s\S]*window\.setTimeout\(\(\) => void refresh\(\), CAPABILITY_PROBE_RETRY_DELAY_MS\)/, "Capability retries must remain bounded and must not turn public read-only history into a permanent polling loop.");
+  assert.match(assist, /const interactionLocked = busy \|\| !localHistoryReady/, "Assist interactions must remain disabled until local history restoration completes.");
+  assert.match(assist, /if \(!text \|\| interactionLocked\) return;/, "Assist requests must not begin before history restoration completes.");
+  assert.match(assist, /if \(!localHistoryReady\) return;[\s\S]*requestRef\.current \+= 1;/, "The clear action must not race local history restoration.");
+  assert.match(assist, /disabled=\{interactionLocked\}/, "Visible Assist prompt actions must respect the history restoration lock.");
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });

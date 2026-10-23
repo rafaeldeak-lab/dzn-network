@@ -26,7 +26,7 @@ export type DznAssistWorkflow = {
 };
 
 export type DznAssistReply = {
-  kind: "boundary" | "guidance" | "ranking" | "fallback";
+  kind: DznAssistReplyKind;
   message: string;
   links: DznAssistLink[];
   workflows: DznAssistWorkflow[];
@@ -37,14 +37,18 @@ export type DznAssistReply = {
   showServers: boolean;
 };
 
+export type DznAssistReplyKind = "boundary" | "guidance" | "ranking" | "fallback";
+
 type DznAssistOptions = {
   guides?: readonly DznAssistGuide[];
   previousGuideIds?: readonly string[];
 };
 
-const SENSITIVE_PRIVATE_REQUEST = /\b(card number|cvv|cvc|password|passcode|token|secret|credential|api key|bank|account number|private message|dm|server file)\b/i;
+const SENSITIVE_PRIVATE_REQUEST = /\b(?:card number|cvv|cvc|password|passcode|token|secret|credential|api key|private key|bank|account number|private message|dm|server file|session cookie)\b|\bauthorization\s*:|\bcookie\s*:/i;
+const SENSITIVE_CREDENTIAL_ASSIGNMENT = /\b(?:[a-z0-9]+[-_])*(?:token|secret|password|passcode|credential|authorization|api[-_\s]?key|private[-_\s]?key|cookie)(?:[-_][a-z0-9]+)*\s*(?::|=)/i;
+const AUTHENTICATED_URL = /(?:\b[a-z][a-z0-9+.-]*:)?\/\/[^\s\/@]+@/i;
 const ACCOUNT_SPECIFIC_REQUEST = /\b(my account|my payment|my bill|my invoice|my receipt|my subscription|my discord|reported me|reporter|appeal|ban)\b/i;
-const PUBLIC_ACCOUNT_ROUTE_REQUEST = /\b(sign in|log in(?:to)?|login|create (?:(?:an|my) )?account|join dzn)\b|\b(?:view|show|see|compare|learn about)\b[\s\S]{0,24}\b(?:plans?|pricing|subscriptions?)\b/i;
+const PUBLIC_ACCOUNT_ROUTE_ONLY_REQUEST = /^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?(?:sign in|log in(?:to)?|login)(?:\s+(?:to\s+)?(?:my\s+)?account)?\??$|^(?:(?:how|where|can)\s+(?:do|can)\s+i\s+)?create\s+(?:(?:an|my)\s+)?account\??$|^join\s+dzn\??$/i;
 const RANKING_TERMS = "(?:top|leaderboard|rankings?|ranked|best)";
 const PLAYER_RANKING_TERMS = "(?:players?|survivors?|kills?)";
 const SERVER_RANKING_TERMS = "(?:servers?|communities)";
@@ -60,62 +64,59 @@ export function isPublicRankingRequest(question: string) {
   return RANKING_REQUEST.test(question);
 }
 
+export function hasSensitiveDznAssistInput(question: string) {
+  return SENSITIVE_PRIVATE_REQUEST.test(question)
+    || SENSITIVE_CREDENTIAL_ASSIGNMENT.test(question)
+    || AUTHENTICATED_URL.test(question)
+    || (ACCOUNT_SPECIFIC_REQUEST.test(question) && !PUBLIC_ACCOUNT_ROUTE_ONLY_REQUEST.test(question.trim()));
+}
+
 export function answerDznAssist(question: string, options: DznAssistOptions = {}): DznAssistReply {
   const normalized = question.trim().replace(/\s+/g, " ");
   const guides = options.guides ?? DZN_ASSIST_GUIDES;
 
   if (!normalized) return fallbackReply();
 
-  if ((SENSITIVE_PRIVATE_REQUEST.test(normalized) || (ACCOUNT_SPECIFIC_REQUEST.test(normalized) && !PUBLIC_ACCOUNT_ROUTE_REQUEST.test(normalized))) && !isPublicRankingRequest(normalized)) {
-    return {
-      kind: "boundary",
-      message: "I can explain public DZN routes, but I cannot view or disclose account, payment, player, Discord, moderation, or server-private information. Use the signed-in controls or private support for that case.",
-      links: privateSupportLinks(guides),
-      workflows: [],
-      suggestedPrompts: ["Compare DZN plans", "How do I add my server?", "Show the top servers"],
-      guideIds: [],
-      wantsRankings: false,
-      showPlayers: false,
-      showServers: false,
-    };
+  if (hasSensitiveDznAssistInput(normalized) && !isPublicRankingRequest(normalized)) {
+    return boundaryReply(guides);
   }
 
   const showPlayers = PLAYER_RANKING_REQUEST.test(normalized) || (!SERVER_RANKING_REQUEST.test(normalized) && RANKING_REQUEST.test(normalized));
   const showServers = SERVER_RANKING_REQUEST.test(normalized) || (!PLAYER_RANKING_REQUEST.test(normalized) && RANKING_REQUEST.test(normalized));
   if (showPlayers || showServers) {
-    return {
-      kind: "ranking",
-      message: "I can show the current public standings. I will only use the public DZN leaderboard and will not expose private profiles or hidden server data.",
-      links: [{ href: "/leaderboards", label: "Open full leaderboards" }],
-      workflows: [],
-      suggestedPrompts: ["How do I link my DayZ stats?", "How do I add my server?", "What events are live?"],
-      guideIds: [],
-      wantsRankings: true,
-      showPlayers,
-      showServers,
-    };
+    return rankingReply(showPlayers, showServers);
   }
 
   const matchedGuides = findGuides(normalized, guides, options.previousGuideIds);
   if (matchedGuides.length) {
-    const workflows = matchedGuides.map(toWorkflow);
-    const guideIds = workflows.map((workflow) => workflow.id);
-    const message = workflows.length === 1
-      ? `Here is the clearest public route for ${workflows[0].title.toLocaleLowerCase()}.`
-      : `I can help with both parts. Start with ${workflows[0].title.toLocaleLowerCase()}, then continue with ${workflows[1].title.toLocaleLowerCase()}.`;
-    return {
-      kind: "guidance",
-      message,
-      links: uniqueLinks(workflows.flatMap((workflow) => workflow.links)),
-      workflows,
-      suggestedPrompts: nextPromptsFor(workflows),
-      guideIds,
-      wantsRankings: false,
-      showPlayers: false,
-      showServers: false,
-    };
+    return guidanceReply(matchedGuides.map(toWorkflow));
   }
 
+  return fallbackReply();
+}
+
+export function restoreDznAssistReply(kind: DznAssistReplyKind, guideIds: readonly string[] | undefined, options: Pick<DznAssistOptions, "guides"> = {}): DznAssistReply {
+  const guides = options.guides ?? DZN_ASSIST_GUIDES;
+  if (kind === "guidance") {
+    const workflows = (guideIds ?? [])
+      .map((id) => guides.find((guide) => guide.id === id))
+      .filter((guide): guide is DznAssistGuide => Boolean(guide))
+      .slice(0, 2)
+      .map(toWorkflow);
+    if (workflows.length > 0) return guidanceReply(workflows);
+  }
+  if (kind === "boundary") return boundaryReply(guides);
+  if (kind === "ranking") return {
+    kind: "ranking",
+    message: "This saved question was about live public standings. Historic leaderboard rows are not stored in DZN Assist history, so open the public leaderboard to see the current results.",
+    links: [{ href: "/leaderboards", label: "Open full leaderboards" }],
+    workflows: [],
+    suggestedPrompts: ["How do I link my DayZ stats?", "How do I add my server?", "What events are live?"],
+    guideIds: [],
+    wantsRankings: false,
+    showPlayers: false,
+    showServers: false,
+  };
   return fallbackReply();
 }
 
@@ -206,6 +207,52 @@ function toWorkflow(guide: DznAssistGuide): DznAssistWorkflow {
 function nextPromptsFor(workflows: readonly DznAssistWorkflow[]) {
   const prompts = workflows.flatMap((workflow) => workflow.nextPrompts);
   return [...new Set([...prompts, "What should I do next?"])].slice(0, 3);
+}
+
+function guidanceReply(workflows: DznAssistWorkflow[]): DznAssistReply {
+  const guideIds = workflows.map((workflow) => workflow.id);
+  const message = workflows.length === 1
+    ? `Here is the clearest public route for ${workflows[0].title.toLocaleLowerCase()}.`
+    : `I can help with both parts. Start with ${workflows[0].title.toLocaleLowerCase()}, then continue with ${workflows[1].title.toLocaleLowerCase()}.`;
+  return {
+    kind: "guidance",
+    message,
+    links: uniqueLinks(workflows.flatMap((workflow) => workflow.links)),
+    workflows,
+    suggestedPrompts: nextPromptsFor(workflows),
+    guideIds,
+    wantsRankings: false,
+    showPlayers: false,
+    showServers: false,
+  };
+}
+
+function boundaryReply(guides: readonly DznAssistGuide[]): DznAssistReply {
+  return {
+    kind: "boundary",
+    message: "I can explain public DZN routes, but I cannot view or disclose account, payment, player, Discord, moderation, or server-private information. Use the signed-in controls or private support for that case.",
+    links: privateSupportLinks(guides),
+    workflows: [],
+    suggestedPrompts: ["Compare DZN plans", "How do I add my server?", "Show the top servers"],
+    guideIds: [],
+    wantsRankings: false,
+    showPlayers: false,
+    showServers: false,
+  };
+}
+
+function rankingReply(showPlayers: boolean, showServers: boolean): DznAssistReply {
+  return {
+    kind: "ranking",
+    message: "I can show the current public standings. I will only use the public DZN leaderboard and will not expose private profiles or hidden server data.",
+    links: [{ href: "/leaderboards", label: "Open full leaderboards" }],
+    workflows: [],
+    suggestedPrompts: ["How do I link my DayZ stats?", "How do I add my server?", "What events are live?"],
+    guideIds: [],
+    wantsRankings: true,
+    showPlayers,
+    showServers,
+  };
 }
 
 function fallbackReply(): DznAssistReply {
