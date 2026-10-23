@@ -102,12 +102,16 @@ export function DznCommsShell() {
   const [selectedChannel, setSelectedChannel] = useState("global-chat");
   const selectedChannelRef = useRef("global-chat");
   const historyRequestGenerationRef = useRef(0);
+  const privateAccessRequestGenerationRef = useRef(0);
+  const messageLogRef = useRef<HTMLDivElement | null>(null);
   const deletionNoticeTimeoutsRef = useRef(new Map<string, number>());
   const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
   const [deletedMessageIds, setDeletedMessageIds] = useState<ReadonlySet<string>>(() => new Set());
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
+  const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
+  const [historyPageMode, setHistoryPageMode] = useState<"latest" | "earlier">("latest");
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "signed-out">("checking");
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
   const reactionAttemptRef = useRef(new Map<string, string>());
@@ -123,34 +127,49 @@ export function DznCommsShell() {
 
   useEffect(() => {
     if (!historyProbeEnabled || selectedChannel === "dzn-updates") return;
+    // Public history pauses while the visitor reads a selected page. Private groups keep
+    // polling their authorization and controls so access revocations take effect promptly.
+    if (historyPageMode === "earlier" && selectedChannel === "global-chat") return;
+    const retainPrivateEarlierPage = historyPageMode === "earlier" && selectedChannel !== "global-chat";
 
     const controller = new AbortController();
     let poller: number | undefined;
     let retryTimer: number | undefined;
     let capabilityProbeRetries = 0;
     const refresh = () => {
-      const requestGeneration = ++historyRequestGenerationRef.current;
+      // Private access checks must not invalidate an in-flight earlier-page request.
+      // They only refresh membership and capabilities while preserving that page.
+      const requestGeneration = retainPrivateEarlierPage
+        ? ++privateAccessRequestGenerationRef.current
+        : ++historyRequestGenerationRef.current;
+      const isCurrentRequest = () => retainPrivateEarlierPage
+        ? privateAccessRequestGenerationRef.current === requestGeneration
+        : historyRequestGenerationRef.current === requestGeneration;
       return loadCommsHistory(controller.signal, { channelSlug: selectedChannel })
       .then((payload) => {
         if (
           controller.signal.aborted
-          || historyRequestGenerationRef.current !== requestGeneration
+          || !isCurrentRequest()
           || selectedChannelRef.current !== selectedChannel
           || payload.channel.slug !== selectedChannel
         ) return;
-        setHistory({
+        setHistory((current) => ({
           status: "ready",
-          payload,
+          payload: retainPrivateEarlierPage && current.status === "ready" && current.payload.channel.slug === selectedChannel
+            ? { ...payload, messages: current.payload.messages, page: current.payload.page }
+            : payload,
           message: payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. English only. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
-        });
+        }));
       })
       .catch(() => {
         if (
           controller.signal.aborted
-          || historyRequestGenerationRef.current !== requestGeneration
+          || !isCurrentRequest()
           || selectedChannelRef.current !== selectedChannel
         ) return;
         if (selectedChannel !== "global-chat") {
+          setLoadingEarlierMessages(false);
+          setHistoryPageMode("latest");
           setHistory({
             status: "loading",
             payload: staticPayload,
@@ -183,7 +202,7 @@ export function DznCommsShell() {
       if (poller !== undefined) window.clearInterval(poller);
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [selectedChannel, liveHistoryRuntimeEnabled]);
+  }, [selectedChannel, historyPageMode, liveHistoryRuntimeEnabled]);
 
   useEffect(() => {
     const selectChannelFromHash = () => {
@@ -192,6 +211,8 @@ export function DznCommsShell() {
       historyRequestGenerationRef.current += 1;
       setDraft("");
       setComposerMessage("");
+      setLoadingEarlierMessages(false);
+      setHistoryPageMode("latest");
       selectedChannelRef.current = nextChannel;
       if (nextChannel === "global-chat") {
         setHistory({
@@ -268,6 +289,8 @@ export function DznCommsShell() {
     historyRequestGenerationRef.current += 1;
     setDraft("");
     setComposerMessage("");
+    setLoadingEarlierMessages(false);
+    setHistoryPageMode("latest");
     selectedChannelRef.current = "dzn-updates";
     setSelectedChannel("dzn-updates");
     if (window.location.hash !== "#dzn-updates") window.history.replaceState(null, "", "#dzn-updates");
@@ -294,6 +317,9 @@ export function DznCommsShell() {
         setDraft("");
         setComposerMessage(`Message sent to ${payload.channel.name}.`);
       }
+      if (selectedChannelRef.current !== targetChannel) return;
+      setLoadingEarlierMessages(false);
+      setHistoryPageMode("latest");
       const requestGeneration = ++historyRequestGenerationRef.current;
       try {
         const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
@@ -335,6 +361,9 @@ export function DznCommsShell() {
     } catch (error) {
       throw error;
     }
+    if (selectedChannelRef.current !== targetChannel) return;
+    setLoadingEarlierMessages(false);
+    setHistoryPageMode("latest");
     const requestGeneration = ++historyRequestGenerationRef.current;
     try {
       const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
@@ -350,6 +379,63 @@ export function DznCommsShell() {
         setHistory((current) => ({ ...current, message: "Reaction saved. Counts will refresh shortly." }));
       }
     }
+  }
+
+  async function loadEarlierMessages() {
+    const targetChannel = payload.channel.slug;
+    const cursor = payload.page.next_cursor;
+    if (!historyReady || !cursor || loadingEarlierMessages || selectedChannelRef.current !== targetChannel) return;
+
+    const scrollPosition = messageLogRef.current
+      ? { height: messageLogRef.current.scrollHeight, top: messageLogRef.current.scrollTop }
+      : null;
+    const requestGeneration = ++historyRequestGenerationRef.current;
+    setLoadingEarlierMessages(true);
+    setHistoryPageMode("earlier");
+    try {
+      const earlier = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel, cursor });
+      if (
+        historyRequestGenerationRef.current !== requestGeneration
+        || selectedChannelRef.current !== targetChannel
+        || earlier.channel.slug !== targetChannel
+      ) return;
+      setHistory((current) => {
+        if (current.status !== "ready" || current.payload.channel.slug !== targetChannel) return current;
+        const currentIds = new Set(current.payload.messages.map((message) => message.id));
+        const unseenEarlier = earlier.messages.filter((message) => !currentIds.has(message.id));
+        return {
+          ...current,
+          payload: {
+            ...earlier,
+            messages: [...unseenEarlier, ...current.payload.messages],
+          },
+          message: unseenEarlier.length > 0 ? "Earlier messages loaded. Return to latest messages to refresh this channel." : "No additional earlier messages are available.",
+        };
+      });
+      if (scrollPosition) {
+        window.requestAnimationFrame(() => {
+          const log = messageLogRef.current;
+          if (log) log.scrollTop = scrollPosition.top + (log.scrollHeight - scrollPosition.height);
+        });
+      }
+    } catch {
+      if (historyRequestGenerationRef.current === requestGeneration && selectedChannelRef.current === targetChannel) {
+        setHistory((current) => ({ ...current, message: "Earlier messages could not load. Showing the messages already received." }));
+        setHistoryPageMode("latest");
+      }
+    } finally {
+      if (historyRequestGenerationRef.current === requestGeneration && selectedChannelRef.current === targetChannel) {
+        setLoadingEarlierMessages(false);
+      }
+    }
+  }
+
+  function returnToLatestMessages() {
+    if (historyPageMode !== "earlier") return;
+    historyRequestGenerationRef.current += 1;
+    setLoadingEarlierMessages(false);
+    setHistoryPageMode("latest");
+    setHistory((current) => ({ ...current, message: `Returning to the latest ${current.payload.channel.name} messages.` }));
   }
 
   function handleMessageDeleted(messageId: string, deletedChannelSlug: string) {
@@ -412,6 +498,8 @@ export function DznCommsShell() {
             historyRequestGenerationRef.current += 1;
             setDraft("");
             setComposerMessage("");
+            setLoadingEarlierMessages(false);
+            setHistoryPageMode("latest");
             selectedChannelRef.current = "global-chat";
             setHistory({ status: "loading", payload: staticPayload, message: "Opening Global Chat." });
             setSelectedChannel("global-chat");
@@ -482,6 +570,8 @@ export function DznCommsShell() {
                         historyRequestGenerationRef.current += 1;
                         setDraft("");
                         setComposerMessage("");
+                        setLoadingEarlierMessages(false);
+                        setHistoryPageMode("latest");
                         selectedChannelRef.current = channel.slug;
                         setHistory({ status: "loading", payload: staticPayload, message: "Opening the selected DZN Comms channel." });
                         setSelectedChannel(channel.slug);
@@ -521,11 +611,16 @@ export function DznCommsShell() {
               </div>
 
               <div
+                ref={messageLogRef}
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
                 className="mt-3 h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
               >
+                {historyReady && (payload.page.has_more || historyPageMode === "earlier") ? <div className="flex items-center justify-center gap-2 border-b border-white/8 py-3">
+                  {historyPageMode === "earlier" ? <button type="button" onClick={returnToLatestMessages} className="min-h-8 border border-white/12 bg-white/[0.035] px-3 text-xs font-bold text-zinc-300 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white">Latest messages</button> : null}
+                  {payload.page.has_more ? <button type="button" onClick={() => void loadEarlierMessages()} disabled={loadingEarlierMessages} className="min-h-8 border border-cyan-300/25 bg-cyan-300/8 px-3 text-xs font-bold text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/15 disabled:cursor-wait disabled:opacity-60">{loadingEarlierMessages ? "Loading history..." : "Load earlier messages"}</button> : null}
+                </div> : null}
                 {visibleMessages.length > 0 ? visibleMessages.map((message) => (
                   <MessageRow
                     key={message.id}

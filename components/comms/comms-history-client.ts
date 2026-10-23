@@ -260,7 +260,7 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<Co
   }
 }
 
-export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?: typeof fetch; timeoutMs?: number; channelSlug?: string } = {}): Promise<CommsHistoryPayload> {
+export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?: typeof fetch; timeoutMs?: number; channelSlug?: string; cursor?: string } = {}): Promise<CommsHistoryPayload> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
@@ -273,7 +273,10 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
     controller.signal.throwIfAborted();
     const request = (async () => {
       const selectedChannel = channelSlug(options.channelSlug ?? "global-chat");
-      const response = await (options.fetcher ?? fetch)(`/api/comms/message-history?channel=${encodeURIComponent(selectedChannel)}&limit=30`, {
+      const cursor = options.cursor === undefined ? null : historyCursor(options.cursor);
+      const query = new URLSearchParams({ channel: selectedChannel, limit: "30" });
+      if (cursor) query.set("cursor", cursor);
+      const response = await (options.fetcher ?? fetch)(`/api/comms/message-history?${query.toString()}`, {
         method: "GET", cache: "no-store", credentials: "include", redirect: "error", headers: { accept: "application/json" }, signal: controller.signal,
       });
       return readResponse(response, controller.signal);
@@ -284,6 +287,11 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
     signal.removeEventListener("abort", abort);
     controller.signal.removeEventListener("abort", rejectAbort);
   }
+}
+
+function historyCursor(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) throw unavailable();
+  return value;
 }
 
 async function requestCommsMutation(method: "POST" | "DELETE", path: string, body: unknown, fallbackMessage: string) {

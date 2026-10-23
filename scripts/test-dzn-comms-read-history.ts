@@ -115,7 +115,12 @@ assert.match(shell, /Log in to react/, "Signed-out users must receive a direct l
 assert.match(shell, /if \(!reactionWritesAvailable\) return;/, "The auth probe must remain dormant until reaction writes are available.");
 assert.match(shell, /\}, \[reactionWritesAvailable\]\);/, "The auth probe must follow the authoritative reaction-write availability state.");
 assert.match(shell, /reactionAttemptRef\.current\.delete\(addAttemptKey\)[\s\S]*reactionAttemptRef\.current\.delete\(removeAttemptKey\)/, "A successful reaction mutation must clear stale retry IDs for both action directions.");
-assert.match(historyClient, /`\/api\/comms\/message-history\?channel=\$\{encodeURIComponent\(selectedChannel\)\}&limit=30`/, "The client should fetch only the selected read-only history route.");
+assert.match(historyClient, /new URLSearchParams\(\{ channel: selectedChannel, limit: "30" \}\)/, "The client should fetch only the selected read-only history route with a bounded page size.");
+assert.match(historyClient, /if \(cursor\) query\.set\("cursor", cursor\)/, "The client may request an earlier page only through its validated opaque cursor.");
+assert.match(shell, /payload:\s*{\s*\.\.\.earlier,\s*messages:\s*\[\.\.\.unseenEarlier, \.\.\.current\.payload\.messages\]/, "Earlier history must adopt the refreshed channel permissions and flags while retaining accumulated messages.");
+assert.match(shell, /historyPageMode === "earlier" && selectedChannel === "global-chat"/, "Only public history may pause polling while an earlier page is open.");
+assert.match(shell, /retainPrivateEarlierPage[\s\S]*\? \{ \.\.\.payload, messages: current\.payload\.messages, page: current\.payload\.page \}/, "Private-group polling must retain the selected earlier page while applying refreshed access state.");
+assert.match(historyClient, /`\/api\/comms\/message-history\?\$\{query\.toString\(\)\}`/, "The client must keep Comms history requests on the same-origin read-only route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must retain an explicit public UI switch for development and controlled previews.");
 assert.match(shell, /selfDeleteUiEnabled = historyReady && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require the verified server archive safeguard.");

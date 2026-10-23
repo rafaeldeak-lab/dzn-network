@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction, sendCommsMessage } from "../components/comms/comms-history-client";
 import { recentVisibleSpeakers } from "../components/comms/dzn-comms-shell";
+import { parseDznAssistLocalHistory, selectCompletedDznAssistLocalHistoryTurns, serializeDznAssistLocalHistory } from "../lib/dzn-assist-local-history";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
@@ -83,6 +84,63 @@ test("accepts only a membership-scoped private group projection", async () => {
     fetcher: async (url) => { requested = String(url); return jsonResponse(input); },
   });
   assert.equal(requested, "/api/comms/message-history?channel=pandora-squad&limit=30");
+});
+
+test("requests an earlier Comms page only with a validated opaque cursor", async () => {
+  const cursor = "YXJyYXktdGllLTAwMDE";
+  let requested = "";
+  await loadCommsHistory(new AbortController().signal, {
+    cursor,
+    fetcher: async (url) => { requested = String(url); return jsonResponse(commsHistoryFixture()); },
+  });
+  assert.equal(requested, `/api/comms/message-history?channel=global-chat&limit=30&cursor=${cursor}`);
+  await assert.rejects(loadCommsHistory(new AbortController().signal, {
+    cursor: "not+a+cursor",
+    fetcher: async () => jsonResponse(commsHistoryFixture()),
+  }));
+});
+
+test("persists only bounded DZN Assist transcript text and reconstructable reply context locally", () => {
+  const serialized = serializeDznAssistLocalHistory([
+    { role: "visitor", text: "How do I add my server?" },
+    { role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"], replyKind: "guidance" },
+    { role: "assist", text: "Live rankings", replyKind: "ranking" },
+    { role: "assist", text: "Transient public ranking rows are not saved." },
+  ]);
+  assert.ok(serialized);
+  assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(serialized ?? "{}")), [
+    { id: "dzn-assist-history-1", role: "visitor", text: "How do I add my server?" },
+    { id: "dzn-assist-history-2", role: "assist", text: "Open the server setup route.", guideIds: ["server-setup"], replyKind: "guidance" },
+    { id: "dzn-assist-history-3", role: "assist", text: "Live rankings", replyKind: "ranking" },
+  ]);
+  assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "visitor", text: "x", guideIds: ["unsafe/id"] }] }), []);
+  assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "assist", text: "x" }] }), []);
+  assert.equal(serializeDznAssistLocalHistory([
+    { role: "visitor", text: "password is private", excludeFromLocalHistory: true },
+    { role: "assist", text: "Use private support.", replyKind: "boundary", excludeFromLocalHistory: true },
+  ]), null);
+  const retainedHistory = serializeDznAssistLocalHistory([
+    { role: "visitor", text: "Earlier safe question" },
+    { role: "assist", text: "Earlier safe answer", replyKind: "guidance" },
+    ...Array.from({ length: 40 }, (_, index) => ({
+      role: "visitor" as const,
+      text: `Sensitive question ${index + 1}`,
+      excludeFromLocalHistory: true,
+    })),
+  ]);
+  assert.deepEqual(parseDznAssistLocalHistory(JSON.parse(retainedHistory ?? "{}")), [
+    { id: "dzn-assist-history-1", role: "visitor", text: "Earlier safe question" },
+    { id: "dzn-assist-history-2", role: "assist", text: "Earlier safe answer", replyKind: "guidance" },
+  ]);
+  assert.deepEqual(selectCompletedDznAssistLocalHistoryTurns([
+    { role: "visitor", text: "Completed question" },
+    { role: "assist", text: "Completed answer", replyKind: "guidance" },
+    { role: "visitor", text: "Unanswered question" },
+  ]), [
+    { role: "visitor", text: "Completed question" },
+    { role: "assist", text: "Completed answer", replyKind: "guidance" },
+  ]);
+  assert.equal(serializeDznAssistLocalHistory([]), null);
 });
 
 test("rejects unlisted, duplicate, role-mismatched or disabled private channel projections", () => {
