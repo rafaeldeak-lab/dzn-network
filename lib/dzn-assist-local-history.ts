@@ -8,7 +8,9 @@ export type DznAssistLocalHistoryMessage = {
 
 export type DznAssistLocalHistoryReplyKind = "boundary" | "fallback" | "guidance" | "ranking";
 
-type DznAssistLocalHistoryInput = Pick<DznAssistLocalHistoryMessage, "role" | "text" | "guideIds" | "replyKind">;
+type DznAssistLocalHistoryInput = Pick<DznAssistLocalHistoryMessage, "role" | "text" | "guideIds" | "replyKind"> & {
+  excludeFromLocalHistory?: boolean;
+};
 
 export const DZN_ASSIST_LOCAL_HISTORY_STORAGE_KEY = "dzn-assist.local-history.v1";
 const HISTORY_VERSION = 2;
@@ -34,7 +36,7 @@ export function parseDznAssistLocalHistory(value: unknown): DznAssistLocalHistor
 export function serializeDznAssistLocalHistory(messages: readonly DznAssistLocalHistoryInput[]): string | null {
   const saved = messages
     .slice(-MAX_HISTORY_MESSAGES)
-    .filter((message) => message.role !== "assist" || message.replyKind !== undefined)
+    .filter((message) => !message.excludeFromLocalHistory && (message.role !== "assist" || message.replyKind !== undefined))
     .map((message) => parseMessage(message))
     .filter((message): message is Omit<DznAssistLocalHistoryMessage, "id"> => message !== null);
   if (saved.length === 0) return null;

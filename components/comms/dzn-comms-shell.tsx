@@ -126,7 +126,10 @@ export function DznCommsShell() {
 
   useEffect(() => {
     if (!historyProbeEnabled || selectedChannel === "dzn-updates") return;
-    if (historyPageMode === "earlier") return;
+    // Public history pauses while the visitor reads a selected page. Private groups keep
+    // polling their authorization and controls so access revocations take effect promptly.
+    if (historyPageMode === "earlier" && selectedChannel === "global-chat") return;
+    const retainPrivateEarlierPage = historyPageMode === "earlier" && selectedChannel !== "global-chat";
 
     const controller = new AbortController();
     let poller: number | undefined;
@@ -142,11 +145,13 @@ export function DznCommsShell() {
           || selectedChannelRef.current !== selectedChannel
           || payload.channel.slug !== selectedChannel
         ) return;
-        setHistory({
+        setHistory((current) => ({
           status: "ready",
-          payload,
+          payload: retainPrivateEarlierPage && current.status === "ready" && current.payload.channel.slug === selectedChannel
+            ? { ...payload, messages: current.payload.messages, page: current.payload.page }
+            : payload,
           message: payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
-        });
+        }));
       })
       .catch(() => {
         if (

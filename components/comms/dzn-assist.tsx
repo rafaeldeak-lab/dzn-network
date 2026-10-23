@@ -30,6 +30,7 @@ type AssistMessage = {
   suggestedPrompts?: string[];
   guideIds?: string[];
   replyKind?: DznAssistReplyKind;
+  excludeFromLocalHistory?: boolean;
   players?: DznAssistRankingRow[];
   servers?: DznAssistRankingRow[];
   updatedAt?: string | null;
@@ -126,7 +127,8 @@ export function DznAssist() {
     const requestId = ++requestRef.current;
     const previousGuideIds = [...messages].reverse().find((message) => message.role === "assist" && message.guideIds?.length)?.guideIds;
     const reply = answerDznAssist(text, { guides: visibleGuides, previousGuideIds });
-    setMessages((current) => [...current, { id: `visitor-${requestId}`, role: "visitor", text }]);
+    const excludeFromLocalHistory = reply.kind === "boundary";
+    setMessages((current) => [...current, { id: `visitor-${requestId}`, role: "visitor", text, excludeFromLocalHistory }]);
     setDraft("");
     setThinking(true);
 
@@ -141,6 +143,7 @@ export function DznAssist() {
       suggestedPrompts: reply.suggestedPrompts,
       guideIds: reply.guideIds,
       replyKind: reply.kind,
+      excludeFromLocalHistory,
     }]);
     setThinking(false);
 

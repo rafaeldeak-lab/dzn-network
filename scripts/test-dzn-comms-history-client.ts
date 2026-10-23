@@ -115,6 +115,10 @@ test("persists only bounded DZN Assist transcript text and reconstructable reply
   ]);
   assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "visitor", text: "x", guideIds: ["unsafe/id"] }] }), []);
   assert.deepEqual(parseDznAssistLocalHistory({ version: 2, messages: [{ role: "assist", text: "x" }] }), []);
+  assert.equal(serializeDznAssistLocalHistory([
+    { role: "visitor", text: "password is private", excludeFromLocalHistory: true },
+    { role: "assist", text: "Use private support.", replyKind: "boundary", excludeFromLocalHistory: true },
+  ]), null);
   assert.equal(serializeDznAssistLocalHistory([]), null);
 });
 
