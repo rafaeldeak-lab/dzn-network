@@ -22,8 +22,8 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // These are high-confidence whole phrases, not a pretend general language
 // detector. They cover common attempts to post a non-English message written
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
-const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola(?:\s+(?:amigos|a\s+todos|chicos))?|gracias(?:\s+muchas)?|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|bonsoir|merci(?:\s+beaucoup)?|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|grazie|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|danke|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|ola|obrigad[oa]|como\s+voce\s+esta|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet\s+(?:drug|druzya)|spasibo|ni\s+hao)\b/i;
-const nonEnglishGreetingOnlyPattern = /^(?:bonjour|ciao|hallo|namaste)\s*[.!?]*$/i;
+const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao)\b/i;
+const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dick(?:head)?|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|pussy|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
@@ -40,7 +40,7 @@ const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape thre
 // deliberately separated. It never collapses arbitrary words, so ordinary
 // text such as "Scunthorpe" remains safe from false matches.
 const obfuscatedProfanityPattern =
-  /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|a[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k(?:[\W_]*h[\W_]*e[\W_]*a[\W_]*d)?|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|t[\W_]*w[\W_]*a[\W_]*t|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
+  /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|a[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*l[\W_]*[i1!][\W_]*t|c[\W_]*o[\W_]*c[\W_]*k|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k(?:[\W_]*h[\W_]*e[\W_]*a[\W_]*d)?|f[\W_]*a[\W_]*g(?:[\W_]*g[\W_]*o[\W_]*t)?|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|h[\W_]*o[\W_]*m[\W_]*o|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|r[\W_]*e[\W_]*t[\W_]*a[\W_]*r[\W_]*d(?:[\W_]*e[\W_]*d)?|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|t[\W_]*r[\W_]*a[\W_]*n[\W_]*n(?:[\W_]*y|[\W_]*i[\W_]*e)|t[\W_]*w[\W_]*a[\W_]*t|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -681,7 +681,7 @@ function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABL
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function booleanFlag(value: unknown) { return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
-function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase(); }
+function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").replace(/ß/g, "ss").toLowerCase(); }
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }
