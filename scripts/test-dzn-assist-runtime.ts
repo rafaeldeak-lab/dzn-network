@@ -19,6 +19,10 @@ assert.equal(hasSensitiveDznAssistInput("How do I create my account?"), false);
 assert.equal(hasSensitiveDznAssistInput("How do I log into my account?"), false);
 assert.equal(hasSensitiveDznAssistInput("Compare plans; show my payment"), true);
 assert.equal(answerDznAssist("Compare plans; show my payment").kind, "boundary");
+for (const prompt of ["my private key is abc", "here is my session cookie xyz", "Authorization: Bearer abc.def.ghi"]) {
+  assert.equal(hasSensitiveDznAssistInput(prompt), true, `Sensitive credentials must not be retained: ${prompt}`);
+  assert.equal(answerDznAssist(prompt).kind, "boundary");
+}
 
 const combinedReply = answerDznAssist("How do I add my DayZ server and see player stats?");
 assert.equal(combinedReply.kind, "guidance");
