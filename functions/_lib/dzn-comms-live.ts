@@ -22,7 +22,7 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // These are high-confidence whole phrases, not a pretend general language
 // detector. They cover common attempts to post a non-English message written
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
-const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola(?:\s+(?:amigos|a\s+todos|chicos))?|gracias(?:\s+muchas)?|bonjour|bonsoir|merci(?:\s+beaucoup)?|comment\s+(?:ca|vas)|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao|grazie|come\s+stai|per\s+favore|hallo|danke|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|ola|obrigad[oa]|como\s+voce\s+esta|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|ni\s+hao|namaste)\b/i;
+const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola(?:\s+(?:amigos|a\s+todos|chicos))?|gracias(?:\s+muchas)?|bonjour|bonsoir|merci(?:\s+beaucoup)?|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao|grazie|come\s+stai|per\s+favore|hallo|danke|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|ola|obrigad[oa]|como\s+voce\s+esta|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet\s+(?:drug|druzya)|spasibo|ni\s+hao|namaste)\b/i;
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dick(?:head)?|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|pussy|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
@@ -33,6 +33,7 @@ const sexualHarassmentPattern = /\b(?:clit|cock|suck\s+(?:my|your|ur)\s+(?:mum|m
 // chat in another language. This supplements the script/phrase guards above;
 // it is not represented as a complete global language catalogue.
 const multilingualAbusePattern = /\b(?:arschloch|cabron|caralho|cazzo|chinga(?:do)?|connard|encule|filho\s+da\s+puta|joder|kurwa|merde|mierda|pendejo|pierdol|puta|putain|scheisse|schei(?:ss|ß)e|stronzo|vaffanculo|verga)\b/i;
+const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i;
 // A separate expression catches blocked roots when their letters are
 // deliberately separated. It never collapses arbitrary words, so ordinary
 // text such as "Scunthorpe" remains safe from false matches.
@@ -93,11 +94,11 @@ export function moderateDznCommsBody(value: unknown) {
   if (/(?:discord\.gg|discord(?:app)?\.com\/invite)\//i.test(body) || /(.)\1{14,}/u.test(body)) {
     return { decision: "block" as const, code: "SPAM_BLOCKED", body: "" };
   }
+  if (severeAbusePattern.test(compact)) {
+    return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
+  }
   if (nonLatinScriptPattern.test(body) || nonEnglishPhrasePattern.test(compact)) {
     return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
-  }
-  if (/\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i.test(compact)) {
-    return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
   if (
     profanityPattern.test(compact)

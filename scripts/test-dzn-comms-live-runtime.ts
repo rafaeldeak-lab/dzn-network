@@ -882,7 +882,7 @@ function testAutomaticLanguageFilter() {
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
   }
-  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet", "Привет"] ) {
+  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet drug", "Привет"] ) {
     const result = moderateDznCommsBody(body);
     assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
   }
@@ -890,7 +890,14 @@ function testAutomaticLanguageFilter() {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
   }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
+  assert.equal(moderateDznCommsBody("Take cover behind the privet hedge.").decision, "allow", "Ambiguous English words must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("The report is filed with comment CA.").decision, "allow", "Ambiguous English abbreviations must not trigger the English-only filter.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
+  assert.deepEqual(
+    moderateDznCommsBody("kill yourself Привет"),
+    { decision: "timeout", code: "SAFETY_TIMEOUT", body: "" },
+    "Severe abuse must retain its timeout decision when language markers are also present.",
+  );
 }
 
 async function main() {
