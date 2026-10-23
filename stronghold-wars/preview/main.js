@@ -11,9 +11,11 @@ import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy } from './layout-grid.js';
+import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
+const operations = new OperationsController(service);
 const DEFS = {
   hq: { name: 'Command Hall', pos: [0, 0] },
   workshop: { name: 'Workshop / Forge', pos: [-9, 4] },
@@ -2101,13 +2103,103 @@ function showWarTable(errorMessage = '') {
 }
 $('warBtn').onclick = () => showWarTable();
 
+function showOperationsBoard(message = '') {
+  const identityId = service.state.currentIdentityId;
+  const board = operations.getBoard(identityId);
+  if (!board.ok) { toast(board.error); return; }
+  if (!board.access.allowed) {
+    openPanel(`<h2>DZN Operations</h2><p class="notice warn">${escapeHTML(board.access.reason)}</p><p class="help">Private community signals, preparation and missions are available to verified members of an eligible owner Pro server. This is a local preview identity, not a DZN login.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+    $('closeBtn').onclick = closePanel;
+    return;
+  }
+  const attempt = board.current;
+  const active = attempt?.status === 'active';
+  const selected = board.selected;
+  const roster = Object.entries(OPERATIVES).map(([id, op]) => {
+    const tier = squadTier(op.role, state.levels);
+    return `<article class="operative-card ${selected === id ? 'selected' : ''}"><img src="${escapeHTML(squadPortrait(op.role, tier))}" alt="${escapeHTML(op.name)} DZN kit preview" loading="lazy"><div><strong>${escapeHTML(op.name)}</strong><small>${escapeHTML(op.title)} · kit L${tier}</small><small>${escapeHTML(op.passive)} · ${escapeHTML(op.tactical)} · ${escapeHTML(op.ultimate)}</small></div><button data-select-operative="${id}" ${active || selected === id ? 'disabled' : ''}>${selected === id ? 'Command slot selected' : 'Assign commander'}</button></article>`;
+  }).join('');
+  const profile = operations.showcase(identityId);
+  const mastery = Object.entries(profile.mastery).map(([id, count]) => `<span>${escapeHTML(OPERATIVES[id].name)} ${count}</span>`).join(' · ');
+  const badges = [
+    ['First Through', profile.earned.firstThrough, 'Extract after breaching a route'],
+    ['Eyes on Target', profile.earned.eyesOnTarget, 'Extract with route intelligence'],
+    ['Siege Medic', profile.earned.siegeMedic, 'Extract after a real casualty recovery'],
+  ].map(([name, earned, criterion]) => `<div class="operation-ping"><strong>${earned ? '✦ ' : '◇ '}${name}</strong><span>${earned ? 'Earned in local PvE' : criterion}</span></div>`).join('');
+  let missionHTML = '';
+  if (!attempt) {
+    const troopInputs = Object.entries(SQUAD_ROLES).map(([role, squad]) => `<label class="field-label" for="opsTroop${role}">${escapeHTML(squad.name)} <input id="opsTroop${role}" data-ops-troop="${role}" type="number" min="0" max="12" step="1" value="${role === 'assault' || role === 'engineer' ? 1 : 0}" ${squadUnlocked(role, state.levels) ? '' : 'disabled'}></label>`).join('');
+    missionHTML = `<div class="war-card ready"><h3>Salvage Run · Outpost Ember</h3><p>Scout a route, open a shutter, choose a cache and extract before the ten minute window closes. One commander uses ${EXPEDITION_RULES.commanderSlots} of ${board.capacity} slots. The rest hold ordinary troops. ${EXPEDITION_RULES.launchSalvage} personal Salvage prepares the convoy.</p><div class="operation-orders">${troopInputs}</div><p id="opsCapacity" class="help"></p><div class="row"><button id="opsLaunch">Deploy ${escapeHTML(OPERATIVES[selected].name)}</button></div></div>`;
+  } else {
+    const phases = ['approach', 'barrier', 'cache', 'extraction'];
+    const currentIndex = phases.indexOf(attempt.phase);
+    const track = `<div class="operation-stage-track" aria-label="Expedition stage">${phases.map((phase, index) => `<span class="${active && index === currentIndex ? 'current' : index < currentIndex || !active ? 'done' : ''}">${phase.toUpperCase()}</span>`).join('')}</div>`;
+    const choices = { approach: [['scout', 'Scout · safer route'], ['push', 'Rush · higher risk']], barrier: [['cut', 'Engineer cut'], ['force', 'Force through']], cache: [['secure', 'Core cache · 40 Parts'], ['extra', 'Extra cache · 65 Parts, high risk']], extraction: [['extract', 'Call extraction convoy']] };
+    const abilityTargetReady = attempt.operativeId === 'rivet' ? attempt.phase === 'barrier'
+      : attempt.operativeId === 'signal' ? ['approach', 'barrier'].includes(attempt.phase)
+      : attempt.casualties > 0 || attempt.health < 100;
+    const fieldChoice = attempt.fieldUpgrade ? `<p class="notice">Field Upgrade: ${escapeHTML(FIELD_UPGRADES[attempt.fieldUpgrade])}</p>`
+      : attempt.phase === 'extraction' ? '<p class="help">Field Upgrade window closed at extraction.</p>'
+      : `<h3>Choose one temporary Field Upgrade</h3><div class="operation-orders">${Object.entries(FIELD_UPGRADES).map(([id, label]) => `<button data-field-upgrade="${id}">${escapeHTML(label)}</button>`).join('')}</div>`;
+    const actions = active ? `<div class="operation-orders">${choices[attempt.phase].map(([id, label]) => `<button data-op-step="${id}" ${id === 'cut' && !attempt.roster.engineer ? 'disabled title="Needs a Combat Engineer"' : ''}>${label}</button>`).join('')}</div><div class="operation-orders"><button id="opsTactical" ${attempt.turn < attempt.tacticalReadyTurn || !abilityTargetReady ? 'disabled' : ''}>Tactical · ${escapeHTML(OPERATIVES[attempt.operativeId].tactical)}</button><button id="opsUltimate" ${attempt.ultimateUsed || !abilityTargetReady ? 'disabled' : ''}>Ultimate · ${escapeHTML(OPERATIVES[attempt.operativeId].ultimate)}</button></div><p class="help">${escapeHTML(OPERATIVES[attempt.operativeId].tacticalText)} Tactical ready at turn ${attempt.tacticalReadyTurn}; Ultimate once per attempt. All effects are bounded.</p>${fieldChoice}<div class="row"><button id="opsWithdraw">Withdraw · lose cargo</button></div>` : `<p class="notice">${attempt.status === 'extracted' ? `Extraction complete · ${attempt.cargo} Parts delivered to personal inventory.` : `Expedition ${escapeHTML(attempt.status)} · no Parts awarded.`} Start a new run when ready.</p><div class="row"><button id="opsNew">Prepare another run</button></div>`;
+    missionHTML = `<div class="war-card ready"><h3>Outpost Ember · ${escapeHTML(OPERATIVES[attempt.operativeId].name)}</h3><p>Attempt ${escapeHTML(attempt.id)} · ${active ? `window closes in <b id="opsCountdown">${formatRemaining(attempt.deadlineAt)}</b>` : escapeHTML(attempt.status)}</p>${track}<div class="operation-statline"><b>Health ${attempt.health}/100</b><b>Shield ${attempt.shield}</b><b>Incapacitated ${attempt.casualties}</b><b>Recovered ${attempt.recovered}</b><b>Recovery charges ${attempt.recoveriesLeft}</b><b>Cargo ${attempt.cargo} Parts</b></div>${actions}<div class="operation-log"><strong>Field record</strong>${attempt.events.slice().reverse().map(event => `<p>${escapeHTML(event.text)}</p>`).join('')}</div></div>`;
+  }
+  const pings = board.pings.slice().reverse().map(ping => `<div class="operation-ping"><strong>${escapeHTML(PING_TYPES[ping.type])} · ${escapeHTML(ping.target)}</strong><span>${escapeHTML(ping.author)} · expires in ${formatRemaining(ping.expiresAt)} · ${ping.acknowledgedBy.length} acknowledged · suggestion</span>${!ping.acknowledgedBy.includes(identityId) ? `<button data-ack-ping="${escapeHTML(ping.id)}">Acknowledge</button>` : ''}</div>`).join('');
+  openPanel(`<h2>DZN Operations Board</h2><p>One operative commands the ordinary army. Tactical choices, recovery and Field Upgrades belong to one local PvE attempt. Shared construction and local wars keep their existing rules. <span class="sim">[LOCAL PREVIEW]</span></p>${message ? `<p class="notice" role="status">${escapeHTML(message)}</p>` : ''}<div class="operations-layout"><div><h3>Operative Bay</h3><div class="operative-roster">${roster}</div>${missionHTML}</div><aside class="operations-side"><h3>Community signals</h3><p class="help">Suggestions are visible only to this eligible preview community. They expire after 15 minutes; acknowledgement is not owner approval.</p><label class="field-label" for="opsPingType">Signal</label><select id="opsPingType">${Object.entries(PING_TYPES).map(([id, name]) => `<option value="${id}">${escapeHTML(name)}</option>`).join('')}</select><label class="field-label" for="opsPingTarget">Target or objective</label><input id="opsPingTarget" maxlength="70" placeholder="e.g. west shutter"><div class="row"><button id="opsPostPing">Place signal</button></div>${pings || '<p class="help">No active signals.</p>'}<h3>Personal showcase</h3><p>${profile.completed} extracted mission${profile.completed === 1 ? '' : 's'} · ${mastery}</p>${badges}<p class="help">These are local PvE achievements with attempt evidence. Calling cards are cosmetic and never grant combat power.</p></aside></div><div class="row"><button id="closeBtn">Return to base</button></div>`);
+  $('closeBtn').onclick = closePanel;
+  panel.querySelectorAll('[data-select-operative]').forEach(button => button.onclick = () => { const result = operations.selectOperative(identityId, button.dataset.selectOperative); showOperationsBoard(result.ok ? `${OPERATIVES[result.operativeId].name} assigned to your command slot.` : result.error); });
+  const troopFields = [...panel.querySelectorAll('[data-ops-troop]')];
+  if (troopFields.length) {
+    const updateCapacity = () => {
+      const total = troopFields.reduce((sum, field) => sum + (Number(field.value) || 0), 0) + EXPEDITION_RULES.commanderSlots;
+      $('opsCapacity').textContent = `${total}/${board.capacity} command slots · selected operative costs 2 · troop kit follows shared Hall/support levels.`;
+      $('opsLaunch').disabled = total < 3 || total > board.capacity || service.member(identityId).salvage < EXPEDITION_RULES.launchSalvage || troopFields.some(field => !Number.isSafeInteger(Number(field.value)) || Number(field.value) < 0);
+    };
+    troopFields.forEach(field => field.oninput = updateCapacity); updateCapacity();
+    $('opsLaunch').onclick = () => {
+      const troops = Object.fromEntries(troopFields.map(field => [field.dataset.opsTroop, Number(field.value)]));
+      const result = operations.startExpedition(identityId, troops);
+      if (result.ok) { toast('Salvage convoy deployed.'); updateHud(); }
+      showOperationsBoard(result.ok ? 'Outpost Ember mission started. Choose your first route.' : result.error);
+    };
+  }
+  panel.querySelectorAll('[data-op-step]').forEach(button => button.onclick = () => {
+    const result = operations.advance(identityId, button.dataset.opStep);
+    if (result.ok && result.status === 'extracted') { celebrateUpgrade(-5, -12, 'Salvage convoy extracted', 1, false); toast(`Extraction complete · +${result.cargo} personal Parts`); updateHud(); }
+    showOperationsBoard(result.ok ? '' : result.error);
+  });
+  panel.querySelectorAll('[data-field-upgrade]').forEach(button => button.onclick = () => { const result = operations.chooseFieldUpgrade(identityId, button.dataset.fieldUpgrade); showOperationsBoard(result.ok ? 'Field Upgrade installed for this attempt.' : result.error); });
+  if ($('opsTactical')) $('opsTactical').onclick = () => { const result = operations.useAbility(identityId, 'tactical'); showOperationsBoard(result.ok ? 'Tactical ability activated.' : result.error); };
+  if ($('opsUltimate')) $('opsUltimate').onclick = () => { const result = operations.useAbility(identityId, 'ultimate'); showOperationsBoard(result.ok ? 'Ultimate ability activated.' : result.error); };
+  if ($('opsWithdraw')) $('opsWithdraw').onclick = () => { const result = operations.withdraw(identityId); showOperationsBoard(result.ok ? 'Squad withdrawn. Salvage and cargo remain spent.' : result.error); };
+  if ($('opsNew')) $('opsNew').onclick = () => { const result = operations.prepareNext(identityId); showOperationsBoard(result.ok ? '' : result.error); };
+  $('opsPostPing').onclick = () => { const result = operations.postPing(identityId, $('opsPingType').value, $('opsPingTarget').value); showOperationsBoard(result.ok ? 'Signal placed for your community.' : result.error); };
+  panel.querySelectorAll('[data-ack-ping]').forEach(button => button.onclick = () => { const result = operations.acknowledgePing(identityId, button.dataset.ackPing); showOperationsBoard(result.ok ? 'Signal acknowledged.' : result.error); });
+}
+$('operationsBtn').onclick = () => showOperationsBoard();
+setInterval(() => {
+  const countdown = $('opsCountdown');
+  if (!countdown || panel.style.display === 'none') return;
+  const current = operations.current();
+  if (!current || current.status !== 'active') { showOperationsBoard(); return; }
+  countdown.textContent = formatRemaining(current.deadlineAt);
+}, 1000);
+
 function showCardVault() {
   const base = service.community()?.saved.base;
+  const access = service.getAccess();
   const cards = FIRST_EDITION_CARDS.map(card => {
     const earned = cardEarned(card.id, base);
     return `<article class="collectible-card ${earned ? 'earned' : ''}"><div class="collectible-card-art"><img src="${escapeHTML(card.image)}" alt="${escapeHTML(card.name)} First Edition card art" loading="lazy"></div><strong>${escapeHTML(card.name)}</strong><span>${escapeHTML(card.rarity)} · ${earned ? 'Earned in this preview' : 'Discoverable'}</span><p>${earned ? 'Milestone reached. This local collection mark follows the current base.' : escapeHTML(card.condition)}</p></article>`;
   }).join('');
-  openPanel(`<h2>DZN First Edition Cards</h2><p>Guardian, Ghost and Fixer bring DZN's squads and base upgrades into a collectible art series. Milestones reveal cards in this local preview.</p><div class="collectible-grid">${cards}</div><p class="help">Artwork and milestones are real preview assets. Globally limited numbers, ownership, trading and any gameplay buffs need a reviewed DZN Network issuance system; no scarce cards have been minted.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  const showcase = access.allowed ? operations.showcase() : null;
+  const operative = OPERATIVES[operations.selected()];
+  const serviceBadges = showcase ? [
+    ['First Through', showcase.earned.firstThrough], ['Eyes on Target', showcase.earned.eyesOnTarget], ['Siege Medic', showcase.earned.siegeMedic],
+  ].map(([name, earned]) => `<span class="world-kit">${earned ? '✦' : '◇'} ${name} · ${earned ? 'earned' : 'locked'}</span>`).join('') : '';
+  const evidence = showcase?.evidence?.length ? showcase.evidence.slice().reverse().map(record => `<p class="war-event">${escapeHTML(record.id)} · ${escapeHTML(OPERATIVES[record.operativeId].name)} · ${record.reward} Parts extracted · ${record.recovered} recovered · ${record.scanned ? 'scouted' : 'unscouted'} · ${record.breached ? 'breached' : 'no breach'}</p>`).join('') : '<p class="help">Complete a local salvage extraction to begin your service record.</p>';
+  const profilePanel = showcase ? `<hr><h3>Personal Showcase · ${escapeHTML(service.profile().name)}</h3><div class="row"><img src="${escapeHTML(squadPortrait(operative.role, squadTier(operative.role, state.levels)))}" alt="Selected DZN operative kit" style="width:90px;height:105px;object-fit:contain;background:#202924;border-radius:9px"><div><strong>${escapeHTML(operative.name)} · ${escapeHTML(operative.title)}</strong><p>${showcase.completed} local PvE extractions · mastery ${showcase.mastery[operations.selected()] || 0}</p><div class="world-kits">${serviceBadges}</div></div></div><h3>Achievement evidence</h3>${evidence}` : `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
+  openPanel(`<h2>DZN First Edition Cards</h2><p>Guardian, Ghost and Fixer bring DZN's squads and base upgrades into a collectible art series. Milestones reveal cards in this local preview.</p><div class="collectible-grid">${cards}</div>${profilePanel}<p class="help">Cards and mastery are cosmetic local previews. No globally limited edition, trading rights, or competitive buffs have been issued.</p><div class="row"><button id="closeBtn">Close</button></div>`);
   $('closeBtn').onclick = closePanel;
 }
 $('cardsBtn').onclick = showCardVault;

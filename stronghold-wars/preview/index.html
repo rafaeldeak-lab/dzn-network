@@ -98,6 +98,34 @@
       .war-tactic strong { color: var(--green); font-size: 11px; }
       .war-tactic p { color: var(--muted); font-size: 9px !important; }
       .war-tag { color: var(--purple); font: 700 9px Orbitron, sans-serif; letter-spacing: .07em; }
+      .panel:has(.operations-layout) { width: min(920px, calc(100vw - 28px)); max-height: 84vh; }
+      .operations-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr); gap: 14px; }
+      .operative-roster { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; margin: 11px 0; }
+      .operative-card { min-width: 0; border: 1px solid rgba(192,132,252,.35); background: linear-gradient(145deg, #243429, #131a1a 66%, #261d34); border-radius: 12px; padding: 8px; overflow: hidden; }
+      .operative-card.selected { border-color: #8df2ab; box-shadow: inset 0 0 0 1px #8df2ab66, 0 0 22px #8df2ab18; }
+      .operative-card img { display: block; width: 100%; height: 126px; object-fit: contain; background: radial-gradient(ellipse at 50% 67%, #657a6955, transparent 70%); }
+      .operative-card strong { color: #e5c5ff; font: 700 11px Orbitron,sans-serif; display: block; margin-top: 5px; }
+      .operative-card small { display: block; color: #b8c9bc; font-size: 9px; line-height: 1.4; }
+      .operative-card button { width: 100%; margin-top: 8px; padding: 6px; }
+      .operation-stage-track { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin: 12px 0; }
+      .operation-stage-track span { font: 700 9px Orbitron,sans-serif; text-align: center; border: 1px solid #74588c; border-radius: 7px; padding: 8px 3px; color: #aab5ac; background: #1a2020; }
+      .operation-stage-track span.current { color: #d9ffe3; border-color: #70e59a; background: linear-gradient(180deg,#325b40,#183326); box-shadow: 0 0 17px #70e59a33; }
+      .operation-stage-track span.done { color: #85e3ae; border-color: #70e59a77; }
+      .operation-statline { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0; }
+      .operation-statline b { border: 1px solid #8c6aa466; border-radius: 7px; background: #221c2c; padding: 6px 8px; font-size: 10px; }
+      .operation-orders { display: grid; grid-template-columns: repeat(auto-fit,minmax(125px,1fr)); gap: 7px; margin: 9px 0; }
+      .operation-orders button { text-align: left; min-height: 48px; }
+      .operation-log { border-left: 2px solid #70e59a77; padding-left: 9px; margin-top: 11px; }
+      .operation-log p { font-size: 10px; color: #c7d5cb; margin: 5px 0; }
+      .operations-side { border-left: 1px solid #b68bd333; padding-left: 13px; }
+      .operations-side input { width: 100%; }
+      .operations-side select { width: 100%; }
+      .operation-ping { border: 1px solid #8c6aa466; background: #1b241f; padding: 8px; border-radius: 8px; margin: 7px 0; font-size: 10px; }
+      .operation-ping strong { display: block; color: #d8bbf8; }
+      .operation-ping span { display: block; color: #adc3b2; margin: 3px 0; }
+      @media (max-width: 760px) { .operations-layout { grid-template-columns: 1fr; } .operations-side { border-left: 0; border-top: 1px solid #b68bd333; padding: 12px 0 0; } .operative-card img { height: 90px; } }
+      @media (max-width: 440px) { .operative-roster { grid-template-columns: 1fr; } .operative-card { display: grid; grid-template-columns: 72px 1fr; gap: 5px 9px; } .operative-card img { grid-row: span 3; height: 80px; } .operative-card button { margin: 0; } }
+      @media (prefers-reduced-motion: reduce) { .operation-stage-track span.current { box-shadow: none; } }
       .squad-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 12px; margin: 12px 0; }
       .panel:has(.squad-grid) { width: min(980px, calc(100vw - 28px)); }
       .squad-card { padding: 11px; border: 1px solid rgba(112,229,154,.26); border-radius: 11px; background: linear-gradient(145deg, rgba(46,68,54,.38), rgba(13,19,16,.4)); }
@@ -330,6 +358,7 @@
       <button id="layoutBtn">Base Layout</button>
       <button id="chronicleBtn">Chronicle</button>
       <button id="warBtn">War Table</button>
+      <button id="operationsBtn">Operations</button>
       <button id="worldBtn">World Map</button>
       <button id="cardsBtn">Cards</button>
       <button id="muteBtn" aria-label="Toggle sound">🔊</button>

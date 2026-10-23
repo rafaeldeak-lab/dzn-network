@@ -8,6 +8,7 @@ import { squadBattleStats } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
 import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
+import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -167,6 +168,7 @@ function createFreshState() {
     warActionRecords: [],
     warRewardLedger: [],
     nextWarNumber: 1,
+    operations: newOperationsState(),
     migratedLegacy: false,
     createdAt: Date.now(),
   };
@@ -423,6 +425,7 @@ function normalizeLoadedState(raw) {
   fresh.warActionRecords = Array.isArray(raw.warActionRecords) ? raw.warActionRecords.filter(r => r && typeof r.id === 'string' && typeof r.actorId === 'string' && r.result && typeof r.result === 'object').slice(-2000).map(r => ({ id: r.id, actorId: r.actorId, kind: String(r.kind || ''), result: clone(r.result), at: safeInt(r.at) })) : [];
   fresh.warRewardLedger = Array.isArray(raw.warRewardLedger) ? raw.warRewardLedger.filter(r => r && typeof r.id === 'string' && typeof r.identityId === 'string').map(r => ({ id: r.id, warId: String(r.warId || ''), identityId: r.identityId, amount: safeInt(r.amount), at: safeInt(r.at) })) : [];
   fresh.nextWarNumber = Math.max(1, safeInt(raw.nextWarNumber, fresh.wars.length + 1));
+  fresh.operations = normalizeOperationsState(raw.operations, PREVIEW_IDENTITIES);
   fresh.schemaVersion = 3;
   return fresh;
 }

@@ -2,6 +2,7 @@ import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
+import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -603,6 +604,62 @@ export function runServiceTests() {
   const v2MigratedAgain = new LocalGameService({ storage: v2MigrationStorage, now: () => warClock });
   assert(v2MigratedAgain.snapshot('iron-owner').member.parts === 1234 && v2MigratedAgain.snapshot('iron-owner').base.levels.hq === 4, 'reloading the V3 save never repeats V2 migration or starter grants');
   checks.push('V2-to-V3 exact raw backup, no-loss migration, refresh stability and preserved V1 migration behavior');
+
+  let missionClock = clock + 300_000;
+  const missionStorage = new MemoryStorage();
+  let missionGame = new LocalGameService({ storage: missionStorage, now: () => missionClock });
+  let ops = new OperationsController(missionGame);
+  assert(Object.keys(OPERATIVES).length === 3 && ops.getBoard('iron-owner').capacity === 4, 'three original operatives use the Hall command budget');
+  assert(!ops.startExpedition('iron-unverified', { assault: 1 }, 'mission-locked').ok && !ops.startExpedition('free-owner', { assault: 1 }, 'mission-free').ok, 'expeditions require verified community owner Pro access');
+  const startingSalvage = missionGame.member('iron-member').salvage;
+  assert(!ops.startExpedition('iron-member', { assault: 3 }, 'mission-over-budget').ok && missionGame.member('iron-member').salvage === startingSalvage, 'commander plus ordinary troops cannot exceed the shared capacity');
+  assert(!ops.startExpedition('iron-member', { medic: 1 }, 'mission-locked-medic').ok, 'ordinary specialist troops still follow their existing building unlocks');
+  const rivetStart = ops.startExpedition('iron-member', { assault: 1, engineer: 1 }, 'mission-rivet-start');
+  assert(rivetStart.ok && missionGame.member('iron-member').salvage === startingSalvage - EXPEDITION_RULES.launchSalvage, 'mission launch spends personal Salvage exactly once');
+  assert(ops.startExpedition('iron-member', { assault: 1, engineer: 1 }, 'mission-rivet-start').replay && missionGame.member('iron-member').salvage === startingSalvage - EXPEDITION_RULES.launchSalvage, 'replay does not create a second attempt or spend again');
+  assert(!ops.startExpedition('iron-owner', { assault: 1 }, 'mission-rivet-start').ok, 'another member cannot reuse the same action ID');
+  assert(!ops.useAbility('iron-member', 'tactical', 'rivet-too-early').ok, 'breach charge has a visible valid-target gate');
+  assert(ops.advance('iron-member', 'scout', 'rivet-scout').ok && ops.current('iron-member').scanned, 'approach scouting records useful route intelligence');
+  assert(ops.chooseFieldUpgrade('iron-member', 'cover', 'rivet-cover').ok && !ops.chooseFieldUpgrade('iron-member', 'route', 'rivet-cover-twice').ok, 'temporary Field Upgrade is a single bounded choice');
+  assert(ops.useAbility('iron-member', 'tactical', 'rivet-breach').ok && ops.current('iron-member').phase === 'cache', 'Rivet opens a barrier without replacing ordinary troops');
+  assert(ops.advance('iron-member', 'secure', 'rivet-cache').ok && ops.advance('iron-member', 'extract', 'rivet-extract').status === 'extracted', 'safer cache reaches an actual extraction outcome');
+  const partsAfterExtraction = missionGame.member('iron-member').parts;
+  assert(ops.advance('iron-member', 'extract', 'rivet-extract').replay && missionGame.member('iron-member').parts === partsAfterExtraction, 'duplicate extraction never duplicates personal Parts');
+  assert(ops.showcase('iron-member').earned.firstThrough && ops.showcase('iron-member').earned.eyesOnTarget && ops.showcase('iron-member').mastery.rivet === 1, 'earned PvE badges and mastery follow the recorded completed attempt');
+  missionGame = new LocalGameService({ storage: missionStorage, now: () => missionClock }); ops = new OperationsController(missionGame);
+  assert(ops.current('iron-member').status === 'extracted' && missionGame.member('iron-member').parts === partsAfterExtraction && ops.showcase('iron-member').completed === 1, 'mission, reward ledger and evidence survive reload without another grant');
+  assert(ops.prepareNext('iron-member', 'mission-next').ok && ops.showcase('iron-member').completed === 1, 'next-run preparation retains permanent mastery and reward evidence');
+  checks.push('operative command slot, local Pro gate, ordinary troop unlocks, tactical targets, one Field Upgrade, extraction ledger and mastery persistence');
+
+  const remedyGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });
+  const remedyOps = new OperationsController(remedyGame);
+  assert(remedyOps.selectOperative('iron-owner', 'remedy', 'remedy-select').ok, 'member selects an original recovery operative');
+  assert(remedyOps.startExpedition('iron-owner', { assault: 1, recon: 1 }, 'remedy-start').ok, 'Remedy fills the command slot without unlocking the ordinary medic troop');
+  assert(remedyOps.advance('iron-owner', 'push', 'remedy-ambush').ok && remedyOps.current('iron-owner').casualties === 1, 'unscouted approach causes one finite incapacitation');
+  assert(remedyOps.useAbility('iron-owner', 'tactical', 'remedy-recover').ok && remedyOps.current('iron-owner').recovered === 1 && remedyOps.current('iron-owner').recoveriesLeft === 0, 'Trauma Station recovers a casualty and consumes a charge');
+  assert(remedyOps.chooseFieldUpgrade('iron-owner', 'triage', 'remedy-triage').ok, 'temporary triage adds only one charge');
+  assert(remedyOps.advance('iron-owner', 'force', 'remedy-force').ok && remedyOps.current('iron-owner').casualties === 1, 'forced breach can incapacitate another troop');
+  assert(remedyOps.useAbility('iron-owner', 'ultimate', 'remedy-ultimate').ok && remedyOps.current('iron-owner').recovered === 2 && !remedyOps.useAbility('iron-owner', 'ultimate', 'remedy-ultimate-again').ok, 'one ultimate cannot produce unlimited recoveries');
+  assert(remedyOps.advance('iron-owner', 'secure', 'remedy-cache').ok && remedyOps.advance('iron-owner', 'extract', 'remedy-extract').ok && remedyOps.showcase('iron-owner').earned.siegeMedic, 'meaningful recovered casualties count only after extraction');
+  checks.push('bounded incapacitation, recovery charges, once-per-attempt ultimate and evidence-backed medic award');
+
+  const pingGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });
+  const pingOps = new OperationsController(pingGame);
+  const posted = pingOps.postPing('iron-member', 'scout', 'west shutter', 'ping-west');
+  assert(posted.ok && pingOps.getBoard('iron-owner').pings.length === 1 && pingOps.getBoard('violet-owner').pings.length === 0, 'signals stay within their preview community');
+  assert(pingOps.acknowledgePing('iron-owner', posted.pingId, 'ping-ack').ok && !pingOps.acknowledgePing('violet-owner', posted.pingId, 'ping-cross').ok, 'only an eligible same-community member can acknowledge a signal');
+  pingGame.setOwnerProActive('iron-owner', false);
+  assert(pingOps.getBoard('iron-member').pings.length === 0 && !pingOps.postPing('iron-member', 'hold', 'gate', 'ping-pro-off').ok, 'inactive owner Pro hides private signals and locks new signals');
+  pingGame.setOwnerProActive('iron-owner', true);
+  missionClock += EXPEDITION_RULES.pingLifetimeMs;
+  assert(pingOps.getBoard('iron-member').pings.length === 0, 'signals expire at their published time');
+  const expiryGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });
+  const expiryOps = new OperationsController(expiryGame);
+  assert(expiryOps.startExpedition('iron-owner', { assault: 1 }, 'expiry-start').ok, 'fresh attempt starts before deadline');
+  const salvageSpent = expiryGame.member('iron-owner').salvage;
+  missionClock += EXPEDITION_RULES.durationMs;
+  assert(expiryOps.current('iron-owner').status === 'expired' && expiryGame.member('iron-owner').salvage === salvageSpent && expiryGame.member('iron-owner').parts === 600, 'timeout closes the same attempt without refund or reward');
+  checks.push('scoped and expiring community pings, Pro privacy, mission deadline and no timeout reward');
 
   return { passed: checks.length, checks };
 }

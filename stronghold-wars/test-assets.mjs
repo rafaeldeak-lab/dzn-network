@@ -35,7 +35,8 @@ for (const [key, definition] of Object.entries(BUILDING_ASSETS)) {
     pairs += 1;
   }
 }
-if (pairs !== 20 || recorded.size !== 44) throw new Error(`Expected 20 building pairs and 44 assets, got ${pairs} and ${recorded.size}`);
+const arcBatteryModels = [...recorded.keys()].filter(path => path.startsWith('assets/models/defense-towers/') && path.endsWith('.glb'));
+if (pairs !== 20 || recorded.size !== 49 || arcBatteryModels.length !== 5 || !BUILDING_ASSETS.tower.levels.every(level => arcBatteryModels.includes(level.glb))) throw new Error(`Expected 20 building pairs, five mapped Arc Battery stages and 49 checksums; got ${pairs}, ${arcBatteryModels.length} and ${recorded.size}`);
 const sceneryManifest = JSON.parse(readFileSync(join(root, 'assets/models/scenery/manifest.json'), 'utf8'));
 const sceneryNames = Object.keys(sceneryManifest.assets);
 if (sceneryNames.length !== 14 || ![1, 2, 3, 4, 5].every(level => sceneryNames.includes(`pine_l0${level}`)) || !['fallen_trunk', 'fern_patch', 'mossy_rock_cluster', 'brush_pile', 'lumber_pallet'].every(name => sceneryNames.includes(name))) throw new Error('Scenery kit must contain five tree stages, four clearing props and five forest details.');

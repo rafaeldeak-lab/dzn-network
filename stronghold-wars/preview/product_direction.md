@@ -1,5 +1,16 @@
 # DZN: Stronghold Wars — product direction
 
+The user-supplied [Apex expansion addendum](../briefs/apex-expansion.md) extends the existing Clash-inspired shared-base direction. It is a design brief, not an assertion that the reference game's changing numbers or modes are current. Build it in phases while preserving one community base, its construction economy, ordinary troops, sector wars, and cosmetic calling cards.
+
+## Operative and expedition stage
+
+- Three original DZN commanders are currently selectable: Rivet (breach), Signal (reconnaissance), and Remedy (recovery). Their command slot costs two of the Hall's army slots; ordinary troops use the remaining unlocked capacity.
+- Outpost Ember is a local tactical PvE salvage expedition. Members pay personal Salvage to stage it, choose existing ordinary troops, scout or rush a route, breach or force a shutter, choose safe or high-risk cargo, and extract before the saved deadline. Timed attempts persist across browser reloads and grant Parts to personal inventory once through an attempt reward ledger.
+- Each attempt permits one temporary Field Upgrade, bounded tactical cooldowns, one ultimate, finite casualty recovery and no refund on withdrawal or timeout. The three personal PvE badges require a completed extraction with recorded evidence. A card or cosmetic never modifies combat power.
+- Community signals carry an author, target, timestamp, fifteen-minute expiry and acknowledgement state. They are suggestions scoped to eligible preview members; they are not owner-approved orders or live network messages.
+- The Operative Bay uses the existing DZN 3D role kits and user-supplied progression portraits as visual prototypes. Bespoke operative 3D models, deeper animation and a fully spatial mission battlefield are future art/gameplay milestones; the local mission rules must not be described as a real-time shared battle.
+- The existing local War Table remains separate. Competitive operative loadouts, per-sector locks, authoritative replays, server-side reward transactions, travel/staging and live Pro member access require their later reviewed phases. Do not use this browser save for ranked results or DZN authentication.
+
 - The intended product is for eligible servers whose owner has active DZN Pro and their verified connected members.
 - A server shares one community base; individual members do not each purchase Pro.
 - Members contribute/craft Parts to fund shared upgrades and participate in wars against sufficiently developed eligible Pro servers.
