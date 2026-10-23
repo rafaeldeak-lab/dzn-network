@@ -15,14 +15,35 @@ const OWNER_ARCHIVE_PAGE_SIZE = 50;
 const RATE_SLOT_RETENTION_DAYS = 2;
 const reportReasons = new Set(["harassment", "hate", "threat", "spam", "personal_information", "other"]);
 const moderationActions = new Set(["hide", "restore", "delete", "resolve_report", "dismiss_report"]);
-// Keep the automatic language check deliberately narrow. Severe abuse remains a
-// timeout case below; ordinary profanity is rejected without retaining its text.
-const profanityPattern = /\b(?:arsehole|bastard|bitch|bullshit|cunt|dickhead|fuck(?:er|ing|ed|s)?|motherfucker|prick|shit(?:ty|head)?|wanker)\b/i;
-// A separate expression catches only the existing blocked roots when their
-// letters are deliberately separated. It never collapses arbitrary words, so
-// ordinary text such as "Scunthorpe" remains safe from false matches.
+// Comms is deliberately English-only. A translation provider is not called from
+// this path: moderation must remain deterministic, private, and fail closed.
+// Non-Latin scripts are therefore rejected before a message can be retained.
+const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{Script=Inherited}]/u;
+// These are high-confidence whole phrases, not a pretend general language
+// detector. They cover common attempts to post a non-English message written
+// with Latin characters while avoiding a broad, error-prone dictionary gate.
+const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao)\b/i;
+const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
+const foreignPhraseExplanationPattern = /^(?:(?:i|we|they|he|she)\s+(?:explain(?:ed|s|ing)?|said|wrote)\b.*\b(?:means?|translates?)\b|use\s+.+\s+when\s+(?:asking|saying|writing)\b)/i;
+// Ordinary profanity, discriminatory slurs, explicit sexual insults, and
+// targeted identity abuse are rejected without retaining the submitted text.
+const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bollocks|bullshit|cunt|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|prick|shit(?:ty|head)?|slut|tosser|twat|wanker|whore)\b/i;
+const targetedProfanityPattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
+const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|trann(?:y|ie))\b/i;
+const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
+const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
+const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
+const sexualHarassmentPattern = /\b(?:clit|(?:nice|big|small|show|touch|your|ur|my)\s+cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
+// Common profanity and insults that are often pasted into English-language
+// chat in another language. This supplements the script/phrase guards above;
+// it is not represented as a complete global language catalogue.
+const multilingualAbusePattern = /\b(?:arschloch|cabron|caralho|cazzo|chinga(?:do)?|connard|encule|filho\s+da\s+puta|joder|kurwa|merde|mierda|pendejo|pierdol|puta|putain|scheisse|schei(?:ss|ß)e|stronzo|vaffanculo|verga)\b/i;
+const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i;
+// A separate expression catches blocked roots when their letters are
+// deliberately separated. It never collapses arbitrary words, so ordinary
+// text such as "Scunthorpe" remains safe from false matches.
 const obfuscatedProfanityPattern =
-  /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
+  /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|a[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*l[\W_]*[i1!][\W_]*t|c[\W_]+o[\W_]*c[\W_]*k|c[\W_]*o[\W_]+c[\W_]*k|c[\W_]*o[\W_]*c[\W_]+k|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*a[\W_]*g(?:[\W_]*g[\W_]*o[\W_]*t)?|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|h(?:[\W_]+o[\W_]*m[\W_]*o|[\W_]*o[\W_]+m[\W_]*o|[\W_]*o[\W_]*m[\W_]+o)|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|r[\W_]*e[\W_]*t[\W_]*a[\W_]*r[\W_]*d(?:[\W_]*e[\W_]*d)?|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|t[\W_]*r[\W_]*a[\W_]*n[\W_]*n(?:[\W_]*y|[\W_]*i[\W_]*e)|t[\W_]*w[\W_]*a[\W_]*t|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -70,17 +91,32 @@ export function moderateDznCommsBody(value: unknown) {
   if (!body || codePoints > MAX_BODY_CODE_POINTS || bytes > MAX_BODY_BYTES) {
     return { decision: "block" as const, code: "INVALID_MESSAGE", body: "" };
   }
-  const compact = body.toLowerCase().replace(/[^a-z0-9@.:/]+/g, " ");
+  const folded = foldForModeration(body);
+  const compact = folded.replace(/[^a-z0-9@.:/]+/g, " ");
   if (/mfa\.[a-z0-9_-]{20,}|[a-z0-9_-]{24,}\.[a-z0-9_-]{6}\.[a-z0-9_-]{20,}/i.test(body)) {
     return { decision: "block" as const, code: "SECRET_DETECTED", body: "" };
   }
   if (/(?:discord\.gg|discord(?:app)?\.com\/invite)\//i.test(body) || /(.)\1{14,}/u.test(body)) {
     return { decision: "block" as const, code: "SPAM_BLOCKED", body: "" };
   }
-  if (/\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i.test(compact)) {
+  if (severeAbusePattern.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
-  if (profanityPattern.test(compact) || obfuscatedProfanityPattern.test(body)) {
+  const explainsForeignPhrase = foreignPhraseExplanationPattern.test(body);
+  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || (nonEnglishPhrasePattern.test(compact) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
+    return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
+  }
+  if (
+    profanityPattern.test(compact)
+    || identitySlurPattern.test(compact)
+    || targetedProfanityPattern.test(compact)
+    || targetedIdentityAbusePattern.test(compact)
+    || contextualAmbiguousAbusePattern.test(compact)
+    || possessiveIdentityInsultPattern.test(compact)
+    || sexualHarassmentPattern.test(compact)
+    || multilingualAbusePattern.test(compact)
+    || obfuscatedProfanityPattern.test(folded)
+  ) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
   return { decision: "allow" as const, code: "MESSAGE_ALLOWED", body };
@@ -557,7 +593,7 @@ async function storeRejected(db: D1Database, user: SessionUser, actorReceiptKey:
     if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that safety decision. Retry shortly.");
   }
-  return error(status, reason, decision === "timeout" ? "This account has a short chat timeout for a safety review." : "That message was blocked by DZN Safety.");
+  return error(status, reason, rejectedCommsMessage(decision, reason));
 }
 
 async function readReceipt(db: D1Database, actorReceiptKey: string, channel: SendChannel, userId: string, requestId: string) {
@@ -639,13 +675,25 @@ function deleteExpiredReceipt(db: D1Database, actorReceiptKey: string, channelId
 
 function receiptResponse(row: { decision: string; response_status: number; reason_code: string | null; message_id: string | null }, replayed: boolean) {
   const ok = row.decision === "allow";
-  return json({ ok, code: ok ? "MESSAGE_SENT" : row.reason_code, message_id: row.message_id, replayed }, { status: replayed && ok ? 200 : row.response_status, headers: privateNoStoreHeaders() });
+  return json({
+    ok,
+    code: ok ? "MESSAGE_SENT" : row.reason_code,
+    ...(ok ? {} : { message: rejectedCommsMessage(row.decision, row.reason_code) }),
+    message_id: row.message_id,
+    replayed,
+  }, { status: replayed && ok ? 200 : row.response_status, headers: privateNoStoreHeaders() });
+}
+function rejectedCommsMessage(decision: string, reason: string | null) {
+  if (decision === "timeout") return "This account has a short chat timeout for a safety review.";
+  if (reason === "ENGLISH_ONLY") return "DZN Comms is English-only. Please write your message in English.";
+  return "That message was blocked by DZN Safety.";
 }
 function unavailable() { return error(404, "DZN_COMMS_LIVE_DISABLED", "Live DZN Comms is not enabled in this environment."); }
 function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABLE", "This private DZN Comms group is not available to your account."); }
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function booleanFlag(value: unknown) { return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/ß/g, "ss"); }
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }

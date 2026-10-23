@@ -138,7 +138,7 @@ function deleteRequest(path: string, token: string | null, origin = "http://127.
 }
 
 async function payload(response: Response) {
-  return await response.json() as { ok?: boolean; code?: string; replayed?: boolean; message_id?: string };
+  return await response.json() as { ok?: boolean; code?: string; message?: string; replayed?: boolean; message_id?: string };
 }
 
 async function testSendRuntime() {
@@ -178,6 +178,21 @@ async function testSendRuntime() {
     const receiptKeys = f.sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts ORDER BY created_at, id").all();
     assert.equal(receiptKeys.length, 2);
     assert.notEqual(receiptKeys[0]?.actor_receipt_key, receiptKeys[1]?.actor_receipt_key, "Separate requests from one account must not share a correlatable receipt key.");
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const blocked = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-language-filter", body: "suck your mums left clit",
+    }), f.env);
+    assert.equal(blocked.status, 422, "Abusive language must be rejected by the send route.");
+    assert.equal((await payload(blocked)).code, "LANGUAGE_FILTERED");
+    assert.equal(f.count("dzn_comms_messages"), 2, "Rejected text must not create a visible chat row.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%clit%'").get()?.count, 0, "Rejected text must never be retained in the message table.");
+    const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos" };
+    const englishOnly = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
+    assert.equal(englishOnly.status, 422);
+    assert.deepEqual(await payload(englishOnly), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English." });
+    const englishOnlyReplay = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
+    assert.equal(englishOnlyReplay.status, 422);
+    assert.deepEqual(await payload(englishOnlyReplay), { ok: false, code: "ENGLISH_ONLY", message: "DZN Comms is English-only. Please write your message in English.", message_id: null, replayed: true });
   } finally { f.close(); }
 
   const replayQuota = await fixture();
@@ -836,6 +851,19 @@ function testPrivateLedgerMigrationRejectsActiveQuotas() {
 
 function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
+  assert.equal(moderateDznCommsBody("Gay pride event details are available in the DZN Updates feed.").decision, "allow", "Identity terms must not be treated as abuse without a hostile context.");
+  assert.equal(moderateDznCommsBody("Your gay teammate is welcome.").decision, "allow", "Possessive identity references must not be treated as abuse without hostile context.");
+  assert.equal(moderateDznCommsBody("Dick is joining the squad.").decision, "allow", "A player name must not be treated as profanity without hostile context.");
+  assert.equal(moderateDznCommsBody("Dick, move left.").decision, "allow", "An in-game instruction to a player must not be treated as an insult.");
+  assert.equal(moderateDznCommsBody("Cock the rifle before entering.").decision, "allow", "A weapon-handling instruction must not be treated as sexual harassment.");
+  assert.equal(moderateDznCommsBody("Homo sapiens is our species.").decision, "allow", "A biological reference must not be treated as identity abuse.");
+  assert.equal(moderateDznCommsBody("Pussy willow is a plant.").decision, "allow", "A plant name must not be treated as profanity.");
+  assert.equal(moderateDznCommsBody("She explained that como estas means how are you.").decision, "allow", "An English explanation of a foreign phrase must remain allowed.");
+  assert.equal(moderateDznCommsBody("Use por favor when asking politely.").decision, "allow", "An English usage explanation must remain allowed.");
+  assert.equal(moderateDznCommsBody("She explained that Привет means hello.").decision, "allow", "An English explanation of a native-script phrase must remain allowed.");
+  assert.equal(moderateDznCommsBody("hola amigos word").decision, "block", "A foreign-language post must not bypass the filter by appending an English keyword.");
+  assert.equal(moderateDznCommsBody("h.o.m.o").decision, "block", "Punctuation must not bypass the identity-abuse filter.");
+  assert.equal(moderateDznCommsBody("Homo sapiens f.u.c.k you").decision, "block", "A benign biological reference must not disable the rest of the safety filter.");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
@@ -855,6 +883,9 @@ function testAutomaticLanguageFilter() {
     "p.r.i.c.k",
     "s.h.i.t",
     "w.a.n.k.e.r",
+    "f.a.g.g.o.t",
+    "c.l.i.t",
+    "c.o.c.k",
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Separated profanity must not bypass the language filter: ${body}`);
   }
@@ -863,8 +894,48 @@ function testAutomaticLanguageFilter() {
   }
   assert.equal(moderateDznCommsBody("s h 1 t happens").decision, "block", "Spaced leetspeak must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
+  for (const body of [
+    "your gay",
+    "your gay.",
+    "you're a dick",
+    "you are a dick",
+    "ur a dick",
+    "u r a dick",
+    "That's a dick move",
+    "you're a pussy",
+    "you are a pussy",
+    "ur a pussy",
+    "you're a homo",
+    "you are gay",
+    "you're gay",
+    "ur a faggot",
+    "suck your mum",
+    "suck your mums left clit",
+    "nice cock",
+    "what an asshole",
+    "f.u.c.k off",
+  ]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
+  }
+  for (const body of ["hola amigos", "bonjour tout le monde", "ciao come stai", "Hallo wie geht es dir", "privet drug", "Привет", "hola", "bonsoir", "danke", "namaste"]) {
+    const result = moderateDznCommsBody(body);
+    assert.deepEqual(result, { decision: "block", code: "ENGLISH_ONLY", body: "" }, `English-only policy must reject: ${body}`);
+  }
+  for (const body of ["mierda", "scheisse", "scheiße", "SCHEIẞE", "vaffanculo", "kurwa"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
+  }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
+  assert.equal(moderateDznCommsBody("Take cover behind the privet hedge.").decision, "allow", "Ambiguous English words must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("The report is filed with comment CA.").decision, "allow", "Ambiguous English abbreviations must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("She signed off with ciao.").decision, "allow", "Borrowed greeting words inside English sentences must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("She explained that hola means hello.").decision, "allow", "Greeting words inside an English sentence must not trigger the English-only filter.");
+  assert.equal(moderateDznCommsBody("The cafe is named Bonsoir.").decision, "allow", "A borrowed greeting used as a name must not trigger the English-only filter.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
+  assert.deepEqual(
+    moderateDznCommsBody("kill yourself Привет"),
+    { decision: "timeout", code: "SAFETY_TIMEOUT", body: "" },
+    "Severe abuse must retain its timeout decision when language markers are also present.",
+  );
 }
 
 async function main() {
