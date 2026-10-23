@@ -853,6 +853,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
   assert.equal(moderateDznCommsBody("Gay pride event details are available in the DZN Updates feed.").decision, "allow", "Identity terms must not be treated as abuse without a hostile context.");
   assert.equal(moderateDznCommsBody("Your gay teammate is welcome.").decision, "allow", "Possessive identity references must not be treated as abuse without hostile context.");
+  assert.equal(moderateDznCommsBody("Dick is joining the squad.").decision, "allow", "A player name must not be treated as profanity without hostile context.");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
@@ -885,6 +886,8 @@ function testAutomaticLanguageFilter() {
   for (const body of [
     "your gay",
     "your gay.",
+    "you're a dick",
+    "you're gay",
     "ur a faggot",
     "suck your mum",
     "suck your mums left clit",
