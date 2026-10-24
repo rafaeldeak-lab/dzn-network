@@ -353,7 +353,12 @@ scene.fog = new THREE.Fog(0x1a2420, 60, 130);
 let zoom = 28;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
+const cameraOffset = new THREE.Vector3(40, 40, 40);
 let focusedPatrolRole = null;
+function updateCameraPosition() {
+  camera.position.copy(camTarget).add(cameraOffset);
+  camera.lookAt(camTarget);
+}
 function updateCamera() {
   const aspect = window.innerWidth / window.innerHeight;
   camera.left = -zoom * aspect / 2;
@@ -361,8 +366,7 @@ function updateCamera() {
   camera.top = zoom / 2;
   camera.bottom = -zoom / 2;
   camera.updateProjectionMatrix();
-  camera.position.copy(camTarget).add(new THREE.Vector3(40, 40, 40));
-  camera.lookAt(camTarget);
+  updateCameraPosition();
 }
 updateCamera();
 window.addEventListener('resize', () => {
@@ -380,6 +384,17 @@ scene.add(sun);
 const purpleFill = new THREE.PointLight(0xa855f7, 60, 40);
 purpleFill.position.set(-6, 8, -6);
 scene.add(purpleFill);
+// Patrol inspection gets a close, soft key light without changing the base lighting.
+const patrolFocusLight = new THREE.PointLight(0xc3ffce, 18, 6, 2);
+patrolFocusLight.visible = false;
+scene.add(patrolFocusLight);
+const patrolFocusRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.62, 0.73, 40),
+  new THREE.MeshBasicMaterial({ color: 0x70e59a, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false }),
+);
+patrolFocusRing.rotation.x = -Math.PI / 2;
+patrolFocusRing.visible = false;
+scene.add(patrolFocusRing);
 
 const texLoader = new THREE.TextureLoader();
 function tiledTexture(url, repeat) {
@@ -1376,6 +1391,9 @@ document.body.append(patrolFocusExit);
 function stopPatrolFocus(returnToBase = false) {
   focusedPatrolRole = null;
   patrolFocusExit.hidden = true;
+  patrolFocusExit.textContent = '← Back to base';
+  patrolFocusLight.visible = false;
+  patrolFocusRing.visible = false;
   if (returnToBase) { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); }
 }
 patrolFocusExit.onclick = () => stopPatrolFocus(true);
@@ -1711,7 +1729,7 @@ function showSquadPanel() {
   }).join('');
   const away = currentAwaySquads().length;
   const defenderCards = defenderCardsHTML();
-  openPanel(`<h2>DZN Squad Armoury</h2><p>Five DZN roles use the owner's detailed Level 1–5 artwork in this Armoury and articulated 3D models in the base and battles. Choose a thumbnail to inspect an outfit; this does not change equipped level. Command Hall and specialist buildings determine active kit. Sentinel and Lifeline join at Hall L4 once their specialist building reaches L3.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Patrol strength is visibly reduced until return or recall; the War Table shows the current counterattack risk.</p>` : '<p class="notice">All local patrols are home.</p>'}<p class="help">In local preview wars, upgraded damage adds bounded attack points, while health, armour and Lifeline support reduce losses. The war locks both bases and their kits before battle. Access and owner approval still follow the existing rules.</p><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves each shared upgrade and assigns posts. Verified members fund approved projects with personal Parts. Assigned defenders walk from camp to their posts and contribute bounded defence from the accepted-war snapshot. Reserve units have no battle effect.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Inspect each outfit or watch its 3D patrol. Active gear follows building level; previewing an outfit does not equip it.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Home defence is reduced until return or recall.</p>` : ''}<details class="technical-details"><summary>How upgrades and battles work</summary><p>Command Hall and specialist buildings set active kit. Sentinel and Lifeline unlock at Hall L4 with a Level 3 specialist building. Upgraded damage boosts attacks; health, armour and Lifeline support reduce losses. Battles lock both bases and kits before the first move.</p></details><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves upgrades and assigns posts. Assigned defenders guard the base; reserves stay out of battle.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
   panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
     const role = button.dataset.squadPreview;
     const level = Number(button.dataset.level);
@@ -1733,6 +1751,9 @@ function showSquadPanel() {
     if (!patrol || fallback2D || raid || warBattle) { toast('3D patrol is unavailable right now.'); return; }
     focusedPatrolRole = patrol.role;
     patrolFocusExit.hidden = false;
+    patrolFocusExit.textContent = `← Back to base · ${SQUAD_ROLES[patrol.role].name} L${patrol.mesh.userData.squadTier}`;
+    patrolFocusLight.visible = true;
+    patrolFocusRing.visible = true;
     zoom = 8;
     camTarget.copy(patrol.mesh.position);
     updateCamera();
@@ -2890,7 +2911,13 @@ renderer.setAnimationLoop(time => {
   if (focusedPatrolRole) {
     const patrol = patrols.find(item => item.role === focusedPatrolRole && item.mesh.visible);
     if (!patrol || raid || warBattle) stopPatrolFocus(true);
-    else { camTarget.lerp(patrol.mesh.position, Math.min(1, dt * 7)); updateCamera(); }
+    else {
+      camTarget.lerp(patrol.mesh.position, Math.min(1, dt * 7));
+      updateCameraPosition();
+      patrolFocusLight.position.set(patrol.mesh.position.x + 1.2, 2.6, patrol.mesh.position.z + 1.2);
+      patrolFocusRing.position.set(patrol.mesh.position.x, 0.055, patrol.mesh.position.z);
+      patrolFocusRing.scale.setScalar(1 + Math.sin(elapsed * 3) * 0.04);
+    }
   }
   for (const patrol of defenderPatrols.values()) {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
