@@ -399,10 +399,14 @@ export async function getPublicServersPayload(env: Env, slug: string | null, vie
 
 async function getPublicServersPreviewPayload(env: Env) {
   const rows = await queryPublicServersPreview(env);
-  const badgeAwardMap = await getPublicBadgeAwardMap(env, rows.map((row) => row.id));
+  const [reviewSummaries, badgeAwardMap] = await Promise.all([
+    getPublicServerRatingSummaries(env, rows.map((row) => row.id)),
+    getPublicBadgeAwardMap(env, rows.map((row) => row.id)),
+  ]);
   const servers = (await Promise.all(rows.map((row) => toSafePublicServerPreview(
     env,
     row,
+    reviewSummaries.get(row.id) ?? emptyPublicServerRatingSummary(),
     badgeAwardMap.get(row.id) ?? null,
   ))))
     .filter((server): server is SafePublicServer => Boolean(server))
@@ -1270,6 +1274,7 @@ async function toSafePublicServer(
 async function toSafePublicServerPreview(
   env: Env,
   row: PublicServerRow,
+  reviewSummary: PublicServerRatingSummary,
   badgeAwardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null,
 ): Promise<SafePublicServer | null> {
   if (!row.public_slug) return null;
@@ -1484,7 +1489,9 @@ async function toSafePublicServerPreview(
     ...stats,
     score_breakdown: null,
     stats_sync_active: publicStatsActive,
-    ...emptyPublicServerRatingSummary(),
+    average_rating: reviewSummary.average_rating,
+    review_count: reviewSummary.review_count,
+    rating_breakdown: reviewSummary.rating_breakdown,
     advertising,
     plan_key: planKey,
     server_access: { source: serverAccess.source },
