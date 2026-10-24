@@ -11,7 +11,11 @@ from mathutils import Matrix, Quaternion, Vector
 
 
 source_path, output_path = sys.argv[sys.argv.index('--') + 1:]
-two_handed = 'sentinel_l0' in source_path.lower()
+source_name = source_path.lower().replace('\\', '/')
+is_engineer = 'engineer_l0' in source_name
+two_handed = 'sentinel_l0' in source_name
+left_hand_occupied = two_handed or is_engineer
+right_hand_occupied = two_handed
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=source_path)
 meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
@@ -92,9 +96,16 @@ bone('Chest', (0, 0, 1.20), (0, 0, 1.44), 'Spine')
 bone('Neck', (0, 0, 1.44), (0, 0, 1.56), 'Chest')
 bone('Head', (0, 0, 1.56), (0, 0, 1.78), 'Neck')
 for side, sign in [('L', -1), ('R', 1)]:
-    bone(f'UpperArm_{side}', (sign * .22, 0, 1.42), (sign * .41, 0, 1.17), 'Chest')
-    bone(f'Forearm_{side}', (sign * .41, 0, 1.17), (sign * .52, 0, .98), f'UpperArm_{side}')
-    bone(f'Hand_{side}', (sign * .52, 0, .98), (sign * .59, 0, .87), f'Forearm_{side}')
+    if is_engineer and side == 'L':
+        # The Fixer source has its gloves close to the torso and forward of
+        # the hips; the generic wide-T-pose rig places hand bones ~40 cm away.
+        bone(f'UpperArm_{side}', (sign * .20, -.05, 1.42), (sign * .27, -.13, 1.10), 'Chest')
+        bone(f'Forearm_{side}', (sign * .27, -.13, 1.10), (sign * .27, -.22, .88), f'UpperArm_{side}')
+        bone(f'Hand_{side}', (sign * .27, -.22, .88), (sign * .27, -.27, .78), f'Forearm_{side}')
+    else:
+        bone(f'UpperArm_{side}', (sign * .22, 0, 1.42), (sign * .41, 0, 1.17), 'Chest')
+        bone(f'Forearm_{side}', (sign * .41, 0, 1.17), (sign * .52, 0, .98), f'UpperArm_{side}')
+        bone(f'Hand_{side}', (sign * .52, 0, .98), (sign * .59, 0, .87), f'Forearm_{side}')
     bone(f'UpperLeg_{side}', (sign * .13, 0, .79), (sign * .13, 0, .43), 'Root')
     bone(f'LowerLeg_{side}', (sign * .13, 0, .43), (sign * .13, 0, .12), f'UpperLeg_{side}')
     bone(f'Foot_{side}', (sign * .13, 0, .12), (sign * .13, -.12, .03), f'LowerLeg_{side}')
@@ -115,11 +126,18 @@ for mesh in meshes:
     modifier = mesh.modifiers.new('DZN skin', 'ARMATURE')
     modifier.object = armature
     groups = {name: mesh.vertex_groups.new(name=name) for name in bones}
+    held_vertices = 0
     for vertex in mesh.data.vertices:
         point = vertex.co
+        if is_engineer and -.34 < point.x < 0 and point.y < -.22 and .43 < point.z < .96:
+            # The disconnected axe, handle and gripping glove are one visual
+            # prop. Keep them rigid on the carrying hand through the walk.
+            groups['Hand_L'].add([vertex.index], 1, 'REPLACE')
+            held_vertices += 1
+            continue
         if point.z > 1.53:
             candidates = ['Head', 'Neck']
-        elif point.z > .86 and abs(point.x) > .24:
+        elif (is_engineer and point.x < -.18 and point.z > .74 and (point.z > 1.0 or point.y < -.08)) or (point.z > .86 and abs(point.x) > .24):
             side = 'L' if point.x < 0 else 'R'
             candidates = [f'UpperArm_{side}', f'Forearm_{side}', f'Hand_{side}']
         elif point.z < .81 and abs(point.x) > .07:
@@ -132,6 +150,8 @@ for mesh in meshes:
         total = sum(strengths)
         for name, strength in zip(nearest, strengths):
             groups[name].add([vertex.index], strength / total, 'REPLACE')
+    if is_engineer:
+        print('DZN_FIXER_HAND_WEIGHTED', mesh.name, held_vertices)
 
 
 def swing(name, radians, frame):
@@ -149,10 +169,12 @@ for frame, step in [(1, 0), (7, .30), (13, 0), (19, -.30), (25, 0)]:
     for side, sign in [('L', 1), ('R', -1)]:
         swing(f'UpperLeg_{side}', step * sign, frame)
         swing(f'LowerLeg_{side}', max(0, -step * sign) * .40, frame)
-        # Keep both gloves in a shared rifle grip. Opposing arm swings pull
-        # the image-guided weapon away from one hand during the walk cycle.
-        swing(f'UpperArm_{side}', step * .07 if two_handed else -step * sign * .52, frame)
-        swing(f'Forearm_{side}', 0 if two_handed else .04, frame)
+        # Keep occupied gloves close to their carried gear. The source art has
+        # tools baked into the skinned mesh, so a normal counter-swing visibly
+        # separates a hand from its axe or rifle.
+        occupied = (left_hand_occupied and side == 'L') or (right_hand_occupied and side == 'R')
+        swing(f'UpperArm_{side}', step * .07 if occupied else -step * sign * .52, frame)
+        swing(f'Forearm_{side}', 0 if occupied else .04, frame)
     swing('Chest', math.sin((frame - 1) * math.pi / 12) * .014, frame)
 
 armature.animation_data.action = None
@@ -160,8 +182,8 @@ idle = bpy.data.actions.new('DZN_Operative_Idle')
 armature.animation_data.action = idle
 for frame, breath in [(1, 0), (25, .015), (49, 0)]:
     swing('Chest', breath, frame)
-    swing('UpperArm_L', breath * .15 if two_handed else -breath * .7, frame)
-    swing('UpperArm_R', breath * .15 if two_handed else breath * .7, frame)
+    swing('UpperArm_L', breath * .15 if left_hand_occupied else -breath * .7, frame)
+    swing('UpperArm_R', breath * .15 if right_hand_occupied else breath * .7, frame)
 
 armature.animation_data.action = walk
 bpy.context.scene.frame_start = 1

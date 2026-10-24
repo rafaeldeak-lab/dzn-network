@@ -241,12 +241,14 @@ for (let level = 1; level <= 5; level++) {
     || triangles !== ghost.triangles || ghost.animations.some(animation => !ghostAnimations.get(animation))) throw new Error(`Ghost Level ${level} lacks textured, skinned walk/idle geometry.`);
 }
 console.log('Five distinct image-guided DZN Ghost levels verified with retained sources, skins, textures and walk/idle clips.');
-const fixerManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v8/manifest.json'), 'utf8'));
-if (Object.keys(fixerManifest.assets || {}).length !== 5) throw new Error('Fixer kit must have five image-guided models.');
+const fixerManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v12/manifest.json'), 'utf8'));
+const fixerBaseline = JSON.parse(readFileSync(join(root, 'assets/models/squads-v8/manifest.json'), 'utf8'));
+if (!fixerManifest.complete || Object.keys(fixerManifest.assets || {}).length !== 5) throw new Error('Fixer kit must have five steady-grip models.');
 const fixerHashes = new Set();
 for (let level = 1; level <= 5; level++) {
   const name = `engineer_l0${level}`, fixer = fixerManifest.assets[name];
-  if (!fixer || fixer.file !== squadAsset('engineer', level) || fixer.reference !== squadPortrait('engineer', level) || !fixer.rosebudJob) throw new Error(`Fixer Level ${level} model or portrait mapping is missing.`);
+  if (!fixer || fixer.file !== squadAsset('engineer', level) || fixer.reference !== squadPortrait('engineer', level) || !fixer.rosebudJob
+    || fixer.sourceSha256 !== fixerBaseline.assets[name]?.sourceSha256 || fixer.sha256 === fixerBaseline.assets[name]?.sha256) throw new Error(`Fixer Level ${level} steady-grip model or portrait mapping is missing.`);
   const bytes = readFileSync(join(root, ...fixer.file.split('/')));
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), fixer.source));
   const reference = readFileSync(join(root, ...fixer.reference.split('/')));
@@ -262,7 +264,7 @@ for (let level = 1; level <= 5; level++) {
   if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 15 || gltf.images?.length < 2
     || triangles !== fixer.triangles || fixer.animations.some(animation => !clips.get(animation))) throw new Error(`Fixer Level ${level} lacks textured, skinned walk/idle geometry.`);
 }
-console.log('Five distinct image-guided DZN Fixer levels verified with retained sources, skins, textures and walk/idle clips.');
+console.log('Five distinct DZN Fixer steady-grip levels verified with retained image-guided sources, skins, textures and walk/idle clips.');
 const medicManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v9/manifest.json'), 'utf8'));
 if (Object.keys(medicManifest.assets || {}).length !== 5) throw new Error('Lifeline kit must have five image-guided models.');
 const medicHashes = new Set();

@@ -201,13 +201,22 @@ GLBs in WebGL, with role equipment and visual changes from Level 1 to 5.
 Patrols walk along paths between the compound buildings and squad camp,
 pause at assigned stops, and turn toward their next destination. The exact
 owner-supplied artwork remains in the Armoury; Canvas 2D uses flat portraits
-as a compatibility fallback. The new procedural models are game-scale
-interpretations of the single-view concept sheets, not exact textured 3D
-reconstructions. The earlier models remain under
+as a compatibility fallback. The active WebGL folders are `squads-v6` for
+Warden, `squads-v7` for Ghost, `squads-v12` for Fixer, `squads-v9` for
+Lifeline and `squads-v11` for Sentinel. These Rosebud image-guided models
+are textured 3D interpretations of the single-view concept sheets. The
+earlier procedural models remain under
 `preview/assets/models/squads/`, `preview/assets/models/squads-v2/`, and
 `preview/assets/models/squads-v3/` for comparison and are no longer selected
-in WebGL. `tools/generate-squads.mjs` creates the `squads-v5` kit used by Ghost,
-Fixer, Sentinel and Lifeline.
+in WebGL. `tools/generate-squads.mjs` creates the older `squads-v5` kit.
+
+The Fixer's five `squads-v12` GLBs reuse the retained image-guided static
+sources from `squads-v8`. `tools/rig-rosebud-operative.py` places the axe-side
+hand bone at the visible glove, weights the axe and glove to that hand, and
+steadies it during the walk. `tools/package-steady-fixer.mjs` records the
+unchanged source hashes and the revised output hashes. This local rig pass
+used no additional generation credits. The Rosebud editor contains all five
+new GLBs and selects this folder for Fixer patrols.
 
 Warden Levels 1–5 now use five distinct textured models generated with
 Rosebud's Create > 3D Model tool. The static Rosebud source GLBs remain in
