@@ -473,17 +473,21 @@ const buildings = {};
 const animated = { radars: [], lights: [], chimneys: [], yards: [] };
 let warTurretRig = null;
 
-function addArcMuzzle(yaw, distance) {
-  const muzzle = new THREE.Group();
-  muzzle.position.set(0, 0.12, distance);
-  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xc7ff73, transparent: true, opacity: 0, depthWrite: false }));
-  flash.scale.setScalar(0.01);
-  muzzle.add(flash);
-  const light = new THREE.PointLight(0xb5ff65, 0, 5, 2);
-  muzzle.add(light);
-  yaw.add(muzzle);
-  return { muzzle, flash, light };
+function addArcMuzzle(yaw, distance, spread = 0.16) {
+  const muzzles = [-spread, spread].map(x => {
+    const node = new THREE.Group();
+    node.position.set(x, 0.12, distance);
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xc7ff73, transparent: true, opacity: 0, depthWrite: false }));
+    flash.userData.arcFlash = true;
+    flash.scale.setScalar(0.01);
+    node.add(flash);
+    const light = new THREE.PointLight(0xb5ff65, 0, 5, 2);
+    node.add(light);
+    yaw.add(node);
+    return { node, flash, light };
+  });
+  return { muzzles, muzzle: muzzles[0].node, barrelIndex: 1 };
 }
 
 // Rosebud's Arc Battery GLBs are one textured mesh each. Keep that artwork,
@@ -525,12 +529,17 @@ function articulateArcBattery(model) {
   model.updateMatrixWorld(true);
   recoil.attach(rotor);
   const span = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
-  const muzzleParts = addArcMuzzle(yaw, span * 0.23);
+  const muzzleParts = addArcMuzzle(yaw, span * 0.23, span * 0.07);
   return { yaw, recoil, ...muzzleParts, flashAmount: 0 };
 }
 
 function stepArcBattery(rig, dt, time, target = null, fire = false) {
-  if (!rig || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!rig) return false;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    rig.flashAmount = 0;
+    rig.muzzles.forEach(muzzle => { muzzle.flash.material.opacity = 0; muzzle.light.intensity = 0; });
+    return false;
+  }
   let desired = Math.sin(time * 0.45) * 0.85;
   if (target) {
     const local = rig.yaw.parent.worldToLocal(target.clone());
@@ -538,17 +547,29 @@ function stepArcBattery(rig, dt, time, target = null, fire = false) {
   }
   const delta = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
   rig.yaw.rotation.y += THREE.MathUtils.clamp(delta, -dt * 1.9, dt * 1.9);
-  if (fire) { rig.flashAmount = 1; if (rig.recoil) rig.recoil.position.z = -0.065; }
+  const remaining = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
+  const fired = Boolean(fire && target && Math.abs(remaining) < 0.12);
+  if (fired) {
+    rig.barrelIndex = 1 - rig.barrelIndex;
+    rig.muzzle = rig.muzzles[rig.barrelIndex].node;
+    rig.flashAmount = 1;
+    if (rig.recoil) rig.recoil.position.z = -0.14;
+  }
   rig.flashAmount = Math.max(0, rig.flashAmount - dt * 4.2);
   if (rig.recoil) rig.recoil.position.z = THREE.MathUtils.damp(rig.recoil.position.z, 0, 12, dt);
-  rig.flash.material.opacity = rig.flashAmount * 0.95;
-  rig.flash.scale.setScalar(0.01 + rig.flashAmount * 1.8);
-  rig.light.intensity = rig.flashAmount * 24;
+  rig.muzzles.forEach((muzzle, index) => {
+    const brightness = index === rig.barrelIndex ? rig.flashAmount : 0;
+    muzzle.flash.material.opacity = brightness * 0.95;
+    muzzle.flash.scale.setScalar(0.01 + brightness * 1.8);
+    muzzle.light.intensity = brightness * 24;
+  });
+  return fired;
 }
 
 function clearArcSplitGeometry(model) {
   model?.traverse(object => {
-    if (object.isMesh && object.geometry?.userData.arcSplit) object.geometry.dispose();
+    if (object.isMesh && (object.geometry?.userData.arcSplit || object.userData.arcFlash)) object.geometry.dispose();
+    if (object.userData.arcFlash) object.material.dispose();
   });
 }
 const revealEffects = new Map();
@@ -2763,11 +2784,7 @@ function refreshWarTableTimers() {
 function clearWarBaseVisuals() {
   warDefenderToken++;
   warTurretRig = null;
-  for (const bolt of warBattle?.bolts || []) {
-    scene.remove(bolt.line);
-    bolt.line.geometry.dispose();
-    bolt.line.material.dispose();
-  }
+  for (const bolt of warBattle?.bolts || []) disposeWarBolt(bolt);
   for (const defender of warDefenderMeshes) {
     scene.remove(defender.mesh);
     if (defender.snareField) {
@@ -2778,9 +2795,20 @@ function clearWarBaseVisuals() {
   warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
     if (child.userData.sharedTemplate) clearArcSplitGeometry(child);
-    else child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+    else child.traverse(object => {
+      if (object.isMesh) object.geometry?.dispose();
+      if (object.userData.arcFlash) object.material.dispose();
+    });
     warBaseGroup.remove(child);
   }
+}
+
+function disposeWarBolt(bolt) {
+  scene.remove(bolt.beam, bolt.impact);
+  bolt.beam.geometry.dispose();
+  bolt.beam.material.dispose();
+  bolt.impact.geometry.dispose();
+  bolt.impact.material.dispose();
 }
 
 function buildWarBaseVisual(side) {
@@ -2802,7 +2830,10 @@ function buildWarBaseVisual(side) {
       detailed.userData.sharedTemplate = true;
       warBaseGroup.add(detailed);
       warBaseGroup.remove(model);
-      model.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+      model.traverse(object => {
+        if (object.isMesh) object.geometry?.dispose();
+        if (object.userData.arcFlash) object.material.dispose();
+      });
       if (key === 'tower') warTurretRig = detailed.userData.turretRig;
     }).catch(error => console.warn(`War base ${key} model could not load; retaining fallback.`, error));
   }
@@ -2916,27 +2947,36 @@ function updateWarBattle(dt) {
     }
     animateDefender({ ...defender, motion: { stride: warBattle.time * 8, moving: defender.role === 'hound' && threat > 0.1 } }, warBattle.time, threat);
   }
-  const target = warBattle.troops.find(troop => troop.mesh.position.distanceTo(OUTPOST) < 22)?.mesh;
-  warBattle.shotClock += dt;
-  const fire = Boolean(warTurretRig && target && progress < 0.94 && warBattle.shotClock >= 0.8);
-  if (fire) warBattle.shotClock = 0;
+  const turretPosition = warTurretRig?.yaw.getWorldPosition(new THREE.Vector3());
+  const target = turretPosition && warBattle.troops.reduce((nearest, troop) => {
+    const distance = troop.mesh.position.distanceToSquared(turretPosition);
+    return !nearest || distance < nearest.distance ? { mesh: troop.mesh, distance } : nearest;
+  }, null)?.mesh;
+  warBattle.shotClock = Math.min(1.2, warBattle.shotClock + dt);
+  const fire = Boolean(target && progress < 0.94 && warBattle.shotClock >= 0.8);
   const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-  stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire);
-  if (fire) {
+  if (stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire)) {
+    warBattle.shotClock = 0;
     const origin = warTurretRig.muzzle.getWorldPosition(new THREE.Vector3());
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, aim]),
-      new THREE.LineBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
-    scene.add(line);
-    warBattle.bolts.push({ line, life: 0 });
+    const direction = aim.clone().sub(origin);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.065, direction.length(), 8),
+      new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
+    beam.position.copy(origin).addScaledVector(direction, 0.5);
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+    const impact = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.8, depthWrite: false }));
+    impact.position.copy(aim);
+    scene.add(beam, impact);
+    warBattle.bolts.push({ beam, impact, life: 0 });
   }
   for (let i = warBattle.bolts.length - 1; i >= 0; i--) {
     const bolt = warBattle.bolts[i];
     bolt.life += dt;
-    bolt.line.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.22));
-    if (bolt.life >= 0.22) {
-      scene.remove(bolt.line);
-      bolt.line.geometry.dispose();
-      bolt.line.material.dispose();
+    bolt.beam.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.38));
+    bolt.impact.material.opacity = Math.max(0, 0.8 * (1 - bolt.life / 0.38));
+    bolt.impact.scale.setScalar(1 + bolt.life * 2.5);
+    if (bolt.life >= 0.38) {
+      disposeWarBolt(bolt);
       warBattle.bolts.splice(i, 1);
     }
   }
