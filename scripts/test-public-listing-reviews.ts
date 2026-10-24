@@ -69,6 +69,12 @@ assert.match(publicNetworkSource, /<ReviewsPanel key=\{server\.public_slug\} ser
 assert.match(publicNetworkSource, /Checking Discord review access\.\.\./);
 assert.match(publicNetworkSource, /You own this server, so you cannot review it\./);
 
+const publicServersSource = readFileSync("functions/api/public/servers.ts", "utf8");
+assert.match(publicServersSource, /const \[reviewSummaries, badgeAwardMap\] = await Promise\.all\(\[/);
+assert.match(publicServersSource, /reviewSummaries\.get\(row\.id\) \?\? emptyPublicServerRatingSummary\(\)/);
+assert.match(publicServersSource, /average_rating: reviewSummary\.average_rating,/);
+assert.match(publicServersSource, /review_count: reviewSummary\.review_count,/);
+
 const now = new Date("2026-05-16T12:00:00.000Z");
 const recentUpdate = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
 assert.equal(Boolean(reviewCooldownUntil(recentUpdate, now)), true);
