@@ -16,6 +16,42 @@ export type DznOfficialUpdate = {
 // it is deliberately separate from player conversation and private notices.
 export const DZN_OFFICIAL_UPDATES: readonly DznOfficialUpdate[] = [
   {
+    id: "global-chat-english-only-safety",
+    publishedAt: "2026-10-23",
+    audience: "Everyone",
+    category: "Community",
+    title: "Global Chat English-only safety has been strengthened",
+    summary: "Global Chat now has stronger English-only and abuse controls before messages are posted. A small set of common safe greetings can be converted locally into English, while known unsupported foreign phrases are rejected.",
+    href: "/community#global-chat",
+  },
+  {
+    id: "dzn-assist-saved-conversations",
+    publishedAt: "2026-10-23",
+    audience: "Everyone",
+    category: "Website",
+    title: "DZN Assist now keeps conversations on this device",
+    summary: "DZN Assist can recall a recent support conversation on the same device, so players can return to useful guidance without turning it into a public chat record or exposing private account data.",
+    href: "/community#dzn-assist",
+  },
+  {
+    id: "dzn-assist-verified-server-guidance",
+    publishedAt: "2026-10-23",
+    audience: "Everyone",
+    category: "Servers",
+    title: "DZN Assist can guide players to verified servers",
+    summary: "Ask DZN Assist how to find or join a server for direct guidance to verified public DZN server information. It does not expose private player, owner, billing or Discord details.",
+    href: "/community#dzn-assist",
+  },
+  {
+    id: "global-chat-earlier-history",
+    publishedAt: "2026-10-23",
+    audience: "Everyone",
+    category: "Community",
+    title: "Global Chat can now load earlier public messages",
+    summary: "Players can load earlier Global Chat history when it is available, while the official DZN Updates channel remains read-only and separate from player conversation.",
+    href: "/community#global-chat",
+  },
+  {
     id: "official-comms-updates-channel",
     publishedAt: "2026-10-21",
     audience: "Everyone",
