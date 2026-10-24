@@ -204,7 +204,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       generated_at: new Date().toISOString(),
       account: {
         display_name: user.username || "DZN Player",
-        avatar: user.avatar,
+        avatar_url: privateDiscordAvatarUrl(user.discord_id, user.avatar),
         player_home_href: "/player",
         private_profile_href: "/player/profile",
       },
@@ -273,6 +273,14 @@ async function resolveUser(env: Env, request: Request): Promise<SessionUser | nu
     username: mock.user.username,
     avatar: mock.user.avatar,
   };
+}
+
+function privateDiscordAvatarUrl(discordId: string, avatarHash: string | null) {
+  if (!/^\d{16,22}$/.test(discordId) || !avatarHash || !/^[A-Za-z0-9_]{8,128}$/.test(avatarHash)) {
+    return null;
+  }
+
+  return `https://cdn.discordapp.com/avatars/${encodeURIComponent(discordId)}/${encodeURIComponent(avatarHash)}.webp?size=256`;
 }
 
 async function readSafeSavedServers(env: Env, userId: string) {

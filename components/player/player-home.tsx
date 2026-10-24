@@ -69,7 +69,7 @@ type PlayerHubPayload = {
   generated_at: string;
   account: {
     display_name: string;
-    avatar: string | null;
+    avatar_url: string | null;
     player_home_href: string;
     private_profile_href: string;
   };
@@ -518,7 +518,6 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
   const headerNavigation = authState.status === "logged_in" ? authState.navigation : null;
   const hubData = hubState.status === "ready" ? hubState.data : null;
-  const ownerSetupHref = hubData?.owner_setup.href ?? ownerSetupFallbackHref;
   const visiblePlayerActionCards = playerActionCards.filter((card) => {
     if (card.href === "/command-centre") return hubData?.command_centre?.available === true;
     if (card.href === "/survival-command") return hubData?.survival_command?.available === true;
@@ -541,10 +540,22 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
       />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_16%,rgba(34,211,238,0.22),transparent_24%),radial-gradient(circle_at_78%_18%,rgba(168,85,247,0.2),transparent_26%),linear-gradient(rgba(125,211,252,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(168,85,247,0.05)_1px,transparent_1px)] bg-[size:auto,auto,120px_120px,120px_120px]" aria-hidden="true" />
 
-      <section className="relative mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pb-28 pt-8 sm:px-6 lg:px-8">
-        {mode === "profile" && authState.status === "logged_in" ? (
-          <ProfilePageIntro displayName={profileHandlePreview} />
+      <section className="relative mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 pb-28 pt-5 sm:px-6 lg:px-8">
+        {mode === "home" ? (
+          <TacticalPlayerHub
+            authState={authState}
+            hubState={hubState}
+            communityRefresh={communityRefresh}
+            onRefreshCommunityMatches={refreshCommunityMatches}
+            profileHandlePreview={profileHandlePreview}
+            linkedServerCount={authState.linkedServerCount}
+            routes={visiblePlayerActionCards}
+          />
         ) : (
+          <>
+          {authState.status === "logged_in" ? (
+            <ProfilePageIntro displayName={profileHandlePreview} />
+          ) : (
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
           <div className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.12)] backdrop-blur">
             <div className="flex flex-wrap items-center gap-3">
@@ -560,52 +571,21 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
             <div className="mt-6 max-w-3xl">
               <h1 className="text-3xl font-black uppercase leading-tight text-white sm:text-4xl lg:text-5xl">
-                {mode === "profile" ? "Personal Player Profile" : "Player Hub"}
+                Personal Player Profile
               </h1>
               <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-200">
-                {mode === "profile"
-                  ? "Your private profile entry point keeps personal player tools separate from owner setup, billing, and competitive scoring."
-                  : "Your logged-in player home now pulls in followed servers, private Discord membership matches, event suggestions, and profile entry points without needing an owner plan."}
+                Your private profile entry point keeps personal player tools separate from owner setup, billing, and competitive scoring.
               </p>
             </div>
 
             <div className="mt-7 flex flex-wrap gap-3">
-              {authState.status === "logged_in" ? (
-                <>
-                  {mode === "profile" ? (
-                    <Link
-                      href="/player"
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200/60 bg-cyan-300 px-4 text-sm font-black uppercase text-slate-950 shadow-[0_0_22px_rgba(34,211,238,0.24)]"
-                    >
-                      Open Player Hub
-                      <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                    </Link>
-                  ) : (
-                    <Link
-                      href="/player/profile"
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200/60 bg-cyan-300 px-4 text-sm font-black uppercase text-slate-950 shadow-[0_0_22px_rgba(34,211,238,0.24)]"
-                    >
-                      Open Profile
-                      <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                    </Link>
-                  )}
-                  <Link
-                    href="/servers"
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-4 text-sm font-black uppercase text-white"
-                  >
-                    Browse Servers
-                    <ExternalLink aria-hidden="true" className="h-4 w-4" />
-                  </Link>
-                </>
-              ) : (
-                <Link
-                  href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200/60 bg-cyan-300 px-4 text-sm font-black uppercase text-slate-950"
-                >
-                  Login With Discord
-                  <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                </Link>
-              )}
+              <Link
+                href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-200/60 bg-cyan-300 px-4 text-sm font-black uppercase text-slate-950"
+              >
+                Login With Discord
+                <ChevronRight aria-hidden="true" className="h-4 w-4" />
+              </Link>
             </div>
           </div>
 
@@ -624,57 +604,11 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
                 </p>
               </div>
             ) : null}
-            {authState.status === "logged_in" ? (
-              <div className="mt-4 space-y-3">
-                <div className="rounded-md border border-cyan-300/25 bg-cyan-300/10 p-4">
-                  <p className="text-sm font-black text-white">{profileHandlePreview}</p>
-                  <p className="mt-1 text-xs font-semibold text-cyan-100">Discord account verified</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <MetricTile label="Saved" value={hubMetric(hubData?.saved_servers.length, hubState)} />
-                  <MetricTile label="Communities" value={hubMetric(hubData?.matched_communities.length, hubState)} />
-                  <MetricTile label="Events" value={hubMetric(hubData?.suggested_events.length, hubState)} />
-                  <MetricTile label="Owner Servers" value={String(authState.linkedServerCount)} />
-                </div>
-              </div>
-            ) : null}
           </aside>
         </div>
-        )}
+          )}
 
-        {mode === "home" ? (
-          <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              {visiblePlayerActionCards.map((card) => (
-                <Link
-                  key={card.href}
-                  href={card.href}
-                  className={`group rounded-lg border bg-slate-950/78 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900/88 ${toneClasses(card.tone)}`}
-                >
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/8 text-white">
-                    {card.icon}
-                  </span>
-                  <span className="mt-4 flex items-center justify-between gap-3">
-                    <span className="text-base font-black uppercase text-white">{card.title}</span>
-                    <ChevronRight aria-hidden="true" className="h-4 w-4 text-slate-400 transition group-hover:text-cyan-100" />
-                  </span>
-                  <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">{card.description}</span>
-                </Link>
-              ))}
-            </div>
-
-            {authState.status === "logged_in" ? (
-              <PlayerHubDataPanels state={hubState} refreshState={communityRefresh} onRefreshCommunityMatches={refreshCommunityMatches} />
-            ) : (
-              <LoggedOutHubPreview />
-            )}
-
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <ProfileProgressionPanel state={hubState} />
-              <OwnerSetupBoundary ownerSetupHref={ownerSetupHref} />
-            </div>
-          </>
-        ) : authState.status === "logged_in" ? (
+        {authState.status === "logged_in" ? (
           <ProfileWorkspaceNavigation activeSection={activeProfileSection} onSelect={openProfileSection} />
         ) : (
           <LoggedOutHubPreview />
@@ -693,8 +627,232 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
             ) : null}
           </div>
         ) : null}
+        </>
+        )}
       </section>
     </main>
+  );
+}
+
+function TacticalPlayerHub({
+  authState,
+  hubState,
+  communityRefresh,
+  onRefreshCommunityMatches,
+  profileHandlePreview,
+  linkedServerCount,
+  routes,
+}: {
+  authState: PlayerAuthState;
+  hubState: PlayerHubState;
+  communityRefresh: CommunityRefreshState;
+  onRefreshCommunityMatches: () => void;
+  profileHandlePreview: string;
+  linkedServerCount: number;
+  routes: PlayerActionCard[];
+}) {
+  const hubData = hubState.status === "ready" ? hubState.data : null;
+  const isLoggedIn = authState.status === "logged_in";
+  const commandCentreAvailable = hubData?.command_centre?.available === true;
+  const survivalCommandAvailable = hubData?.survival_command?.available === true;
+  const profileAvatarUrl = hubData?.account.avatar_url ?? null;
+  const profileName = hubData?.account.display_name ?? profileHandlePreview;
+
+  return (
+    <div className="space-y-4">
+      <section className="relative overflow-hidden border border-violet-300/30 bg-[#080b18] shadow-[0_18px_56px_rgba(3,7,18,0.56)]">
+        <div className="absolute inset-0 bg-cover bg-[center_56%] opacity-80" style={{ backgroundImage: "url('/media/dzn-cinematic-survivor.png')" }} aria-hidden="true" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,5,15,0.98)_0%,rgba(3,5,15,0.9)_42%,rgba(3,5,15,0.24)_100%),linear-gradient(0deg,rgba(3,5,15,0.86)_0%,transparent_56%)]" aria-hidden="true" />
+        <div className="relative grid min-h-[25rem] gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,0.85fr)_minmax(17rem,0.45fr)] lg:items-end lg:p-9">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2 text-[0.65rem] font-black uppercase text-cyan-100">
+              <span className="border border-cyan-300/35 bg-cyan-300/10 px-2 py-1">Player Hub</span>
+              <span className="border border-violet-300/30 bg-violet-300/10 px-2 py-1">Personal network brief</span>
+            </div>
+            <h1 className="mt-5 max-w-xl text-4xl font-black uppercase leading-[0.94] text-white sm:text-5xl lg:text-6xl">
+              Your next <span className="text-violet-300">chapter starts here.</span>
+            </h1>
+            <p className="mt-5 max-w-xl text-sm font-semibold leading-6 text-slate-200 sm:text-base">
+              Your personal view of DZN: connected identity, followed servers, matched communities, relevant events, and private progression with the existing access rules kept intact.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              {isLoggedIn ? (
+                <>
+                  <Link href="/player/profile" className="inline-flex min-h-11 items-center justify-center gap-2 border border-violet-200/70 bg-violet-300 px-4 text-sm font-black uppercase text-[#10091b] shadow-[0_0_24px_rgba(196,181,253,0.28)]">
+                    Open Profile <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                  </Link>
+                  <Link href="/servers" className="inline-flex min-h-11 items-center justify-center gap-2 border border-white/20 bg-slate-950/50 px-4 text-sm font-black uppercase text-white backdrop-blur hover:border-cyan-200/60">
+                    Browse Servers <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                  </Link>
+                </>
+              ) : (
+                <Link href="/login?returnTo=%2Fplayer" className="inline-flex min-h-11 items-center justify-center gap-2 border border-violet-200/70 bg-violet-300 px-4 text-sm font-black uppercase text-[#10091b]">
+                  Login With Discord <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                </Link>
+              )}
+            </div>
+          </div>
+
+          <aside className="self-end border border-cyan-300/25 bg-[#050914]/82 p-4 backdrop-blur-sm">
+            {isLoggedIn ? (
+              <div className="flex items-center gap-4">
+                <DiscordIdentityAvatar displayName={profileName} avatarUrl={profileAvatarUrl} size="hero" />
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-black text-white">{profileName}</p>
+                  <p className="mt-1 inline-flex items-center gap-2 text-xs font-black uppercase text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Discord verified</p>
+                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-300">This private Hub displays the Discord identity from your current signed-in session only.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><ShieldCheck aria-hidden="true" className="h-5 w-5" /></span>
+                <div>
+                  <p className="font-black uppercase text-white">Discord identity required</p>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">Sign in before DZN loads a profile, saved servers, community matches, or private stats.</p>
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      </section>
+
+      <section aria-label="Player Hub summary" className="grid grid-cols-2 border border-cyan-300/20 bg-[#07101c]/88 sm:grid-cols-4">
+        <TacticalMetric icon={<BookmarkCheck aria-hidden="true" className="h-4 w-4" />} label="Saved" value={hubMetric(hubData?.saved_servers.length, hubState)} />
+        <TacticalMetric icon={<Users aria-hidden="true" className="h-4 w-4" />} label="Communities" value={hubMetric(hubData?.matched_communities.length, hubState)} />
+        <TacticalMetric icon={<CalendarDays aria-hidden="true" className="h-4 w-4" />} label="Events" value={hubMetric(hubData?.suggested_events.length, hubState)} />
+        <TacticalMetric icon={<Radio aria-hidden="true" className="h-4 w-4" />} label="Owner Servers" value={isLoggedIn ? String(linkedServerCount) : "--"} />
+      </section>
+
+      <nav aria-label="Player Hub destinations" className="grid grid-cols-2 border border-white/10 bg-[#060a14]/90 sm:grid-cols-3 lg:grid-cols-5">
+        {routes.map((route) => (
+          <Link key={route.href} href={route.href} className="group flex min-h-16 items-center gap-3 border-b border-r border-white/10 px-3 py-3 text-left transition hover:bg-white/[0.05] lg:border-b-0">
+            <span className="text-cyan-100 transition group-hover:text-violet-200">{route.icon}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-black uppercase text-white">{route.title}</span>
+              <span className="mt-1 block truncate text-[0.65rem] font-bold uppercase text-slate-500">{route.href === "/games" ? "Maintenance status" : "Open"}</span>
+            </span>
+          </Link>
+        ))}
+      </nav>
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+        <TacticalFeatureCard
+          title="Command Centre"
+          eyebrow="Private operations"
+          description={commandCentreAvailable ? "Build your private DZN settlement and return to the commands that are available to your signed-in account." : "Command Centre is not enabled for this environment yet. Your player profile and saved data remain available."}
+          imageUrl="/media/player-hub/command-centre.webp"
+          href={commandCentreAvailable ? "/command-centre" : null}
+          action={commandCentreAvailable ? "Open Command Centre" : "Unavailable"}
+          icon={<Hammer aria-hidden="true" className="h-5 w-5" />}
+          tone="amber"
+          featured
+        />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+          <TacticalFeatureCard
+            title="Survival Command"
+            eyebrow="Field operations"
+            description={survivalCommandAvailable ? "Deploy into private field-team work without changing any competitive results or server controls." : "Survival Command is not enabled for this environment yet."}
+            imageUrl="/media/player-hub/survival-command.webp"
+            href={survivalCommandAvailable ? "/survival-command" : null}
+            action={survivalCommandAvailable ? "Open Survival Command" : "Unavailable"}
+            icon={<Activity aria-hidden="true" className="h-5 w-5" />}
+            tone="cyan"
+          />
+          <TacticalFeatureCard
+            title="Network Records"
+            eyebrow="Events and rankings"
+            description="Browse public rankings and current event information from their source pages. Your Hub does not alter scoring or eligibility."
+            imageUrl="/media/player-hub/network-events.webp"
+            href="/leaderboards"
+            action="Open Leaderboards"
+            icon={<Trophy aria-hidden="true" className="h-5 w-5" />}
+            tone="violet"
+          />
+        </div>
+      </section>
+
+      {isLoggedIn ? (
+        <PlayerHubDataPanels state={hubState} refreshState={communityRefresh} onRefreshCommunityMatches={onRefreshCommunityMatches} />
+      ) : (
+        <LoggedOutHubPreview />
+      )}
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.28fr)_minmax(20rem,0.72fr)]">
+        <ProfileProgressionPanel state={hubState} />
+        <OwnerSetupBoundary ownerSetupHref={hubData?.owner_setup.href ?? ownerSetupFallbackHref} />
+      </section>
+    </div>
+  );
+}
+
+function TacticalMetric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex min-h-20 items-center gap-3 border-b border-r border-white/10 px-4 py-3 last:border-r-0 sm:border-b-0">
+      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center border border-violet-300/28 bg-violet-300/10 text-violet-100">{icon}</span>
+      <span>
+        <span className="block text-xl font-black leading-none text-white">{value}</span>
+        <span className="mt-1 block text-[0.65rem] font-black uppercase text-slate-400">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+function TacticalFeatureCard({
+  title,
+  eyebrow,
+  description,
+  imageUrl,
+  href,
+  action,
+  icon,
+  tone,
+  featured = false,
+}: {
+  title: string;
+  eyebrow: string;
+  description: string;
+  imageUrl: string;
+  href: string | null;
+  action: string;
+  icon: ReactNode;
+  tone: "amber" | "cyan" | "violet";
+  featured?: boolean;
+}) {
+  const accent = tone === "amber" ? "border-amber-300/35 text-amber-100" : tone === "violet" ? "border-violet-300/35 text-violet-100" : "border-cyan-300/35 text-cyan-100";
+  const content = (
+    <>
+      <div className="absolute inset-0 bg-cover bg-center transition duration-500 group-hover:scale-[1.03]" style={{ backgroundImage: `url('${imageUrl}')` }} aria-hidden="true" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(4,7,17,0.97)_0%,rgba(4,7,17,0.84)_42%,rgba(4,7,17,0.23)_100%),linear-gradient(0deg,rgba(4,7,17,0.9)_0%,transparent_62%)]" aria-hidden="true" />
+      <div className={`relative flex h-full flex-col justify-end p-5 ${featured ? "min-h-[20rem] sm:p-7" : "min-h-[13rem]"}`}>
+        <span className={`mb-auto inline-flex w-fit items-center gap-2 border bg-[#050914]/70 px-2 py-1 text-[0.65rem] font-black uppercase ${accent}`}>{icon}{eyebrow}</span>
+        <h2 className={`max-w-md font-black uppercase text-white ${featured ? "text-3xl sm:text-4xl" : "text-xl"}`}>{title}</h2>
+        <p className="mt-3 max-w-xl text-sm font-semibold leading-6 text-slate-200">{description}</p>
+        <span className={`mt-5 inline-flex w-fit min-h-10 items-center gap-2 border bg-[#050914]/72 px-3 text-xs font-black uppercase ${href ? accent : "border-white/15 text-slate-400"}`}>
+          {action}<ChevronRight aria-hidden="true" className="h-4 w-4" />
+        </span>
+      </div>
+    </>
+  );
+
+  if (!href) return <section aria-label={`${title}: ${action}`} className="group relative overflow-hidden border border-white/12 bg-[#080b16]">{content}</section>;
+  return <Link href={href} className="group relative block overflow-hidden border border-white/12 bg-[#080b16] transition hover:border-white/30">{content}</Link>;
+}
+
+function DiscordIdentityAvatar({ displayName, avatarUrl, size }: { displayName: string; avatarUrl: string | null; size: "hero" | "profile" }) {
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const safeAvatarUrl = safeAuthenticatedDiscordAvatarUrl(avatarUrl);
+  const initial = initialsFromName(displayName).slice(0, 1);
+  const dimensionClass = size === "hero" ? "h-16 w-16 text-2xl" : "h-20 w-20 text-3xl";
+
+  return (
+    <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden border-2 border-cyan-200/60 bg-cyan-300/10 font-black text-cyan-100 ${dimensionClass}`} role="img" aria-label={`${displayName} Discord profile`}>
+      <span aria-hidden="true">{initial}</span>
+      {safeAvatarUrl && safeAvatarUrl !== failedAvatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- private session identity has an authenticated Discord CDN URL.
+        <img src={safeAvatarUrl} alt="" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailedAvatarUrl(safeAvatarUrl)} />
+      ) : null}
+      <span className="absolute bottom-1 right-1 h-3 w-3 border-2 border-[#050914] bg-emerald-400" aria-label="Discord connected" />
+    </span>
   );
 }
 
@@ -841,8 +999,7 @@ function PlayerHubDataPanels({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-3">
-      <FollowedServersPanel servers={state.data.saved_servers} source={state.data.sources.saved_servers} />
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
       <MatchedCommunitiesPanel
         communities={state.data.matched_communities}
         source={state.data.sources.matched_communities}
@@ -850,7 +1007,10 @@ function PlayerHubDataPanels({
         refreshState={refreshState}
         onRefreshCommunityMatches={onRefreshCommunityMatches}
       />
-      <SuggestedEventsPanel events={state.data.suggested_events} source={state.data.sources.suggested_events} />
+      <div className="grid gap-4">
+        <FollowedServersPanel servers={state.data.saved_servers} source={state.data.sources.saved_servers} />
+        <SuggestedEventsPanel events={state.data.suggested_events} source={state.data.sources.suggested_events} />
+      </div>
     </div>
   );
 }
@@ -1063,6 +1223,7 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
   const data = state.status === "ready" ? state.data : null;
   const profile = data?.profile_summary ?? null;
   const progression = data?.progression_summary ?? null;
+  const profileAvatarUrl = data?.account.avatar_url ?? null;
   const hasStats = progression?.status === "stats_available";
   const publicStatus = profile?.public_profile_status === "published" ? "Public"
     : profile?.public_profile_status === "private" ? "Private"
@@ -1083,9 +1244,13 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
         <div className="mt-5 space-y-4">
           <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">{profile.display_name}</p>
-                <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{profile.public_profile_message}</p>
+              <div className="flex min-w-0 items-start gap-3">
+                <DiscordIdentityAvatar displayName={profile.display_name} avatarUrl={profileAvatarUrl} size="profile" />
+                <div className="min-w-0">
+                  <p className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">{profile.display_name}</p>
+                  <p className="mt-1 text-xs font-black uppercase text-emerald-100">Discord verified private account</p>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{profile.public_profile_message}</p>
+                </div>
               </div>
               <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
                 {publicStatus}
@@ -1353,13 +1518,6 @@ function BoundaryTile({ title, body }: { title: string; body: string }) {
   );
 }
 
-function toneClasses(tone: PlayerActionCard["tone"]) {
-  if (tone === "violet") return "border-violet-300/24 hover:border-violet-200/55";
-  if (tone === "amber") return "border-amber-300/24 hover:border-amber-200/55";
-  if (tone === "emerald") return "border-emerald-300/24 hover:border-emerald-200/55";
-  return "border-cyan-300/24 hover:border-cyan-200/55";
-}
-
 function summarizeCommunityMatches(communities: PlayerHubCommunity[]) {
   return communities.reduce(
     (summary, community) => {
@@ -1408,6 +1566,16 @@ function initialsFromName(name: string) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "D";
+}
+
+function safeAuthenticatedDiscordAvatarUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "cdn.discordapp.com" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function safeDiscordIconUrl(value: string | null) {
