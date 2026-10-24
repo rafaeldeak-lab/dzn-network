@@ -30,17 +30,26 @@
       button:disabled { opacity: .43; cursor: not-allowed; transform: none; }
       select, input { background: #18221c; border: 1px solid rgba(112, 229, 154, .48); border-radius: 8px; padding: 8px 9px; min-width: 0; }
       :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-      #hud { position: fixed; z-index: 5; top: 12px; left: 14px; right: 14px; display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; pointer-events: none; }
-      #hud::-webkit-scrollbar { display: none; }
-      #hud > * { pointer-events: auto; flex-shrink: 0; }
-      #hud button { padding: 7px 8px; font-size: 10px; }
+      #hud { position: fixed; z-index: 7; top: 10px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; pointer-events: none; }
+      #hud > * { pointer-events: auto; }
+      #hud button, #hud summary { padding: 8px 10px; font-size: 11px; }
+      .hud-status, .hud-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+      .hud-status { flex: 1 1 620px; }
+      .hud-actions { justify-content: flex-end; flex: 0 1 auto; }
+      .hud-menu { position: relative; }
+      .hud-menu > summary { cursor: pointer; list-style: none; border: 1px solid rgba(192,132,252,.7); border-radius: 9px; background: rgba(29,24,38,.97); font-weight: 800; white-space: nowrap; }
+      .hud-menu > summary::-webkit-details-marker { display: none; }
+      .hud-menu[open] > summary { border-color: var(--green); color: var(--green); }
+      .hud-menu-list { position: absolute; top: calc(100% + 7px); right: 0; width: 205px; max-height: min(65vh, 480px); overflow-y: auto; display: grid; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: rgba(10,18,14,.98); box-shadow: 0 16px 35px #000a; }
+      .hud-menu-list button { width: 100%; text-align: left; }
+      .hud-menu-list small { display: block; color: var(--muted); font-size: 9px; margin: -2px 4px 4px; line-height: 1.4; }
       .chip { padding: 8px 11px; background: rgba(13, 20, 16, .9); border: 1px solid rgba(112, 229, 154, .38); border-radius: 9px; box-shadow: 0 5px 20px rgba(0,0,0,.23); font-size: 12px; font-weight: 700; white-space: nowrap; }
       .title { font: 700 12px Orbitron, sans-serif; color: var(--purple); border-color: rgba(192,132,252,.7); letter-spacing: .05em; }
       .badge { color: var(--green); }
       .chip.exposed { border-color: #dba460; color: #ffdcaa; background: rgba(77,45,25,.9); box-shadow: 0 0 16px rgba(231,157,86,.16); }
       .dim { color: var(--muted); }
       .accent { color: var(--purple); }
-      .preview-card { position: fixed; z-index: 4; top: 64px; left: 14px; width: min(280px, calc(100vw - 28px)); max-height: min(76vh, 760px); overflow: auto; background: rgba(13,19,16,.9); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); backdrop-filter: blur(8px); }
+      .preview-card { position: fixed; z-index: 4; top: 67px; left: 12px; width: min(280px, calc(100vw - 24px)); max-height: min(76vh, 760px); overflow: auto; background: rgba(13,19,16,.9); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); backdrop-filter: blur(8px); }
       .preview-card > details > summary, #appearanceDetails > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
       .preview-card summary::-webkit-details-marker { display: none; }
       .preview-card > details > summary strong { font: 600 11px Orbitron, sans-serif; color: var(--purple); letter-spacing: .03em; }
@@ -61,13 +70,20 @@
       .preview-mini { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 8px; }
       .preview-mini button { padding: 6px 8px; font-size: 10px; }
       .local-note { margin-top: 8px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 7px; color: #92a198; font-size: 9px; line-height: 1.45; }
-      .building-nav { position: fixed; z-index: 4; left: 14px; bottom: 14px; width: min(226px, calc(100vw - 28px)); padding: 10px; background: rgba(13,19,16,.9); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.24); backdrop-filter: blur(8px); }
+      .building-nav { position: fixed; z-index: 4; left: 12px; bottom: 12px; width: min(226px, calc(100vw - 24px)); padding: 10px; background: rgba(13,19,16,.9); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.24); backdrop-filter: blur(8px); }
+      .building-nav summary { cursor: pointer; list-style: none; color: var(--green); font: 700 11px Orbitron, sans-serif; }
+      .building-nav summary::-webkit-details-marker { display: none; }
+      .building-nav details[open] summary { margin-bottom: 9px; }
       .building-nav h3 { margin: 0 0 7px; font: 600 10px Orbitron, sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
       .building-list { display: grid; gap: 5px; }
       .building-entry { width: 100%; display: flex; justify-content: space-between; align-items: center; text-align: left; border-color: rgba(255,255,255,.1); background: rgba(29,38,32,.76); padding: 7px 8px; font-size: 10px; }
       .building-entry.selected { border-color: var(--green); box-shadow: inset 3px 0 var(--green); color: var(--green); }
       .building-entry .level { color: var(--purple); font-weight: 800; }
-      .panel { position: fixed; z-index: 8; right: 14px; bottom: 14px; width: min(492px, calc(100vw - 270px)); max-height: min(78vh, 760px); overflow: auto; background: var(--panel); border: 1px solid rgba(192,132,252,.65); border-radius: 15px; padding: 16px; display: none; box-shadow: 0 16px 60px rgba(0,0,0,.52); backdrop-filter: blur(14px); }
+      .panel { position: fixed; z-index: 8; right: 12px; bottom: 12px; width: min(465px, calc(100vw - 24px)); max-height: min(73vh, calc(100dvh - 115px)); overflow: auto; background: var(--panel); border: 1px solid rgba(192,132,252,.65); border-radius: 15px; padding: 17px; display: none; box-shadow: 0 16px 60px rgba(0,0,0,.52); backdrop-filter: blur(14px); }
+      .panel-dismiss { position: sticky; top: 0; float: right; z-index: 2; margin: -7px -7px 3px 8px; background: #202a22; font-size: 15px; line-height: 1; padding: 7px 10px; }
+      .technical-details { margin: 9px 0; border-top: 1px solid rgba(255,255,255,.1); padding-top: 7px; }
+      .technical-details summary { cursor: pointer; color: var(--muted); font-size: 11px; }
+      .district-card.focused { border-color: var(--green); box-shadow: inset 3px 0 var(--green); }
       .panel h2 { margin: 0 0 6px; font: 600 17px Orbitron, sans-serif; color: var(--green); }
       .panel h3 { margin: 14px 0 6px; color: var(--purple); font-size: 12px; }
       .panel p { margin: 5px 0; font-size: 12px; line-height: 1.5; }
@@ -242,21 +258,26 @@
       @keyframes revealPulse { from { opacity: 1; transform: scale(.75); } to { opacity: 0; transform: scale(1.24); } }
       @media (prefers-reduced-motion: reduce) { #upgradeReveal, #upgradeReveal.active, #upgradeReveal.active::after { transition: none; animation: none; } }
       @media (max-width: 700px) {
-        #hud { top: 8px; left: 8px; right: 8px; gap: 5px; }
+        #hud { top: 7px; left: 8px; right: 8px; gap: 5px; }
+        .hud-status { flex-basis: 100%; gap: 4px; }
+        .hud-actions { flex-basis: 100%; justify-content: flex-start; gap: 4px; }
+        .hud-menu > summary { padding: 7px 8px; }
+        .hud-menu-list { left: 0; right: auto; }
+        .hud-menu:nth-of-type(n+3) .hud-menu-list { left: auto; right: 0; }
         .chip { padding: 7px 8px; font-size: 10px; }
-        .title { font-size: 10px; }
+        .title { display: none; }
         #hud button { padding: 7px 8px; font-size: 10px; }
-        .preview-card { top: 104px; left: 8px; width: 194px; padding: 8px; }
+        .preview-card { top: auto; bottom: 56px; left: 8px; width: 194px; padding: 8px; }
         .preview-mini { display: block; }
         .preview-mini button { margin-top: 4px; }
         .building-nav { left: 8px; bottom: 8px; width: 178px; padding: 7px; }
         .building-entry { padding: 6px; }
-        .panel { right: 8px; bottom: 8px; width: min(440px, calc(100vw - 200px)); max-height: 72vh; padding: 12px; }
+        .panel { right: 8px; bottom: 8px; width: min(440px, calc(100vw - 16px)); max-height: min(70vh, calc(100dvh - 155px)); padding: 12px; }
         .panel h2 { font-size: 14px; }
         .panel p { font-size: 11px; }
       }
       @media (max-width: 440px) {
-        .preview-card { top: 97px; width: 166px; }
+        .preview-card { width: 166px; }
         .building-nav { width: 150px; }
         .building-entry { font-size: 9px; }
         .panel { width: calc(100vw - 16px); right: 8px; bottom: 8px; }
@@ -342,32 +363,37 @@
 </div>
     <div id="game-container" aria-label="DZN Stronghold isometric game world"></div>
     <header id="hud" aria-label="Stronghold controls">
-      <span class="chip title">DZN: STRONGHOLD WARS</span>
-      <span class="chip badge" id="communityBadge">COMMUNITY · LOCAL PREVIEW</span>
-      <span class="chip" id="defenceChip" hidden>HOME DEFENCE</span>
-      <span class="chip" id="parts">⚙ 0 Parts</span>
-      <span class="chip" id="salvage">♻ 0 Salvage</span>
-      <span class="chip" id="timber">🪵 0 Timber</span>
-      <span class="chip" id="treasury">🏦 0 Unallocated</span>
-      <button id="collectBtn">Collect</button>
-      <button id="projectsBtn">Projects</button>
-      <button id="forgeBtn">Forge</button>
-      <button id="squadsBtn">Squads</button>
-      <button id="progressionBtn">Progression</button>
-      <button id="landBtn">Land &amp; Forest</button>
-      <button id="layoutBtn">Base Layout</button>
-      <button id="chronicleBtn">Chronicle</button>
-      <button id="warBtn">War Table</button>
-      <button id="operationsBtn">Operations</button>
-      <button id="worldBtn">World Map</button>
-      <button id="cardsBtn">Cards</button>
-      <button id="muteBtn" aria-label="Toggle sound">🔊</button>
+      <div class="hud-status">
+        <span class="chip title">DZN: STRONGHOLD WARS</span>
+        <span class="chip badge" id="communityBadge">COMMUNITY · LOCAL PREVIEW</span>
+        <span class="chip" id="defenceChip" hidden>HOME DEFENCE</span>
+        <span class="chip" id="parts">⚙ 0 Parts</span>
+        <span class="chip" id="salvage">♻ 0 Salvage</span>
+        <span class="chip" id="timber">🪵 0 Timber</span>
+        <span class="chip" id="treasury">🏦 0 Unallocated</span>
+      </div>
+      <nav class="hud-actions" aria-label="Game sections">
+        <button id="collectBtn">Collect</button>
+        <button id="yardBtn" title="Find the Timberline Lumber Yard and its unlock steps">🪵 Lumber Yard</button>
+        <details class="hud-menu"><summary>Build ▾</summary><div class="hud-menu-list">
+          <button id="projectsBtn">Projects</button><button id="forgeBtn">Forge</button><button id="landBtn">Land &amp; Forest</button><button id="layoutBtn">Base Layout</button>
+        </div></details>
+        <details class="hud-menu"><summary>Army ▾</summary><div class="hud-menu-list">
+          <button id="squadsBtn">Squads</button><button id="operationsBtn">Operations</button><button id="warBtn">War Table</button><button id="progressionBtn">Progression</button>
+        </div></details>
+        <details class="hud-menu"><summary>World ▾</summary><div class="hud-menu-list">
+          <button id="worldBtn">World Map</button><button id="chronicleBtn">Chronicle</button><button id="cardsBtn">Cards</button>
+        </div></details>
+        <details class="hud-menu"><summary>More ▾</summary><div class="hud-menu-list">
+          <small>This is a browser-saved preview.</small><button id="identityBtn">Preview identity</button><button id="muteBtn" aria-label="Toggle sound">🔊</button>
+        </div></details>
+      </nav>
     </header>
     <section id="worldMapOverlay" class="world-overlay" role="dialog" aria-modal="true" aria-label="Stronghold world map"></section>
     <aside class="preview-card" aria-label="Local identity preview controls">
       <p id="recoveryNotice" class="notice warn" role="status" aria-live="polite" hidden></p>
-      <details id="previewDetails" open>
-        <summary><strong>PREVIEW IDENTITY</strong><span class="sim">SIMULATED</span></summary>
+      <details id="previewDetails">
+        <summary><strong>LOCAL DEMO</strong><span class="sim">Identity ▾</span></summary>
         <div class="preview-content">
           <label for="identitySelect">Community · role · member</label>
           <select id="identitySelect" aria-label="Choose a local preview identity"></select>
@@ -383,8 +409,9 @@
       </details>
     </aside>
     <aside class="building-nav" aria-label="Select a building">
-      <h3>Command Compound</h3>
-      <div class="building-list" id="buildingList"></div>
+      <details id="structureDetails"><summary>Buildings ▾</summary><h3>Command Compound</h3>
+        <div class="building-list" id="buildingList"></div>
+      </details>
     </aside>
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="upgradeReveal" role="status" aria-live="polite"><strong>Upgrade complete</strong><span></span></div>

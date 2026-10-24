@@ -606,6 +606,7 @@ async function reconcileLandScenery() {
   try {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
       .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
+    if (!base.landPlots.find(plot => plot.id === 'timberline-depot')?.facilityLevel) facilityNames.push('timberline_l01');
     const routeLevels = [...new Set(base.landPlots.filter(plot => plot.status === 'claimed' && plot.routeLevel > 0).map(plot => plot.routeLevel))];
     const wallLevels = [...new Set(base.layout.walls.map(wall => wall.level))];
     const models = Object.fromEntries(await Promise.all([
@@ -616,7 +617,12 @@ async function reconcileLandScenery() {
       [`chronicle_l0${base.levels.hq}`, await chronicleModel(base.levels.hq)],
     ]));
     if (request !== sceneryRequest) return;
-    for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
+    for (const child of landScenery.children) {
+      if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
+      if (child.userData.ownedGhost) child.traverse(object => {
+        if (object.isMesh) for (const material of [].concat(object.material)) material.dispose();
+      });
+    }
     landScenery.clear();
     landTreePicks = [];
     animated.yards.length = 0;
@@ -648,6 +654,24 @@ async function reconcileLandScenery() {
       if (!plot) continue;
       const [x, z] = config.position;
       const claimed = plot.status === 'claimed';
+      if (config.id === 'timberline-depot' && plot.facilityLevel === 0 && models.timberline_l01) {
+        // A visible 3D blueprint makes the first district discoverable before Hall L2.
+        const blueprint = models.timberline_l01.clone(true);
+        blueprint.userData.ownedGhost = true;
+        blueprint.position.set(x, .1, z);
+        blueprint.traverse(object => {
+          if (!object.isMesh) return;
+          const ghostMaterial = material => {
+            const clone = material.clone();
+            clone.transparent = true;
+            clone.opacity = .38;
+            clone.depthWrite = false;
+            return clone;
+          };
+          object.material = Array.isArray(object.material) ? object.material.map(ghostMaterial) : ghostMaterial(object.material);
+        });
+        landScenery.add(blueprint);
+      }
       const clearing = new THREE.Mesh(
         new THREE.CircleGeometry(5.25, 10),
         new THREE.MeshStandardMaterial({ color: claimed ? 0x405b49 : plot.status === 'approved' ? 0x636044 : 0x344537, roughness: 1, transparent: true, opacity: 0.83 }),
@@ -1046,10 +1070,20 @@ function bindSquadEquipment(model, role) {
     sentinel: ['heavy_carbine', 'heavy_barrel', 'reflex_sight', 'drum_magazine'],
     medic: ['aid_injector', 'injector_charge'],
   };
+  // The older articulated kits store tools in world coordinates beside the
+  // forearm. Move each tool's grip onto the glove before parenting it, so the
+  // whole item follows the shoulder instead of floating alongside the soldier.
+  const gripOffset = {
+    recon: [-.04, -.16, -.315], engineer: [-.10, -.07, -.285],
+    sentinel: [-.06, -.18, -.23], medic: [-.06, -.17, -.285],
+  }[role] || [0, 0, 0];
   model.updateMatrixWorld(true);
   for (const name of held[role] || []) {
     const part = model.getObjectByName(name);
-    if (right && part) right.attach(part);
+    if (right && part) {
+      right.attach(part);
+      part.position.add(new THREE.Vector3(...gripOffset));
+    }
   }
   if (role === 'assault' && left) for (const name of ['forearm_shield', 'shield_light']) {
     const part = model.getObjectByName(name);
@@ -1100,6 +1134,10 @@ function equipSoldier(soldier, role, tier) {
         carbine.position.set(0.06, 0.86, -0.27);
         carbine.traverse(item => { if (item.isMesh) item.castShadow = true; });
         model.add(carbine);
+        model.updateMatrixWorld(true);
+        const hand = model.getObjectByName('Hand_R');
+        if (hand) hand.attach(carbine);
+        else console.warn('DZN Warden rig has no right hand for its carbine.');
       }).catch(weaponError => console.warn('DZN Warden carbine could not load.', weaponError));
     }
   }).catch(error => {
@@ -1131,7 +1169,8 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
     return;
   }
   const swing = Math.sin(phase) * 0.42 * pace;
-  for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', -swing * 0.65], ['right_arm', swing * 0.65]]) {
+  const equipped = ['recon', 'engineer', 'sentinel', 'medic'].includes(soldier.userData.squadRole);
+  for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', equipped && soldier.userData.squadRole === 'sentinel' ? -.26 - swing * .15 : -swing * .55], ['right_arm', equipped ? -.34 + swing * .22 : swing * .65]]) {
     const limb = soldier.getObjectByName(name);
     if (limb) limb.rotation.x = angle;
   }
@@ -1326,8 +1365,11 @@ function toast(text) {
   toastTimer = 2.5;
 }
 function openPanel(html) {
-  panel.innerHTML = html;
+  document.querySelectorAll('.hud-menu[open]').forEach(menu => { menu.open = false; });
+  panel.innerHTML = `<button type="button" class="panel-dismiss" aria-label="Close panel">×</button>${html}`;
+  panel.querySelector('.panel-dismiss').onclick = closePanel;
   panel.style.display = 'block';
+  panel.scrollTop = 0;
 }
 function closePanel() {
   panel.style.display = 'none';
@@ -1428,6 +1470,8 @@ function updateHud() {
   $('collectBtn').textContent = `Collect +${Math.floor(state.stored)}`;
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
   $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
+  const yard = service.community()?.saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
+  $('yardBtn').textContent = yard?.facilityLevel ? `🪵 Lumber Yard L${yard.facilityLevel}` : state.levels.hq < 2 ? '🪵 Lumber Yard · Hall L2' : '🪵 Lumber Yard';
   updatePreviewCard();
   updateBuildingList();
 }
@@ -1473,17 +1517,16 @@ function showBuildingPanel(key) {
   const cfg = GAME_CONFIG.buildings[key];
   const currentStats = cfg.stats[level - 1];
   const nextStats = requirement.targetLevel <= GAME_CONFIG.maxLevel ? cfg.stats[requirement.targetLevel - 1] : null;
-  let html = `<h2>${escapeHTML(def.name)} · Level ${level}/5</h2><p><span class="dim">Current benefit:</span> ${escapeHTML(requirement.currentBenefit)}</p><p class="help">Current stats: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p>`;
+  let html = `<h2>${escapeHTML(def.name)} · Level ${level}/5</h2><p><span class="dim">Now:</span> ${escapeHTML(requirement.currentBenefit)}</p>`;
   if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
-    html += `<hr><p><b>Next benefit · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p class="help">Next stats: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p>`;
-    html += `<p>Project target: <b>${requirement.cost.toLocaleString()} Parts</b> · funding completes construction immediately. A ${GAME_CONFIG.revealSeconds.toFixed(1)}s delivery/scaffold reveal follows.</p>`;
-    if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Requirements / status</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
+    html += `<p><b>Next · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p><b>Cost:</b> ${requirement.cost.toLocaleString()} Parts</p>`;
+    if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Before upgrading</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
+    html += `<details class="technical-details"><summary>Stats and construction details</summary><p class="help">Current: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Next: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Funding completes construction immediately. A ${GAME_CONFIG.revealSeconds.toFixed(1)}s delivery and scaffold reveal follows.</p></details>`;
     if (legacyJob) html += `<p class="notice">Previously paid legacy work is preserved. Completion is due ${new Date(legacyJob.end).toLocaleTimeString()}.</p>`;
     if (activeProject) {
       const remaining = Math.max(0, activeProject.targetAmount - activeProject.funded);
       html += `<div class="project-card ${activeProject.pinned ? 'pinned' : ''}"><strong>${activeProject.pinned ? '★ PRIORITY · ' : ''}Approved · L${activeProject.targetLevel}</strong><p>Funded ${activeProject.funded.toLocaleString()} / ${activeProject.targetAmount.toLocaleString()} Parts · ${remaining.toLocaleString()} remaining</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, activeProject.funded / activeProject.targetAmount * 100)}%"></div></div><div class="row"><button id="projectDetailsBtn">Open project funding</button></div></div>`;
     } else if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
-      html += `<p class="help">Prerequisites: ${requirement.prerequisites.length ? 'listed above' : 'met'} · HQ controls supporting-building caps.</p>`;
       if (isLeadership()) html += `<div class="row"><button id="approveProjectBtn" ${requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button></div>`;
       else html += `<p class="notice">Only the community owner/admin can approve this upgrade. Members can fund it after approval.</p>`;
     }
@@ -1754,7 +1797,7 @@ function showChroniclePanel() {
   $('closeBtn').onclick = closePanel;
 }
 
-function showLandPanel() {
+function showLandPanel(focusPlotId = null) {
   const access = service.getAccess();
   if (!access.allowed) {
     openPanel(`<h2>Land & Forest</h2><p class="notice warn">${escapeHTML(access.reason)}</p><p>Shared land and personal Timber stay saved while access is locked.</p><div class="row"><button id="closeBtn">Close</button></div>`);
@@ -1809,9 +1852,14 @@ function showLandPanel() {
         if (target > hall) routeHtml += `<p class="help">Command Hall L${target} required for the next route tier.</p>`;
       }
     }
-    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
+    const yardGuide = config.id === 'timberline-depot' && plot.facilityLevel === 0
+      ? '<p class="help">Lumber Yard path: Hall L2 → clear 3 trees → owner approves the land → members fund the claim and Level 1 yard.</p>' : '';
+    return `<article class="district-card ${focusPlotId === config.id ? 'focused' : ''}" data-plot-card="${config.id}"><strong>${escapeHTML(config.id === 'timberline-depot' ? 'Timberline Lumber Yard site' : config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p>${yardGuide}<div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
   }).join('');
-  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Leadership approves land, facilities and DZN supply routes; members contribute and build them together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Route tiers: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.routeLevel, 0)} · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p><div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div><p class="help">Daily Salvage keeps Timber renewable after your forest is cleared. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim.</p>${cards}<p class="help">Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades are frozen when a local war is accepted. Supply routes do not change war scoring.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>Land & Forest</h2><p>Chop trees for Timber. The owner approves each cleared district; members fund its buildings together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed land: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5</p>${focusPlotId ? '<div class="row"><button id="returnBaseBtn">Return camera to base</button></div>' : ''}<div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div>${cards}<details class="technical-details"><summary>Routes, defence and renewable Timber</summary><p class="help">Daily Salvage keeps Timber renewable. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim. Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades freeze during an accepted local war; routes do not change war scoring.</p></details><div class="row"><button id="closeBtn">Close</button></div>`);
+  // Timberline is the first card, so retain the short explanation and return
+  // control at the top instead of scrolling them off screen.
+  if ($('returnBaseBtn')) $('returnBaseBtn').onclick = () => { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); closePanel(); };
   $('closeBtn').onclick = closePanel;
   $('recycleTimberBtn').onclick = () => { const result = service.recycleTimber(); toast(result.ok ? `+${result.amount} recycled Timber` : result.error); updateHud(); showLandPanel(); };
   panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
@@ -1907,7 +1955,25 @@ $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
 $('squadsBtn').onclick = showSquadPanel;
 $('progressionBtn').onclick = showProgressionPanel;
-$('landBtn').onclick = showLandPanel;
+$('landBtn').onclick = () => showLandPanel();
+$('yardBtn').onclick = () => {
+  if (raid || warBattle) { toast('Return from the battle to view the Lumber Yard.'); return; }
+  const [x, z] = GAME_CONFIG.landPlots.find(plot => plot.id === 'timberline-depot').position;
+  camTarget.set(x, 0, z);
+  zoom = 25;
+  updateCamera();
+  showLandPanel('timberline-depot');
+};
+$('identityBtn').onclick = () => { $('previewDetails').open = true; $('previewDetails').scrollIntoView({ block: 'nearest' }); };
+document.addEventListener('click', event => {
+  if (!event.target.closest('.hud-menu')) document.querySelectorAll('.hud-menu[open]').forEach(menu => { menu.open = false; });
+});
+document.querySelectorAll('.hud-menu').forEach(menu => {
+  menu.addEventListener('toggle', () => {
+    if (menu.open) document.querySelectorAll('.hud-menu[open]').forEach(other => { if (other !== menu) other.open = false; });
+  });
+  menu.querySelectorAll('button').forEach(button => button.addEventListener('click', () => { menu.open = false; }));
+});
 
 let layoutZone = 'command-compound';
 let layoutMode = 'move-building';
