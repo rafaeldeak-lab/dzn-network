@@ -1108,7 +1108,7 @@ function equipSoldier(soldier, role, tier) {
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.025;
   soldier.add(shadow);
-  const rigged = role === 'assault' || role === 'recon' || role === 'engineer' || role === 'medic';
+  const rigged = role === 'assault' || role === 'recon' || role === 'engineer' || role === 'medic' || role === 'sentinel';
   const request = rigged ? loadAnimatedSquad(path) : loadBuildingTemplate(path);
   request.then(asset => {
     if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1120,7 +1120,7 @@ function equipSoldier(soldier, role, tier) {
     if (rigged) {
       const clip = asset.animations.find(animation => animation.name === (role === 'assault' ? 'DZN_Warden_Walk' : 'DZN_Operative_Walk')) || asset.animations[0];
       if (!clip) throw new Error(`Animated squad model has no walk clip: ${path}`);
-      // The Warden source faces +X; image-guided Ghost, Fixer and Lifeline face +Z.
+      // The Warden source faces +X; image-guided Ghost, Fixer, Lifeline and Sentinel face +Z.
       if (role === 'assault') model.rotation.y = -Math.PI / 2;
       const mixer = new THREE.AnimationMixer(model);
       soldier.userData.walkMixer = mixer;
