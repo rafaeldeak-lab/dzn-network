@@ -186,6 +186,14 @@ async function testSendRuntime() {
     assert.equal((await payload(blocked)).code, "LANGUAGE_FILTERED");
     assert.equal(f.count("dzn_comms_messages"), 2, "Rejected text must not create a visible chat row.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%clit%'").get()?.count, 0, "Rejected text must never be retained in the message table.");
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const hateSpeech = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-hate-speech", body: "nigger",
+    }), f.env);
+    assert.equal(hateSpeech.status, 422, "High-severity hate speech must be rejected by the send route.");
+    assert.equal((await payload(hateSpeech)).code, "LANGUAGE_FILTERED");
+    assert.equal(f.count("dzn_comms_messages"), 2, "Rejected hate speech must not create a visible chat row.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%nigger%'").get()?.count, 0, "Rejected hate speech must never be retained in the message table.");
     const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos please help me" };
     const englishOnly = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
     assert.equal(englishOnly.status, 422);
@@ -927,6 +935,9 @@ function testAutomaticLanguageFilter() {
     "f.u.c.k off",
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Abusive language must not be accepted: ${body}`);
+  }
+  for (const body of ["nigger", "n1gger", "n.i.g.g.e.r", "n\u200bi\u200bg\u200bg\u200be\u200br", "nigga", "n1gga"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `High-severity hate speech must not bypass safety controls: ${body}`);
   }
   for (const body of ["hola amigos please help", "bonjour je ne parle pas anglais", "ciao come stai oggi", "Hallo wie geht es dir heute", "privet drug pomogi", "Привет", "no hablo ingles", "je suis nouveau", "ich bin neu", "ola preciso de ajuda"]) {
     const result = moderateDznCommsBody(body);

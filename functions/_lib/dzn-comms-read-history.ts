@@ -2,7 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed } from "./http";
 import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
 import { readDznCommsReactionFlags, readDznCommsReactionSummaries } from "./dzn-comms-reactions";
-import { readDznCommsOwnerArchiveFlags, readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
+import { moderateDznCommsBody, readDznCommsOwnerArchiveFlags, readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
 import type { Env, SessionUser } from "./types";
 
 type DznCommsChannelRow = {
@@ -465,7 +465,11 @@ async function readMessages(
 
 function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionSummary | undefined, currentUserId: string | null, selfDeleteEnabled: boolean) {
   const visibilityState = normalizeVisibilityState(row.visibility_state);
-  const visible = visibilityState === "visible";
+  const moderated = moderateDznCommsBody(row.body);
+  // A stricter rule can be released after a row was stored. Do not repeat
+  // that content to the public while the persisted row awaits owner review.
+  const visible = visibilityState === "visible" && moderated.decision === "allow";
+  const publicVisibilityState = visibilityState === "visible" && !visible ? "hidden" : visibilityState;
 
   return {
     id: cleanText(row.id, 120),
@@ -474,8 +478,8 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     author_avatar_url: visible
       ? publicDiscordAvatarUrl(row.author_public_handle, row.author_public_profile_enabled, row.author_discord_identity_enabled)
       : null,
-    body: visible ? cleanText(row.body, 2000) : placeholderForState(visibilityState),
-    visibility_state: visibilityState,
+    body: visible ? cleanText(moderated.body, 2000) : placeholderForState(publicVisibilityState),
+    visibility_state: publicVisibilityState,
     created_at: cleanNullableText(row.created_at, 40),
     edited_at: cleanNullableText(row.edited_at, 40),
     public_safe: true,
