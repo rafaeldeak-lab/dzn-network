@@ -5,8 +5,8 @@ import { ArrowRight, CreditCard, X } from "lucide-react";
 import { ApiRequestError, createCheckoutSession } from "./api";
 import { RETURNING_STARTER_OFFER } from "../../lib/billing/returning-starter";
 
-export function StarterCheckoutButton({ disabled = false, label = "Choose Starter", returnTo = "/dashboard" }: {
-  disabled?: boolean; label?: string; returnTo?: string;
+export function StarterCheckoutButton({ disabled = false, label = "Choose Starter", returnTo = "/dashboard", cancelReturnTo = returnTo }: {
+  disabled?: boolean; label?: string; returnTo?: string; cancelReturnTo?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function StarterCheckoutButton({ disabled = false, label = "Choose Starte
     if (inFlight.current || disabled) return;
     inFlight.current = true; setBusy(true); setError("");
     try {
-      const session = await createCheckoutSession("starter", returnTo, offer);
+      const session = await createCheckoutSession("starter", returnTo, offer, cancelReturnTo);
       window.location.assign(session.url);
     } catch (failure) {
       const next = failure instanceof ApiRequestError ? failure.offer as { id?: unknown; confirmation?: unknown } | undefined : undefined;

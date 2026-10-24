@@ -31,11 +31,11 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 const rows = (f: Fixture, table: string) => f.db.sqlite.prepare(`SELECT * FROM ${table} ORDER BY 1`).all();
 const protectedRows = (f: Fixture) => ["owner_billing_accounts", "owner_plan_entitlements"].map(table => rows(f, table));
 const ledgerRows = (f: Fixture) => ["billing_checkout_attempts", "owner_starter_trial_claims"].map(table => rows(f, table));
-async function request(f: Fixture, plan: "starter" | "pro", status: number, token = f.token) {
+async function request(f: Fixture, plan: "starter" | "pro", status: number, token = f.token, overrides: Record<string, unknown> = {}) {
   const response = await onRequest({ env: f.env, request: new Request("https://local.test/api/billing/create-checkout-session", {
     method: "POST", headers: { cookie: `dzn_session=${token}`, "content-type": "application/json" },
     body: JSON.stringify({ plan_key: plan, returnTo: "/setup", price: "price_forged", amount: 1, currency: "usd", trial_period_days: 99,
-      payment_method_types: ["klarna"], adaptive_pricing: { enabled: true } }),
+      payment_method_types: ["klarna"], adaptive_pricing: { enabled: true }, ...overrides }),
   }), params: {}, data: {}, waitUntil() {}, next: async () => new Response(null, { status: 404 }) });
   const body = await response.json() as { errorCode?: string; url?: string };
   assert.equal(response.status, status, JSON.stringify(body));
@@ -112,6 +112,23 @@ async function run() {
     assert.deepEqual(protectedRows(f), [[], []]);
   }
   console.log("PASS both plans: 38 incorrect prices and 12 provider failures reject before attempts/trials/Session writes; correct concurrent requests retain exact advertised contract");
+
+  const pricingCancel = await fixture();
+  await request(pricingCancel, "starter", 200, pricingCancel.token, { cancelReturnTo: "/pricing" });
+  const pricingParams = new URLSearchParams([...sessions.values()].at(-1)!.body);
+  const successUrl = new URL(pricingParams.get("success_url")!);
+  const cancelUrl = new URL(pricingParams.get("cancel_url")!);
+  assert.equal(successUrl.pathname, "/setup");
+  assert.equal(successUrl.searchParams.get("billing"), "success");
+  assert.equal(cancelUrl.pathname, "/pricing");
+  assert.equal(cancelUrl.searchParams.get("billing"), "cancelled");
+
+  const unsafeCancel = await fixture();
+  await request(unsafeCancel, "pro", 200, unsafeCancel.token, { cancelReturnTo: "https://evil.example/checkout" });
+  const unsafeCancelUrl = new URL(new URLSearchParams([...sessions.values()].at(-1)!.body).get("cancel_url")!);
+  assert.equal(unsafeCancelUrl.origin, "https://local.test");
+  assert.equal(unsafeCancelUrl.pathname, "/dashboard");
+  console.log("PASS pricing checkout returns to setup only after completion, returns cancellation to pricing, and rejects unsafe cancellation destinations");
 
   const f = await fixture(); loseResponse = true;
   await request(f, "starter", 503);

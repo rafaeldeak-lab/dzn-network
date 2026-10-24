@@ -140,8 +140,12 @@ assert.match(privacy, /does not sell personal data/i);
 assert.ok(checkout.includes("plan?.configured !== true || plan.checkout_enabled !== true"));
 assert.ok(checkout.includes("StarterCheckoutButton") && checkout.includes("inFlight.current"));
 assert.ok(checkout.includes("failure instanceof ApiRequestError") && checkout.includes("failure.status !== 401"));
+assert.match(checkout, /cancelReturnTo="\/pricing"/);
+assert.match(checkout, /Checkout cancelled\. No payment was taken and no trial was started\./);
+assert.match(route, /PricingCheckoutStatus/);
 const client = readFileSync("components/onboarding/api.ts", "utf8");
 assert.ok(client.includes("readonly status?: number") && client.includes("data.offer, response.status"));
+assert.match(client, /cancelReturnTo/);
 assert.ok(!/localStorage|sessionStorage|sendBeacon|analytics|document\.cookie/.test(checkout));
 assert.ok(!/window.location.replace|createPortal/.test(route));
 function files(dir: string): string[] {

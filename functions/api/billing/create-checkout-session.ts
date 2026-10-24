@@ -12,6 +12,7 @@ import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 type CheckoutBody = {
   plan_key?: string;
   returnTo?: string;
+  cancelReturnTo?: string;
   accepted_offer?: unknown;
 };
 
@@ -39,7 +40,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   try {
     const result = await createOrResumeCheckout(env, request, {
-      discordUserId: user.discord_id, planKey, priceId, returnTo: body.returnTo ?? "/dashboard", acceptedOffer: body.accepted_offer,
+      discordUserId: user.discord_id,
+      planKey,
+      priceId,
+      returnTo: body.returnTo ?? "/dashboard",
+      cancelReturnTo: body.cancelReturnTo ?? body.returnTo ?? "/dashboard",
+      acceptedOffer: body.accepted_offer,
     });
     return json(result, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
   } catch (error) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, RefreshCw } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { ApiRequestError, createCheckoutSession, getBillingPlans, getMe } from "./api";
 import { StarterCheckoutButton } from "./starter-checkout-button";
 import { PAYMENT_COPY, pricingReturnTo } from "../../lib/billing/payment-copy";
@@ -42,7 +43,7 @@ export function PricingCheckout({ planKey }: { planKey: "starter" | "pro" }) {
     if (inFlight.current || state !== "ready") return;
     inFlight.current = true; setBusy(true); setError("");
     try {
-      const session = await createCheckoutSession("pro", returnTo);
+      const session = await createCheckoutSession("pro", returnTo, undefined, "/pricing");
       window.location.assign(session.url);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Checkout is unavailable. Please try again."); }
     finally { inFlight.current = false; setBusy(false); }
@@ -50,9 +51,20 @@ export function PricingCheckout({ planKey }: { planKey: "starter" | "pro" }) {
   const buttonClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded border border-cyan-200/35 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-100 hover:bg-cyan-400/20 disabled:opacity-50";
   if (state === "login") return <Link href={`/login?returnTo=${encodeURIComponent(`/pricing?returnTo=${encodeURIComponent(returnTo)}`)}`} className={buttonClass}>Sign in to choose {planKey === "starter" ? "Starter" : "Pro"}<ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0" /></Link>;
   return <div>
-    {planKey === "starter" ? <StarterCheckoutButton disabled={state !== "ready"} returnTo={returnTo} /> : <button type="button" className={buttonClass} disabled={state !== "ready" || busy} onClick={() => void proCheckout()}>{busy ? "Opening checkout..." : "Choose Pro"}<ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0" /></button>}
+    {planKey === "starter" ? <StarterCheckoutButton disabled={state !== "ready"} returnTo={returnTo} cancelReturnTo="/pricing" /> : <button type="button" className={buttonClass} disabled={state !== "ready" || busy} onClick={() => void proCheckout()}>{busy ? "Opening checkout..." : "Choose Pro"}<ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0" /></button>}
     <p role="status" className="mt-3 text-sm leading-6 text-zinc-300">{state === "loading" ? "Checking checkout availability..." : state === "paused" ? PAYMENT_COPY.paused : state === "error" ? "We could not check checkout availability. No payment has been started." : "Review your plan and recurring payment in Stripe before confirming."}</p>
     {state === "paused" || state === "error" ? <button type="button" className="mt-2 inline-flex min-h-10 items-center gap-2 text-sm text-cyan-200" onClick={() => { setState("loading"); setRetry(n => n + 1); }}><RefreshCw aria-hidden="true" className="h-4 w-4" />Check again</button> : null}
     {error ? <p role="alert" className="mt-2 text-sm text-red-200">{error}</p> : null}
   </div>;
+}
+
+export function PricingCheckoutStatus() {
+  const searchParams = useSearchParams();
+  if (searchParams.get("billing") !== "cancelled") return null;
+
+  return (
+    <div role="status" className="mt-6 border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm font-semibold leading-6 text-amber-50">
+      Checkout cancelled. No payment was taken and no trial was started. Your existing DZN access has not changed.
+    </div>
+  );
 }

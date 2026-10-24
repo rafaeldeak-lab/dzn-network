@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   ArrowRight,
   BarChart3,
@@ -21,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PricingCheckout } from "../../components/onboarding/pricing-checkout";
+import { PricingCheckout, PricingCheckoutStatus } from "../../components/onboarding/pricing-checkout";
 import { PublicContact } from "../../components/site/public-contact";
 import { getSubscriptionPlanPublicContracts } from "../../lib/billing/plans";
 import { PAYMENT_COPY, PAYMENT_FAQS } from "../../lib/billing/payment-copy";
@@ -185,6 +186,9 @@ export default function PricingPage() {
             <p className="text-xs font-black uppercase text-violet-200">Choose your owner plan</p>
             <h2 id="choose-plan-title" className="mt-2 text-3xl font-black uppercase sm:text-4xl">Start small or run the full DZN toolkit</h2>
             <p className="mt-4 text-sm font-semibold leading-6 text-zinc-300">Players use DZN for free. These subscriptions are for server owners who want connected tracking, publishing and community-growth tools.</p>
+            <Suspense fallback={null}>
+              <PricingCheckoutStatus />
+            </Suspense>
           </div>
           <div className="mt-9 grid items-stretch gap-4 lg:grid-cols-[0.82fr_1.18fr]">
             <article className="flex flex-col border border-cyan-200/35 bg-[linear-gradient(145deg,#081721,#07101a)] p-5 sm:p-7">
