@@ -46,8 +46,8 @@ for (const [code, entry] of Object.entries(badgeManifest)) {
   assert.equal(Boolean(entry.imageAlt), true, `${code} must include imageAlt.`);
   assertAssetExists(entry.staticIconUrl, `${code} staticIconUrl`);
   if (entry.animatedIconUrl) assertAssetExists(entry.animatedIconUrl, `${code} animatedIconUrl`);
-  assertSvgHasTitle(entry.staticIconUrl, `${code} static SVG`);
-  if (entry.animatedIconUrl) assertSvgHasTitle(entry.animatedIconUrl, `${code} animated SVG`);
+  assertBadgeVisualAsset(entry.staticIconUrl, `${code} static icon`);
+  if (entry.animatedIconUrl) assertBadgeVisualAsset(entry.animatedIconUrl, `${code} animated icon`);
 }
 
 for (const [key, entry] of Object.entries(frameManifest)) {
@@ -68,9 +68,8 @@ for (const [key, entry] of Object.entries(themeManifest)) {
 
 for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);
-  assert.equal(visual.staticIconUrl?.endsWith(".svg"), true, `${code} staticIconUrl should use SVG.`);
-  assertAssetExists(visual.staticIconUrl, `${code} mapped staticIconUrl`);
-  if (visual.animatedIconUrl) assertAssetExists(visual.animatedIconUrl, `${code} mapped animatedIconUrl`);
+  assertBadgeVisualAsset(visual.staticIconUrl, `${code} mapped staticIconUrl`);
+  if (visual.animatedIconUrl) assertBadgeVisualAsset(visual.animatedIconUrl, `${code} mapped animatedIconUrl`);
 }
 
 for (const [key, frame] of Object.entries(getAvailableFrameVisuals())) {
@@ -93,7 +92,8 @@ const allVisualUrls = [
   ...Object.values(frameManifest).flatMap((entry) => [entry.staticOverlayUrl, entry.animatedOverlayUrl]),
   ...Object.values(themeManifest).flatMap((entry) => [entry.backgroundUrl, entry.animatedBackgroundUrl]),
 ].filter(Boolean);
-assert.equal(allVisualUrls.some((url) => String(url).endsWith(".webp")), false, "Phase 4A assets should use SVG paths.");
+assert.equal(allVisualUrls.every((url) => /\.(svg|webp)$/i.test(String(url))), true, "Badge visuals must use reviewed local SVG or WebP files.");
+assert.equal(allVisualUrls.some((url) => String(url).endsWith(".webp")), true, "Reward artwork should include optimized WebP badge assets.");
 
 console.log(`Badge asset validation passed: ${Object.keys(badgeManifest).length * 2} badge files, ${Object.keys(frameManifest).length * 2} frame files, ${Object.keys(themeManifest).length * 2} theme files.`);
 
@@ -116,4 +116,19 @@ function assertSvgHasTitle(url: string, label: string) {
   assert.equal(source.includes("role=\"img\""), true, `${label} must include role="img".`);
   assert.equal(/viewBox="0 0 256 256"|viewBox="0 0 1200 420"/.test(source), true, `${label} must use the required viewBox.`);
   assert.equal(/base64|(?:href|src)=["']https?:\/\//i.test(source), false, `${label} must not embed base64 or remote URLs.`);
+}
+
+function assertBadgeVisualAsset(url: string | null | undefined, label: string) {
+  assertAssetExists(url, label);
+  const filePath = path.join("public", String(url).replace(/^\//, ""));
+  if (/\.svg$/i.test(filePath)) {
+    assertSvgHasTitle(String(url), label);
+    return;
+  }
+
+  assert.equal(/\.webp$/i.test(filePath), true, `${label} must be an approved SVG or WebP file.`);
+  const source = readFileSync(filePath);
+  assert.equal(source.subarray(0, 4).toString("ascii"), "RIFF", `${label} must be a valid WebP container.`);
+  assert.equal(source.subarray(8, 12).toString("ascii"), "WEBP", `${label} must be a valid WebP image.`);
+  assert.equal(source.length >= 2048, true, `${label} WebP image is unexpectedly small.`);
 }

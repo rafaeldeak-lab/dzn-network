@@ -32,6 +32,7 @@ import type { Env, PagesFunction } from "../../_lib/types";
 import { getPlanVisualTreatment, getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
 import { normalizeListingPlanKey } from "../../../lib/billing/plans";
+import { formatPublicServerName } from "../../../lib/public-display-text";
 import {
   SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
@@ -627,7 +628,7 @@ function lightweightRankingFromPublicRow(row: PublicServerRow): PublicServerRank
   return {
     rank: numberOrZero(row.network_rank) || null,
     server_id: row.id,
-    server_name: row.server_name ?? "DZN Server",
+    server_name: formatPublicServerName(row.server_name),
     slug: row.public_slug,
     mode: row.server_mode ?? row.server_type,
     category: row.server_type,
@@ -1168,7 +1169,7 @@ async function toSafePublicServer(
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
-    server_name: row.server_name,
+    server_name: formatPublicServerName(row.server_name),
     server_type: row.server_type,
     tags_json: tagsJson,
     tags,
@@ -1180,7 +1181,7 @@ async function toSafePublicServer(
       owner_action: lifecycleDisplay.ownerAction,
       historical: historicalLifecycle,
     },
-    nitrado_service_name: row.nitrado_service_name,
+    nitrado_service_name: formatPublicServerName(row.nitrado_service_name, formatPublicServerName(row.server_name)),
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,
     adm_status: admStatus,
@@ -1435,7 +1436,7 @@ async function toSafePublicServerPreview(
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
-    server_name: row.server_name,
+    server_name: formatPublicServerName(row.server_name),
     server_type: row.server_type,
     tags_json: tagsJson,
     tags: parsePublicTags(tagsJson),
@@ -1447,7 +1448,7 @@ async function toSafePublicServerPreview(
       owner_action: lifecycleDisplay.ownerAction,
       historical: historicalLifecycle,
     },
-    nitrado_service_name: row.nitrado_service_name,
+    nitrado_service_name: formatPublicServerName(row.nitrado_service_name, formatPublicServerName(row.server_name)),
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,
     adm_status: admStatus,

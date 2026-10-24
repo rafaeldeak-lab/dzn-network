@@ -995,7 +995,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
           <VisibilityLabels server={server} />
         </div>
 
-        <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 6 : 4} />
+        <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 8 : 6} />
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2">
           <MiniMetric label="Kills" value={formatNumber(server.total_kills)} />
@@ -1354,31 +1354,19 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
 }
 
 function ServerAchievementPanel({ server }: { server: PublicServer }) {
-  const showcase = server.achievement_showcase;
   const earnedBadges = server.earnedBadges ?? [];
   const lockedBadges = server.lockedBadges ?? [];
-  const groupedEarned = [
-    { title: "Crowns", icon: Crown, rows: earnedBadges.filter((badge) => badge.category === "crown") },
-    { title: "Reputation", icon: ShieldCheck, rows: earnedBadges.filter((badge) => badge.category === "reputation") },
-    { title: "Combat", icon: Crosshair, rows: earnedBadges.filter((badge) => badge.category === "combat") },
-    { title: "Seasonal", icon: Trophy, rows: earnedBadges.filter((badge) => badge.category === "seasonal") },
-    { title: "Pro/Status", icon: Sparkles, rows: earnedBadges.filter((badge) => badge.category === "premium") },
-    { title: "Community", icon: Users, rows: earnedBadges.filter((badge) => badge.category === "community") },
-    { title: "Founder/Legacy", icon: Medal, rows: earnedBadges.filter((badge) => badge.category === "founder") },
-  ];
-  const groups = [
-    { title: "Top Badges", icon: Medal, rows: showcase?.topEarnedBadges ?? [] },
-    { title: "Crowns", icon: Crown, rows: showcase?.crownBadges ?? [] },
-    { title: "Seasonal", icon: Trophy, rows: showcase?.seasonalTrophies ?? [] },
-    { title: "Founder", icon: ShieldCheck, rows: showcase?.founderBadges ?? [] },
-  ];
-  const hasRows = earnedBadges.length > 0 || groups.some((group) => group.rows.length > 0) || server.plan_key === "pro";
+  const achievementVault = uniquePublicBadges([
+    ...earnedBadges,
+    ...(server.showcaseBadges ?? []),
+    ...(server.badges ?? []),
+  ]);
 
   return (
-    <GlassPanel title="Achievements" icon={Crown}>
+    <GlassPanel title="Achievement Vault" icon={Crown}>
       <div className="grid gap-4">
         <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
-          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100/75">Reputation</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100/75">Server reputation</p>
           <div className="mt-2 flex items-end justify-between gap-3">
             <div>
               <p className="text-2xl font-black uppercase text-white">{server.reputation?.tier ?? "Bronze"}</p>
@@ -1390,52 +1378,45 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
           </div>
         </div>
 
-        <BadgeShowcase
-          badges={server.showcaseBadges ?? server.badges ?? []}
-          title="Visual Showcase"
-          emptyText="Badge visuals will appear here as this server earns crowns, seasonal trophies, and reputation rewards."
-        />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <AchievementStat label="Earned" value={earnedBadges.length} icon={Trophy} accent="text-amber-100" />
+          <AchievementStat label="In Progress" value={lockedBadges.length} icon={Target} accent="text-cyan-100" />
+          <AchievementStat label="Showcased" value={achievementVault.length} icon={Sparkles} accent="text-violet-100" />
+        </div>
 
-        {earnedBadges.length ? (
-          <div className="grid gap-3">
-            {groupedEarned.filter((group) => group.rows.length).map((group) => (
-              <div key={group.title} className="rounded-lg border border-white/10 bg-black/24 p-3">
-                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{group.title}</p>
-                <div className="mt-3 grid gap-2">
-                  {group.rows.slice(0, 8).map((badge) => (
-                    <AchievementRow key={badge.code} icon={group.icon} name={badge.name} description={badge.description} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <BadgeShowcase
+          badges={achievementVault}
+          title="Earned rewards"
+          emptyText="This server has not earned a public reward yet. Progress cards below show the next available server achievements."
+        />
 
         {lockedBadges.length ? (
           <div className="rounded-lg border border-white/10 bg-black/24 p-3">
-            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">Locked progress</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">Next rewards</p>
+              <span className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">{lockedBadges.length} available paths</span>
+            </div>
             <div className="mt-3 grid gap-2">
-              {lockedBadges.slice(0, 6).map((badge) => (
+              {lockedBadges.slice(0, 8).map((badge) => (
                 <LockedBadgeProgress key={badge.code} badge={badge} />
               ))}
             </div>
           </div>
         ) : null}
 
-        {hasRows ? (
-          <div className="grid gap-3">
-            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name={publicListingPlanLabel(server.server_access?.source)} description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
-            {groups.map((group) =>
-              earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
-                <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
-              )) : null,
-            )}
-          </div>
-        ) : (
-          <p className="text-sm leading-6 text-zinc-400">Achievements will appear here as this server builds reputation across DZN.</p>
-        )}
+        <p className="text-xs leading-5 text-zinc-500">Rewards reflect verified DZN server activity, reputation, status, and seasonal outcomes. Pro improves presentation; it does not grant competitive results.</p>
       </div>
     </GlassPanel>
+  );
+}
+
+function AchievementStat({ label, value, icon: Icon, accent }: { label: string; value: number; icon: typeof Activity; accent: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+      <Icon className={`h-4 w-4 ${accent}`} />
+      <p className="mt-3 text-xl font-black text-white">{value}</p>
+      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</p>
+    </div>
   );
 }
 
@@ -1458,18 +1439,16 @@ function LockedBadgeProgress({ badge }: { badge: PublicLockedBadge }) {
   );
 }
 
-function AchievementRow({ icon: Icon, name, description }: { icon: typeof Activity; name: string; description: string }) {
-  return (
-    <div className="flex gap-3 rounded-lg border border-white/10 bg-black/24 p-3">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-400/10 text-violet-100">
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-black uppercase text-white">{name}</p>
-        <p className="mt-1 text-xs leading-5 text-zinc-400">{description}</p>
-      </div>
-    </div>
-  );
+function uniquePublicBadges(badges: VisualBadge[]) {
+  const seen = new Set<string>();
+  return badges
+    .filter((badge) => badge.isPublic)
+    .filter((badge) => {
+      if (seen.has(badge.code)) return false;
+      seen.add(badge.code);
+      return true;
+    })
+    .sort((left, right) => right.sortOrder - left.sortOrder);
 }
 
 function ServerProfileShell({
@@ -1626,7 +1605,7 @@ export function ServerProfile({ server }: { server: PublicServer }) {
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
-              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={5} className="mt-3" />
+              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={8} className="mt-3" />
               <ServerReputationBadges server={server} />
             </div>
           </div>
