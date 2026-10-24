@@ -674,6 +674,9 @@ const routesPatchSource = readFileSync("scripts/patch-pages-routes.mjs", "utf8")
 const staticRoutesSource = readFileSync("public/_routes.json", "utf8");
 const productionSmokeSource = readFileSync("scripts/autodev/production-smoke.ts", "utf8");
 const publicAccessPolicyDoc = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
+const publicNetworkSource = readFileSync("components/network/public-network.tsx", "utf8");
+const leaderboardsPageSource = readFileSync("app/leaderboards/page.tsx", "utf8");
+const onboardingApiSource = readFileSync("components/onboarding/api.ts", "utf8");
 const buildLeaderboardCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-build-leaderboard"),
   globalsSource.indexOf(".dzn-game-modes-section"),
@@ -778,6 +781,13 @@ assert.equal(productionSmokeSource.includes("Protected app page redirected logge
 assert.equal(productionSmokeSource.includes("Public preview route returned 200 without requiring sign-in."), true);
 assert.equal(productionSmokeSource.includes("[\"/servers\", \"/leaderboards\"]"), true);
 assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
+assert.equal(publicNetworkSource.includes("function isRedactedPublicNetworkCache"), true);
+assert.equal(publicNetworkSource.includes("server.access_level === \"preview\" && server.is_locked === true"), true);
+assert.equal(publicNetworkSource.includes("window.localStorage.removeItem(publicNetworkCacheKey(slug))"), true);
+assert.equal(leaderboardsPageSource.includes("normalized.access_level !== \"preview\" || normalized.is_locked !== true"), true);
+assert.equal(leaderboardsPageSource.includes("window.localStorage.removeItem(LEADERBOARD_LAST_GOOD_KEY)"), true);
+assert.equal(onboardingApiSource.includes("dzn:lastGoodLeaderboard"), true);
+assert.equal(onboardingApiSource.includes("dzn:lastGoodPublicNetwork:"), true);
 assert.equal(pricingUpgradeBlock.includes('href="/pricing"'), true);
 assert.equal(pricingUpgradeBlock.includes("PAYMENT_COPY.starterOffer"), true);
 assert.equal(pricingUpgradeBlock.includes('role="dialog"'), false);

@@ -1009,6 +1009,10 @@ function loadLastGoodLeaderboard(): ReturnType<typeof normalizePayload> | null {
     const cachedAt = typeof (parsed as { cached_at?: unknown }).cached_at === "string" ? (parsed as { cached_at: string }).cached_at : null;
     if (cachedAt && Date.now() - new Date(cachedAt).getTime() > LEADERBOARD_LAST_GOOD_MAX_AGE_MS) return null;
     const normalized = normalizePayload(parsed.data && !parsed.top_servers ? parsed.data : parsed);
+    if (normalized.access_level !== "preview" || normalized.is_locked !== true) {
+      window.localStorage.removeItem(LEADERBOARD_LAST_GOOD_KEY);
+      return null;
+    }
     return hasMeaningfulLeaderboard(normalized) ? normalized : null;
   } catch {
     return null;
@@ -1017,6 +1021,7 @@ function loadLastGoodLeaderboard(): ReturnType<typeof normalizePayload> | null {
 
 function saveLastGoodLeaderboard(payload: ReturnType<typeof normalizePayload>) {
   if (typeof window === "undefined") return;
+  if (payload.access_level !== "preview" || payload.is_locked !== true) return;
   try {
     const snapshot = stripVolatileLeaderboardProfileLinks({ ...payload, cached_at: new Date().toISOString() });
     window.localStorage.setItem(LEADERBOARD_LAST_GOOD_KEY, JSON.stringify(snapshot));

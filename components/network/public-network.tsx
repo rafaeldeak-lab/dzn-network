@@ -3171,6 +3171,10 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PublicNetworkCachePayload;
     if (parsed.cached_at && Date.now() - new Date(parsed.cached_at).getTime() > PUBLIC_NETWORK_CACHE_MAX_AGE_MS) return null;
+    if (!isRedactedPublicNetworkCache(parsed)) {
+      window.localStorage.removeItem(publicNetworkCacheKey(slug));
+      return null;
+    }
     if (slug) return parsed.server ? { server: parsed.server } : null;
     return Array.isArray(parsed.servers) || parsed.stats ? { servers: parsed.servers ?? [], stats: parsed.stats ?? null } : null;
   } catch {
@@ -3180,12 +3184,18 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
 
 function savePublicNetworkCache(slug: string | null, payload: PublicNetworkCachePayload) {
   if (typeof window === "undefined") return;
+  if (!isRedactedPublicNetworkCache(payload)) return;
   try {
     const snapshot = stripVolatilePublicNetworkProfileLinks({ ...payload, cached_at: new Date().toISOString() });
     window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify(snapshot));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
+}
+
+function isRedactedPublicNetworkCache(payload: PublicNetworkCachePayload) {
+  const visibleServers = payload.server ? [payload.server] : payload.servers ?? [];
+  return visibleServers.length > 0 && visibleServers.every((server) => server.access_level === "preview" && server.is_locked === true);
 }
 
 function stripVolatilePublicNetworkProfileLinks(value: unknown): unknown {

@@ -58,8 +58,8 @@ assert.match(component, /window\.location\.pathname\.match/, "The dynamic shell 
 assert.match(component, /avatarFailed/, "Broken avatars must fall back safely.");
 assert.match(page, /generateStaticParams/, "The exported dynamic route must ship a static shell.");
 assert.match(shell, /env\.ASSETS\.fetch/, "Cloudflare must serve the dynamic directory through the exported shell.");
-assert.match(middleware, /isPublicServerCommunityPath/, "The public directory route must be excluded narrowly from the private server-management gate.");
-assert.match(middleware, /\/servers\\\/\[a-z0-9\].*\\\/community/, "The public exception must be constrained to a server slug and community suffix.");
+assert.doesNotMatch(middleware, /isPublicServerCommunityPath/, "Public server discovery must not depend on a one-route exception to an otherwise private server browser.");
+assert.doesNotMatch(middleware, /"\/servers"/, "The redacted public server browser and its directory routes must remain reachable before login.");
 assert.match(publicServer, /Community Members/, "Public server profiles must link to the directory.");
 assert.match(publicServer, /<div className="grid gap-4">[\s\S]*Community Members[\s\S]*\{hasDescription \? \(/, "Directory discovery must remain visible even when optional server profile copy is empty.");
 assert.match(manager, /New entries stay private unless you explicitly publish them/, "The owner UI must explain the private default.");

@@ -607,11 +607,23 @@ export async function logout() {
 export function clearClientAuthState() {
   if (typeof window === "undefined") return;
 
-  const keys = ["active_server", "dzn_auth", "dzn_user", "dzn_session", "auth", "user", "dzn:lastGoodDashboardAuth"];
+  const keys = new Set([
+    "active_server",
+    "dzn_auth",
+    "dzn_user",
+    "dzn_session",
+    "auth",
+    "user",
+    "dzn:lastGoodDashboardAuth",
+    "dzn:lastGoodLeaderboard",
+  ]);
   for (const storage of [window.localStorage, window.sessionStorage]) {
     try {
-      for (const key of keys) {
-        storage.removeItem(key);
+      for (let index = storage.length - 1; index >= 0; index -= 1) {
+        const key = storage.key(index);
+        if (key && (keys.has(key) || key.startsWith("dzn:lastGoodPublicNetwork:"))) {
+          storage.removeItem(key);
+        }
       }
     } catch {
       // Storage can be unavailable in hardened/private browser contexts.
