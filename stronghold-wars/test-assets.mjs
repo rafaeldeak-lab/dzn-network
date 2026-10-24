@@ -219,6 +219,28 @@ if (carbineBytes.toString('ascii', 0, 4) !== 'glTF' || carbineBytes.readUInt32LE
 const carbineGltf = JSON.parse(carbineBytes.toString('utf8', 20, 20 + carbineBytes.readUInt32LE(12)));
 if (!carbineGltf.meshes?.length || !carbineGltf.images?.length) throw new Error('Warden carbine lacks a 3D mesh or texture.');
 console.log('Five distinct, textured and skinned Rosebud Warden levels and a textured 3D carbine verified.');
+const ghostManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v7/manifest.json'), 'utf8'));
+if (Object.keys(ghostManifest.assets || {}).length !== 5) throw new Error('Ghost kit must have five image-guided models.');
+const ghostHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `recon_l0${level}`, ghost = ghostManifest.assets[name];
+  if (!ghost || ghost.file !== squadAsset('recon', level) || ghost.reference !== squadPortrait('recon', level)) throw new Error(`Ghost Level ${level} model or portrait mapping is missing.`);
+  const ghostBytes = readFileSync(join(root, ...ghost.file.split('/')));
+  const ghostSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), ghost.source));
+  const ghostReference = readFileSync(join(root, ...ghost.reference.split('/')));
+  const hash = createHash('sha256').update(ghostBytes).digest('hex');
+  if (ghostBytes.toString('ascii', 0, 4) !== 'glTF' || ghostBytes.readUInt32LE(8) !== ghostBytes.length || ghostBytes.length !== ghost.bytes
+    || hash !== ghost.sha256 || ghostHashes.has(hash)
+    || createHash('sha256').update(ghostSource).digest('hex') !== ghost.sourceSha256
+    || createHash('sha256').update(ghostReference).digest('hex') !== ghost.referenceSha256) throw new Error(`Ghost Level ${level} source, portrait or game GLB integrity failed.`);
+  ghostHashes.add(hash);
+  const ghostGltf = JSON.parse(ghostBytes.toString('utf8', 20, 20 + ghostBytes.readUInt32LE(12)));
+  const ghostAnimations = new Map((ghostGltf.animations || []).map(animation => [animation.name, animation.channels.length]));
+  const triangles = ghostGltf.meshes?.flatMap(mesh => mesh.primitives).reduce((count, part) => count + ghostGltf.accessors[part.indices].count / 3, 0);
+  if (!ghostGltf.meshes?.length || !ghostGltf.skins?.length || ghostGltf.skins[0].joints?.length < 15 || ghostGltf.images?.length < 2
+    || triangles !== ghost.triangles || ghost.animations.some(animation => !ghostAnimations.get(animation))) throw new Error(`Ghost Level ${level} lacks textured, skinned walk/idle geometry.`);
+}
+console.log('Five distinct image-guided DZN Ghost levels verified with retained sources, skins, textures and walk/idle clips.');
 const operativeManifest = JSON.parse(readFileSync(join(root, 'assets/models/operatives/manifest.json'), 'utf8'));
 const operativeHashes = new Set();
 if (Object.keys(operativeManifest.assets).length !== 3 || operativeAsset('unknown') !== null) throw new Error('Expected exactly three named DZN commander models.');

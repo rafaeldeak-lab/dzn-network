@@ -1101,12 +1101,14 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.walkMixer?.stopAllAction();
   soldier.userData.walkMixer = null;
   soldier.userData.walkAction = null;
+  soldier.userData.idleAction = null;
+  soldier.userData.activeAction = null;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.025;
   soldier.add(shadow);
-  const rigged = role === 'assault';
+  const rigged = role === 'assault' || role === 'recon';
   const request = rigged ? loadAnimatedSquad(path) : loadBuildingTemplate(path);
   request.then(asset => {
     if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1116,15 +1118,18 @@ function equipSoldier(soldier, role, tier) {
     model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
     soldier.add(model);
     if (rigged) {
-      const clip = asset.animations.find(animation => animation.name === 'DZN_Warden_Walk') || asset.animations[0];
+      const clip = asset.animations.find(animation => animation.name === (role === 'recon' ? 'DZN_Operative_Walk' : 'DZN_Warden_Walk')) || asset.animations[0];
       if (!clip) throw new Error(`Animated squad model has no walk clip: ${path}`);
-      // Rosebud's source soldier faces +X. Align its front with the patrol's
-      // +Z heading before applying the route yaw.
-      model.rotation.y = -Math.PI / 2;
+      // The Warden source faces +X; the image-guided Ghost already faces +Z.
+      if (role === 'assault') model.rotation.y = -Math.PI / 2;
       const mixer = new THREE.AnimationMixer(model);
       soldier.userData.walkMixer = mixer;
       soldier.userData.walkAction = mixer.clipAction(clip);
-      soldier.userData.walkAction.play();
+      const idleClip = asset.animations.find(animation => animation.name === 'DZN_Operative_Idle');
+      soldier.userData.idleAction = idleClip ? mixer.clipAction(idleClip) : null;
+      soldier.userData.activeAction = soldier.userData.idleAction || soldier.userData.walkAction;
+      soldier.userData.activeAction.play();
+      if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
         const carbine = weapon.scene.clone(true);
@@ -1146,7 +1151,7 @@ function equipSoldier(soldier, role, tier) {
     if (!rigged) return;
     const current = soldier.getObjectByName('squad_model');
     if (current) soldier.remove(current);
-    loadBuildingTemplate(`assets/models/squads-v5/assault_l0${tier}.glb`).then(template => {
+    loadBuildingTemplate(`assets/models/squads-v5/${role}_l0${tier}.glb`).then(template => {
       if (soldier.userData.loadToken !== token) return;
       const fallback = template.clone(true);
       fallback.name = 'squad_model';
@@ -1163,7 +1168,13 @@ function makeSoldier(role, levels) {
 function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   if (soldier.userData.walkMixer) {
-    if (pace > 0) soldier.userData.walkMixer.update(Math.max(0, dt) * pace);
+    const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
+    if (nextAction && nextAction !== soldier.userData.activeAction) {
+      nextAction.reset().play();
+      soldier.userData.activeAction.crossFadeTo(nextAction, .18, false);
+      soldier.userData.activeAction = nextAction;
+    }
+    soldier.userData.walkMixer.update(Math.max(0, dt) * (pace > 0.05 ? pace : (soldier.userData.idleAction ? 1 : 0)));
     const model = soldier.getObjectByName('squad_model');
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;

@@ -6,7 +6,9 @@ import sys
 from mathutils import Vector
 
 
-source, target = sys.argv[sys.argv.index('--') + 1:]
+arguments = sys.argv[sys.argv.index('--') + 1:]
+source, target = arguments[:2]
+frame = int(arguments[2]) if len(arguments) > 2 else 7
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=source)
 scene = bpy.context.scene
@@ -20,7 +22,7 @@ for obj in scene.objects:
     if obj.type == 'ARMATURE' and 'DZN_Operative_Walk' in bpy.data.actions:
         obj.animation_data_create()
         obj.animation_data.action = bpy.data.actions['DZN_Operative_Walk']
-scene.frame_set(7)
+scene.frame_set(frame)
 
 camera_data = bpy.data.cameras.new('QA Camera')
 camera = bpy.data.objects.new('QA Camera', camera_data)
