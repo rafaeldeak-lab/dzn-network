@@ -664,7 +664,7 @@ async function reconcileLandScenery() {
           const ghostMaterial = material => {
             const clone = material.clone();
             clone.transparent = true;
-            clone.opacity = .38;
+            clone.opacity = .72;
             clone.depthWrite = false;
             return clone;
           };
