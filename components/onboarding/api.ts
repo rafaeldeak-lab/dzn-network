@@ -205,10 +205,20 @@ export async function getBillingReadiness() {
   return request<BillingReadinessResponse>("/api/billing/readiness", { cache: "no-store" });
 }
 
-export async function createCheckoutSession(planKey: "starter" | "pro", returnTo = "/dashboard", acceptedOffer?: string) {
+export async function createCheckoutSession(
+  planKey: "starter" | "pro",
+  returnTo = "/dashboard",
+  acceptedOffer?: string,
+  cancelReturnTo = returnTo,
+) {
   return request<{ url: string }>("/api/billing/create-checkout-session", {
     method: "POST",
-    body: JSON.stringify({ plan_key: planKey, returnTo, ...(acceptedOffer ? { accepted_offer: acceptedOffer } : {}) }),
+    body: JSON.stringify({
+      plan_key: planKey,
+      returnTo,
+      cancelReturnTo,
+      ...(acceptedOffer ? { accepted_offer: acceptedOffer } : {}),
+    }),
   });
 }
 

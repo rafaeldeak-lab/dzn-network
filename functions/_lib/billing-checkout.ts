@@ -28,7 +28,12 @@ const retryError = () => new CheckoutRecoveryError("We could not confirm checkou
 const now = () => Math.floor(Date.now() / 1000);
 
 export async function createOrResumeCheckout(env: Env, request: Request, input: {
-  discordUserId: string; planKey: PurchasablePlanKey; priceId: string; returnTo: string; acceptedOffer?: unknown;
+  discordUserId: string;
+  planKey: PurchasablePlanKey;
+  priceId: string;
+  returnTo: string;
+  cancelReturnTo?: string;
+  acceptedOffer?: unknown;
 }) {
   const db = requireDb(env);
   // No runtime schema creation for this ledger: this read-only preflight must fail before Stripe.
@@ -88,7 +93,7 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
       "payment_method_types[0]": "card", "adaptive_pricing[enabled]": false,
       client_reference_id: input.discordUserId,
       success_url: billingRedirectUrl(env, request, input.returnTo, "success"),
-      cancel_url: billingRedirectUrl(env, request, input.returnTo, "cancelled"),
+      cancel_url: billingRedirectUrl(env, request, input.cancelReturnTo ?? input.returnTo, "cancelled"),
       "metadata[discord_user_id]": input.discordUserId, "metadata[plan_key]": input.planKey,
       "metadata[source]": "dzn-network", "metadata[dzn_checkout_attempt_id]": id,
       "subscription_data[metadata][discord_user_id]": input.discordUserId,
