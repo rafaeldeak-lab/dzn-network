@@ -1,0 +1,124 @@
+DZN STRONGHOLD BOOTSTRAP FOUNDATION
+
+Status: proposed default-off source foundation; no production activation.
+Reviewed and locally revalidated against DZN main
+97735424b9dcd653a3342427191889ccde4eaf7e.
+Original source provenance: 119f9627caf74e24c2dc650f3c9ea737c8ca8e4f.
+Policy version: stronghold-bootstrap-v1.
+
+WHAT THIS ADDS
+GET /api/stronghold/bootstrap?serverId=<canonical linked_servers.id>
+returns a minimal, private, read-only access observation for a real signed-in
+DZN user and one selected community server. The only environment change in
+source is the optional DZN_STRONGHOLD_BOOTSTRAP_ENABLED type declaration.
+No wrangler configuration sets it. Missing, false or any value other than the
+exact string "true" keeps the route unavailable.
+
+This endpoint does not create a settlement, load game progress, mint currency,
+start a Forge job, record contributions, register a war or validate a battle.
+All gameplay/mutation capabilities in its successful response are false.
+The response is not a bearer credential and must never authorize a later
+mutation without repeating the trusted access checks at that mutation.
+
+NEW ACCESS POLICY — NOT AN EXISTING PRESENTATION PERMISSION
+The existing player community bridge and public directory remain
+presentation-only in all existing features. This default-off feature defines
+a new, explicit use of narrowly scoped OAuth evidence for bootstrap access:
+
+1. Require an actual DZN session through getSessionUser. Reject mock auth,
+   the mock user and missing session-secret configuration. Do not add a login
+   fallback or create any session from this endpoint. Additionally bind an
+   independent expiry read to the exact cookie hash and the resolved user.
+   Require one unambiguous session record and a valid future UTC ISO expiry.
+   This closes the inherited helper's same-day ISO/text-comparison issue for
+   this new route without modifying existing auth readers. Missing, malformed,
+   timezone-less and expired values fail closed. Bootstrap validity is also
+   bounded by this session's expiry.
+2. Accept only one canonical linked-server UUID. Resolve its actual owner
+   from linked_servers.user_id joined to users. Do not accept client user,
+   guild, subscription or role selectors. Slugs and Discord guild IDs are not
+   interchangeable with linked_servers.id.
+3. Require a live, active_live, unmerged linked server in this narrow first
+   policy. Other lifecycle states fail closed; whether temporary Nitrado
+   degradation should leave the website game available is a later product
+   decision, not a silent fallback in this foundation.
+4. Read player_discord_community_memberships for the session user and the
+   exact linked server's external guild_id. Require source
+   discord_oauth_guilds, revoked_at IS NULL, and last_seen_at less than
+   15 minutes old. Future, absent or invalid timestamps fail closed. D1 UTC
+   timestamps are parsed as UTC, independently of the process timezone.
+   Owners must satisfy membership too. A public directory entry or a cached
+   administrator relationship cannot substitute for this evidence.
+5. Require active Pro capability in BOTH the owner's billing account and the
+   server_subscriptions projection. Match the actual owner's Discord ID,
+   exact guild ID, customer ID and subscription ID. Require both paid periods
+   to contain the current server time. Existing legacy Pro-capable plan keys
+   use the central plan normalizer. Trialing, unknown/missing billing, expired
+   periods, inconsistent projections and complimentary showcase access are
+   excluded from this first policy. Members need no personal paid plan.
+6. Identify owner authority only when the session user's internal user ID
+   equals linked_servers.user_id. Everyone else is a member. No delegated
+   game-admin role contract exists in the reviewed schema, so no such grant
+   is implemented. Public role labels, Discord relationship strings, request
+   headers, URL parameters and client state never grant management powers.
+
+The 15-minute interval is a NEW conservative policy for this read-only slice,
+not an existing DZN competitive entitlement. Revocation is observed when the
+authoritative OAuth cache refresh succeeds; this is not instantaneous Discord
+revocation detection. Stale users can use the existing authenticated Discord
+membership refresh/login flow, which this endpoint does not invoke. No raw
+guild list, billing identifiers, owner identifiers, tokens or cookies are
+returned. validUntil is informational and bounded by all evidence expiry.
+
+DATABASE AND AUTH BOUNDARIES
+The route performs session lookup, a strict cookie-bound expiry read, and one
+parameterized read joining existing
+users, linked_servers, owner_billing_accounts, server_subscriptions and
+player_discord_community_memberships. It performs no writes, DDL, migrations,
+schema repair, external fetches, billing calls or Discord calls. Missing
+schema/errors return a sanitized unavailable response. It uses existing
+json/security headers, private no-store caching and Vary: Cookie. It adds no
+CORS allowance; foreign Origin and cross-site requests are rejected. Non-GET
+methods return 405. Existing free Games Hub, personal Command Centre, Workshop,
+ADM wars, billing handlers and progression ledgers are unchanged.
+
+VALIDATION
+Pure policy tests cover missing sessions and feature flags; canonical and
+wrong-server identity; Free members under a Pro owner; Free/lapsed owner or
+server entitlements; cross-owner/guild/subscription projection mismatch;
+legacy plan compatibility; stale/revoked/future membership; UTC parsing;
+owner-only authority; inactive servers; expiry boundaries and invalid clocks.
+
+Route tests use the unchanged pinned createSession/getSessionUser helpers and
+the repository's existing GamesLocalD1 SQLite adapter. Fixtures apply the
+actual existing migrations 0001, 0012, 0015, 0041, 0054 and 0061 to a disposable
+in-memory database. They exercise the actual API export, authentication,
+same-day session expiry, malformed/empty/timezone-less expiry, exact-cookie
+binding, duplicate session hashes, expiry-bounded observations, method/origin
+boundaries, client spoofing, account isolation, entitlement and
+membership failures, sanitized missing-schema errors, safe response fields,
+and absence of database/schema changes for successful and denied reads.
+
+From a complete DZN checkout with its existing dev dependencies:
+  npm run test:stronghold
+This script runs both suites with the repository's existing tsx dependency.
+It is also appended to pretest, preserving the other existing gates, so the
+PR workflow's npm run test command includes both Stronghold suites.
+
+On the reviewed current source, the isolated Node 24 harness passed all
+15 policy cases and 18 route/session/SQLite cases. The 15 policy cases also
+passed under TZ=Pacific/Honolulu. The dependency-installed npm script and
+full repository CI remain pending; they were not run in the source subset.
+Run the repository's normal typecheck/lint/build and relevant regression gates
+before merging. The isolated review harness runs the same source and tests
+with Node 24's native TypeScript support; it does not replace full-repository
+typechecking, workerd/D1 integration or real-account production verification.
+
+REMAINING CONTRACTS BEFORE PLAYABLE INTEGRATION
+Separate shared-base storage; personal Forge/economy design; atomic
+contribution funding; explicit delegated administrators; Pro-lapse policy;
+server switching/season allegiance; gameplay membership freshness; immutable
+paired raid snapshots; authoritative result validation; reward idempotency.
+None is invented or enabled by this bootstrap response. Real deployment,
+flag activation and any future production migrations are separate release
+steps. This patch does not change live billing or broaden existing access.

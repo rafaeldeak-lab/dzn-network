@@ -20,6 +20,7 @@ interface D1Database {
 }
 
 interface CloudflareEnv {
+  DZN_STRONGHOLD_BOOTSTRAP_ENABLED?: string;
   DZN_GAMES_HUB_ENABLED?: string;
   DZN_COMMAND_CENTRE_ENABLED?: string;
   DZN_SURVIVAL_COMMAND_ENABLED?: string;
