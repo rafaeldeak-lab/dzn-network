@@ -60,7 +60,14 @@ async function main() {
       : fail(`GET ${path}`, routeScope[path] === "adm" ? `Expected 200, got ${result.status}.` : `Route sanity check failed with ${result.status}; mark out-of-scope unless tied to ADM code.`, result, routeScope[path] === "adm" ? "high" : "medium"));
   }
 
-  for (const path of ["/dashboard", "/events", "/leaderboards", "/servers", "/setup", "/dzn-pulse", "/seasons"]) {
+  for (const path of ["/servers", "/leaderboards"]) {
+    const result = await request(path);
+    checks.push(result.ok && result.status === 200
+      ? pass(`GET ${path} unauthenticated`, "Public preview route returned 200 without requiring sign-in.", { status: result.status })
+      : fail(`GET ${path} unauthenticated`, `Expected public preview HTTP 200, got ${result.status}.`, result, "high"));
+  }
+
+  for (const path of ["/dashboard", "/events", "/setup", "/dzn-pulse", "/seasons"]) {
     const result = await request(path);
     const location = result.headers.location ?? "";
     checks.push(result.ok && result.status === 302 && location.includes("/login")

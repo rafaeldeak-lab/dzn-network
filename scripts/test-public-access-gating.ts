@@ -6,6 +6,7 @@ import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functi
 import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows, getRecentActivity } from "../functions/api/public/home-stats";
 import { applyServerReviewsAccess } from "../functions/api/public/server-reviews";
 import { applyPublicServerAccess, publicListingStatus, resolvePublicStatsActive } from "../functions/api/public/servers";
+import { isProtectedAppPagePath } from "../functions/_middleware";
 import { stripPublicUrl } from "../lib/public-display-text";
 
 type Sqlite = {
@@ -19,6 +20,13 @@ type Sqlite = {
 };
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (file: string) => Sqlite };
+
+assert.equal(isProtectedAppPagePath("/servers"), false, "Public server discovery must be reachable before Discord login.");
+assert.equal(isProtectedAppPagePath("/servers/profile"), false, "Public server profiles must retain their redacted preview route.");
+assert.equal(isProtectedAppPagePath("/leaderboards"), false, "Public leaderboard previews must be reachable before Discord login.");
+assert.equal(isProtectedAppPagePath("/dashboard"), true, "Dashboard routes must remain authenticated.");
+assert.equal(isProtectedAppPagePath("/player/profile"), true, "Personal player routes must remain authenticated.");
+assert.equal(isProtectedAppPagePath("/owner"), false, "Owner functions enforce their own stricter authorization boundary.");
 
 async function assertRecentActivityIgnoresSyncRows() {
   const sqlite = new DatabaseSync(":memory:");
@@ -743,8 +751,14 @@ assert.equal(siteHeaderSource.includes("data-auth-state"), true);
 assert.equal(siteHeaderSource.includes("checking-public"), true);
 assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
 assert.equal(siteHeaderSource.includes("authProbePending ?"), true);
-for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/player", "/seasons", "/servers", "/setup", "/test"]) {
+for (const route of ["/dashboard", "/dzn-pulse", "/events", "/player", "/seasons", "/setup", "/test"]) {
   assert.equal(pageMiddlewareSource.includes(`"${route}"`), true, `Protected app page middleware must include ${route}.`);
+  assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include exact ${route}.`);
+  assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include exact ${route}.`);
+  assert.equal(publicAccessPolicyDoc.includes(`\`${route}\``), true, `Public access policy doc must describe ${route}.`);
+}
+for (const route of ["/leaderboards", "/servers"]) {
+  assert.equal(pageMiddlewareSource.includes(`"${route}"`), false, `Public preview middleware must not require login for ${route}.`);
   assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include exact ${route}.`);
   assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include exact ${route}.`);
   assert.equal(publicAccessPolicyDoc.includes(`\`${route}\``), true, `Public access policy doc must describe ${route}.`);
@@ -761,7 +775,9 @@ assert.equal(routesPatchSource.includes("\"/api/*\""), true);
 assert.equal(routesPatchSource.includes("\"/owner\""), true);
 assert.equal(routesPatchSource.includes("\"/owner/*\""), true);
 assert.equal(productionSmokeSource.includes("Protected app page redirected logged-out navigation to login."), true);
-assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/leaderboards\", \"/servers\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
+assert.equal(productionSmokeSource.includes("Public preview route returned 200 without requiring sign-in."), true);
+assert.equal(productionSmokeSource.includes("[\"/servers\", \"/leaderboards\"]"), true);
+assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
 assert.equal(pricingUpgradeBlock.includes('href="/pricing"'), true);
 assert.equal(pricingUpgradeBlock.includes("PAYMENT_COPY.starterOffer"), true);
 assert.equal(pricingUpgradeBlock.includes('role="dialog"'), false);
