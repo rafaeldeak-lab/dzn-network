@@ -272,6 +272,20 @@ export function runServiceTests() {
   checks.push('five-role unit unlocks, frozen upgraded combat stats, saved-war reload and casualty mitigation');
 
   const trainingService = new LocalGameService({ storage: new MemoryStorage(), now: () => clock });
+  const initialTraining = trainingService.getTrainingLoadout('iron-owner');
+  assert(initialTraining.capacity === 4 && initialTraining.counts.assault === 4, 'older and fresh saves have a valid Warden training squad');
+  const mixedTraining = { assault: 2, recon: 1, engineer: 1, sentinel: 0, medic: 0 };
+  assert(trainingService.setTrainingLoadout('iron-owner', mixedTraining).ok, 'verified owner can save a mixed unlocked training squad');
+  assert(!trainingService.setTrainingLoadout('iron-owner', { ...mixedTraining, sentinel: 1 }).ok, 'locked Sentinel cannot enter a training squad');
+  assert(!trainingService.setTrainingLoadout('iron-owner', { ...mixedTraining, assault: 3 }).ok, 'training capacity cannot be exceeded');
+  assert(!trainingService.setTrainingLoadout('iron-owner', { ...mixedTraining, recon: 0.5 }).ok, 'fractional troop counts are rejected');
+  assert(!trainingService.setTrainingLoadout('iron-unverified', mixedTraining).ok && !trainingService.setTrainingLoadout('free-owner', mixedTraining).ok, 'unverified and Free preview identities cannot configure training');
+  const reloadedTraining = new LocalGameService({ storage: trainingService.storage, now: () => clock });
+  assert(reloadedTraining.getTrainingLoadout('iron-owner').counts.recon === 1 && reloadedTraining.getTrainingLoadout('iron-owner').counts.engineer === 1, 'saved mixed squad survives reload');
+  assert(reloadedTraining.getTrainingLoadout('iron-member').counts.assault === 4, 'another connected member has an independent loadout');
+  trainingService.state.communities['iron-pines'].base.levels = { hq: 4, workshop: 3, tower: 3, comms: 3 };
+  assert(trainingService.setTrainingLoadout('iron-owner', { assault: 3, recon: 1, engineer: 1, sentinel: 2, medic: 1 }).ok, 'advanced squad roles unlock through Hall and specialist buildings');
+  checks.push('member-specific training loadouts, capacity and role gates, Pro access and save reload');
   const trainingStartParts = trainingService.snapshot('iron-owner').member.parts;
   assert(!trainingService.recordTrainingVictory('iron-owner', 1, 300).ok, 'an unrecorded training encounter cannot claim a reward');
   assert(trainingService.recordTrainingAttempt(1).ok, 'a training attempt is recorded before the encounter');

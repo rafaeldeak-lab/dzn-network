@@ -4,7 +4,7 @@
  * inventories, idempotent actions, progression, and Forge persistence. It is
  * intentionally local-only; it is not an authentication or security boundary.
  */
-import { squadBattleStats } from './squad-assets.js';
+import { SQUAD_ROLES, squadBattleStats, squadUnlocked } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
 import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
@@ -127,6 +127,28 @@ const safeInt = (value, fallback = 0) => {
   return Number.isSafeInteger(n) && n >= 0 ? n : fallback;
 };
 const clone = value => JSON.parse(JSON.stringify(value));
+const TRAINING_ROLES = Object.freeze(Object.keys(SQUAD_ROLES));
+const trainingCapacity = levels => 2 + (levels.hq || 1) * 2;
+function defaultTrainingLoadout(levels) {
+  const counts = Object.fromEntries(TRAINING_ROLES.map(role => [role, 0]));
+  counts.assault = trainingCapacity(levels);
+  return counts;
+}
+function validTrainingLoadout(counts, levels) {
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) return false;
+  let total = 0;
+  for (const role of TRAINING_ROLES) {
+    const count = Number(counts[role] ?? 0);
+    if (!Number.isSafeInteger(count) || count < 0 || count > trainingCapacity(levels) || (count && !squadUnlocked(role, levels))) return false;
+    total += count;
+  }
+  return total > 0 && total <= trainingCapacity(levels) && Object.keys(counts).every(role => TRAINING_ROLES.includes(role));
+}
+function normalizedTrainingLoadout(counts, levels) {
+  return validTrainingLoadout(counts, levels)
+    ? Object.fromEntries(TRAINING_ROLES.map(role => [role, Number(counts[role] ?? 0)]))
+    : defaultTrainingLoadout(levels);
+}
 
 function emptyBase(treasury = 200) {
   return {
@@ -144,7 +166,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], muted: false };
+  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, muted: false };
 }
 
 function createFreshState() {
@@ -413,6 +435,8 @@ function normalizeLoadedState(raw) {
         finishAt: Number.isFinite(Number(j.finishAt)) ? Number(j.finishAt) : null, claimedAt: safeInt(j.claimedAt),
       })) : [],
       actionRecords: Array.isArray(saved.actionRecords) ? saved.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [],
+      trainingLoadout: saved.trainingLoadout && typeof saved.trainingLoadout === 'object' && !Array.isArray(saved.trainingLoadout)
+        ? clone(saved.trainingLoadout) : null,
       muted: Boolean(saved.muted),
     };
   }
@@ -1830,6 +1854,26 @@ export class LocalGameService {
     else if (key === 'stored') member.stored = Math.max(0, Number(value) || 0);
     else member[key] = safeInt(value);
     this.save();
+  }
+
+  getTrainingLoadout(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const levels = entry.saved.base.levels;
+    return { counts: normalizedTrainingLoadout(member.trainingLoadout, levels), capacity: trainingCapacity(levels) };
+  }
+
+  setTrainingLoadout(identityId, counts) {
+    const access = this.getAccess(identityId);
+    if (!access.allowed) return { ok: false, error: access.reason };
+    const entry = this.community(identityId);
+    const levels = entry.saved.base.levels;
+    if (!validTrainingLoadout(counts, levels)) return { ok: false, error: `Select 1–${trainingCapacity(levels)} unlocked troops with whole-number counts.` };
+    const loadout = normalizedTrainingLoadout(counts, levels);
+    this.member(identityId).trainingLoadout = loadout;
+    this.save();
+    return { ok: true, counts: clone(loadout), capacity: trainingCapacity(levels) };
   }
 
   recordTrainingVictory(identityId, raidId, reward) {

@@ -1626,6 +1626,11 @@ patrolFocusExit.onclick = () => stopPatrolFocus(true);
 let selectedKey = null;
 let raid = null;
 let raidLaunching = false;
+const trainingHud = document.createElement('div');
+trainingHud.hidden = true;
+trainingHud.setAttribute('role', 'status');
+trainingHud.style.cssText = 'position:fixed;z-index:8;right:12px;top:64px;max-width:min(300px,calc(100vw - 24px));padding:9px 12px;border:1px solid #70e59a88;border-radius:10px;background:#0d1914ee;color:#edf4ee;font:700 11px Inter,system-ui,sans-serif;box-shadow:0 8px 25px #0008';
+document.body.append(trainingHud);
 let warBattle = null;
 let toastTimer = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -1956,7 +1961,8 @@ function showSquadPanel() {
   }).join('');
   const away = currentAwaySquads().length;
   const defenderCards = defenderCardsHTML();
-  openPanel(`<h2>DZN Squad Armoury</h2><p>Inspect each outfit or watch its 3D patrol. Active gear follows building level; previewing an outfit does not equip it.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Home defence is reduced until return or recall.</p>` : ''}<details class="technical-details"><summary>How upgrades and battles work</summary><p>Command Hall and specialist buildings set active kit. Sentinel and Lifeline unlock at Hall L4 with a Level 3 specialist building. Upgraded damage boosts attacks; health, armour and Lifeline support reduce losses. Battles lock both bases and kits before the first move.</p></details><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves upgrades and assigns posts. Assigned defenders guard the base; reserves stay out of battle.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Inspect each outfit or watch its 3D patrol. Active gear follows building level; previewing an outfit does not equip it.</p><button id="trainingLoadoutBtn">Set training squad</button>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Home defence is reduced until return or recall.</p>` : ''}<details class="technical-details"><summary>How upgrades and battles work</summary><p>Command Hall and specialist buildings set active kit. Sentinel and Lifeline unlock at Hall L4 with a Level 3 specialist building. Upgraded damage boosts attacks; health, armour and Lifeline support reduce losses. Battles lock both bases and kits before the first move.</p></details><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves upgrades and assigns posts. Assigned defenders guard the base; reserves stay out of battle.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('trainingLoadoutBtn').onclick = () => showTrainingLoadout();
   panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
     const role = button.dataset.squadPreview;
     const level = Number(button.dataset.level);
@@ -2429,6 +2435,32 @@ updateHud();
 const WAR_COMMUNITY_IDS = ['iron-pines', 'violet-ridge', 'mossback-free'];
 const WAR_LEADERSHIP = ['owner', 'admin'];
 let selectedWarOpponentCommunityId = null;
+let selectedTrainingApproach = 'west';
+
+function trainingSquadSummary(counts) {
+  return Object.entries(counts).filter(([, count]) => count > 0)
+    .map(([role, count]) => `${count} ${SQUAD_ROLES[role].name.replace('DZN ', '')}`).join(' · ');
+}
+
+function showTrainingLoadout(errorMessage = '') {
+  const profile = service.profile();
+  const access = service.getAccess(profile.id);
+  const { counts, capacity } = service.getTrainingLoadout(profile.id);
+  const used = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const rows = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
+    const kit = squadProfile(role, state.levels);
+    return `<div class="project-card"><label class="field-label" for="training${role}">${escapeHTML(definition.name)} · ${kit.unlocked ? `L${kit.tier} · ${kit.maxHealth} HP · ${kit.damage} damage` : 'LOCKED'}</label><div class="row"><input id="training${role}" data-training-role="${role}" type="number" min="0" max="${capacity}" step="1" value="${counts[role]}" ${kit.unlocked && access.allowed ? '' : 'disabled'}><span class="help">${escapeHTML(definition.purpose)}</span></div></div>`;
+  }).join('');
+  openPanel(`<h2>Training squad</h2><p>Prepare your own DZN squad for the simulated Outpost Delta drill. Your Command Hall allows ${capacity} troops; ${used} are assigned.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : ''}${rows}<p class="help">Ghosts move quickly, Fixers pressure the battery, Sentinels absorb fire, and Lifeline medics recover nearby allies. Unlocked kit levels apply automatically.</p><div class="row"><button id="saveTrainingLoadout" ${access.allowed ? '' : 'disabled'}>Save squad</button><button id="backToWarTable">War Table</button></div>`);
+  $('saveTrainingLoadout').onclick = () => {
+    const selected = Object.fromEntries([...panel.querySelectorAll('[data-training-role]')].map(input => [input.dataset.trainingRole, Number(input.value)]));
+    const result = service.setTrainingLoadout(profile.id, selected);
+    if (!result.ok) { showTrainingLoadout(result.error); return; }
+    toast('Training squad saved.');
+    showWarTable();
+  };
+  $('backToWarTable').onclick = () => showWarTable();
+}
 
 function warCommunityName(communityId) {
   return service.getIdentityOptions().find(identity => identity.communityId === communityId)?.communityName || communityId;
@@ -2526,15 +2558,19 @@ function showWarTable(errorMessage = '') {
   const canChallenge = leadership && currentReadiness.eligible && targetReadiness.eligible && !activeWar && !raid && !warBattle && ['iron-pines', 'violet-ridge'].includes(community.id);
   const otherOption = service.getIdentityOptions().find(identity => identity.communityId === otherCommunityId);
   const access = service.getAccess(profile.id);
-  const trainingSquad = 2 + (state.levels.hq || 1) * 2;
+  const trainingLoadout = service.getTrainingLoadout(profile.id);
+  const trainingSquad = Object.values(trainingLoadout.counts).reduce((sum, count) => sum + count, 0);
   let html = `<h2>War Table</h2><p>Server-versus-server <span class="sim">[LOCAL WAR PREVIEW]</span> · only Iron Pines and Violet Ridge can challenge. Identity, membership and Pro status are local fixtures—not authentication or live multiplayer.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}<h3>Eligibility · exact gates</h3>${communities}<div class="war-card"><b>Issue a challenge</b><p class="help">Owner/admin only. Opposing owner/admin must accept. One active local war at a time.</p><div class="row"><label class="field-label" for="warOpponentSelect">Opponent community</label><select id="warOpponentSelect"><option value="${escapeHTML(otherCommunityId)}">${escapeHTML(otherOption?.communityName || otherCommunityId)}${targetReadiness.eligible ? '' : ' · locked'}</option><option value="mossback-free" disabled>Mossback Free Community · locked (Free tier)</option></select><button id="warChallengeBtn" ${canChallenge ? '' : 'disabled'}>Send challenge</button></div>${!leadership ? '<p class="notice warn">Only this community’s owner/admin may issue a challenge.</p>' : ''}${activeWar ? `<p class="notice">War ${escapeHTML(activeWar.id)} is already ${escapeHTML(activeWar.state)}. Resolve or close it before another challenge.</p>` : !targetReadiness.eligible ? `<p class="notice warn">Opponent gates: ${targetReadiness.unmetGates.map(escapeHTML).join(' ')}</p>` : !currentReadiness.eligible ? `<p class="notice warn">Your gates: ${currentReadiness.unmetGates.map(escapeHTML).join(' ')}</p>` : ''}</div>`;
   if (wars.length) html += `<h3>Challenge inbox · shared war record</h3>${wars.map(war => renderWarRecord(war, community.id, profile)).join('')}`;
   else html += '<p class="help">No challenges or wars yet. Once both fictional communities meet the gates, one owner/admin can challenge the other.</p>';
   const lockedMessage = access.allowed ? '' : `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
-  html += `<hr><p><b>AI Training Encounter:</b> Fixed Outpost Delta <span class="sim">[TRAINING · SIMULATED]</span></p><p>Squad: ${trainingSquad} troops · Training attempts: ${state.raidCount}. Practice is separate from war scores and rewards.</p>${lockedMessage}<div class="row"><button id="raidBtn" ${raid || raidLaunching || warBattle || !access.allowed ? 'disabled' : ''}>Launch Practice Raid</button><button id="closeBtn">Close</button></div><p class="help">War points and practice wins are local preview data only. No coordinates or private information are used.</p>`;
+  html += `<hr><p><b>AI Training Encounter:</b> Fixed Outpost Delta <span class="sim">[TRAINING · SIMULATED]</span></p><p>${trainingSquad}/${trainingLoadout.capacity} troops · ${escapeHTML(trainingSquadSummary(trainingLoadout.counts))} · Attempts ${state.raidCount}.</p>${lockedMessage}<div class="row"><button id="configureTrainingBtn">Set squad</button><label class="field-label" for="trainingApproach">Approach</label><select id="trainingApproach"><option value="west">West cover</option><option value="south">South ridge</option><option value="east">East battery flank</option></select><button id="raidBtn" ${raid || raidLaunching || warBattle || !access.allowed ? 'disabled' : ''}>Launch drill</button><button id="closeBtn">Close</button></div><p class="help">Practice stays separate from server war scores. This is a local simulation.</p>`;
   openPanel(html);
   $('closeBtn').onclick = closePanel;
+  $('configureTrainingBtn').onclick = () => showTrainingLoadout();
   $('raidBtn').onclick = launchRaid;
+  $('trainingApproach').value = selectedTrainingApproach;
+  $('trainingApproach').onchange = () => { selectedTrainingApproach = $('trainingApproach').value; };
   $('warOpponentSelect').value = selectedWarOpponentCommunityId;
   $('warOpponentSelect').onchange = () => { selectedWarOpponentCommunityId = $('warOpponentSelect').value; showWarTable(); };
   $('warChallengeBtn').onclick = () => {
@@ -3062,11 +3098,16 @@ function updateWarBattle(dt) {
 
 async function launchRaid() {
   if (raid || raidLaunching || warBattle) return;
-  if (!service.getAccess().allowed) {
-    toast(service.getAccess().reason);
+  const identityId = service.state.currentIdentityId;
+  const access = service.getAccess(identityId);
+  if (!access.allowed) {
+    toast(access.reason);
     showWarTable();
     return;
   }
+  const levels = { ...state.levels };
+  const loadout = service.getTrainingLoadout(identityId);
+  const approach = selectedTrainingApproach;
   raidLaunching = true;
   try {
     await buildOutpost();
@@ -3078,6 +3119,11 @@ async function launchRaid() {
   }
   raidLaunching = false;
   if (raid || warBattle) return;
+  if (service.state.currentIdentityId !== identityId || !service.getAccess(identityId).allowed) {
+    toast('Training access changed. Prepare the drill again.');
+    showWarTable();
+    return;
+  }
   const raidId = Math.max(state.raidCount, state.lastRaidClaimed) + 1;
   const attempt = service.recordTrainingAttempt(raidId);
   if (!attempt.ok) {
@@ -3087,42 +3133,65 @@ async function launchRaid() {
   }
   closePanel();
   const troops = [];
-  const count = 2 + state.levels.hq * 2;
-  const assault = squadProfile('assault', state.levels);
-  for (let i = 0; i < count; i++) {
-    const t = makeSoldier('assault', state.levels);
+  const roles = Object.entries(loadout.counts).flatMap(([role, count]) => Array(count).fill(role));
+  for (let i = 0; i < roles.length; i++) {
+    const role = roles[i];
+    const kit = squadProfile(role, levels);
+    const t = makeSoldier(role, levels);
     t.userData.stride = i * 0.65;
-    t.userData.hp = assault.maxHealth;
-    t.position.set(OUTPOST.x - 18, 0, OUTPOST.z + (i - count / 2) * 1.5);
+    t.userData.hp = kit.maxHealth;
+    t.userData.combat = { role, maxHealth: kit.maxHealth, damage: kit.damage, armour: kit.armour, tier: kit.tier,
+      speed: { assault: 5, recon: 6.8, engineer: 4.7, sentinel: 4, medic: 5.2 }[role] };
+    const offset = (i - (roles.length - 1) / 2) * 1.6;
+    if (approach === 'east') t.position.set(OUTPOST.x + 19, 0, OUTPOST.z + offset);
+    else if (approach === 'south') t.position.set(OUTPOST.x + offset, 0, OUTPOST.z + 19);
+    else t.position.set(OUTPOST.x - 19, 0, OUTPOST.z + offset);
     scene.add(t);
     troops.push(t);
   }
-  raid = { id: raidId, troops, time: 0, tracers: [] };
+  raid = { id: raidId, identityId, troops, approach, time: 0, tracers: [], hudSecond: -1 };
+  trainingHud.hidden = false;
   camTarget.copy(OUTPOST);
   zoom = 30;
   updateCamera();
   playClank();
-  toast('AI training squad deployed.');
+  toast(`${roles.length} DZN troops deployed from the ${approach} approach.`);
 }
 
 function updateRaid(dt) {
   raid.time += dt;
-  const firepower = squadProfile('assault', state.levels).damage * 1.25;
-  const alive = outpostBlocks.filter(b => b.userData.hp > 0);
+  const remainingSeconds = Math.max(0, Math.ceil(45 - raid.time));
+  if (remainingSeconds !== raid.hudSecond) {
+    raid.hudSecond = remainingSeconds;
+    trainingHud.textContent = `OUTPOST DELTA · ${remainingSeconds}s · ${raid.troops.filter(t => t.userData.hp > 0).length}/${raid.troops.length} troops · ${outpostBlocks.filter(b => b.userData.hp > 0).length}/${outpostBlocks.length} targets`;
+  }
   for (const t of raid.troops) {
     if (t.userData.hp <= 0) continue;
-    const target = alive[0];
+    const combat = t.userData.combat;
+    const alive = outpostBlocks.filter(b => b.userData.hp > 0);
+    const priority = combat.role === 'engineer' ? 'tower' : combat.role === 'recon' ? 'comms' : null;
+    const target = alive.find(b => b.userData.structureKey === priority) || alive.reduce((nearest, block) =>
+      !nearest || block.position.distanceToSquared(t.position) < nearest.position.distanceToSquared(t.position) ? block : nearest, null);
     if (!target) {
       break;
     }
+    if (combat.role === 'medic') {
+      t.userData.healClock = (t.userData.healClock || 0) + dt;
+      if (t.userData.healClock >= 1.2) {
+        const ally = raid.troops.filter(candidate => candidate.userData.hp > 0 && candidate.userData.hp < candidate.userData.combat.maxHealth && candidate.position.distanceToSquared(t.position) < 80)
+          .sort((a, b) => a.userData.hp / a.userData.combat.maxHealth - b.userData.hp / b.userData.combat.maxHealth)[0];
+        if (ally) { ally.userData.hp = Math.min(ally.userData.combat.maxHealth, ally.userData.hp + 10 + combat.tier * 4); t.userData.healClock = 0; }
+      }
+    }
     const dir = target.position.clone().sub(t.position).setY(0);
     if (dir.length() > 4) {
-      t.position.addScaledVector(dir.normalize(), dt * 5);
+      t.position.addScaledVector(dir.normalize(), dt * combat.speed);
       t.rotation.y = Math.atan2(dir.x, dir.z);
       animateSoldier(t, raid.time * 8 + t.userData.stride, 1, null, dt);
     } else {
       animateSoldier(t, raid.time * 2 + t.userData.stride, 0.22, null, dt);
-      target.userData.hp -= firepower * dt;
+      const specialistBonus = (combat.role === 'engineer' && target.userData.structureKey === 'tower') || (combat.role === 'recon' && target.userData.structureKey === 'comms') ? 1.35 : 1;
+      target.userData.hp -= combat.damage * 1.25 * specialistBonus * dt;
       if (Math.random() < dt * 6) {
         spawnSmoke(target.position.clone().add(new THREE.Vector3(0, 1, 0)));
         beep(200 + Math.random() * 100, 0.04);
@@ -3141,7 +3210,7 @@ function updateRaid(dt) {
     if (stepArcBattery(rig, dt, raid.time, aim, defender.userData.shotClock >= 1.2)) {
       defender.userData.shotClock = 0;
       spawnArcBolt(rig.muzzle.getWorldPosition(new THREE.Vector3()), aim, raid.tracers);
-      troop.userData.hp -= 18;
+      troop.userData.hp -= Math.max(5, 18 - Math.floor(troop.userData.combat.armour / 4));
       if (troop.userData.hp <= 0) {
         troop.visible = false;
         spawnSmoke(troop.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
@@ -3163,16 +3232,17 @@ function updateRaid(dt) {
 function finishRaid(won) {
   const finished = raid;
   raid = null;
+  trainingHud.hidden = true;
   finished.troops.forEach(t => scene.remove(t));
   finished.tracers.forEach(disposeWarBolt);
   let reward = 0;
   if (won) {
     const proposedReward = Math.round(250 * (1 + state.levels.comms * 0.2));
-    const claim = service.recordTrainingVictory(service.state.currentIdentityId, finished.id, proposedReward);
+    const claim = service.recordTrainingVictory(finished.identityId, finished.id, proposedReward);
     if (claim.ok) reward = claim.reward;
     else console.warn('Training reward was not applied:', claim.error);
   }
-  panel.innerHTML = `<h2>${won ? 'TRAINING VICTORY' : 'TRAINING DEFEAT'}</h2><p>Simulated Outpost Delta ${won ? 'neutralised' : 'held out'}.</p><p>Training reward: ⚙ ${reward} Parts${won && reward === 0 ? ' · already claimed or locked' : ''}</p><div class="row"><button id="closeBtn">Return to Base</button></div>`;
+  panel.innerHTML = `<h2>${won ? 'TRAINING VICTORY' : 'TRAINING DEFEAT'}</h2><p>Simulated Outpost Delta ${won ? 'neutralised' : 'held out'}.</p><p>Approach: ${escapeHTML(finished.approach)} · Time: ${Math.min(45, Math.round(finished.time))}s · Troops returned: ${finished.troops.filter(t => t.userData.hp > 0).length}/${finished.troops.length}.</p><p>Training reward: ⚙ ${reward} Parts${won && reward === 0 ? ' · already claimed or locked' : ''}</p><div class="row"><button id="closeBtn">Return to Base</button></div>`;
   panel.style.display = 'block';
   beep(won ? 990 : 180, 0.4);
   $('closeBtn').onclick = () => {
