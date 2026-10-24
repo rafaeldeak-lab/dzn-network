@@ -42,10 +42,15 @@ assert.equal(reputation.rarity, "legendary");
 assert.equal(reputation.animationType, "legendary");
 
 for (const [code, artworkPath] of Object.entries({
+  platinum: "/rewards/icons/reputation-platinum-3d.webp",
   diamond: "/rewards/icons/reputation-shield-3d.webp",
   verified_server: "/rewards/icons/verified-server-2d.webp",
+  rising_server: "/rewards/icons/rising-server-2d.webp",
+  active_server: "/rewards/icons/active-server-2d.webp",
   death_dealer: "/rewards/icons/warlord-medal-3d.webp",
+  long_shot_legend: "/rewards/icons/long-shot-legend-3d.webp",
   warlord: "/rewards/icons/warlord-medal-3d.webp",
+  veteran: "/rewards/icons/veteran-3d.webp",
   king_of_dzn: "/rewards/icons/season-crown-3d.webp",
   winter_champion: "/rewards/icons/season-crown-3d.webp",
 })) {
@@ -189,10 +194,15 @@ for (const code of ["death_dealer", "trusted_server", "king_of_dzn", "dzn_legend
   assert.equal(Boolean(badgeManifest[code].imageAlt), true);
 }
 for (const [code, artworkPath] of Object.entries({
+  platinum: "/rewards/icons/reputation-platinum-3d.webp",
   diamond: "/rewards/icons/reputation-shield-3d.webp",
   verified_server: "/rewards/icons/verified-server-2d.webp",
+  rising_server: "/rewards/icons/rising-server-2d.webp",
+  active_server: "/rewards/icons/active-server-2d.webp",
   death_dealer: "/rewards/icons/warlord-medal-3d.webp",
+  long_shot_legend: "/rewards/icons/long-shot-legend-3d.webp",
   warlord: "/rewards/icons/warlord-medal-3d.webp",
+  veteran: "/rewards/icons/veteran-3d.webp",
   king_of_dzn: "/rewards/icons/season-crown-3d.webp",
   winter_champion: "/rewards/icons/season-crown-3d.webp",
 })) {

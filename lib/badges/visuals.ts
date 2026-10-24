@@ -132,7 +132,7 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   bronze: visual("reputation", "bronze", "Bronze Reputation", "common", "#cd7f32", "glow", 10),
   silver: visual("reputation", "silver", "Silver Reputation", "uncommon", "#cbd5e1", "glow", 20),
   gold: visual("reputation", "gold", "Gold Reputation", "rare", "#facc15", "shimmer", 30),
-  platinum: visual("reputation", "platinum", "Platinum Reputation", "epic", "#93c5fd", "electric", 40),
+  platinum: artworkVisual("reputation", "platinum", "Platinum Reputation", "epic", "#93c5fd", "electric", 40, "/rewards/icons/reputation-platinum-3d.webp"),
   diamond: artworkVisual("reputation", "diamond", "Diamond Reputation", "legendary", "#67e8f9", "legendary", 50, "/rewards/icons/reputation-shield-3d.webp"),
   legendary: visual("reputation", "legendary", "Legendary Reputation", "mythic", "#c084fc", "legendary", 60),
   dzn_legend: visual("reputation", "dzn-legend", "DZN Legend", "mythic", "#facc15", "legendary", 65),
@@ -142,9 +142,9 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   featured_server: visual("premium", "featured-server", "Featured Server", "premium", "#f59e0b", "shimmer", 106),
   trending_server: visual("premium", "trending-server", "Trending Server", "epic", "#fb7185", "pulse", 96),
   top_pick: visual("premium", "top-pick", "Top Pick", "epic", "#a78bfa", "sparks", 97),
-  rising_server: visual("premium", "rising-server", "Rising Server", "rare", "#34d399", "pulse", 80),
+  rising_server: artworkVisual("premium", "rising-server", "Rising Server", "rare", "#34d399", "pulse", 80, "/rewards/icons/rising-server-2d.webp"),
   community_favourite: visual("premium", "community-favourite", "Community Favourite", "epic", "#f472b6", "sparks", 92),
-  active_server: visual("premium", "active-server", "Active Server", "uncommon", "#22c55e", "pulse", 78),
+  active_server: artworkVisual("premium", "active-server", "Active Server", "uncommon", "#22c55e", "pulse", 78, "/rewards/icons/active-server-2d.webp"),
   exclusive: visual("premium", "exclusive", "Exclusive", "legendary", "#a78bfa", "legendary", 118),
   hardcore_mode: visual("premium", "hardcore-mode", "Hardcore Mode", "epic", "#ef4444", "flame", 88),
 
@@ -156,8 +156,8 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
 
   death_dealer: artworkVisual("combat", "death-dealer", "Death Dealer", "rare", "#ef4444", "pulse", 70, "/rewards/icons/warlord-medal-3d.webp"),
   headhunter: visual("combat", "headhunter", "Headhunter", "epic", "#fb7185", "sparks", 90),
-  long_shot_legend: visual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100),
-  marksman: visual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100),
+  long_shot_legend: artworkVisual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100, "/rewards/icons/long-shot-legend-3d.webp"),
+  marksman: artworkVisual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100, "/rewards/icons/long-shot-legend-3d.webp"),
   warlord: artworkVisual("combat", "warlord", "Warlord", "legendary", "#dc2626", "flame", 120, "/rewards/icons/warlord-medal-3d.webp"),
   hot_streak: visual("combat", "hot-streak", "Hot Streak", "epic", "#f97316", "flame", 85),
 
@@ -173,7 +173,7 @@ const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: strin
   beta_veteran: visual("founder", "beta-veteran", "Beta Veteran", "limited", "#a78bfa", "electric", 240),
   legacy_server: visual("founder", "legacy-server", "Legacy Server", "limited", "#facc15", "legendary", 245),
   pioneer: visual("founder", "pioneer", "Pioneer", "limited", "#34d399", "glow", 232),
-  veteran: visual("founder", "veteran", "Veteran", "limited", "#facc15", "shimmer", 238),
+  veteran: artworkVisual("founder", "veteran", "Veteran", "limited", "#facc15", "shimmer", 238, "/rewards/icons/veteran-3d.webp"),
 
   spring_champion: visual("seasonal", "spring-champion", "Spring Champion", "seasonal", "#86efac", "seasonal", 200),
   summer_champion: visual("seasonal", "summer-champion", "Summer Champion", "seasonal", "#facc15", "seasonal", 205),

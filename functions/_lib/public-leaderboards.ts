@@ -9,6 +9,7 @@ import {
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
 } from "../../lib/server-lifecycle";
+import { formatPublicServerName } from "../../lib/public-display-text";
 
 export { calculateServerScore, calculateServerScoreBreakdown };
 
@@ -309,7 +310,7 @@ export async function getRankedPublicServers(env: Env, limit: number, mode: Publ
     return {
       id: row.server_id,
       server_id: row.server_id,
-      server_name: row.server_name ?? "Unnamed DZN Server",
+      server_name: formatPublicServerName(row.server_name, "Unnamed DZN Server"),
       slug: row.slug,
       mode: normalizeMode(row.mode),
       category: normalizeServerCategoryFromRecord({ server_category: row.category }) ?? normalizeMode(row.category),
@@ -579,7 +580,7 @@ export function rankPublicPlayers(
         rank: index + 1,
         player_name: player.playerName ?? "Unknown Player",
         player_id: null,
-        server_name: player.serverName ?? "Unnamed DZN Server",
+        server_name: formatPublicServerName(player.serverName, "Unnamed DZN Server"),
         server_slug: player.serverSlug ?? null,
         kills,
         deaths,
@@ -622,7 +623,7 @@ export function rankLongestKills(
       rank: index + 1,
       player_name: row.player_name ?? "Unknown Player",
       victim_name: row.victim_name ?? "Unknown Player",
-      server_name: row.server_name ?? "Unnamed DZN Server",
+      server_name: formatPublicServerName(row.server_name, "Unnamed DZN Server"),
       server_slug: row.server_slug ?? null,
       weapon: row.weapon ?? "Unknown weapon",
       distance: roundOne(numberOrZero(row.distance)),
@@ -849,7 +850,7 @@ async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric
       rank: queryOffset + index + 1,
       player_name: row.player_name ?? "Unknown Player",
       player_id: null,
-      server_name: row.server_name ?? "Unnamed DZN Server",
+      server_name: formatPublicServerName(row.server_name, "Unnamed DZN Server"),
       server_slug: row.server_slug ?? null,
       kills,
       deaths,
@@ -909,7 +910,7 @@ function toKillHighlight(
   return {
     player_name: row.player_name ?? "Unknown Player",
     victim_name: row.victim_name ?? "Unknown Player",
-    server_name: row.server_name ?? "Unnamed DZN Server",
+    server_name: formatPublicServerName(row.server_name, "Unnamed DZN Server"),
     server_slug: row.server_slug ?? null,
     weapon: row.weapon ?? "Unknown weapon",
     distance: roundOne(numberOrZero(row.distance)),
