@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -47,36 +48,42 @@ const proHighlights = [
 const proFeatureGroups = [
   {
     icon: BarChart3,
+    image: "/media/pricing/dzn-pricing-intelligence-v1.webp",
     title: "Advanced server intelligence",
     summary: "Turn imported server activity into owner-ready insights and richer public proof.",
     features: ["Advanced owner analytics where data is available", "Server-specific Advanced Showcase tools", "Event leaderboard detail", "30-minute eligible ADM pull cadence"],
   },
   {
     icon: Megaphone,
+    image: "/media/pricing/dzn-pricing-discovery-v1.webp",
     title: "Promotion and discovery",
     summary: "Give each connected server more ways to be found without buying competitive results.",
     features: ["Featured and spotlight rotation eligibility", "Enhanced discovery and priority visibility", "Server spotlight eligibility", "2 promotion credits per billing period", "Public advert publishing every 24 hours", "Organic server bump every 7 days"],
   },
   {
     icon: ImageIcon,
+    image: "/media/pricing/dzn-pricing-command-outpost-v1.webp",
     title: "A stronger public profile",
     summary: "Build a recognisable server presence with more space and original visual assets.",
     features: ["2,500-character server description", "Custom advert banner", "Up to 4 JPEG gallery images", "Advanced Showcase access", "Up to 8 earned badges in the showcase", "Pro profile presentation and frame"],
   },
   {
     icon: BellRing,
+    image: "/media/pricing/dzn-pricing-comms-v1.webp",
     title: "Discord automation suite",
     summary: "Publish server moments, feeds and operational updates through the connected DZN bot.",
     features: ["Fresh-wipe and event announcements", "Leaderboard, longest-kill and weekly recap posts", "Kill, PvE, hit, connection and build feeds", "Server-vs-server and event leaderboard embeds", "Milestone and network-ranking posts", "Admin alerts and admin-log posts"],
   },
   {
     icon: Swords,
+    image: "/media/pricing/dzn-pricing-discovery-v1.webp",
     title: "Events and Server Wars",
     summary: "Host community competition while keeping every score and result plan-neutral.",
     features: ["Server Wars challenge-hosting tools", "Event announcements and leaderboard posts", "Server-vs-server progress Discord posts", "Public network-ranking posts", "No paid score, rank or gameplay advantage"],
   },
   {
     icon: Radar,
+    image: "/media/pricing/dzn-pricing-intelligence-v1.webp",
     title: "Faster owner operations",
     summary: "Run more servers with shorter eligible refresh windows and deeper operational insight.",
     features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority Discord posting", "Owner announcements", "Public advert publishing every 24 hours"],
@@ -135,16 +142,18 @@ const comparisonGroups = [
 export default function PricingPage() {
   return (
     <main className="min-h-screen bg-[#04070c] pb-16 text-white">
-      <section className="relative min-h-[500px] overflow-hidden border-b border-cyan-300/20 bg-[url('/media/server-wars-showdown/server-wars-bg-layer.webp')] bg-cover bg-center">
-        <div className="absolute inset-0 bg-[#03060bd9]" aria-hidden="true" />
-        <div className="relative mx-auto flex w-full max-w-7xl flex-col justify-center px-4 py-14 sm:px-6 lg:px-8">
+      <section className="relative min-h-[560px] overflow-hidden border-b border-cyan-300/20 bg-[#03060b]">
+        <Image src="/media/pricing/dzn-pricing-command-outpost-v1.webp" alt="" fill priority sizes="100vw" className="object-cover object-[68%_center]" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,6,11,0.98)_0%,rgba(3,6,11,0.93)_35%,rgba(3,6,11,0.46)_72%,rgba(3,6,11,0.7)_100%)]" aria-hidden="true" />
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-[linear-gradient(transparent,rgba(4,7,12,1))]" aria-hidden="true" />
+        <div className="relative mx-auto flex w-full max-w-7xl flex-col justify-center px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
           <div className="max-w-4xl">
-            <div className="inline-flex items-center gap-2 border border-amber-300/35 bg-black/55 px-3 py-2 text-xs font-black uppercase text-amber-100">
+            <div className="inline-flex items-center gap-2 border border-amber-300/35 bg-black/60 px-3 py-2 text-xs font-black uppercase text-amber-100">
               <Crown aria-hidden="true" className="h-4 w-4" />
               DZN Pro for server owners
             </div>
-            <h1 className="mt-6 text-4xl font-black uppercase leading-[0.95] text-white sm:text-6xl lg:text-7xl">
-              Make your server impossible to overlook
+            <h1 className="mt-6 max-w-4xl text-4xl font-black uppercase leading-[0.95] text-white sm:text-6xl lg:text-7xl">
+              Make your server impossible to overlook.
             </h1>
             <p className="mt-6 max-w-3xl text-base font-semibold leading-7 text-zinc-200 sm:text-lg">
               Pro combines advanced analytics, richer server profiles, discovery tools, Discord automation and Server Wars hosting for owners who want to grow an active DayZ community.
@@ -158,9 +167,9 @@ export default function PricingPage() {
               </Link>
             </div>
           </div>
-          <div className="mt-10 grid max-w-5xl grid-cols-2 gap-px overflow-hidden border border-white/15 bg-white/15 sm:grid-cols-4">
+          <div className="mt-12 grid max-w-5xl grid-cols-2 gap-px overflow-hidden border border-white/15 bg-white/15 sm:grid-cols-4">
             {proHighlights.map(({ icon: Icon, value, label }) => (
-              <div key={label} className="bg-[#07101ce6] p-4 sm:p-5">
+              <div key={label} className="bg-[#07101ce6] p-4 backdrop-blur-sm sm:p-5">
                 <Icon aria-hidden="true" className="h-5 w-5 text-cyan-200" />
                 <p className="mt-3 text-2xl font-black text-white">{value}</p>
                 <p className="mt-1 text-xs font-bold uppercase leading-5 text-zinc-400">{label}</p>
@@ -170,34 +179,15 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <section aria-labelledby="pro-tools-title" className="border-b border-white/10 bg-[#07101a] py-14">
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-          <p className="text-xs font-black uppercase text-cyan-200">Everything Pro unlocks</p>
-          <h2 id="pro-tools-title" className="mt-2 max-w-3xl text-3xl font-black uppercase text-white sm:text-4xl">More ways to operate, promote and grow</h2>
-          <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">Every item below is backed by DZN&apos;s current plan registry. Availability still depends on completed setup, supported logs and the data each feature needs.</p>
-          <div className="mt-9 grid gap-x-10 gap-y-9 md:grid-cols-2 xl:grid-cols-3">
-            {proFeatureGroups.map(({ icon: Icon, title, summary, features }) => (
-              <article key={title} className="border-t border-cyan-300/30 pt-5">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><Icon aria-hidden="true" className="h-5 w-5" /></span>
-                  <div><h3 className="text-lg font-black uppercase text-white">{title}</h3><p className="mt-2 text-sm font-semibold leading-6 text-zinc-400">{summary}</p></div>
-                </div>
-                <ul className="mt-5 space-y-3">{features.map((feature) => <li key={feature} className="flex items-start gap-3 text-sm font-semibold leading-5 text-zinc-200"><Check aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><span>{feature}</span></li>)}</ul>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="choose-plan" aria-labelledby="choose-plan-title" className="scroll-mt-24 py-14">
+      <section id="choose-plan" aria-labelledby="choose-plan-title" className="scroll-mt-24 bg-[#04070c] py-16">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="max-w-3xl">
             <p className="text-xs font-black uppercase text-violet-200">Choose your owner plan</p>
             <h2 id="choose-plan-title" className="mt-2 text-3xl font-black uppercase sm:text-4xl">Start small or run the full DZN toolkit</h2>
             <p className="mt-4 text-sm font-semibold leading-6 text-zinc-300">Players use DZN for free. These subscriptions are for server owners who want connected tracking, publishing and community-growth tools.</p>
           </div>
-          <div className="mt-9 grid items-stretch gap-6 lg:grid-cols-[0.82fr_1.18fr]">
-            <article className="flex flex-col border border-cyan-200/25 bg-[#08111b] p-5 sm:p-7">
+          <div className="mt-9 grid items-stretch gap-4 lg:grid-cols-[0.82fr_1.18fr]">
+            <article className="flex flex-col border border-cyan-200/35 bg-[linear-gradient(145deg,#081721,#07101a)] p-5 sm:p-7">
               <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase text-cyan-200">Try the owner workflow</p><h3 className="mt-2 text-3xl font-black uppercase">{starter.name}</h3></div><Shield aria-hidden="true" className="h-8 w-8 text-cyan-200" /></div>
               <p className="mt-5 text-4xl font-black">{PAYMENT_COPY.starterPrice}</p>
               <p className="mt-2 text-sm font-bold text-cyan-100">{PAYMENT_COPY.starterOffer}</p>
@@ -207,18 +197,41 @@ export default function PricingPage() {
               </ul>
               <div className="mt-auto"><PricingCheckout planKey="starter" /></div>
             </article>
-            <article className="relative flex flex-col overflow-hidden border border-amber-300/55 bg-[#11100e] p-5 shadow-[0_0_55px_rgba(251,191,36,0.12)] sm:p-8">
+            <article className="relative flex flex-col overflow-hidden border border-amber-300/65 bg-[#11100e] p-5 shadow-[0_0_55px_rgba(251,191,36,0.16)] sm:p-8">
+              <Image src="/media/pricing/dzn-pricing-command-outpost-v1.webp" alt="" fill sizes="(min-width: 1024px) 58vw, 100vw" className="object-cover opacity-20" />
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(18,15,9,0.96),rgba(13,13,15,0.9))]" aria-hidden="true" />
               <div className="absolute right-0 top-0 bg-amber-300 px-4 py-2 text-xs font-black uppercase text-slate-950">Recommended</div>
-              <div className="flex items-start justify-between gap-4 pr-24"><div><p className="text-xs font-black uppercase text-amber-200">For ambitious communities</p><h3 className="mt-2 text-4xl font-black uppercase">DZN {pro.name}</h3></div><Crown aria-hidden="true" className="hidden h-10 w-10 text-amber-200 sm:block" /></div>
-              <div className="mt-5 flex flex-wrap items-end gap-x-3 gap-y-1"><p className="text-5xl font-black">{PAYMENT_COPY.proPrice}</p><p className="pb-1 text-sm font-bold uppercase text-zinc-400">cancel anytime</p></div>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300">{PAYMENT_COPY.proTerms}</p>
-              <div className="my-7 grid gap-3 sm:grid-cols-2">
+              <div className="relative flex items-start justify-between gap-4 pr-24"><div><p className="text-xs font-black uppercase text-amber-200">For ambitious communities</p><h3 className="mt-2 text-4xl font-black uppercase">DZN {pro.name}</h3></div><Crown aria-hidden="true" className="hidden h-10 w-10 text-amber-200 sm:block" /></div>
+              <div className="relative mt-5 flex flex-wrap items-end gap-x-3 gap-y-1"><p className="text-5xl font-black">{PAYMENT_COPY.proPrice}</p><p className="pb-1 text-sm font-bold uppercase text-zinc-300">cancel anytime</p></div>
+              <p className="relative mt-4 max-w-2xl text-sm leading-6 text-zinc-200">{PAYMENT_COPY.proTerms}</p>
+              <div className="relative my-7 grid gap-3 sm:grid-cols-2">
                 {["Up to 3 linked servers", "Advanced analytics and stats", "Custom banner and gallery", "24 Discord post and feed types", "Faster eligible sync cadences", "Featured and spotlight eligibility", "Server Wars hosting tools", "2 promotion credits per billing period", "Event leaderboard detail", "Up to 8 earned showcase badges"].map((feature) => <div key={feature} className="flex items-start gap-3 border-b border-white/10 pb-3 text-sm font-bold leading-5 text-white"><Sparkles aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" /><span>{feature}</span></div>)}
               </div>
-              <div className="mt-auto"><PricingCheckout planKey="pro" /></div>
+              <div className="relative mt-auto"><PricingCheckout planKey="pro" /></div>
             </article>
           </div>
           <p className="mt-6 border-y border-white/15 py-5 text-sm leading-6 text-zinc-300">{PAYMENT_COPY.consent} {PAYMENT_COPY.returningStarter}</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="pro-tools-title" className="border-y border-white/10 bg-[#07101a] py-14">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <p className="text-xs font-black uppercase text-cyan-200">Everything Pro unlocks</p>
+          <h2 id="pro-tools-title" className="mt-2 max-w-3xl text-3xl font-black uppercase text-white sm:text-4xl">More ways to operate, promote and grow</h2>
+          <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">Every item below is backed by DZN&apos;s current plan registry. Availability still depends on completed setup, supported logs and the data each feature needs.</p>
+          <div className="mt-9 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {proFeatureGroups.map(({ icon: Icon, image, title, summary, features }) => (
+              <article key={title} className="relative min-h-[330px] overflow-hidden border border-cyan-200/20 bg-[#070d16] p-5 sm:p-6">
+                <Image src={image} alt="" fill sizes="(min-width: 1280px) 33vw, (min-width: 768px) 50vw, 100vw" className="object-cover opacity-45" />
+                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,10,17,0.18)_0%,rgba(5,10,17,0.9)_50%,rgba(5,10,17,1)_100%)]" aria-hidden="true" />
+                <div className="relative flex h-full flex-col">
+                  <span className="grid h-10 w-10 place-items-center border border-cyan-300/35 bg-[#06121bd9] text-cyan-100"><Icon aria-hidden="true" className="h-5 w-5" /></span>
+                  <div className="mt-auto pt-12"><h3 className="text-lg font-black uppercase text-white">{title}</h3><p className="mt-2 text-sm font-semibold leading-6 text-zinc-200">{summary}</p></div>
+                  <ul className="mt-5 space-y-2 border-t border-white/15 pt-4">{features.slice(0, 3).map((feature) => <li key={feature} className="flex items-start gap-3 text-sm font-semibold leading-5 text-zinc-100"><Check aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><span>{feature}</span></li>)}</ul>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 

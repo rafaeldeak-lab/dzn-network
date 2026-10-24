@@ -13,9 +13,10 @@ const starterHeaderBlock = sourceBlock(siteHeaderSource, "const starterHeaderLin
 const proHeaderBlock = sourceBlock(siteHeaderSource, "const proHeaderLinks", "let pageHeaderAuthState");
 const headerActionBlock = sourceBlock(siteHeaderSource, "<div className=\"dzn-header-actions\">", "{resolvedAuthenticated && showLogout");
 
-assert.equal(loggedOutHeaderBlock.includes("Features"), true);
+assert.equal(loggedOutHeaderBlock.includes("Features"), false);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
-for (const privateLabel of ["Player Hub", "Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Pro Tools"]) {
+assert.equal(loggedOutHeaderBlock.includes("Servers"), true);
+for (const privateLabel of ["Player Hub", "Leaderboards", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Pro Tools"]) {
   assert.equal(loggedOutHeaderBlock.includes(privateLabel), false, `Logged-out header links must not include ${privateLabel}.`);
 }
 

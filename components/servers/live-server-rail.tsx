@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
+import { ArrowRight, Eye, RadioTower, Star, Users } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { formatPublicServerName } from "@/lib/public-display-text";
@@ -21,6 +21,7 @@ type RailItem = {
   playerCountStatus?: string;
   ratingAverage: number | null;
   reviewCount: number;
+  viewsLast7Days: number;
   listingPlanKey: "free" | "starter" | "pro";
   isPro: boolean;
 };
@@ -219,6 +220,11 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 
 function RailCard({ item }: { item: RailItem }) {
   const displayName = formatPublicServerName(item.name);
+
+  useEffect(() => {
+    trackRailImpression(item.id);
+  }, [item.id]);
+
   const content = (
     <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
       <div className="dzn-live-server-card__icon">
@@ -239,6 +245,10 @@ function RailCard({ item }: { item: RailItem }) {
             <Users className="h-3.5 w-3.5 text-cyan-200" aria-hidden="true" />
             {playersLabel(item)}
           </span>
+          <span className="inline-flex items-center gap-1" aria-label={`${formatViewsLabel(item.viewsLast7Days)} in the last 7 days`}>
+            <Eye className="h-3.5 w-3.5 text-violet-200" aria-hidden="true" />
+            {formatViewsLabel(item.viewsLast7Days)}
+          </span>
         </div>
       </div>
       <ArrowRight className="h-4 w-4 shrink-0 text-violet-100/70" aria-hidden="true" />
@@ -258,6 +268,32 @@ function playersLabel(item: RailItem) {
   if (typeof item.currentPlayers === "number" && typeof item.maxPlayers === "number" && item.maxPlayers > 0) return `${item.currentPlayers}/${item.maxPlayers}`;
   if (typeof item.currentPlayers === "number") return `${item.currentPlayers} online`;
   return "Players syncing";
+}
+
+function formatViewsLabel(value: number) {
+  const views = Math.max(0, Math.floor(Number(value) || 0));
+  const display = views >= 1000 ? `${(views / 1000).toFixed(views >= 10_000 ? 0 : 1).replace(/\.0$/, "")}k` : String(views);
+  return `${display} ${views === 1 ? "view" : "views"}`;
+}
+
+function trackRailImpression(serverId: string) {
+  if (typeof window === "undefined" || !serverId) return;
+
+  const payload = JSON.stringify({ serverId, eventType: "impression", source: "live_server_rail", promotionId: null });
+  try {
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/public/promotions/track", new Blob([payload], { type: "application/json" }));
+      return;
+    }
+    void fetch("/api/public/promotions/track", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: payload,
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // View telemetry must never block discovery or navigation.
+  }
 }
 
 function dedupeRailItems(items: RailItem[]) {
