@@ -379,9 +379,11 @@ console.log('DZN defenders verified: four 3D roles reach every assigned post and
 const defenderManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders/manifest.json'), 'utf8'));
 const defenderHashes = new Set();
 const defenderParts = {
-  guardian: ['barrier_shield', 'barrier_body'], aegis: ['left_drone', 'right_drone'],
-  trapper: ['snare_module_0', 'snare_module_1', 'snare_module_2'],
-  hound: ['left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg'],
+  guardian: ['left_arm', 'right_arm', 'left_leg', 'right_leg', 'barrier_shield', 'barrier_body'],
+  aegis: ['left_arm', 'right_arm', 'left_leg', 'right_leg', 'scanner', 'left_drone', 'right_drone'],
+  trapper: ['left_arm', 'right_arm', 'left_leg', 'right_leg', 'snare_module_0', 'snare_module_1', 'snare_module_2',
+    'snare_charge_0', 'snare_charge_1', 'snare_charge_2'],
+  hound: ['hound_head', 'tail', 'left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg'],
 };
 if (Object.keys(defenderManifest.assets).length !== 20) throw new Error('Four DZN defenders need five 3D appearance tiers each.');
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (let level = 1; level <= 5; level++) {

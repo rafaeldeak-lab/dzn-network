@@ -1391,6 +1391,9 @@ function bindDefenderRig(model, role) {
   const limbs = Object.fromEntries(['left_arm', 'right_arm', 'left_leg', 'right_leg',
     'left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg', 'hound_head']
     .map(name => [name, defenderLimbPivot(model, name)]));
+  for (const name of ['barrier_shield', 'scanner', 'left_drone', 'right_drone', 'tail',
+    'snare_module_0', 'snare_module_1', 'snare_module_2',
+    'snare_charge_0', 'snare_charge_1', 'snare_charge_2']) limbs[name] = model.getObjectByName(name);
   model.updateMatrixWorld(true);
   const held = role === 'guardian' ? { left_arm: ['barrier_shield'] }
     : role === 'aegis' ? { right_arm: ['scanner', 'scanner_screen'] } : {};
@@ -1426,7 +1429,7 @@ function syncDefenderPatrols() {
     }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
   }
 }
-function animateDefender(patrol, time = elapsed) {
+function animateDefender(patrol, time = elapsed, threat = 0) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
   const limbs = patrol.limbs || mesh.userData.defenderLimbs;
@@ -1438,20 +1441,34 @@ function animateDefender(patrol, time = elapsed) {
       const leg = limbs[name];
       if (leg) leg.rotation.x = swing * sign;
     }
-    if (limbs.hound_head) limbs.hound_head.rotation.y = Math.sin(time * 0.8) * (moving ? 0.08 : 0.24);
+    if (limbs.hound_head) limbs.hound_head.rotation.y = Math.sin(time * (threat ? 3 : 0.8)) * (moving ? 0.08 : 0.24);
+    if (limbs.tail) limbs.tail.rotation.y = Math.sin(time * (threat ? 7 : 2)) * 0.2;
   } else {
     if (limbs.left_leg) limbs.left_leg.rotation.x = swing;
     if (limbs.right_leg) limbs.right_leg.rotation.x = -swing;
-    if (limbs.left_arm) limbs.left_arm.rotation.x = (role === 'guardian' ? -0.28 : role === 'aegis' ? -0.2 : -0.12) - swing * 0.22;
-    if (limbs.right_arm) limbs.right_arm.rotation.x = (role === 'aegis' ? -0.46 : role === 'trapper' ? -0.25 : -0.12) + swing * 0.28;
+    if (limbs.left_arm) limbs.left_arm.rotation.x = (role === 'guardian' ? -0.28 - threat * 0.5 : role === 'aegis' ? -0.2 : -0.12) - swing * 0.22;
+    if (limbs.right_arm) limbs.right_arm.rotation.x = (role === 'aegis' ? -0.46 - threat * 0.3 : role === 'trapper' ? -0.25 - threat * 0.35 : -0.12) + swing * 0.28;
   }
+  if (limbs.barrier_shield) limbs.barrier_shield.rotation.y = Math.sin(time * 5) * threat * 0.04;
   if (patrol.model) patrol.model.position.y = moving ? Math.abs(Math.sin(motion.stride)) * 0.025 : Math.sin(time * 1.4) * 0.006;
   if (role === 'aegis') for (const [index, name] of ['left_drone', 'right_drone'].entries()) {
-    const drone = mesh.getObjectByName(name);
+    const drone = limbs[name];
     if (drone) {
-      if (drone.userData.restY === undefined) drone.userData.restY = drone.position.y;
-      drone.position.y = drone.userData.restY + Math.sin(time * 2 + index * Math.PI) * 0.09;
-      drone.rotation.y = Math.sin(time * 0.7 + index * Math.PI) * 0.35;
+      if (!drone.userData.restPosition) drone.userData.restPosition = drone.position.clone();
+      const rest = drone.userData.restPosition;
+      drone.position.set(rest.x + Math.sin(time * (1 + threat * 2) + index * Math.PI) * threat * 0.26,
+        rest.y + Math.sin(time * (2 + threat * 3) + index * Math.PI) * (0.09 + threat * 0.08),
+        rest.z + Math.cos(time * (1 + threat * 2) + index * Math.PI) * threat * 0.2);
+      drone.rotation.y = Math.sin(time * (0.7 + threat * 2) + index * Math.PI) * (0.35 + threat * 0.5);
+    }
+  }
+  if (role === 'trapper') for (let index = 0; index < 3; index++) {
+    const snareModule = limbs[`snare_module_${index}`];
+    const charge = limbs[`snare_charge_${index}`];
+    if (snareModule) snareModule.rotation.y = Math.sin(time * (1.1 + threat * 3) + index * 2) * (0.06 + threat * 0.18);
+    if (charge) {
+      if (!charge.userData.restScale) charge.userData.restScale = charge.scale.clone();
+      charge.scale.copy(charge.userData.restScale).multiplyScalar(1 + Math.sin(time * (3 + threat * 5) + index * 2) * (0.06 + threat * 0.12));
     }
   }
 }
@@ -2751,10 +2768,17 @@ function clearWarBaseVisuals() {
     bolt.line.geometry.dispose();
     bolt.line.material.dispose();
   }
-  for (const defender of warDefenderMeshes) scene.remove(defender.mesh);
+  for (const defender of warDefenderMeshes) {
+    scene.remove(defender.mesh);
+    if (defender.snareField) {
+      defender.snareField.geometry.dispose();
+      defender.snareField.material.dispose();
+    }
+  }
   warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
-    if (!child.userData.sharedTemplate) child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+    if (child.userData.sharedTemplate) clearArcSplitGeometry(child);
+    else child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
     warBaseGroup.remove(child);
   }
 }
@@ -2770,6 +2794,17 @@ function buildWarBaseVisual(side) {
     model.position.set(point?.x ?? building.pos[0], 0.05, point?.z ?? building.pos[1]);
     warBaseGroup.add(model);
     if (key === 'tower') warTurretRig = model.userData.turretRig;
+    const asset = getBuildingAsset(key, side.base.levels[key]);
+    if (asset) loadBuildingTemplate(asset.glb).then(template => {
+      if (token !== warDefenderToken) return;
+      const detailed = normalizeBuildingClone(template, key, side.base.levels[key]);
+      detailed.position.copy(model.position);
+      detailed.userData.sharedTemplate = true;
+      warBaseGroup.add(detailed);
+      warBaseGroup.remove(model);
+      model.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+      if (key === 'tower') warTurretRig = detailed.userData.turretRig;
+    }).catch(error => console.warn(`War base ${key} model could not load; retaining fallback.`, error));
   }
   for (const wall of side.base.layout?.walls || []) wallModel(wall.level).then(template => {
     if (token !== warDefenderToken || !template) return;
@@ -2794,7 +2829,15 @@ function buildWarBaseVisual(side) {
     mesh.position.set(OUTPOST.x + x, 0, OUTPOST.z + z);
     mesh.rotation.y = -Math.PI / 2;
     scene.add(mesh);
-    const patrol = { role, level: defender.level, mesh };
+    const patrol = { role, level: defender.level, mesh, home: mesh.position.clone() };
+    if (role === 'trapper') {
+      const field = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 32),
+        new THREE.MeshBasicMaterial({ color: 0xafff52, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      field.rotation.x = -Math.PI / 2;
+      field.position.y = 0.055;
+      mesh.add(field);
+      patrol.snareField = field;
+    }
     warDefenderMeshes.push(patrol);
     loadBuildingTemplate(defenderAsset(role, defender.level)).then(template => {
       if (token !== warDefenderToken) return;
@@ -2832,12 +2875,12 @@ function launchWarAttack(warId, tactic) {
     warTroopMeshes.push(troop);
     troops.push({ mesh: troop, start, target: troopTarget, phase: i * 0.45 });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 7, smokeTimer: 0, shotClock: 0, bolts: [] };
+  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 10, smokeTimer: 0, shotClock: 0, bolts: [] };
   camTarget.copy(OUTPOST);
   zoom = 32;
   updateCamera();
   panel.style.display = 'none';
-  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed · ${result.score} points · ${result.feedback}`);
+  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed · ${result.score} points · ${result.casualties} troops withdrawn. Full breakdown in War Table.`);
   playClank();
 }
 
@@ -2851,7 +2894,28 @@ function updateWarBattle(dt) {
     troop.mesh.rotation.y = Math.PI / 2;
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, 1, null, dt);
   }
-  for (const defender of warDefenderMeshes) animateDefender({ ...defender, motion: { stride: warBattle.time * 2, moving: false } }, warBattle.time);
+  for (const defender of warDefenderMeshes) {
+    const nearest = warBattle.troops.reduce((best, troop) => {
+      const distance = troop.mesh.position.distanceTo(defender.home);
+      return !best || distance < best.distance ? { mesh: troop.mesh, distance } : best;
+    }, null);
+    const threat = nearest ? THREE.MathUtils.clamp((20 - nearest.distance) / 12, 0, 1) : 0;
+    if (threat) {
+      const direction = nearest.mesh.position.clone().sub(defender.home);
+      const facing = Math.atan2(direction.x, direction.z);
+      const turn = Math.atan2(Math.sin(facing - defender.mesh.rotation.y), Math.cos(facing - defender.mesh.rotation.y));
+      defender.mesh.rotation.y += THREE.MathUtils.clamp(turn, -dt * 2.8, dt * 2.8);
+      if (defender.role === 'hound') {
+        direction.y = 0;
+        defender.mesh.position.copy(defender.home).add(direction.normalize().multiplyScalar(Math.max(0, Math.sin(warBattle.time * 9)) * threat * 0.55));
+      }
+    } else defender.mesh.position.copy(defender.home);
+    if (defender.snareField) {
+      defender.snareField.scale.setScalar(1 + threat * (0.4 + Math.sin(warBattle.time * 8) * 0.2));
+      defender.snareField.material.opacity = threat * (0.2 + Math.sin(warBattle.time * 8) * 0.08);
+    }
+    animateDefender({ ...defender, motion: { stride: warBattle.time * 8, moving: defender.role === 'hound' && threat > 0.1 } }, warBattle.time, threat);
+  }
   const target = warBattle.troops.find(troop => troop.mesh.position.distanceTo(OUTPOST) < 22)?.mesh;
   warBattle.shotClock += dt;
   const fire = Boolean(warTurretRig && target && progress < 0.94 && warBattle.shotClock >= 0.8);
@@ -2893,7 +2957,7 @@ function updateWarBattle(dt) {
   camTarget.set(0, 0, 0);
   zoom = 28;
   updateCamera();
-  toast(`${completed.result.feedback} · Open War Table for the updated score and event replay.`);
+  toast(`Raid replay complete · ${completed.result.score} points. Open War Table for the full result.`);
   showWarTable();
 }
 
