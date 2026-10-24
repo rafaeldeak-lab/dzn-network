@@ -2,35 +2,31 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-const root = process.cwd();
-const rewardArtwork = [
-  "reputation-shield-3d",
-  "verified-server-2d",
-  "season-crown-3d",
-  "player-compass-2d",
-  "warlord-medal-3d",
-];
+import { getBadgeCabinetArtworkUrl, getBadgeVisualConfig } from "../lib/badges/visuals";
 
-for (const asset of rewardArtwork) {
-  const icon = path.join(root, "public", "rewards", "icons", `${asset}.webp`);
-  const cabinet = path.join(root, "public", "rewards", "cabinet", `${asset}.webp`);
-  assert.equal(existsSync(icon), true, `Expected optimized icon artwork: ${asset}`);
-  assert.equal(existsSync(cabinet), true, `Expected optimized cabinet artwork: ${asset}`);
-  assert.equal(statSync(icon).size < 20_000, true, `Badge icon should remain compact: ${asset}`);
-  assert.equal(statSync(cabinet).size < 100_000, true, `Cabinet artwork should remain compact: ${asset}`);
-  assert.equal(existsSync(path.join(root, "public", "rewards", `${asset}.png`)), false, `Unoptimized source PNG must not ship: ${asset}`);
-}
+const root = process.cwd();
+const cabinetDecoration = path.join(root, "public", "rewards", "cabinet", "player-compass-2d.webp");
+assert.equal(existsSync(cabinetDecoration), true, "The Store cabinet decoration should exist.");
+assert.equal(statSync(cabinetDecoration).size < 100_000, true, "The Store cabinet decoration should remain compact.");
+assert.equal(existsSync(path.join(root, "public", "rewards", "player-compass-2d.png")), false, "An unoptimized source PNG must not ship.");
 
 const cabinet = readFileSync(path.join(root, "components", "store", "rewards-cabinet.tsx"), "utf8");
-for (const code of ["diamond", "verified_server", "death_dealer", "warlord", "king_of_dzn", "winter_champion"]) {
+for (const code of ["bronze", "silver", "gold", "platinum", "diamond", "legendary", "verified_server", "active_server", "death_dealer", "long_shot_legend", "warlord", "trusted_server", "veteran", "legacy_server", "king_of_dzn", "winter_champion"]) {
   assert.match(cabinet, new RegExp(`\\b${code}\\b`), `Expected live reward code: ${code}`);
+  const visual = getBadgeVisualConfig(code);
+  assert.equal(visual.staticIconUrl?.startsWith("/rewards/icons/compact/"), true, `${code} should use the shared reward artwork library.`);
+  assert.equal(existsSync(path.join(root, "public", visual.staticIconUrl!.replace(/^\//, ""))), true, `${code} artwork should exist.`);
+  const cabinetArtwork = getBadgeCabinetArtworkUrl(code);
+  assert.equal(cabinetArtwork?.startsWith("/rewards/cabinet/"), true, `${code} should use a larger Store cabinet artwork variant.`);
+  assert.equal(existsSync(path.join(root, "public", cabinetArtwork!.replace(/^\//, ""))), true, `${code} cabinet artwork should exist.`);
 }
 for (const futureOnlyCode of ["community_favourite", "headhunter", "hot_streak", "team_player", "loot_master", "event_champion"]) {
   assert.equal(cabinet.includes(futureOnlyCode), false, `Future-only reward must not be presented as a live Store reward: ${futureOnlyCode}`);
 }
 assert.match(cabinet, /Automatic player medal tracking is not live yet\./);
 assert.match(cabinet, /No paid competitive advantage/);
-assert.match(cabinet, /\/rewards\/cabinet\/.*\.webp/);
+assert.match(cabinet, /src=\{cabinetArtwork\}/);
+assert.equal(cabinet.includes("ARTWORK_BY_CODE"), false, "The Store must not maintain a stale duplicate reward artwork map.");
 assert.equal(cabinet.includes("/rewards/") && cabinet.includes(".png"), false, "Rewards Cabinet must not reference unoptimized PNG artwork.");
 assert.equal(cabinet.includes("fetch("), false, "Rewards Cabinet must not initiate a Store API request or checkout.");
 

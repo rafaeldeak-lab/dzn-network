@@ -9015,7 +9015,8 @@ button.dzn-header-action {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  padding: 1px;
   opacity: 0.94;
   filter: saturate(0.9) contrast(1.04);
 }
@@ -9107,6 +9108,10 @@ button.dzn-header-action {
 .dzn-badge-tooltip {
   position: relative;
   display: inline-flex;
+}
+
+.dzn-badge-tooltip--labelled .dzn-badge-tooltip__content {
+  display: none;
 }
 
 .dzn-badge-tooltip__content {

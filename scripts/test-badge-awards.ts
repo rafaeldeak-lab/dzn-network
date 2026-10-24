@@ -24,7 +24,11 @@ const premium = buildServerBadgeCollection({
 assert.equal(premium.earnedBadges.some((badge) => badge.code === "premium_server"), true, "Premium plan should earn premium_server.");
 assert.equal(premium.earnedBadges.some((badge) => badge.code === "death_dealer"), true, "5,000 kills should unlock death_dealer.");
 assert.equal(premium.earnedBadges.some((badge) => badge.code === "long_shot_legend"), true, "1,000m longest kill should unlock long_shot_legend.");
-assert.equal(premium.earnedBadges.some((badge) => badge.staticIconUrl?.endsWith(".svg")), true, "Earned badges should use real SVG assets.");
+assert.equal(
+  premium.earnedBadges.every((badge) => badge.staticIconUrl?.startsWith("/rewards/icons/compact/") && badge.staticIconUrl.endsWith(".webp")),
+  true,
+  "Earned badges should use compact WebP artwork.",
+);
 assert.equal(premium.showcaseBadges.length <= 6, true, "Server card showcase should be capped.");
 
 const legacyNetwork = buildServerBadgeCollection({ planKey: "network", active: true });
