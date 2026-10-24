@@ -353,6 +353,7 @@ scene.fog = new THREE.Fog(0x1a2420, 60, 130);
 let zoom = 28;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
+let focusedPatrolRole = null;
 function updateCamera() {
   const aspect = window.innerWidth / window.innerHeight;
   camera.left = -zoom * aspect / 2;
@@ -1366,6 +1367,18 @@ buildOutpost();
 // ---------- UI: identity, shared projects, progression and Forge ----------
 const $ = id => document.getElementById(id);
 const panel = $('panel');
+const patrolFocusExit = document.createElement('button');
+patrolFocusExit.type = 'button';
+patrolFocusExit.hidden = true;
+patrolFocusExit.textContent = '← Back to base';
+patrolFocusExit.style.cssText = 'position:fixed;z-index:9;left:50%;bottom:18px;transform:translateX(-50%);box-shadow:0 8px 30px #000a';
+document.body.append(patrolFocusExit);
+function stopPatrolFocus(returnToBase = false) {
+  focusedPatrolRole = null;
+  patrolFocusExit.hidden = true;
+  if (returnToBase) { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); }
+}
+patrolFocusExit.onclick = () => stopPatrolFocus(true);
 let selectedKey = null;
 let raid = null;
 let warBattle = null;
@@ -1472,6 +1485,7 @@ function updateHud() {
     patrol.mesh.visible = unlocked && deployed >= Math.min(away, 3);
     if (unlocked) deployed++;
   });
+  if (focusedPatrolRole && !patrols.some(patrol => patrol.role === focusedPatrolRole && patrol.mesh.visible)) stopPatrolFocus(true);
   for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
   syncOperativePatrol();
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
@@ -1693,7 +1707,7 @@ function showSquadPanel() {
     const tier = profile.tier;
     const sourceName = GAME_CONFIG.buildings[definition.source].name;
     const unlock = profile.unlocked ? `DEPLOYED · L${tier}` : `LOCKED · Hall L${definition.unlockHall} + ${escapeHTML(sourceName)} L${definition.unlockSource}`;
-    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p><img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></article>`;
+    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p>${profile.unlocked ? `<button type="button" data-watch-patrol="${role}">Watch 3D patrol</button>` : ""}<img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><details class="technical-details"><summary>See all five kit levels</summary><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></details></article>`;
   }).join('');
   const away = currentAwaySquads().length;
   const defenderCards = defenderCardsHTML();
@@ -1713,6 +1727,17 @@ function showSquadPanel() {
       choice.classList.toggle('selected', selected);
       choice.setAttribute('aria-pressed', String(selected));
     });
+  }));
+  panel.querySelectorAll('[data-watch-patrol]').forEach(button => button.addEventListener('click', () => {
+    const patrol = patrols.find(item => item.role === button.dataset.watchPatrol && item.mesh.visible);
+    if (!patrol || fallback2D || raid || warBattle) { toast('3D patrol is unavailable right now.'); return; }
+    focusedPatrolRole = patrol.role;
+    patrolFocusExit.hidden = false;
+    zoom = 8;
+    camTarget.copy(patrol.mesh.position);
+    updateCamera();
+    closePanel();
+    toast(`Watching ${SQUAD_ROLES[patrol.role].name} in 3D · drag to explore`);
   }));
   panel.querySelectorAll('[data-defender-preview]').forEach(button => button.addEventListener('click', () => {
     const level = Number(button.dataset.level);
@@ -2764,6 +2789,7 @@ renderer.domElement.addEventListener('pointermove', e => {
     pinchStart = dist;
   } else {
     dragDistance += Math.abs(dx) + Math.abs(dy);
+    if (focusedPatrolRole && dragDistance > 6) stopPatrolFocus();
     const scale = zoom / window.innerHeight;
     const right = new THREE.Vector3(1, 0, -1).normalize();
     const forward = new THREE.Vector3(-1, 0, -1).normalize();
@@ -2792,6 +2818,7 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 renderer.domElement.addEventListener('pointercancel', e => pointers.delete(e.pointerId));
 renderer.domElement.addEventListener('wheel', e => {
+  if (focusedPatrolRole) stopPatrolFocus();
   zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 12, 60);
   updateCamera();
 }, { passive: true });
@@ -2860,6 +2887,11 @@ renderer.setAnimationLoop(time => {
     p.mesh.rotation.y = motion.yaw;
     animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null, dt);
   });
+  if (focusedPatrolRole) {
+    const patrol = patrols.find(item => item.role === focusedPatrolRole && item.mesh.visible);
+    if (!patrol || raid || warBattle) stopPatrolFocus(true);
+    else { camTarget.lerp(patrol.mesh.position, Math.min(1, dt * 7)); updateCamera(); }
+  }
   for (const patrol of defenderPatrols.values()) {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     patrol.mesh.position.set(motion.x, 0, motion.z);
