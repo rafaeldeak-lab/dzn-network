@@ -23,11 +23,24 @@ import {
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
 
+const upgradedArtwork = {
+  bronze: "/rewards/icons/reputation-bronze-3d.webp",
+  gold: "/rewards/icons/reputation-gold-3d.webp",
+  trusted_server: "/rewards/icons/trusted-server-3d.webp",
+  death_dealer: "/rewards/icons/combat-death-dealer-3d.webp",
+  headhunter: "/rewards/icons/combat-headhunter-3d.webp",
+  king_of_dzn: "/rewards/icons/sovereign-crown-3d.webp",
+  founder: "/rewards/icons/founder-legacy-3d.webp",
+  spring_champion: "/rewards/icons/seasonal-champion-3d.webp",
+  platinum: "/rewards/icons/reputation-platinum-3d.webp",
+  diamond: "/rewards/icons/reputation-shield-3d.webp",
+} as const;
+
 const barrel = getBadgeVisualConfig("premium_server", "premium");
 assert.equal(barrel.rarity, "premium");
 assert.equal(barrel.animationType, "premium");
-assert.equal(barrel.staticIconUrl?.startsWith("/badges/"), true);
-assert.equal(barrel.staticIconUrl?.endsWith(".svg"), true);
+assert.equal(barrel.staticIconUrl, "/rewards/icons/server-prestige-3d.webp");
+assert.equal(barrel.staticIconUrl?.endsWith(".webp"), true);
 assert.equal(existsSync(`public${barrel.staticIconUrl}`), true);
 assert.equal(existsSync(`public${barrel.animatedIconUrl}`), true);
 
@@ -36,24 +49,16 @@ assert.equal(deathDealer.rarity, "rare");
 assert.equal(deathDealer.theme, "combat");
 assert.equal(deathDealer.glowColour, "#ef4444");
 
+const importedCombatBadge = getBadgeVisualConfig("first_blood_1", "combat", "First Blood");
+assert.equal(importedCombatBadge.staticIconUrl, "/rewards/icons/combat-headhunter-3d.webp");
+assert.equal(importedCombatBadge.animatedIconUrl, "/rewards/icons/combat-headhunter-3d.webp");
+
 const reputation = getReputationVisual("Diamond");
 assert.equal(reputation.tier, "Diamond");
 assert.equal(reputation.rarity, "legendary");
 assert.equal(reputation.animationType, "legendary");
 
-for (const [code, artworkPath] of Object.entries({
-  platinum: "/rewards/icons/reputation-platinum-3d.webp",
-  diamond: "/rewards/icons/reputation-shield-3d.webp",
-  verified_server: "/rewards/icons/verified-server-2d.webp",
-  rising_server: "/rewards/icons/rising-server-2d.webp",
-  active_server: "/rewards/icons/active-server-2d.webp",
-  death_dealer: "/rewards/icons/warlord-medal-3d.webp",
-  long_shot_legend: "/rewards/icons/long-shot-legend-3d.webp",
-  warlord: "/rewards/icons/warlord-medal-3d.webp",
-  veteran: "/rewards/icons/veteran-3d.webp",
-  king_of_dzn: "/rewards/icons/season-crown-3d.webp",
-  winter_champion: "/rewards/icons/season-crown-3d.webp",
-})) {
+for (const [code, artworkPath] of Object.entries(upgradedArtwork)) {
   const visual = getBadgeVisualConfig(code);
   assert.equal(visual.staticIconUrl, artworkPath, `${code} should use its upgraded reward artwork.`);
   assert.equal(visual.animatedIconUrl, artworkPath, `${code} should retain its CSS animation treatment over the upgraded artwork.`);
@@ -70,10 +75,12 @@ assert.equal(seasonal.key, "summer_champion");
 assert.equal(seasonal.rarity, "seasonal");
 assert.equal(seasonal.animationType, "seasonal");
 
-for (const code of ["bronze", "king_of_pvp", "summer_champion", "premium_server", "founder", "new_year_champion"]) {
+for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);
-  assert.equal(visual.staticIconUrl?.endsWith(".svg"), true, `${code} should use SVG static asset.`);
-  assert.equal(visual.animatedIconUrl?.endsWith(".svg"), true, `${code} should use SVG animated asset.`);
+  assert.equal(visual.staticIconUrl?.startsWith("/rewards/icons/"), true, `${code} should use the shared reward artwork library.`);
+  assert.equal(visual.staticIconUrl?.endsWith(".webp"), true, `${code} should use WebP static artwork.`);
+  assert.equal(visual.animatedIconUrl?.startsWith("/rewards/icons/"), true, `${code} should use the shared reward artwork library for its animation.`);
+  assert.equal(visual.animatedIconUrl?.endsWith(".webp"), true, `${code} should use WebP animated artwork.`);
   assert.equal(existsSync(`public${visual.staticIconUrl}`), true, `${code} static asset should exist.`);
   assert.equal(existsSync(`public${visual.animatedIconUrl}`), true, `${code} animated asset should exist.`);
 }
@@ -193,21 +200,13 @@ for (const code of ["death_dealer", "trusted_server", "king_of_dzn", "dzn_legend
   assert.equal(existsSync(`public${badgeManifest[code].animatedIconUrl}`), true);
   assert.equal(Boolean(badgeManifest[code].imageAlt), true);
 }
-for (const [code, artworkPath] of Object.entries({
-  platinum: "/rewards/icons/reputation-platinum-3d.webp",
-  diamond: "/rewards/icons/reputation-shield-3d.webp",
-  verified_server: "/rewards/icons/verified-server-2d.webp",
-  rising_server: "/rewards/icons/rising-server-2d.webp",
-  active_server: "/rewards/icons/active-server-2d.webp",
-  death_dealer: "/rewards/icons/warlord-medal-3d.webp",
-  long_shot_legend: "/rewards/icons/long-shot-legend-3d.webp",
-  warlord: "/rewards/icons/warlord-medal-3d.webp",
-  veteran: "/rewards/icons/veteran-3d.webp",
-  king_of_dzn: "/rewards/icons/season-crown-3d.webp",
-  winter_champion: "/rewards/icons/season-crown-3d.webp",
-})) {
+for (const [code, artworkPath] of Object.entries(upgradedArtwork)) {
   assert.equal(badgeManifest[code]?.staticIconUrl, artworkPath, `${code} manifest should name the upgraded reward artwork.`);
   assert.equal(badgeManifest[code]?.animatedIconUrl, artworkPath, `${code} manifest should name the upgraded animation artwork.`);
+}
+for (const [code, entry] of Object.entries(badgeManifest)) {
+  assert.equal(entry.staticIconUrl.startsWith("/rewards/icons/"), true, `${code} manifest must not keep a legacy public badge path.`);
+  assert.equal(entry.animatedIconUrl.startsWith("/rewards/icons/"), true, `${code} manifest animation must not keep a legacy public badge path.`);
 }
 for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);
@@ -224,6 +223,7 @@ assert.equal(componentSource.includes("alt={badge.imageAlt}"), true);
 assert.equal(componentSource.includes("{!shouldShowImage ? ("), true, "Fallback glyphs should only render when badge artwork is unavailable.");
 assert.equal(componentSource.includes("tabIndex={0}"), true);
 assert.equal(componentSource.includes("dzn-profile-frame__image"), true);
+assert.equal(componentSource.includes("suppressOverlay={showLabel}"), true, "Labelled reward chips should not open redundant hover overlays.");
 
 const css = readFileSync("app/globals.css", "utf8");
 for (const animation of ["dznBadgeGlowPulse", "dznBadgeShimmer", "dznBadgeSparks", "dznBadgeElectric", "dznBadgeFireAura", "dznBadgeCrownShine", "dznBadgeSeasonalSparkle", "dznBadgeLegendaryAura", "dznBadgePremiumGlow"]) {
@@ -234,7 +234,9 @@ const badgeImageCss = css.match(/\.dzn-badge-icon__image\s*\{([\s\S]*?)\}/)?.[1]
 const badgeFallbackCss = css.match(/\.dzn-badge-icon__fallback\s*\{([\s\S]*?)\}/)?.[1] ?? "";
 assert.equal(badgeImageCss.includes("z-index: 2;"), true, "Loaded badge artwork should remain above the fallback layer.");
 assert.equal(badgeImageCss.includes("opacity: 0.94;"), true, "Loaded badge artwork should remain visually identifiable.");
+assert.equal(badgeImageCss.includes("object-fit: contain;"), true, "Reward artwork should not be cropped inside compact display slots.");
 assert.equal(badgeFallbackCss.includes("z-index: 1;"), true, "Fallback glyphs should stay behind loaded artwork.");
+assert.equal(css.includes(".dzn-badge-tooltip--labelled .dzn-badge-tooltip__content"), true, "Labelled reward chips should suppress redundant hover overlays.");
 
 const publicApiSource = readFileSync("functions/api/public/servers.ts", "utf8");
 for (const field of ["badges", "profileFrame", "themeBanner", "planVisualTreatment", "getServerVisualShowcase"]) {

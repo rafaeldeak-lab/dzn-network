@@ -23,7 +23,7 @@ type BadgeIconProps = {
 export function BadgeIcon({ badge, size = badge.displaySize ?? "md", showLabel = false, locked = badge.locked, className = "" }: BadgeIconProps) {
   const label = `${badge.name}. ${badge.rarity} ${badge.category} badge. ${badge.description}`;
   return (
-    <BadgeTooltip badge={badge}>
+    <BadgeTooltip badge={badge} suppressOverlay={showLabel}>
       <span
         className={`dzn-badge-chip dzn-badge-chip--${size} ${locked ? "dzn-badge-chip--locked" : ""} ${className}`}
         aria-label={label}
@@ -77,9 +77,9 @@ export function AnimatedBadge({ badge, locked = false, size = badge.displaySize 
   );
 }
 
-export function BadgeTooltip({ badge, children }: { badge: VisualBadge; children: ReactNode }) {
+export function BadgeTooltip({ badge, children, suppressOverlay = false }: { badge: VisualBadge; children: ReactNode; suppressOverlay?: boolean }) {
   return (
-    <span className="dzn-badge-tooltip">
+    <span className={`dzn-badge-tooltip ${suppressOverlay ? "dzn-badge-tooltip--labelled" : ""}`}>
       {children}
       <span className="dzn-badge-tooltip__content" role="tooltip">
         <span className="dzn-badge-tooltip__title">{badge.name}</span>

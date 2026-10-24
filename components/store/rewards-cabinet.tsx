@@ -4,16 +4,24 @@ import { BadgeIcon } from "@/components/badges/server-visuals";
 import { BADGE_RULE_BY_CODE, type BadgeRule } from "@/lib/badges/rules";
 import { toVisualBadge } from "@/lib/badges/visuals";
 
-const SERVER_REWARD_CODES = ["diamond", "verified_server", "death_dealer", "warlord", "king_of_dzn", "winter_champion"] as const;
-
-const ARTWORK_BY_CODE: Partial<Record<(typeof SERVER_REWARD_CODES)[number], string>> = {
-  diamond: "/rewards/cabinet/reputation-shield-3d.webp",
-  verified_server: "/rewards/cabinet/verified-server-2d.webp",
-  death_dealer: "/rewards/cabinet/warlord-medal-3d.webp",
-  warlord: "/rewards/cabinet/warlord-medal-3d.webp",
-  king_of_dzn: "/rewards/cabinet/season-crown-3d.webp",
-  winter_champion: "/rewards/cabinet/season-crown-3d.webp",
-};
+const SERVER_REWARD_CODES = [
+  "bronze",
+  "silver",
+  "gold",
+  "platinum",
+  "diamond",
+  "legendary",
+  "verified_server",
+  "active_server",
+  "death_dealer",
+  "long_shot_legend",
+  "warlord",
+  "trusted_server",
+  "veteran",
+  "legacy_server",
+  "king_of_dzn",
+  "winter_champion",
+] as const;
 
 const INDIVIDUAL_COLLECTION = [
   { title: "Profile identity", detail: "Account-bound profile themes and frames", icon: Palette },
@@ -49,7 +57,7 @@ export function RewardsCabinet() {
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {serverRewards.map((rule) => (
-              <RewardCard key={rule.badgeCode} rule={rule} artwork={ARTWORK_BY_CODE[rule.badgeCode as (typeof SERVER_REWARD_CODES)[number]]} />
+              <RewardCard key={rule.badgeCode} rule={rule} />
             ))}
           </div>
         </div>
@@ -99,7 +107,7 @@ export function RewardsCabinet() {
   );
 }
 
-function RewardCard({ rule, artwork }: { rule: BadgeRule; artwork?: string }) {
+function RewardCard({ rule }: { rule: BadgeRule }) {
   const badge = toVisualBadge({
     key: rule.badgeCode,
     name: rule.name,
@@ -114,9 +122,9 @@ function RewardCard({ rule, artwork }: { rule: BadgeRule; artwork?: string }) {
         <BadgeIcon badge={badge} size="lg" className="shrink-0" />
         <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{rewardStatus(rule)}</span>
       </div>
-      {artwork ? (
+      {badge.staticIconUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={artwork} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
+        <img src={badge.staticIconUrl} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
       ) : null}
       <div className="relative mt-8 max-w-[48%] sm:max-w-[68%]">
         <p className="text-xs font-black uppercase text-cyan-200">{rule.category}</p>

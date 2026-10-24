@@ -129,60 +129,60 @@ const CATEGORY_DEFAULTS: Record<string, Partial<BadgeVisualConfig>> = {
 };
 
 const BADGE_VISUALS: Record<string, Partial<BadgeVisualConfig> & { label?: string }> = {
-  bronze: visual("reputation", "bronze", "Bronze Reputation", "common", "#cd7f32", "glow", 10),
-  silver: visual("reputation", "silver", "Silver Reputation", "uncommon", "#cbd5e1", "glow", 20),
-  gold: visual("reputation", "gold", "Gold Reputation", "rare", "#facc15", "shimmer", 30),
+  bronze: artworkVisual("reputation", "bronze", "Bronze Reputation", "common", "#cd7f32", "glow", 10, "/rewards/icons/reputation-bronze-3d.webp"),
+  silver: artworkVisual("reputation", "silver", "Silver Reputation", "uncommon", "#cbd5e1", "glow", 20, "/rewards/icons/reputation-silver-3d.webp"),
+  gold: artworkVisual("reputation", "gold", "Gold Reputation", "rare", "#facc15", "shimmer", 30, "/rewards/icons/reputation-gold-3d.webp"),
   platinum: artworkVisual("reputation", "platinum", "Platinum Reputation", "epic", "#93c5fd", "electric", 40, "/rewards/icons/reputation-platinum-3d.webp"),
   diamond: artworkVisual("reputation", "diamond", "Diamond Reputation", "legendary", "#67e8f9", "legendary", 50, "/rewards/icons/reputation-shield-3d.webp"),
-  legendary: visual("reputation", "legendary", "Legendary Reputation", "mythic", "#c084fc", "legendary", 60),
-  dzn_legend: visual("reputation", "dzn-legend", "DZN Legend", "mythic", "#facc15", "legendary", 65),
+  legendary: artworkVisual("reputation", "legendary", "Legendary Reputation", "mythic", "#c084fc", "legendary", 60, "/rewards/icons/sovereign-crown-3d.webp"),
+  dzn_legend: artworkVisual("reputation", "dzn-legend", "DZN Legend", "mythic", "#facc15", "legendary", 65, "/rewards/icons/founder-legacy-3d.webp"),
 
-  premium_server: visual("premium", "premium-server", "Premium Server", "premium", "#facc15", "premium", 110),
+  premium_server: artworkVisual("premium", "premium-server", "Premium Server", "premium", "#facc15", "premium", 110, "/rewards/icons/server-prestige-3d.webp"),
   verified_server: artworkVisual("premium", "verified-server", "Verified Server", "rare", "#22d3ee", "glow", 102, "/rewards/icons/verified-server-2d.webp"),
-  featured_server: visual("premium", "featured-server", "Featured Server", "premium", "#f59e0b", "shimmer", 106),
-  trending_server: visual("premium", "trending-server", "Trending Server", "epic", "#fb7185", "pulse", 96),
-  top_pick: visual("premium", "top-pick", "Top Pick", "epic", "#a78bfa", "sparks", 97),
+  featured_server: artworkVisual("premium", "featured-server", "Featured Server", "premium", "#f59e0b", "shimmer", 106, "/rewards/icons/server-prestige-3d.webp"),
+  trending_server: artworkVisual("premium", "trending-server", "Trending Server", "epic", "#fb7185", "pulse", 96, "/rewards/icons/server-prestige-3d.webp"),
+  top_pick: artworkVisual("premium", "top-pick", "Top Pick", "epic", "#a78bfa", "sparks", 97, "/rewards/icons/server-prestige-3d.webp"),
   rising_server: artworkVisual("premium", "rising-server", "Rising Server", "rare", "#34d399", "pulse", 80, "/rewards/icons/rising-server-2d.webp"),
-  community_favourite: visual("premium", "community-favourite", "Community Favourite", "epic", "#f472b6", "sparks", 92),
+  community_favourite: artworkVisual("premium", "community-favourite", "Community Favourite", "epic", "#f472b6", "sparks", 92, "/rewards/icons/server-prestige-3d.webp"),
   active_server: artworkVisual("premium", "active-server", "Active Server", "uncommon", "#22c55e", "pulse", 78, "/rewards/icons/active-server-2d.webp"),
-  exclusive: visual("premium", "exclusive", "Exclusive", "legendary", "#a78bfa", "legendary", 118),
-  hardcore_mode: visual("premium", "hardcore-mode", "Hardcore Mode", "epic", "#ef4444", "flame", 88),
+  exclusive: artworkVisual("premium", "exclusive", "Exclusive", "legendary", "#a78bfa", "legendary", 118, "/rewards/icons/server-prestige-3d.webp"),
+  hardcore_mode: artworkVisual("premium", "hardcore-mode", "Hardcore Mode", "epic", "#ef4444", "flame", 88, "/rewards/icons/combat-headhunter-3d.webp"),
 
-  king_of_pvp: visual("crowns", "king-of-pvp", "King of PvP", "crown", "#f59e0b", "crown", 300),
-  king_of_survival: visual("crowns", "king-of-survival", "King of Survival", "crown", "#34d399", "crown", 300),
-  king_of_deathmatch: visual("crowns", "king-of-deathmatch", "King of Deathmatch", "crown", "#ef4444", "crown", 300),
-  king_of_pve: visual("crowns", "king-of-pve", "King of PvE", "crown", "#22d3ee", "crown", 300),
-  king_of_dzn: artworkVisual("crowns", "king-of-dzn", "King of DZN", "mythic", "#facc15", "legendary", 340, "/rewards/icons/season-crown-3d.webp"),
+  king_of_pvp: artworkVisual("crowns", "king-of-pvp", "King of PvP", "crown", "#f59e0b", "crown", 300, "/rewards/icons/sovereign-crown-3d.webp"),
+  king_of_survival: artworkVisual("crowns", "king-of-survival", "King of Survival", "crown", "#34d399", "crown", 300, "/rewards/icons/sovereign-crown-3d.webp"),
+  king_of_deathmatch: artworkVisual("crowns", "king-of-deathmatch", "King of Deathmatch", "crown", "#ef4444", "crown", 300, "/rewards/icons/sovereign-crown-3d.webp"),
+  king_of_pve: artworkVisual("crowns", "king-of-pve", "King of PvE", "crown", "#22d3ee", "crown", 300, "/rewards/icons/sovereign-crown-3d.webp"),
+  king_of_dzn: artworkVisual("crowns", "king-of-dzn", "King of DZN", "mythic", "#facc15", "legendary", 340, "/rewards/icons/sovereign-crown-3d.webp"),
 
-  death_dealer: artworkVisual("combat", "death-dealer", "Death Dealer", "rare", "#ef4444", "pulse", 70, "/rewards/icons/warlord-medal-3d.webp"),
-  headhunter: visual("combat", "headhunter", "Headhunter", "epic", "#fb7185", "sparks", 90),
+  death_dealer: artworkVisual("combat", "death-dealer", "Death Dealer", "rare", "#ef4444", "pulse", 70, "/rewards/icons/combat-death-dealer-3d.webp"),
+  headhunter: artworkVisual("combat", "headhunter", "Headhunter", "epic", "#fb7185", "sparks", 90, "/rewards/icons/combat-headhunter-3d.webp"),
   long_shot_legend: artworkVisual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100, "/rewards/icons/long-shot-legend-3d.webp"),
   marksman: artworkVisual("combat", "long-shot-legend", "Long Shot Legend", "legendary", "#f59e0b", "shimmer", 100, "/rewards/icons/long-shot-legend-3d.webp"),
   warlord: artworkVisual("combat", "warlord", "Warlord", "legendary", "#dc2626", "flame", 120, "/rewards/icons/warlord-medal-3d.webp"),
-  hot_streak: visual("combat", "hot-streak", "Hot Streak", "epic", "#f97316", "flame", 85),
+  hot_streak: artworkVisual("combat", "hot-streak", "Hot Streak", "epic", "#f97316", "flame", 85, "/rewards/icons/combat-headhunter-3d.webp"),
 
-  trusted_server: visual("community", "trusted-server", "Trusted Server", "rare", "#22d3ee", "glow", 74),
-  trusted_node: visual("community", "trusted-server", "Trusted Server", "rare", "#22d3ee", "glow", 74),
-  team_player: visual("community", "team-player", "Team Player", "uncommon", "#38bdf8", "pulse", 62),
-  helping_hand: visual("community", "helping-hand", "Helping Hand", "uncommon", "#34d399", "glow", 64),
-  loot_master: visual("community", "loot-master", "Loot Master", "rare", "#a78bfa", "shimmer", 70),
-  event_champion: visual("community", "event-champion", "Event Champion", "legendary", "#facc15", "legendary", 130),
+  trusted_server: artworkVisual("community", "trusted-server", "Trusted Server", "rare", "#22d3ee", "glow", 74, "/rewards/icons/trusted-server-3d.webp"),
+  trusted_node: artworkVisual("community", "trusted-server", "Trusted Server", "rare", "#22d3ee", "glow", 74, "/rewards/icons/trusted-server-3d.webp"),
+  team_player: artworkVisual("community", "team-player", "Team Player", "uncommon", "#38bdf8", "pulse", 62, "/rewards/icons/trusted-server-3d.webp"),
+  helping_hand: artworkVisual("community", "helping-hand", "Helping Hand", "uncommon", "#34d399", "glow", 64, "/rewards/icons/trusted-server-3d.webp"),
+  loot_master: artworkVisual("community", "loot-master", "Loot Master", "rare", "#a78bfa", "shimmer", 70, "/rewards/icons/community-champion-3d.webp"),
+  event_champion: artworkVisual("community", "event-champion", "Event Champion", "legendary", "#facc15", "legendary", 130, "/rewards/icons/community-champion-3d.webp"),
 
-  founder: visual("founder", "founder", "Founder", "limited", "#f59e0b", "legendary", 250),
-  early_adopter: visual("founder", "early-adopter", "Early Adopter", "limited", "#22d3ee", "shimmer", 230),
-  beta_veteran: visual("founder", "beta-veteran", "Beta Veteran", "limited", "#a78bfa", "electric", 240),
-  legacy_server: visual("founder", "legacy-server", "Legacy Server", "limited", "#facc15", "legendary", 245),
-  pioneer: visual("founder", "pioneer", "Pioneer", "limited", "#34d399", "glow", 232),
-  veteran: artworkVisual("founder", "veteran", "Veteran", "limited", "#facc15", "shimmer", 238, "/rewards/icons/veteran-3d.webp"),
+  founder: artworkVisual("founder", "founder", "Founder", "limited", "#f59e0b", "legendary", 250, "/rewards/icons/founder-legacy-3d.webp"),
+  early_adopter: artworkVisual("founder", "early-adopter", "Early Adopter", "limited", "#22d3ee", "shimmer", 230, "/rewards/icons/founder-legacy-3d.webp"),
+  beta_veteran: artworkVisual("founder", "beta-veteran", "Beta Veteran", "limited", "#a78bfa", "electric", 240, "/rewards/icons/founder-legacy-3d.webp"),
+  legacy_server: artworkVisual("founder", "legacy-server", "Legacy Server", "limited", "#facc15", "legendary", 245, "/rewards/icons/founder-legacy-3d.webp"),
+  pioneer: artworkVisual("founder", "pioneer", "Pioneer", "limited", "#34d399", "glow", 232, "/rewards/icons/founder-legacy-3d.webp"),
+  veteran: artworkVisual("founder", "veteran", "Veteran", "limited", "#facc15", "shimmer", 238, "/rewards/icons/founder-legacy-3d.webp"),
 
-  spring_champion: visual("seasonal", "spring-champion", "Spring Champion", "seasonal", "#86efac", "seasonal", 200),
-  summer_champion: visual("seasonal", "summer-champion", "Summer Champion", "seasonal", "#facc15", "seasonal", 205),
-  autumn_champion: visual("seasonal", "autumn-champion", "Autumn Champion", "seasonal", "#fb923c", "seasonal", 210),
-  winter_champion: artworkVisual("seasonal", "winter-champion", "Winter Champion", "seasonal", "#93c5fd", "seasonal", 215, "/rewards/icons/season-crown-3d.webp"),
-  halloween_champion: visual("seasonal", "halloween-champion", "Halloween Champion", "seasonal", "#f97316", "flame", 218),
-  christmas_champion: visual("seasonal", "christmas-champion", "Christmas Champion", "seasonal", "#ef4444", "seasonal", 219),
-  easter_champion: visual("seasonal", "easter-champion", "Easter Champion", "seasonal", "#f9a8d4", "seasonal", 220),
-  new_year_champion: visual("seasonal", "new-year-champion", "New Year Champion", "seasonal", "#facc15", "sparks", 221),
+  spring_champion: artworkVisual("seasonal", "spring-champion", "Spring Champion", "seasonal", "#86efac", "seasonal", 200, "/rewards/icons/seasonal-champion-3d.webp"),
+  summer_champion: artworkVisual("seasonal", "summer-champion", "Summer Champion", "seasonal", "#facc15", "seasonal", 205, "/rewards/icons/seasonal-champion-3d.webp"),
+  autumn_champion: artworkVisual("seasonal", "autumn-champion", "Autumn Champion", "seasonal", "#fb923c", "seasonal", 210, "/rewards/icons/seasonal-champion-3d.webp"),
+  winter_champion: artworkVisual("seasonal", "winter-champion", "Winter Champion", "seasonal", "#93c5fd", "seasonal", 215, "/rewards/icons/seasonal-champion-3d.webp"),
+  halloween_champion: artworkVisual("seasonal", "halloween-champion", "Halloween Champion", "seasonal", "#f97316", "flame", 218, "/rewards/icons/seasonal-champion-3d.webp"),
+  christmas_champion: artworkVisual("seasonal", "christmas-champion", "Christmas Champion", "seasonal", "#ef4444", "seasonal", 219, "/rewards/icons/seasonal-champion-3d.webp"),
+  easter_champion: artworkVisual("seasonal", "easter-champion", "Easter Champion", "seasonal", "#f9a8d4", "seasonal", 220, "/rewards/icons/seasonal-champion-3d.webp"),
+  new_year_champion: artworkVisual("seasonal", "new-year-champion", "New Year Champion", "seasonal", "#facc15", "sparks", 221, "/rewards/icons/seasonal-champion-3d.webp"),
 };
 
 const FRAME_VISUALS: Record<string, ProfileFrameVisual> = {
@@ -426,8 +426,8 @@ export function getAvailableThemeBannerVisuals() {
 function visual(folder: string, slug: string, label: string, rarity: BadgeRarity, glowColour: string, animationType: BadgeAnimationType, sortOrder: number): Partial<BadgeVisualConfig> & { label: string } {
   return {
     label,
-    staticIconUrl: `/badges/${folder}/${slug}.svg`,
-    animatedIconUrl: `/badges/${folder}/${slug}-animated.svg`,
+    staticIconUrl: badgeAssetPath(folder === "crowns" ? "crown" : folder, slug, false),
+    animatedIconUrl: badgeAssetPath(folder === "crowns" ? "crown" : folder, slug, true),
     imageAlt: `${label} badge`,
     rarity,
     theme: folder === "crowns" ? "crown" : folder,
@@ -480,9 +480,25 @@ function theme(key: string, label: string, description: string, palette: string[
 }
 
 function badgeAssetPath(category: string, key: string, animated: boolean) {
-  const folder = category === "crown" ? "crowns" : category;
-  const slug = key.replace(/_/g, "-");
-  return `/badges/${folder}/${slug}${animated ? "-animated" : ""}.svg`;
+  void key;
+  void animated;
+
+  // Unknown, imported, and future reward codes still inherit the current public art direction.
+  // This keeps a new code from silently falling back to the retired SVG badge set.
+  const artworkByCategory: Record<string, string> = {
+    reputation: "/rewards/icons/reputation-bronze-3d.webp",
+    premium: "/rewards/icons/server-prestige-3d.webp",
+    combat: "/rewards/icons/combat-headhunter-3d.webp",
+    founder: "/rewards/icons/founder-legacy-3d.webp",
+    seasonal: "/rewards/icons/seasonal-champion-3d.webp",
+    crown: "/rewards/icons/sovereign-crown-3d.webp",
+    legendary: "/rewards/icons/sovereign-crown-3d.webp",
+    community: "/rewards/icons/community-champion-3d.webp",
+    activity: "/rewards/icons/community-champion-3d.webp",
+    growth: "/rewards/icons/community-champion-3d.webp",
+  };
+
+  return artworkByCategory[category] ?? artworkByCategory.community;
 }
 
 function normalizeBadgeKey(value: string) {
