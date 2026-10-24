@@ -220,13 +220,26 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 
 function RailCard({ item }: { item: RailItem }) {
   const displayName = formatPublicServerName(item.name);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const trackedServerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    trackRailImpression(item.id);
+    const card = cardRef.current;
+    if (!card || trackedServerIdRef.current === item.id || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0)) return;
+      trackedServerIdRef.current = item.id;
+      observer.disconnect();
+      trackRailImpression(item.id);
+    }, { threshold: 0.15 });
+    observer.observe(card);
+
+    return () => observer.disconnect();
   }, [item.id]);
 
   const content = (
-    <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
+    <div ref={cardRef} className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
       <div className="dzn-live-server-card__icon">
         {item.logoUrl ? <Image src={item.logoUrl} alt="" width={48} height={48} unoptimized /> : <RadioTower className="h-5 w-5" aria-hidden="true" />}
       </div>

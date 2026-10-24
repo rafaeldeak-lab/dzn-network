@@ -224,6 +224,7 @@ function numberOrZero(value: unknown) {
 async function readRailViewCounts(env: Env, serverIds: string[]) {
   const uniqueServerIds = [...new Set(serverIds.filter(Boolean))];
   if (uniqueServerIds.length === 0) return new Map<string, number>();
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   try {
     const placeholders = uniqueServerIds.map(() => "?").join(", ");
@@ -231,9 +232,9 @@ async function readRailViewCounts(env: Env, serverIds: string[]) {
       `SELECT server_id, COUNT(*) AS view_count
          FROM promotion_impressions
         WHERE server_id IN (${placeholders})
-          AND occurred_at >= datetime('now', '-7 days')
+          AND occurred_at >= ?
         GROUP BY server_id`,
-    ).bind(...uniqueServerIds).all<RailViewRow>();
+    ).bind(...uniqueServerIds, cutoff).all<RailViewRow>();
     return new Map((result.results ?? []).map((row) => [row.server_id, numberOrZero(row.view_count)]));
   } catch {
     // Older read-only environments may not yet have promotion analytics. The rail remains available without the count.

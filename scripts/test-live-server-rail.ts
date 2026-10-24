@@ -43,6 +43,7 @@ assert.match(source, /clearTimeout\(requestTimeout\)/, "Completed rail requests 
 assert.equal(source.includes("formatPublicServerName(item.name)"), true, "The rail must defensively render a clean server name.");
 assert.equal(source.includes("viewsLast7Days"), true, "Live rail cards must render their recorded discovery views.");
 assert.equal(source.includes('source: "live_server_rail"'), true, "Live rail impressions must be recorded with their source.");
+assert.equal(source.includes("new IntersectionObserver"), true, "Rail impressions must wait until a card becomes visible.");
 assert.equal(formatPublicServerName("NUKETOWN DEATHMATCH- HTTPS://DAYZ-NETWORK.COM"), "NukeTown Deathmatch");
 assert.equal(formatPublicServerName("NukeTown | discord.gg/dzn-network"), "NukeTown");
 assert.equal(formatPublicServerName("DAYZ US 1PP HARDCORE RP"), "DayZ US 1PP HARDCORE RP");
@@ -75,6 +76,8 @@ const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf
 assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");
 assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate service records must use authoritative canonical evidence.");
 assert.match(railRouteSource, /promotion_impressions/, "The rail must read its existing aggregated view ledger.");
+assert.match(railRouteSource, /toISOString\(\)/, "The rail view cutoff must match the ISO timestamp format stored by promotion analytics.");
+assert.match(railRouteSource, /\.bind\(\.\.\.uniqueServerIds, cutoff\)/, "The seven-day cutoff must be bound to the ledger query.");
 assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
 
 const missingDbResponse = await invokeRail({});
