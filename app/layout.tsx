@@ -17,6 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://dayz-network.com"),
   title: "DZN Network | DayZ Server Competition Platform",
   description:
     "DZN Network connects DayZ servers, live ADM stats, server-vs-server leaderboards, factions, and community reputation in one premium competition hub.",
