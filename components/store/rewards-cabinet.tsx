@@ -2,7 +2,7 @@ import { Award, Check, Crown, LockKeyhole, Palette, Server, ShieldCheck, Sparkle
 
 import { BadgeIcon } from "@/components/badges/server-visuals";
 import { BADGE_RULE_BY_CODE, type BadgeRule } from "@/lib/badges/rules";
-import { toVisualBadge } from "@/lib/badges/visuals";
+import { getBadgeCabinetArtworkUrl, toVisualBadge } from "@/lib/badges/visuals";
 
 const SERVER_REWARD_CODES = [
   "bronze",
@@ -115,6 +115,7 @@ function RewardCard({ rule }: { rule: BadgeRule }) {
     description: rule.requirementDescription,
     permanent: rule.isPermanent,
   });
+  const cabinetArtwork = getBadgeCabinetArtworkUrl(rule.badgeCode, rule.category, rule.name);
 
   return (
     <article className="group relative min-h-[300px] overflow-hidden border border-white/10 bg-[#090e1c] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
@@ -122,9 +123,9 @@ function RewardCard({ rule }: { rule: BadgeRule }) {
         <BadgeIcon badge={badge} size="lg" className="shrink-0" />
         <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{rewardStatus(rule)}</span>
       </div>
-      {badge.staticIconUrl ? (
+      {cabinetArtwork ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={badge.staticIconUrl} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
+        <img src={cabinetArtwork} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
       ) : null}
       <div className="relative mt-8 max-w-[48%] sm:max-w-[68%]">
         <p className="text-xs font-black uppercase text-cyan-200">{rule.category}</p>

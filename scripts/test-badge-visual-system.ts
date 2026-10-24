@@ -24,22 +24,22 @@ import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
 
 const upgradedArtwork = {
-  bronze: "/rewards/icons/reputation-bronze-3d.webp",
-  gold: "/rewards/icons/reputation-gold-3d.webp",
-  trusted_server: "/rewards/icons/trusted-server-3d.webp",
-  death_dealer: "/rewards/icons/combat-death-dealer-3d.webp",
-  headhunter: "/rewards/icons/combat-headhunter-3d.webp",
-  king_of_dzn: "/rewards/icons/sovereign-crown-3d.webp",
-  founder: "/rewards/icons/founder-legacy-3d.webp",
-  spring_champion: "/rewards/icons/seasonal-champion-3d.webp",
-  platinum: "/rewards/icons/reputation-platinum-3d.webp",
-  diamond: "/rewards/icons/reputation-shield-3d.webp",
+  bronze: "/rewards/icons/compact/reputation-bronze-3d.webp",
+  gold: "/rewards/icons/compact/reputation-gold-3d.webp",
+  trusted_server: "/rewards/icons/compact/trusted-server-3d.webp",
+  death_dealer: "/rewards/icons/compact/combat-death-dealer-3d.webp",
+  headhunter: "/rewards/icons/compact/combat-headhunter-3d.webp",
+  king_of_dzn: "/rewards/icons/compact/sovereign-crown-3d.webp",
+  founder: "/rewards/icons/compact/founder-legacy-3d.webp",
+  spring_champion: "/rewards/icons/compact/seasonal-champion-3d.webp",
+  platinum: "/rewards/icons/compact/reputation-platinum-3d.webp",
+  diamond: "/rewards/icons/compact/reputation-shield-3d.webp",
 } as const;
 
 const barrel = getBadgeVisualConfig("premium_server", "premium");
 assert.equal(barrel.rarity, "premium");
 assert.equal(barrel.animationType, "premium");
-assert.equal(barrel.staticIconUrl, "/rewards/icons/server-prestige-3d.webp");
+assert.equal(barrel.staticIconUrl, "/rewards/icons/compact/server-prestige-3d.webp");
 assert.equal(barrel.staticIconUrl?.endsWith(".webp"), true);
 assert.equal(existsSync(`public${barrel.staticIconUrl}`), true);
 assert.equal(existsSync(`public${barrel.animatedIconUrl}`), true);
@@ -50,8 +50,8 @@ assert.equal(deathDealer.theme, "combat");
 assert.equal(deathDealer.glowColour, "#ef4444");
 
 const importedCombatBadge = getBadgeVisualConfig("first_blood_1", "combat", "First Blood");
-assert.equal(importedCombatBadge.staticIconUrl, "/rewards/icons/combat-headhunter-3d.webp");
-assert.equal(importedCombatBadge.animatedIconUrl, "/rewards/icons/combat-headhunter-3d.webp");
+assert.equal(importedCombatBadge.staticIconUrl, "/rewards/icons/compact/combat-headhunter-3d.webp");
+assert.equal(importedCombatBadge.animatedIconUrl, "/rewards/icons/compact/combat-headhunter-3d.webp");
 
 const reputation = getReputationVisual("Diamond");
 assert.equal(reputation.tier, "Diamond");
@@ -77,9 +77,9 @@ assert.equal(seasonal.animationType, "seasonal");
 
 for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);
-  assert.equal(visual.staticIconUrl?.startsWith("/rewards/icons/"), true, `${code} should use the shared reward artwork library.`);
+  assert.equal(visual.staticIconUrl?.startsWith("/rewards/icons/compact/"), true, `${code} should use the shared reward artwork library.`);
   assert.equal(visual.staticIconUrl?.endsWith(".webp"), true, `${code} should use WebP static artwork.`);
-  assert.equal(visual.animatedIconUrl?.startsWith("/rewards/icons/"), true, `${code} should use the shared reward artwork library for its animation.`);
+  assert.equal(visual.animatedIconUrl?.startsWith("/rewards/icons/compact/"), true, `${code} should use the shared reward artwork library for its animation.`);
   assert.equal(visual.animatedIconUrl?.endsWith(".webp"), true, `${code} should use WebP animated artwork.`);
   assert.equal(existsSync(`public${visual.staticIconUrl}`), true, `${code} static asset should exist.`);
   assert.equal(existsSync(`public${visual.animatedIconUrl}`), true, `${code} animated asset should exist.`);
@@ -205,8 +205,8 @@ for (const [code, artworkPath] of Object.entries(upgradedArtwork)) {
   assert.equal(badgeManifest[code]?.animatedIconUrl, artworkPath, `${code} manifest should name the upgraded animation artwork.`);
 }
 for (const [code, entry] of Object.entries(badgeManifest)) {
-  assert.equal(entry.staticIconUrl.startsWith("/rewards/icons/"), true, `${code} manifest must not keep a legacy public badge path.`);
-  assert.equal(entry.animatedIconUrl.startsWith("/rewards/icons/"), true, `${code} manifest animation must not keep a legacy public badge path.`);
+  assert.equal(entry.staticIconUrl.startsWith("/rewards/icons/compact/"), true, `${code} manifest must not keep a legacy public badge path.`);
+  assert.equal(entry.animatedIconUrl.startsWith("/rewards/icons/compact/"), true, `${code} manifest animation must not keep a legacy public badge path.`);
 }
 for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);

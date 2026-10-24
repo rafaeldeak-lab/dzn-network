@@ -131,4 +131,7 @@ function assertBadgeVisualAsset(url: string | null | undefined, label: string) {
   assert.equal(source.subarray(0, 4).toString("ascii"), "RIFF", `${label} must be a valid WebP container.`);
   assert.equal(source.subarray(8, 12).toString("ascii"), "WEBP", `${label} must be a valid WebP image.`);
   assert.equal(source.length >= 2048, true, `${label} WebP image is unexpectedly small.`);
+  if (String(url).startsWith("/rewards/icons/")) {
+    assert.equal(source.length <= 32_768, true, `${label} must remain compact for its small public display slot.`);
+  }
 }
