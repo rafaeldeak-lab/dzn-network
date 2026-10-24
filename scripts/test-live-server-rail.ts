@@ -78,6 +78,8 @@ assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate se
 assert.match(railRouteSource, /promotion_impressions/, "The rail must read its existing aggregated view ledger.");
 assert.match(railRouteSource, /toISOString\(\)/, "The rail view cutoff must match the ISO timestamp format stored by promotion analytics.");
 assert.match(railRouteSource, /\.bind\(\.\.\.uniqueServerIds, cutoff\)/, "The seven-day cutoff must be bound to the ledger query.");
+assert.match(railRouteSource, /WHERE status = 'approved'/, "The rail must expose the same approved-review summary as public server listings.");
+assert.doesNotMatch(railRouteSource, /WHERE status = 'active'/, "The retired active-review status must not suppress public rail ratings.");
 assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
 
 const missingDbResponse = await invokeRail({});

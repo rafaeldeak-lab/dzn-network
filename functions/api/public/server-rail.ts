@@ -118,7 +118,7 @@ async function queryServerRail(env: Env) {
               ROUND(AVG(rating), 1) AS average_rating,
               COUNT(*) AS review_count
          FROM server_reviews
-        WHERE status = 'active'
+        WHERE status = 'approved'
         GROUP BY linked_server_id
      ) AS review_summary ON review_summary.linked_server_id = linked_servers.id
      WHERE lower(COALESCE(linked_servers.status, '')) = 'live'
