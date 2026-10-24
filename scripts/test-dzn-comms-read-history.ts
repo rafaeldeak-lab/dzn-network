@@ -5,7 +5,12 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
 import { CommsMessageTime } from "../components/comms/comms-message-time";
-import { DznCommsShell } from "../components/comms/dzn-comms-shell";
+import {
+  countDznCommsMessagesNewerThanBoundary,
+  DznCommsShell,
+  isDznCommsMessageRailAtBottom,
+  latestDznCommsMessageRailBoundary,
+} from "../components/comms/dzn-comms-shell";
 import { loadCommsHistory, parseCommsHistory } from "../components/comms/comms-history-client";
 
 import { dznCommsReadHistoryBoundary, readDznCommsReadHistoryFlags } from "../functions/_lib/dzn-comms-read-history";
@@ -126,9 +131,35 @@ assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer 
 assert.match(shell, /selfDeleteUiEnabled = historyReady && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require the verified server archive safeguard.");
 assert.match(shell, /const canDelete = deleteEnabled && message\.can_delete/, "Message rows must not expose or invoke self-delete outside the server-confirmed capability state.");
 assert.match(shell, /role="log"[\s\S]*max-h-\[50svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
+assert.match(shell, /onScroll=\{handleMessageLogScroll\}/, "The message rail must notice when a reader leaves or returns to the latest message.");
+assert.match(shell, /scrollTo\(\{ top: currentLog\.scrollHeight, behavior: "auto" \}\)/, "A newly opened channel or an active reader must be placed on the most recent message.");
+assert.match(shell, /unseenMessageCount > 0[\s\S]*Jump to the latest message/, "Readers who scroll away from the newest messages must receive an explicit catch-up control.");
+assert.match(shell, /scrollMessageRailToLatest\(\);[\s\S]*loadCommsHistory/, "Sending a message must return the sender to the latest message before the history refresh completes.");
 assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
 assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
+
+assert.equal(isDznCommsMessageRailAtBottom({ scrollHeight: 1_000, scrollTop: 680, clientHeight: 288 }), true, "The message rail should treat a reader near the end as following the latest messages.");
+assert.equal(isDznCommsMessageRailAtBottom({ scrollHeight: 1_000, scrollTop: 640, clientHeight: 288 }), false, "The message rail should not interrupt a reader who has intentionally scrolled away from the latest messages.");
+const priorMessageBoundary = latestDznCommsMessageRailBoundary([
+  { id: "a", created_at: "2026-10-24T10:00:00.000Z" },
+  { id: "b", created_at: "2026-10-24T10:01:00.000Z" },
+]);
+assert.deepEqual(priorMessageBoundary, { createdAt: "2026-10-24T10:01:00.000Z", messageId: "b" }, "The message rail must retain its newest chronological boundary.");
+assert.equal(countDznCommsMessagesNewerThanBoundary(priorMessageBoundary, [
+  { id: "older-backfill", created_at: "2026-10-24T09:59:00.000Z" },
+  { id: "a", created_at: "2026-10-24T10:00:00.000Z" },
+  { id: "b", created_at: "2026-10-24T10:01:00.000Z" },
+]), 0, "A deleted row's older backfill must not create a false unread indicator.");
+assert.equal(countDznCommsMessagesNewerThanBoundary(priorMessageBoundary, [
+  { id: "a", created_at: "2026-10-24T10:00:00.000Z" },
+  { id: "b", created_at: "2026-10-24T10:01:00.000Z" },
+  { id: "c", created_at: "2026-10-24T10:02:00.000Z" },
+]), 1, "Only messages after the prior newest boundary should increase the catch-up count.");
+assert.equal(countDznCommsMessagesNewerThanBoundary(
+  { createdAt: "2026-10-24T10:01:00.000Z", messageId: "b" },
+  [{ id: "c", created_at: "2026-10-24T10:01:00.000Z" }],
+), 1, "Equal-time messages must use the same message-ID tie break as the server history order.");
 
 assert.equal(readDznCommsReadHistoryFlags({} as Env).enabled, false, "Read-history route must default disabled.");
 assert.equal(

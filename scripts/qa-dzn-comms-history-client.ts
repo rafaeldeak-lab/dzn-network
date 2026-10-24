@@ -44,6 +44,7 @@ try {
     { name: "unauthorized", width: 390, kind: "401" }, { name: "forbidden", width: 390, kind: "403" },
     { name: "offline", width: 390, kind: "offline" }, { name: "timeout", width: 390, kind: "timeout" },
     { name: "full-unicode-page", width: 390, kind: "unicode" }, { name: "assist-anchor", width: 390, kind: "assist-anchor" },
+    { name: "follow-latest", width: 900, kind: "follow-latest" },
   ]) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), errors: string[] = [], prohibited: string[] = [], sockets: string[] = [];
@@ -60,6 +61,23 @@ try {
       if (["401", "403"].includes(scenario.kind)) return route.fulfill({ status: Number(scenario.kind), contentType: "application/json", body: '{"private_error":"must not render"}' });
       const fixture = commsHistoryFixture();
       if (scenario.kind === "unicode") fixture.messages = Array.from({ length: 30 }, (_, index) => ({ ...fixture.messages[0], id: `unicode-${index}`, body: "\u4e2d".repeat(2_000) }));
+      if (scenario.kind === "follow-latest") {
+        fixture.messages = Array.from({ length: 30 }, (_, index) => ({
+          ...fixture.messages[0],
+          id: `follow-${index}`,
+          body: `History message ${index + 1}. Keep this entry long enough to occupy a reliable message row in the DZN Comms rail.`,
+          created_at: `2026-09-13T00:${String(index).padStart(2, "0")}:00.000Z`,
+        }));
+        fixture.feature_flags.sending_enabled = true;
+        fixture.feature_flags.report_actions_enabled = true;
+        fixture.feature_flags.moderation_mutations_enabled = true;
+        if (reads >= 3) fixture.messages = [...fixture.messages.slice(1), {
+          ...fixture.messages[0],
+          id: "follow-new-message",
+          body: "A newer message arrived while the reader was viewing earlier history.",
+          created_at: "2026-09-13T01:00:00.000Z",
+        }];
+      }
       if (scenario.kind === "empty") fixture.messages = [];
       if (scenario.kind === "private") { fixture.channel.slug = "private-group"; fixture.messages[0].body = "PRIVATE-LEAK-SENTINEL"; }
       if (scenario.kind === "hidden") Object.assign(fixture.messages[0], { visibility_state: "hidden", author_display_name: "PRIVATE-AUTHOR", body: "PRIVATE-LEAK-SENTINEL" });
@@ -69,8 +87,11 @@ try {
       return route.fulfill({ status: 200, contentType: "application/json", body });
     });
     await page.goto(`${base}${scenario.kind === "assist-anchor" ? "/community#dzn-assist" : "/community"}`);
-    const success = ["ready", "empty", "hidden", "long", "unicode", "assist-anchor"].includes(scenario.kind);
-    await page.getByText(success ? "Message history is available. Sending is not enabled yet."
+    const success = ["ready", "empty", "hidden", "long", "unicode", "assist-anchor", "follow-latest"].includes(scenario.kind);
+    const expectedHistoryMessage = scenario.kind === "follow-latest"
+      ? "Global Chat is live. English only. Keep it respectful and report abuse."
+      : "Message history is available. Sending is not enabled yet.";
+    await page.getByText(success ? expectedHistoryMessage
       : "Message history is temporarily unavailable. No old or fabricated messages are shown.", { exact: true }).waitFor({ timeout: 9_000 });
     await page.evaluate(() => document.fonts.ready);
     const metrics = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
@@ -78,13 +99,40 @@ try {
       brokenImages: [...document.images].filter(image => !image.complete || !image.naturalWidth).map(image => image.src),
     }));
     assert.ok(metrics.scrollWidth <= metrics.width, `${scenario.name}: no horizontal page overflow`);
-    assert.equal(metrics.disabledComposer, true); assert.deepEqual(metrics.brokenImages, []);
-    assert.equal(reads, 1); assert.deepEqual(errors, []); assert.deepEqual(prohibited, []); assert.deepEqual(sockets, []);
+    assert.equal(metrics.disabledComposer, scenario.kind !== "follow-latest"); assert.deepEqual(metrics.brokenImages, []);
+    if (scenario.kind === "follow-latest") assert.ok(reads >= 1, "The live fixture must load at least one bounded history page.");
+    else assert.equal(reads, 1);
+    assert.deepEqual(errors, []); assert.deepEqual(prohibited, []); assert.deepEqual(sockets, []);
     assert.doesNotMatch(await page.locator("main").innerText(), /PRIVATE-LEAK-SENTINEL|PRIVATE-AUTHOR|must not render/);
     const globalChatLog = page.locator("#global-chat [role='log']");
     if (scenario.kind === "empty") assert.equal(await globalChatLog.locator("article").count(), 0);
     if (scenario.kind === "hidden") assert.equal(await page.getByText("Message hidden by DZN Safety.", { exact: true }).count(), 1);
     if (scenario.kind === "unicode") assert.equal(await globalChatLog.locator("article").count(), 30);
+    if (scenario.kind === "follow-latest") {
+      await page.waitForTimeout(150);
+      const initialPosition = await globalChatLog.evaluate((log) => ({
+        distance: log.scrollHeight - log.clientHeight - log.scrollTop,
+        scrollHeight: log.scrollHeight,
+        clientHeight: log.clientHeight,
+      }));
+      assert.ok(initialPosition.scrollHeight > initialPosition.clientHeight, "The fixture must create a scrollable message rail.");
+      assert.ok(initialPosition.distance <= 2, "Opening Global Chat must place the reader at the latest message.");
+
+      await globalChatLog.evaluate((log) => {
+        log.scrollTop = 0;
+        log.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+      await page.getByRole("button", { name: /Jump to the latest message\. 1 unread message\./ }).waitFor({ timeout: 7_500 });
+      const heldPosition = await globalChatLog.evaluate((log) => log.scrollTop);
+      assert.equal(heldPosition, 0, "A new message must not pull a reader away from earlier history.");
+
+      await page.getByRole("button", { name: /Jump to the latest message\. 1 unread message\./ }).click();
+      await page.waitForFunction(() => {
+        const log = document.querySelector<HTMLElement>("#global-chat [role='log']");
+        return Boolean(log && log.scrollHeight - log.clientHeight - log.scrollTop <= 2);
+      });
+      assert.equal(await page.getByRole("button", { name: /Jump to the latest message/ }).count(), 0, "Jumping to present must clear the unread catch-up control.");
+    }
     if (scenario.kind === "assist-anchor") {
       await page.getByRole("heading", { name: "Support conversation" }).waitFor();
       const assistInput = page.getByLabel("Ask DZN Assist a question");
