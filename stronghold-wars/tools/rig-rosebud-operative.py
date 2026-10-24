@@ -4,6 +4,7 @@ Usage: blender --background --python rig-rosebud-operative.py -- input.glb outpu
 """
 
 import bpy
+import bmesh
 import math
 import sys
 from mathutils import Matrix, Quaternion, Vector
@@ -24,6 +25,45 @@ points = [vertex.co for mesh in meshes for vertex in mesh.data.vertices]
 low_z = min(point.z for point in points)
 height = max(point.z for point in points) - low_z
 assert 0.7 < height < 2.5, f'Unexpected source height: {height}'
+
+# Some image-guided runs include a stone display slab. Its broad, flat
+# disconnected pieces must not follow the operative around the base.
+for mesh in meshes:
+    vertices = mesh.data.vertices
+    parent = list(range(len(vertices)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for edge in mesh.data.edges:
+        parent[find(edge.vertices[0])] = find(edge.vertices[1])
+    components = {}
+    for vertex in vertices:
+        components.setdefault(find(vertex.index), []).append(vertex.index)
+    remove = set()
+    for indices in components.values():
+        coords = [vertices[index].co for index in indices]
+        span_x = max(p.x for p in coords) - min(p.x for p in coords)
+        span_y = max(p.y for p in coords) - min(p.y for p in coords)
+        span_z = max(p.z for p in coords) - min(p.z for p in coords)
+        if (len(indices) > 250 and span_x > height * .8 and span_y > height * .8
+                and span_z < height * .1 and min(p.z for p in coords) < low_z + height * .14):
+            remove.update(indices)
+    if remove:
+        editable = bmesh.new()
+        editable.from_mesh(mesh.data)
+        editable.verts.ensure_lookup_table()
+        bmesh.ops.delete(editable, geom=[editable.verts[index] for index in remove], context='VERTS')
+        editable.to_mesh(mesh.data)
+        editable.free()
+        print('DZN_FLOOR_REMOVED', mesh.name, len(remove))
+
+points = [vertex.co for mesh in meshes for vertex in mesh.data.vertices]
+low_z = min(point.z for point in points)
+height = max(point.z for point in points) - low_z
 scale = 1.8 / height
 for mesh in meshes:
     for vertex in mesh.data.vertices:
