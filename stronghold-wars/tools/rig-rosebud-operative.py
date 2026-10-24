@@ -11,13 +11,14 @@ from mathutils import Matrix, Quaternion, Vector
 
 
 source_path, output_path = sys.argv[sys.argv.index('--') + 1:]
+two_handed = 'sentinel_l0' in source_path.lower()
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=source_path)
 meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
 assert meshes, 'Source GLB has no meshes'
 
 # The Rosebud characters are Y-forward with their arms along X. Preserve each
-# source material/texture, but put all three on the same 1.8 m skeleton.
+# source material/texture, but put the operatives on the same 1.8 m skeleton.
 for mesh in meshes:
     mesh.data.transform(mesh.matrix_world)
     mesh.matrix_world = Matrix.Identity(4)
@@ -148,8 +149,10 @@ for frame, step in [(1, 0), (7, .30), (13, 0), (19, -.30), (25, 0)]:
     for side, sign in [('L', 1), ('R', -1)]:
         swing(f'UpperLeg_{side}', step * sign, frame)
         swing(f'LowerLeg_{side}', max(0, -step * sign) * .40, frame)
-        swing(f'UpperArm_{side}', -step * sign * .52, frame)
-        swing(f'Forearm_{side}', .04, frame)
+        # Keep both gloves in a shared rifle grip. Opposing arm swings pull
+        # the image-guided weapon away from one hand during the walk cycle.
+        swing(f'UpperArm_{side}', step * .07 if two_handed else -step * sign * .52, frame)
+        swing(f'Forearm_{side}', 0 if two_handed else .04, frame)
     swing('Chest', math.sin((frame - 1) * math.pi / 12) * .014, frame)
 
 armature.animation_data.action = None
@@ -157,8 +160,8 @@ idle = bpy.data.actions.new('DZN_Operative_Idle')
 armature.animation_data.action = idle
 for frame, breath in [(1, 0), (25, .015), (49, 0)]:
     swing('Chest', breath, frame)
-    swing('UpperArm_L', -breath * .7, frame)
-    swing('UpperArm_R', breath * .7, frame)
+    swing('UpperArm_L', breath * .15 if two_handed else -breath * .7, frame)
+    swing('UpperArm_R', breath * .15 if two_handed else breath * .7, frame)
 
 armature.animation_data.action = walk
 bpy.context.scene.frame_start = 1

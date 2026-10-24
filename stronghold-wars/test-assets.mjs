@@ -285,12 +285,14 @@ for (let level = 1; level <= 5; level++) {
     || triangles !== medic.triangles || medic.animations.some(animation => !clips.get(animation))) throw new Error(`Lifeline Level ${level} lacks textured, skinned walk/idle geometry.`);
 }
 console.log('Five distinct image-guided DZN Lifeline levels verified with retained sources, skins, textures and walk/idle clips.');
-const sentinelManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v10/manifest.json'), 'utf8'));
+const sentinelManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v11/manifest.json'), 'utf8'));
+const sentinelBaseline = JSON.parse(readFileSync(join(root, 'assets/models/squads-v10/manifest.json'), 'utf8'));
 if (!sentinelManifest.complete || Object.keys(sentinelManifest.assets || {}).length !== 5) throw new Error('Sentinel set must contain five complete levels.');
 const sentinelHashes = new Set();
 for (let level = 1; level <= 5; level++) {
   const name = `sentinel_l0${level}`, entry = sentinelManifest.assets[name];
-  if (!entry || entry.file !== squadAsset('sentinel', level) || entry.reference !== squadPortrait('sentinel', level) || !entry.rosebudJob) throw new Error(`Sentinel Level ${level} model, portrait or provenance is missing.`);
+  if (!entry || entry.file !== squadAsset('sentinel', level) || entry.reference !== squadPortrait('sentinel', level) || !entry.rosebudJob
+    || entry.sourceSha256 !== sentinelBaseline.assets[name]?.sourceSha256 || entry.sha256 === sentinelBaseline.assets[name]?.sha256) throw new Error(`Sentinel Level ${level} steady-grip model, portrait or provenance is missing.`);
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.source));
   const reference = readFileSync(join(root, ...entry.reference.split('/')));
@@ -303,7 +305,7 @@ for (let level = 1; level <= 5; level++) {
     || !gltf.animations?.some(animation => animation.name === 'DZN_Operative_Idle' && animation.channels.length)) throw new Error(`Sentinel Level ${level} asset integrity failed.`);
   sentinelHashes.add(hash);
 }
-console.log('Five distinct image-guided DZN Sentinel levels verified with retained sources, skins, textures and walk/idle clips.');
+console.log('Five distinct DZN Sentinel steady-grip rigs verified against retained image-guided sources, textures and walk/idle clips.');
 const operativeManifest = JSON.parse(readFileSync(join(root, 'assets/models/operatives/manifest.json'), 'utf8'));
 const operativeHashes = new Set();
 if (Object.keys(operativeManifest.assets).length !== 3 || operativeAsset('unknown') !== null) throw new Error('Expected exactly three named DZN commander models.');

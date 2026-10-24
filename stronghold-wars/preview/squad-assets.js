@@ -68,7 +68,7 @@ export function squadAsset(key, tier) {
   if (key === 'recon') return `assets/models/squads-v7/recon_l0${boundedLevel(tier)}.glb`;
   if (key === 'engineer') return `assets/models/squads-v8/engineer_l0${boundedLevel(tier)}.glb`;
   if (key === 'medic') return `assets/models/squads-v9/medic_l0${boundedLevel(tier)}.glb`;
-  if (key === 'sentinel') return `assets/models/squads-v10/sentinel_l0${boundedLevel(tier)}.glb`;
+  if (key === 'sentinel') return `assets/models/squads-v11/sentinel_l0${boundedLevel(tier)}.glb`;
   return `assets/models/squads-v5/${key}_l0${boundedLevel(tier)}.glb`;
 }
 
