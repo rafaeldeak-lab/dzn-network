@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Check, LoaderCircle, PackageCheck, ReceiptText, RefreshCw, ShieldCheck, ShoppingBag } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { RewardsCabinet } from "@/components/store/rewards-cabinet";
+
 type CatalogProduct = {
   publication_id: string;
   product_key: string;
@@ -113,7 +115,7 @@ export function Storefront() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/media/server-wars-logo/dzn-server-wars-logo-poster-v2.jpg" alt="" className="absolute inset-0 h-full w-full object-cover opacity-20" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,5,13,0.98),rgba(3,5,13,0.82),rgba(3,5,13,0.45))]" />
-        <div className="relative mx-auto flex min-h-72 w-full max-w-7xl items-end px-4 py-10 sm:px-6 lg:px-8">
+        <div className="relative mx-auto grid min-h-[22rem] w-full max-w-7xl items-end gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
           <div className="max-w-3xl">
             <p className="text-xs font-black uppercase text-cyan-200">DZN Store</p>
             <h1 className="mt-2 text-4xl font-black uppercase sm:text-5xl">Support the network. Keep competition fair.</h1>
@@ -123,8 +125,16 @@ export function Storefront() {
               <span className="inline-flex items-center gap-2 border border-cyan-300/30 bg-cyan-300/10 px-3 py-2"><ReceiptText className="h-4 w-4" aria-hidden="true" />Account receipts</span>
             </div>
           </div>
+          <aside className="border border-cyan-300/25 bg-[#07101b]/90 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.28)]">
+            <p className="text-xs font-black uppercase text-violet-200">Earned, then displayed</p>
+            <h2 className="mt-2 text-xl font-black uppercase">Rewards have a home here</h2>
+            <p className="mt-3 text-sm font-semibold leading-6 text-zinc-300">Explore live server award paths, permanent achievements, seasonal trophies and the visual presentation Pro adds to earned progress.</p>
+            <a href="#rewards" className="mt-5 inline-flex min-h-11 items-center border border-cyan-300/40 px-4 text-sm font-black uppercase text-cyan-100 hover:border-cyan-200 hover:text-white">Explore rewards</a>
+          </aside>
         </div>
       </section>
+
+      <RewardsCabinet />
 
       <section aria-labelledby="store-products" className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-5">

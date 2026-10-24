@@ -41,6 +41,20 @@ assert.equal(reputation.tier, "Diamond");
 assert.equal(reputation.rarity, "legendary");
 assert.equal(reputation.animationType, "legendary");
 
+for (const [code, artworkPath] of Object.entries({
+  diamond: "/rewards/reputation-shield-3d.png",
+  verified_server: "/rewards/verified-server-2d.png",
+  death_dealer: "/rewards/warlord-medal-3d.png",
+  warlord: "/rewards/warlord-medal-3d.png",
+  king_of_dzn: "/rewards/season-crown-3d.png",
+  winter_champion: "/rewards/season-crown-3d.png",
+})) {
+  const visual = getBadgeVisualConfig(code);
+  assert.equal(visual.staticIconUrl, artworkPath, `${code} should use its upgraded reward artwork.`);
+  assert.equal(visual.animatedIconUrl, artworkPath, `${code} should retain its CSS animation treatment over the upgraded artwork.`);
+  assert.equal(existsSync(`public${artworkPath}`), true, `${code} upgraded reward artwork should exist.`);
+}
+
 const crown = getCrownVisual("king_of_pvp");
 assert.equal(crown.key, "king_of_pvp");
 assert.equal(crown.rarity, "crown");
@@ -173,6 +187,17 @@ for (const code of ["death_dealer", "trusted_server", "king_of_dzn", "dzn_legend
   assert.equal(existsSync(`public${badgeManifest[code].staticIconUrl}`), true);
   assert.equal(existsSync(`public${badgeManifest[code].animatedIconUrl}`), true);
   assert.equal(Boolean(badgeManifest[code].imageAlt), true);
+}
+for (const [code, artworkPath] of Object.entries({
+  diamond: "/rewards/reputation-shield-3d.png",
+  verified_server: "/rewards/verified-server-2d.png",
+  death_dealer: "/rewards/warlord-medal-3d.png",
+  warlord: "/rewards/warlord-medal-3d.png",
+  king_of_dzn: "/rewards/season-crown-3d.png",
+  winter_champion: "/rewards/season-crown-3d.png",
+})) {
+  assert.equal(badgeManifest[code]?.staticIconUrl, artworkPath, `${code} manifest should name the upgraded reward artwork.`);
+  assert.equal(badgeManifest[code]?.animatedIconUrl, artworkPath, `${code} manifest should name the upgraded animation artwork.`);
 }
 for (const code of getKnownBadgeVisualCodes()) {
   const visual = getBadgeVisualConfig(code);
