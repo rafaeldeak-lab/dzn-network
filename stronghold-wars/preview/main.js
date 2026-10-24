@@ -471,6 +471,86 @@ for (let i = 0; i < 48; i++) {
 // ---------- Buildings ----------
 const buildings = {};
 const animated = { radars: [], lights: [], chimneys: [], yards: [] };
+let warTurretRig = null;
+
+function addArcMuzzle(yaw, distance) {
+  const muzzle = new THREE.Group();
+  muzzle.position.set(0, 0.12, distance);
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xc7ff73, transparent: true, opacity: 0, depthWrite: false }));
+  flash.scale.setScalar(0.01);
+  muzzle.add(flash);
+  const light = new THREE.PointLight(0xb5ff65, 0, 5, 2);
+  muzzle.add(light);
+  yaw.add(muzzle);
+  return { muzzle, flash, light };
+}
+
+// Rosebud's Arc Battery GLBs are one textured mesh each. Keep that artwork,
+// but give its upper assembly a real yaw pivot instead of spinning the base.
+function articulateArcBattery(model) {
+  const mesh = model.getObjectByProperty('isMesh', true);
+  const position = mesh?.geometry?.getAttribute('position');
+  const index = mesh?.geometry?.getIndex();
+  if (!mesh || !position || !index || index.count < 12) return null;
+  mesh.geometry.computeBoundingBox();
+  const bounds = mesh.geometry.boundingBox;
+  const cut = bounds.min.y + (bounds.max.y - bounds.min.y) * 0.61;
+  const fixed = [], moving = [];
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i), b = index.getX(i + 1), c = index.getX(i + 2);
+    ((position.getY(a) + position.getY(b) + position.getY(c)) / 3 >= cut ? moving : fixed).push(a, b, c);
+  }
+  if (Math.min(fixed.length, moving.length) < index.count * 0.12) return null;
+  const lowerGeometry = mesh.geometry.clone();
+  const upperGeometry = mesh.geometry.clone();
+  lowerGeometry.setIndex(fixed);
+  upperGeometry.setIndex(moving);
+  lowerGeometry.userData.arcSplit = upperGeometry.userData.arcSplit = true;
+  const pivotWorld = mesh.localToWorld(new THREE.Vector3((bounds.min.x + bounds.max.x) / 2, cut, (bounds.min.z + bounds.max.z) / 2));
+  const rotor = mesh.clone(false);
+  rotor.name = 'arc_battery_rotor';
+  rotor.geometry = upperGeometry;
+  rotor.castShadow = rotor.receiveShadow = true;
+  mesh.geometry = lowerGeometry;
+  mesh.parent.add(rotor);
+  const yaw = new THREE.Group();
+  yaw.name = 'arc_battery_yaw';
+  model.add(yaw);
+  model.updateMatrixWorld(true);
+  yaw.position.copy(model.worldToLocal(pivotWorld));
+  const recoil = new THREE.Group();
+  recoil.name = 'arc_battery_recoil';
+  yaw.add(recoil);
+  model.updateMatrixWorld(true);
+  recoil.attach(rotor);
+  const span = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
+  const muzzleParts = addArcMuzzle(yaw, span * 0.23);
+  return { yaw, recoil, ...muzzleParts, flashAmount: 0 };
+}
+
+function stepArcBattery(rig, dt, time, target = null, fire = false) {
+  if (!rig || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let desired = Math.sin(time * 0.45) * 0.85;
+  if (target) {
+    const local = rig.yaw.parent.worldToLocal(target.clone());
+    desired = Math.atan2(local.x - rig.yaw.position.x, local.z - rig.yaw.position.z);
+  }
+  const delta = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
+  rig.yaw.rotation.y += THREE.MathUtils.clamp(delta, -dt * 1.9, dt * 1.9);
+  if (fire) { rig.flashAmount = 1; if (rig.recoil) rig.recoil.position.z = -0.065; }
+  rig.flashAmount = Math.max(0, rig.flashAmount - dt * 4.2);
+  if (rig.recoil) rig.recoil.position.z = THREE.MathUtils.damp(rig.recoil.position.z, 0, 12, dt);
+  rig.flash.material.opacity = rig.flashAmount * 0.95;
+  rig.flash.scale.setScalar(0.01 + rig.flashAmount * 1.8);
+  rig.light.intensity = rig.flashAmount * 24;
+}
+
+function clearArcSplitGeometry(model) {
+  model?.traverse(object => {
+    if (object.isMesh && object.geometry?.userData.arcSplit) object.geometry.dispose();
+  });
+}
 const revealEffects = new Map();
 const celebrations = [];
 let revealBannerTimer = 0;
@@ -845,11 +925,10 @@ function buildModel(key, level) {
       new THREE.MeshBasicMaterial({ color: 0xd8b4fe, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide })
     );
     beam.position.set(0, -(height + 6) / 2 + 0.3, 5);
-    beam.rotation.x = -Math.atan2(10, height) + Math.PI;
     beam.rotation.x = Math.PI - Math.atan2(10, height + 6);
     head.add(beam);
     g.add(head);
-    animated.lights.push({ head });
+    g.userData.turretRig = { yaw: head, recoil: null, ...addArcMuzzle(head, 0.72), flashAmount: 0 };
   } else if (key === 'comms') {
     box(g, 4.5, 0.4, 4.5, MAT.concrete);
     box(g, 3, 2, 3, MAT.olive, -0.5, 0.4, -0.5);
@@ -971,6 +1050,7 @@ function normalizeBuildingClone(template, key, level) {
   normalized.userData.buildingLevel = level;
   normalized.userData.assetPath = asset.glb;
   normalized.updateMatrixWorld(true);
+  if (key === 'tower') normalized.userData.turretRig = articulateArcBattery(normalized);
   return normalized;
 }
 
@@ -999,7 +1079,7 @@ function requestBuildingModel(key, level) {
     building.modelAssetPath = asset.glb;
     building.modelLevel = level;
     building.group.userData.buildingLevel = level;
-    if (previous) building.group.remove(previous);
+    if (previous) { building.group.remove(previous); clearArcSplitGeometry(previous); }
     setRendererDiagnostic('');
   }).catch(error => {
     if (building.loadToken !== requestToken) return;
@@ -1287,6 +1367,41 @@ function syncOperativePatrol() {
     operativePatrol.action.play();
   }).catch(error => console.warn(`DZN operative 3D model could not load: ${path}`, error));
 }
+
+function defenderLimbPivot(model, name) {
+  const limb = model.getObjectByName(name);
+  if (!limb?.parent) return null;
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(limb);
+  if (bounds.isEmpty()) return null;
+  const shoulder = bounds.getCenter(new THREE.Vector3());
+  shoulder.y = bounds.max.y - (bounds.max.y - bounds.min.y) * 0.08;
+  const parent = limb.parent;
+  const pivot = new THREE.Group();
+  pivot.name = `${name}_pivot`;
+  parent.add(pivot);
+  parent.updateMatrixWorld(true);
+  pivot.position.copy(parent.worldToLocal(shoulder));
+  pivot.updateMatrixWorld(true);
+  pivot.attach(limb);
+  return pivot;
+}
+
+function bindDefenderRig(model, role) {
+  const limbs = Object.fromEntries(['left_arm', 'right_arm', 'left_leg', 'right_leg',
+    'left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg', 'hound_head']
+    .map(name => [name, defenderLimbPivot(model, name)]));
+  model.updateMatrixWorld(true);
+  const held = role === 'guardian' ? { left_arm: ['barrier_shield'] }
+    : role === 'aegis' ? { right_arm: ['scanner', 'scanner_screen'] } : {};
+  for (const [armName, names] of Object.entries(held)) for (const name of names) {
+    const part = model.getObjectByName(name);
+    const arm = model.getObjectByName(armName);
+    if (part && arm) arm.attach(part);
+  }
+  return limbs;
+}
+
 function syncDefenderPatrols() {
   const assigned = service.community()?.saved.base.defenders || {};
   for (const role of Object.keys(DEFENDER_CONCEPTS)) {
@@ -1306,22 +1421,38 @@ function syncDefenderPatrols() {
       const model = template.clone(true);
       model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
       mesh.add(model);
+      patrol.limbs = bindDefenderRig(model, role);
+      patrol.model = model;
     }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
   }
 }
-function animateDefender(patrol) {
+function animateDefender(patrol, time = elapsed) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
+  const limbs = patrol.limbs || mesh.userData.defenderLimbs;
+  if (!limbs) return;
+  const moving = Boolean(motion.moving);
+  const swing = Math.sin(motion.stride) * (moving ? 0.34 : 0);
   if (role === 'hound') {
-    const swing = Math.sin(motion.stride) * (motion.moving ? 0.36 : 0.025);
     for (const [name, sign] of [['left_front_leg', 1], ['right_rear_leg', 1], ['right_front_leg', -1], ['left_rear_leg', -1]]) {
-      const leg = mesh.getObjectByName(name);
+      const leg = limbs[name];
       if (leg) leg.rotation.x = swing * sign;
     }
-  } else animateSoldier(mesh, motion.stride, motion.moving ? 1 : 0.04);
+    if (limbs.hound_head) limbs.hound_head.rotation.y = Math.sin(time * 0.8) * (moving ? 0.08 : 0.24);
+  } else {
+    if (limbs.left_leg) limbs.left_leg.rotation.x = swing;
+    if (limbs.right_leg) limbs.right_leg.rotation.x = -swing;
+    if (limbs.left_arm) limbs.left_arm.rotation.x = (role === 'guardian' ? -0.28 : role === 'aegis' ? -0.2 : -0.12) - swing * 0.22;
+    if (limbs.right_arm) limbs.right_arm.rotation.x = (role === 'aegis' ? -0.46 : role === 'trapper' ? -0.25 : -0.12) + swing * 0.28;
+  }
+  if (patrol.model) patrol.model.position.y = moving ? Math.abs(Math.sin(motion.stride)) * 0.025 : Math.sin(time * 1.4) * 0.006;
   if (role === 'aegis') for (const [index, name] of ['left_drone', 'right_drone'].entries()) {
     const drone = mesh.getObjectByName(name);
-    if (drone) { drone.position.y = 1.72 + patrol.level * 0.025 + Math.sin(motion.stride * 0.55 + index * Math.PI) * 0.09; drone.rotation.y += 0.012; }
+    if (drone) {
+      if (drone.userData.restY === undefined) drone.userData.restY = drone.position.y;
+      drone.position.y = drone.userData.restY + Math.sin(time * 2 + index * Math.PI) * 0.09;
+      drone.rotation.y = Math.sin(time * 0.7 + index * Math.PI) * 0.35;
+    }
   }
 }
 syncDefenderPatrols();
@@ -1395,6 +1526,12 @@ function stopPatrolFocus(returnToBase = false) {
   patrolFocusLight.visible = false;
   patrolFocusRing.visible = false;
   if (returnToBase) { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); }
+}
+function focusedPatrol() {
+  if (!focusedPatrolRole) return null;
+  return focusedPatrolRole.startsWith('defender:')
+    ? defenderPatrols.get(focusedPatrolRole.slice('defender:'.length))
+    : patrols.find(item => item.role === focusedPatrolRole);
 }
 patrolFocusExit.onclick = () => stopPatrolFocus(true);
 let selectedKey = null;
@@ -1503,7 +1640,7 @@ function updateHud() {
     patrol.mesh.visible = unlocked && deployed >= Math.min(away, 3);
     if (unlocked) deployed++;
   });
-  if (focusedPatrolRole && !patrols.some(patrol => patrol.role === focusedPatrolRole && patrol.mesh.visible)) stopPatrolFocus(true);
+  if (focusedPatrolRole && !focusedPatrol()?.mesh.visible) stopPatrolFocus(true);
   for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
   syncOperativePatrol();
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
@@ -1712,7 +1849,7 @@ function defenderCardsHTML() {
     const progress = project ? `<p class="help">Approved L${project.targetLevel} · ${project.funded}/${project.cost} Parts funded</p><div class="row"><input type="number" min="1" step="1" value="${Math.max(1, project.cost - project.funded)}" data-defender-amount="${role}" aria-label="Parts for ${escapeHTML(definition.name)}"><button data-defender-fund="${role}" ${access ? '' : 'disabled'}>Contribute Parts</button></div>` : '';
     const approval = !project && defender.level < 5 ? `<p class="help">Next L${requirement.targetLevel}: ${requirement.cost} Parts · ${requirement.prerequisites.length ? escapeHTML(requirement.prerequisites.join(' ')) : 'Ready for leadership approval.'}</p><button data-defender-approve="${role}" ${leadership && requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button>` : '';
     const assignment = defender.level ? `<div class="row"><select data-defender-post="${role}" aria-label="${escapeHTML(definition.name)} defensive post" ${leadership && access ? '' : 'disabled'}><option value="">Reserve at camp</option>${Object.entries(DEFENDER_POSTS).map(([key, label]) => `<option value="${key}" ${defender.post === key ? 'selected' : ''}>${escapeHTML(label)}</option>`).join('')}</select><button data-defender-assign="${role}" ${leadership && access ? '' : 'disabled'}>Assign post</button></div>` : '';
-    return `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.role)}</small></div><b>${defender.level ? `L${defender.level}` : 'LOCKED'}</b></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(definition.name)} supplied design"><p>${escapeHTML(definition.detail)}</p><p><b>Ability:</b> ${escapeHTML(definition.ability)}<br><b>Post:</b> ${escapeHTML(post)}</p>${approval}${progress}${assignment}<p class="help">Inspect any 3D appearance at camp without unlocking or equipping it:</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(definition.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`;
+    return `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.role)}</small></div><b>${defender.level ? `L${defender.level}` : 'LOCKED'}</b></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(definition.name)} supplied design"><p>${escapeHTML(definition.detail)}</p><p><b>Ability:</b> ${escapeHTML(definition.ability)}<br><b>Post:</b> ${escapeHTML(post)}</p>${approval}${progress}${assignment}${defender.level && defender.post ? `<button type="button" data-watch-defender="${role}">Watch defender in 3D</button>` : ''}<p class="help">Inspect any 3D appearance at camp without unlocking or equipping it:</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(definition.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`;
   }).join('');
 }
 
@@ -1759,6 +1896,21 @@ function showSquadPanel() {
     updateCamera();
     closePanel();
     toast(`Watching ${SQUAD_ROLES[patrol.role].name} in 3D · drag to explore`);
+  }));
+  panel.querySelectorAll('[data-watch-defender]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.watchDefender;
+    const patrol = defenderPatrols.get(role);
+    if (!patrol?.mesh.visible || fallback2D || raid || warBattle) { toast('Assigned defender is unavailable in 3D right now.'); return; }
+    focusedPatrolRole = `defender:${role}`;
+    patrolFocusExit.hidden = false;
+    patrolFocusExit.textContent = `← Back to base · ${DEFENDER_CONCEPTS[role].name} L${patrol.level}`;
+    patrolFocusLight.visible = true;
+    patrolFocusRing.visible = true;
+    zoom = 8;
+    camTarget.copy(patrol.mesh.position);
+    updateCamera();
+    closePanel();
+    toast(`Watching ${DEFENDER_CONCEPTS[role].name} guard ${DEFENDER_POSTS[patrol.post]}`);
   }));
   panel.querySelectorAll('[data-defender-preview]').forEach(button => button.addEventListener('click', () => {
     const level = Number(button.dataset.level);
@@ -2593,6 +2745,12 @@ function refreshWarTableTimers() {
 
 function clearWarBaseVisuals() {
   warDefenderToken++;
+  warTurretRig = null;
+  for (const bolt of warBattle?.bolts || []) {
+    scene.remove(bolt.line);
+    bolt.line.geometry.dispose();
+    bolt.line.material.dispose();
+  }
   for (const defender of warDefenderMeshes) scene.remove(defender.mesh);
   warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
@@ -2611,6 +2769,7 @@ function buildWarBaseVisual(side) {
     const point = side.base.layout?.structures?.[key];
     model.position.set(point?.x ?? building.pos[0], 0.05, point?.z ?? building.pos[1]);
     warBaseGroup.add(model);
+    if (key === 'tower') warTurretRig = model.userData.turretRig;
   }
   for (const wall of side.base.layout?.walls || []) wallModel(wall.level).then(template => {
     if (token !== warDefenderToken || !template) return;
@@ -2635,10 +2794,14 @@ function buildWarBaseVisual(side) {
     mesh.position.set(OUTPOST.x + x, 0, OUTPOST.z + z);
     mesh.rotation.y = -Math.PI / 2;
     scene.add(mesh);
-    warDefenderMeshes.push({ role, level: defender.level, mesh });
+    const patrol = { role, level: defender.level, mesh };
+    warDefenderMeshes.push(patrol);
     loadBuildingTemplate(defenderAsset(role, defender.level)).then(template => {
       if (token !== warDefenderToken) return;
-      mesh.add(template.clone(true));
+      const model = template.clone(true);
+      mesh.add(model);
+      patrol.model = model;
+      patrol.limbs = bindDefenderRig(model, role);
     }).catch(error => console.warn(`War defender model could not load: ${role}`, error));
   }
 }
@@ -2669,7 +2832,7 @@ function launchWarAttack(warId, tactic) {
     warTroopMeshes.push(troop);
     troops.push({ mesh: troop, start, target: troopTarget, phase: i * 0.45 });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 7, smokeTimer: 0 };
+  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 7, smokeTimer: 0, shotClock: 0, bolts: [] };
   camTarget.copy(OUTPOST);
   zoom = 32;
   updateCamera();
@@ -2688,7 +2851,31 @@ function updateWarBattle(dt) {
     troop.mesh.rotation.y = Math.PI / 2;
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, 1, null, dt);
   }
-  for (const defender of warDefenderMeshes) animateDefender({ ...defender, motion: { stride: warBattle.time * 2, moving: false } });
+  for (const defender of warDefenderMeshes) animateDefender({ ...defender, motion: { stride: warBattle.time * 2, moving: false } }, warBattle.time);
+  const target = warBattle.troops.find(troop => troop.mesh.position.distanceTo(OUTPOST) < 22)?.mesh;
+  warBattle.shotClock += dt;
+  const fire = Boolean(warTurretRig && target && progress < 0.94 && warBattle.shotClock >= 0.8);
+  if (fire) warBattle.shotClock = 0;
+  const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+  stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire);
+  if (fire) {
+    const origin = warTurretRig.muzzle.getWorldPosition(new THREE.Vector3());
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, aim]),
+      new THREE.LineBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
+    scene.add(line);
+    warBattle.bolts.push({ line, life: 0 });
+  }
+  for (let i = warBattle.bolts.length - 1; i >= 0; i--) {
+    const bolt = warBattle.bolts[i];
+    bolt.life += dt;
+    bolt.line.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.22));
+    if (bolt.life >= 0.22) {
+      scene.remove(bolt.line);
+      bolt.line.geometry.dispose();
+      bolt.line.material.dispose();
+      warBattle.bolts.splice(i, 1);
+    }
+  }
   warBattle.smokeTimer += dt;
   if (warBattle.smokeTimer >= 0.8 && progress > 0.65) {
     warBattle.smokeTimer = 0;
@@ -2931,6 +3118,7 @@ renderer.setAnimationLoop(time => {
   animated.radars.forEach(r => {
     r.rotation.y += dt * 1.5;
   });
+  if (buildings.tower?.group.visible) stepArcBattery(buildings.tower.model?.userData.turretRig, dt, elapsed);
   animated.lights.forEach(l => {
     if (l.head) {
       l.head.rotation.y = Math.sin(elapsed * 0.5) * 1.6 + 0.8;
@@ -2975,8 +3163,8 @@ renderer.setAnimationLoop(time => {
     animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null, dt);
   });
   if (focusedPatrolRole) {
-    const patrol = patrols.find(item => item.role === focusedPatrolRole && item.mesh.visible);
-    if (!patrol || raid || warBattle) stopPatrolFocus(true);
+    const patrol = focusedPatrol();
+    if (!patrol?.mesh.visible || raid || warBattle) stopPatrolFocus(true);
     else {
       camTarget.lerp(patrol.mesh.position, Math.min(1, dt * 7));
       updateCameraPosition();
@@ -2989,7 +3177,7 @@ renderer.setAnimationLoop(time => {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     patrol.mesh.position.set(motion.x, 0, motion.z);
     patrol.mesh.rotation.y = motion.yaw;
-    animateDefender(patrol);
+    animateDefender(patrol, elapsed);
   }
   if (operativeMesh.visible && operativePatrol.motion) {
     const motion = stepPatrolMotion(operativePatrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
