@@ -263,6 +263,28 @@ for (let level = 1; level <= 5; level++) {
     || triangles !== fixer.triangles || fixer.animations.some(animation => !clips.get(animation))) throw new Error(`Fixer Level ${level} lacks textured, skinned walk/idle geometry.`);
 }
 console.log('Five distinct image-guided DZN Fixer levels verified with retained sources, skins, textures and walk/idle clips.');
+const medicManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v9/manifest.json'), 'utf8'));
+if (Object.keys(medicManifest.assets || {}).length !== 5) throw new Error('Lifeline kit must have five image-guided models.');
+const medicHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `medic_l0${level}`, medic = medicManifest.assets[name];
+  if (!medic || medic.file !== squadAsset('medic', level) || medic.reference !== squadPortrait('medic', level) || !medic.rosebudJob) throw new Error(`Lifeline Level ${level} model or portrait mapping is missing.`);
+  const bytes = readFileSync(join(root, ...medic.file.split('/')));
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), medic.source));
+  const reference = readFileSync(join(root, ...medic.reference.split('/')));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length || bytes.length !== medic.bytes
+    || hash !== medic.sha256 || medicHashes.has(hash)
+    || createHash('sha256').update(source).digest('hex') !== medic.sourceSha256
+    || createHash('sha256').update(reference).digest('hex') !== medic.referenceSha256) throw new Error(`Lifeline Level ${level} source, portrait or game GLB integrity failed.`);
+  medicHashes.add(hash);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+  const clips = new Map((gltf.animations || []).map(animation => [animation.name, animation.channels.length]));
+  const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((count, part) => count + gltf.accessors[part.indices].count / 3, 0);
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 15 || gltf.images?.length < 2
+    || triangles !== medic.triangles || medic.animations.some(animation => !clips.get(animation))) throw new Error(`Lifeline Level ${level} lacks textured, skinned walk/idle geometry.`);
+}
+console.log('Five distinct image-guided DZN Lifeline levels verified with retained sources, skins, textures and walk/idle clips.');
 const operativeManifest = JSON.parse(readFileSync(join(root, 'assets/models/operatives/manifest.json'), 'utf8'));
 const operativeHashes = new Set();
 if (Object.keys(operativeManifest.assets).length !== 3 || operativeAsset('unknown') !== null) throw new Error('Expected exactly three named DZN commander models.');
