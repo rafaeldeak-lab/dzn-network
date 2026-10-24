@@ -473,7 +473,7 @@ const buildings = {};
 const animated = { radars: [], lights: [], chimneys: [], yards: [] };
 let warTurretRig = null;
 
-function addArcMuzzle(yaw, distance, spread = 0.16) {
+function addArcMuzzle(mount, distance, spread = 0.16) {
   const muzzles = [-spread, spread].map(x => {
     const node = new THREE.Group();
     node.position.set(x, 0.12, distance);
@@ -484,10 +484,10 @@ function addArcMuzzle(yaw, distance, spread = 0.16) {
     node.add(flash);
     const light = new THREE.PointLight(0xb5ff65, 0, 5, 2);
     node.add(light);
-    yaw.add(node);
+    mount.add(node);
     return { node, flash, light };
   });
-  return { muzzles, muzzle: muzzles[0].node, barrelIndex: 1 };
+  return { muzzles, muzzle: muzzles[1].node, barrelIndex: 1 };
 }
 
 // Rosebud's Arc Battery GLBs are one textured mesh each. Keep that artwork,
@@ -523,32 +523,57 @@ function articulateArcBattery(model) {
   model.add(yaw);
   model.updateMatrixWorld(true);
   yaw.position.copy(model.worldToLocal(pivotWorld));
+  const elevation = new THREE.Group();
+  elevation.name = 'arc_battery_elevation';
+  elevation.position.y = (bounds.max.y - cut) * 0.15;
+  yaw.add(elevation);
   const recoil = new THREE.Group();
   recoil.name = 'arc_battery_recoil';
-  yaw.add(recoil);
+  elevation.add(recoil);
   model.updateMatrixWorld(true);
   recoil.attach(rotor);
   const span = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
-  const muzzleParts = addArcMuzzle(yaw, span * 0.23, span * 0.07);
-  return { yaw, recoil, ...muzzleParts, flashAmount: 0 };
+  const muzzleParts = addArcMuzzle(elevation, span * 0.23, span * 0.07);
+  return { yaw, elevation, recoil, ...muzzleParts, flashAmount: 0 };
 }
 
 function stepArcBattery(rig, dt, time, target = null, fire = false) {
   if (!rig) return false;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    rig.flashAmount = 0;
-    rig.muzzles.forEach(muzzle => { muzzle.flash.material.opacity = 0; muzzle.light.intensity = 0; });
-    return false;
-  }
   let desired = Math.sin(time * 0.45) * 0.85;
+  let elevation = Math.sin(time * 0.31) * 0.035;
   if (target) {
     const local = rig.yaw.parent.worldToLocal(target.clone());
-    desired = Math.atan2(local.x - rig.yaw.position.x, local.z - rig.yaw.position.z);
+    const dx = local.x - rig.yaw.position.x;
+    const dz = local.z - rig.yaw.position.z;
+    desired = Math.atan2(dx, dz);
+    elevation = THREE.MathUtils.clamp(-Math.atan2(
+      local.y - rig.yaw.position.y - (rig.elevation?.position.y || 0),
+      Math.hypot(dx, dz),
+    ), -0.12, 0.16);
+  }
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion && !target) {
+    desired = rig.yaw.rotation.y;
+    elevation = rig.elevation?.rotation.x || 0;
   }
   const delta = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
-  rig.yaw.rotation.y += THREE.MathUtils.clamp(delta, -dt * 1.9, dt * 1.9);
+  rig.yaw.rotation.y += reducedMotion ? delta : THREE.MathUtils.clamp(delta, -dt * 1.9, dt * 1.9);
+  if (rig.elevation) {
+    const pitchDelta = elevation - rig.elevation.rotation.x;
+    rig.elevation.rotation.x += reducedMotion ? pitchDelta : THREE.MathUtils.clamp(pitchDelta, -dt * 0.9, dt * 0.9);
+  }
   const remaining = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
   const fired = Boolean(fire && target && Math.abs(remaining) < 0.12);
+  if (reducedMotion) {
+    if (fired) {
+      rig.barrelIndex = 1 - rig.barrelIndex;
+      rig.muzzle = rig.muzzles[rig.barrelIndex].node;
+    }
+    rig.flashAmount = 0;
+    if (rig.recoil) rig.recoil.position.z = 0;
+    rig.muzzles.forEach(muzzle => { muzzle.flash.material.opacity = 0; muzzle.light.intensity = 0; });
+    return fired;
+  }
   if (fired) {
     rig.barrelIndex = 1 - rig.barrelIndex;
     rig.muzzle = rig.muzzles[rig.barrelIndex].node;
@@ -1530,6 +1555,7 @@ function spawnSmoke(worldPos) {
 // ---------- Outpost (raid target) ----------
 const OUTPOST = new THREE.Vector3(55, 0, -10);
 const outpostBlocks = [];
+let outpostReady = null;
 const warBaseGroup = new THREE.Group();
 warBaseGroup.visible = false;
 scene.add(warBaseGroup);
@@ -1537,14 +1563,39 @@ const warTroopMeshes = [];
 const warDefenderMeshes = [];
 let warDefenderToken = 0;
 function buildOutpost() {
-  outpostBlocks.forEach(b => scene.remove(b));
-  outpostBlocks.length = 0;
-  const layout = [[0, 0, 4, 3], [-5, 3, 2, 4], [5, 3, 2, 4], [-4, -4, 2, 2], [4, -4, 2, 2]];
-  for (const [x, z, s, h] of layout) {
-    const m = box(scene, s, h, s, x === 0 ? MAT.dark : MAT.concrete, OUTPOST.x + x, 0, OUTPOST.z + z);
-    m.userData.hp = 100;
-    outpostBlocks.push(m);
+  if (outpostBlocks.length) {
+    for (const building of outpostBlocks) {
+      building.userData.hp = building.userData.maxHp;
+      building.userData.shotClock = 0;
+      building.scale.setScalar(1);
+      building.visible = true;
+    }
+    return outpostReady;
   }
+  const layout = [['hq', 0, 0], ['workshop', -7, 5], ['tower', 7, 5], ['comms', 0, -7]];
+  const loads = layout.map(([key, x, z]) => {
+    const building = new THREE.Group();
+    building.position.set(OUTPOST.x + x, 0, OUTPOST.z + z);
+    building.userData.structureKey = key;
+    building.userData.maxHp = key === 'hq' ? 220 : 160;
+    building.userData.hp = building.userData.maxHp;
+    building.userData.shotClock = 0;
+    scene.add(building);
+    outpostBlocks.push(building);
+    const asset = getBuildingAsset(key, 1);
+    return loadBuildingTemplate(asset.glb).then(template => {
+      const model = normalizeBuildingClone(template, key, 1);
+      building.add(model);
+      building.userData.turretRig = model.userData.turretRig || null;
+    }).catch(error => {
+      console.warn(`Training outpost ${key} model could not load; using procedural building.`, error);
+      const fallback = buildModel(key, 1);
+      building.add(fallback);
+      building.userData.turretRig = fallback.userData.turretRig || null;
+    });
+  });
+  outpostReady = Promise.all(loads);
+  return outpostReady;
 }
 buildOutpost();
 
@@ -1574,6 +1625,7 @@ function focusedPatrol() {
 patrolFocusExit.onclick = () => stopPatrolFocus(true);
 let selectedKey = null;
 let raid = null;
+let raidLaunching = false;
 let warBattle = null;
 let toastTimer = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -2479,7 +2531,7 @@ function showWarTable(errorMessage = '') {
   if (wars.length) html += `<h3>Challenge inbox · shared war record</h3>${wars.map(war => renderWarRecord(war, community.id, profile)).join('')}`;
   else html += '<p class="help">No challenges or wars yet. Once both fictional communities meet the gates, one owner/admin can challenge the other.</p>';
   const lockedMessage = access.allowed ? '' : `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
-  html += `<hr><p><b>AI Training Encounter:</b> Fixed Outpost Delta <span class="sim">[TRAINING · SIMULATED]</span></p><p>Squad: ${trainingSquad} troops · Training attempts: ${state.raidCount}. Practice is separate from war scores and rewards.</p>${lockedMessage}<div class="row"><button id="raidBtn" ${raid || warBattle || !access.allowed ? 'disabled' : ''}>Launch Practice Raid</button><button id="closeBtn">Close</button></div><p class="help">War points and practice wins are local preview data only. No coordinates or private information are used.</p>`;
+  html += `<hr><p><b>AI Training Encounter:</b> Fixed Outpost Delta <span class="sim">[TRAINING · SIMULATED]</span></p><p>Squad: ${trainingSquad} troops · Training attempts: ${state.raidCount}. Practice is separate from war scores and rewards.</p>${lockedMessage}<div class="row"><button id="raidBtn" ${raid || raidLaunching || warBattle || !access.allowed ? 'disabled' : ''}>Launch Practice Raid</button><button id="closeBtn">Close</button></div><p class="help">War points and practice wins are local preview data only. No coordinates or private information are used.</p>`;
   openPanel(html);
   $('closeBtn').onclick = closePanel;
   $('raidBtn').onclick = launchRaid;
@@ -2811,6 +2863,33 @@ function disposeWarBolt(bolt) {
   bolt.impact.material.dispose();
 }
 
+function spawnArcBolt(origin, aim, bolts) {
+  const direction = aim.clone().sub(origin);
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.065, direction.length(), 8),
+    new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
+  beam.position.copy(origin).addScaledVector(direction, 0.5);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+  const impact = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.8, depthWrite: false }));
+  impact.position.copy(aim);
+  scene.add(beam, impact);
+  bolts.push({ beam, impact, life: 0 });
+}
+
+function updateArcBolts(bolts, dt) {
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    const bolt = bolts[i];
+    bolt.life += dt;
+    bolt.beam.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.38));
+    bolt.impact.material.opacity = Math.max(0, 0.8 * (1 - bolt.life / 0.38));
+    bolt.impact.scale.setScalar(1 + bolt.life * 2.5);
+    if (bolt.life >= 0.38) {
+      disposeWarBolt(bolt);
+      bolts.splice(i, 1);
+    }
+  }
+}
+
 function buildWarBaseVisual(side) {
   clearWarBaseVisuals();
   const token = warDefenderToken;
@@ -2957,29 +3036,9 @@ function updateWarBattle(dt) {
   const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
   if (stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire)) {
     warBattle.shotClock = 0;
-    const origin = warTurretRig.muzzle.getWorldPosition(new THREE.Vector3());
-    const direction = aim.clone().sub(origin);
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.065, direction.length(), 8),
-      new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
-    beam.position.copy(origin).addScaledVector(direction, 0.5);
-    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-    const impact = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.8, depthWrite: false }));
-    impact.position.copy(aim);
-    scene.add(beam, impact);
-    warBattle.bolts.push({ beam, impact, life: 0 });
+    spawnArcBolt(warTurretRig.muzzle.getWorldPosition(new THREE.Vector3()), aim, warBattle.bolts);
   }
-  for (let i = warBattle.bolts.length - 1; i >= 0; i--) {
-    const bolt = warBattle.bolts[i];
-    bolt.life += dt;
-    bolt.beam.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.38));
-    bolt.impact.material.opacity = Math.max(0, 0.8 * (1 - bolt.life / 0.38));
-    bolt.impact.scale.setScalar(1 + bolt.life * 2.5);
-    if (bolt.life >= 0.38) {
-      disposeWarBolt(bolt);
-      warBattle.bolts.splice(i, 1);
-    }
-  }
+  updateArcBolts(warBattle.bolts, dt);
   warBattle.smokeTimer += dt;
   if (warBattle.smokeTimer >= 0.8 && progress > 0.65) {
     warBattle.smokeTimer = 0;
@@ -3001,13 +3060,24 @@ function updateWarBattle(dt) {
   showWarTable();
 }
 
-function launchRaid() {
-  if (raid || warBattle) return;
+async function launchRaid() {
+  if (raid || raidLaunching || warBattle) return;
   if (!service.getAccess().allowed) {
     toast(service.getAccess().reason);
     showWarTable();
     return;
   }
+  raidLaunching = true;
+  try {
+    await buildOutpost();
+  } catch (error) {
+    console.error('Training outpost could not be prepared.', error);
+    toast('Training outpost unavailable. Try again.');
+    raidLaunching = false;
+    return;
+  }
+  raidLaunching = false;
+  if (raid || warBattle) return;
   const raidId = Math.max(state.raidCount, state.lastRaidClaimed) + 1;
   const attempt = service.recordTrainingAttempt(raidId);
   if (!attempt.ok) {
@@ -3016,12 +3086,13 @@ function launchRaid() {
     return;
   }
   closePanel();
-  buildOutpost();
   const troops = [];
   const count = 2 + state.levels.hq * 2;
+  const assault = squadProfile('assault', state.levels);
   for (let i = 0; i < count; i++) {
     const t = makeSoldier('assault', state.levels);
     t.userData.stride = i * 0.65;
+    t.userData.hp = assault.maxHealth;
     t.position.set(OUTPOST.x - 18, 0, OUTPOST.z + (i - count / 2) * 1.5);
     scene.add(t);
     troops.push(t);
@@ -3036,9 +3107,10 @@ function launchRaid() {
 
 function updateRaid(dt) {
   raid.time += dt;
-  const firepower = 25 * (1 + state.levels.tower * 0.25);
+  const firepower = squadProfile('assault', state.levels).damage * 1.25;
   const alive = outpostBlocks.filter(b => b.userData.hp > 0);
   for (const t of raid.troops) {
+    if (t.userData.hp <= 0) continue;
     const target = alive[0];
     if (!target) {
       break;
@@ -3057,13 +3129,34 @@ function updateRaid(dt) {
       }
     }
   }
+  const defender = outpostBlocks.find(b => b.userData.structureKey === 'tower' && b.userData.hp > 0);
+  const rig = defender?.userData.turretRig;
+  const troop = rig && raid.troops.filter(t => t.userData.hp > 0).reduce((nearest, candidate) => {
+    const distance = candidate.position.distanceToSquared(defender.position);
+    return !nearest || distance < nearest.distance ? { mesh: candidate, distance } : nearest;
+  }, null)?.mesh;
+  if (rig) {
+    defender.userData.shotClock += dt;
+    const aim = troop?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+    if (stepArcBattery(rig, dt, raid.time, aim, defender.userData.shotClock >= 1.2)) {
+      defender.userData.shotClock = 0;
+      spawnArcBolt(rig.muzzle.getWorldPosition(new THREE.Vector3()), aim, raid.tracers);
+      troop.userData.hp -= 18;
+      if (troop.userData.hp <= 0) {
+        troop.visible = false;
+        spawnSmoke(troop.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
+      }
+    }
+  }
+  updateArcBolts(raid.tracers, dt);
   for (const b of outpostBlocks) {
     if (b.userData.hp <= 0 && b.scale.y > 0.1) {
       b.scale.y = Math.max(0.1, b.scale.y - dt * 2);
     }
   }
-  if (alive.length === 0 || raid.time > 30) {
-    finishRaid(alive.length === 0);
+  const structuresRemaining = outpostBlocks.some(b => b.userData.hp > 0);
+  if (!structuresRemaining || raid.time > 45 || raid.troops.every(t => t.userData.hp <= 0)) {
+    finishRaid(!structuresRemaining);
   }
 }
 
@@ -3071,6 +3164,7 @@ function finishRaid(won) {
   const finished = raid;
   raid = null;
   finished.troops.forEach(t => scene.remove(t));
+  finished.tracers.forEach(disposeWarBolt);
   let reward = 0;
   if (won) {
     const proposedReward = Math.round(250 * (1 + state.levels.comms * 0.2));
