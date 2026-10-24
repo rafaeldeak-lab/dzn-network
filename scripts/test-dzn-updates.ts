@@ -2,8 +2,17 @@ import assert from "node:assert/strict";
 
 import { DZN_OFFICIAL_UPDATES, formatDznUpdateDate, officialDznUpdates } from "../lib/dzn-updates";
 
-assert.ok(DZN_OFFICIAL_UPDATES.length >= 3, "The public DZN Updates feed needs an initial verified release history.");
+assert.ok(DZN_OFFICIAL_UPDATES.length >= 8, "The public DZN Updates feed needs a useful verified release history.");
 assert.equal(new Set(DZN_OFFICIAL_UPDATES.map((update) => update.id)).size, DZN_OFFICIAL_UPDATES.length, "Official DZN update IDs must be unique.");
+
+for (const id of [
+  "global-chat-english-only-safety",
+  "dzn-assist-saved-conversations",
+  "dzn-assist-verified-server-guidance",
+  "global-chat-earlier-history",
+]) {
+  assert.ok(DZN_OFFICIAL_UPDATES.some((update) => update.id === id), `The verified 23 Oct Comms release '${id}' must remain in the public history.`);
+}
 
 const gamesHubDevelopmentNotice = DZN_OFFICIAL_UPDATES.find((update) => update.id === "games-hub-development-notice");
 assert.deepEqual(gamesHubDevelopmentNotice, {
