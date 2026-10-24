@@ -9105,6 +9105,65 @@ button.dzn-header-action {
   animation: none;
 }
 
+.dzn-reward-card {
+  isolation: isolate;
+}
+
+.dzn-reward-card__art {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 0;
+  display: grid;
+  width: clamp(8rem, 34%, 11rem);
+  aspect-ratio: 1;
+  place-items: center;
+  pointer-events: none;
+  perspective: 900px;
+}
+
+.dzn-reward-card__art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0.92;
+  filter: saturate(1.06) contrast(1.04) drop-shadow(0 16px 16px rgba(0, 0, 0, 0.42));
+  transform: rotateX(-6deg) rotateY(-14deg) rotateZ(-1deg);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.dzn-reward-card__copy,
+.dzn-reward-card__requirement {
+  max-width: calc(100% - clamp(8.5rem, 38%, 12rem));
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dzn-reward-card__art img {
+    animation: dznRewardCabinetTurn 24s linear infinite;
+  }
+}
+
+@keyframes dznRewardCabinetTurn {
+  0% {
+    transform: rotateX(-6deg) rotateY(0deg) rotateZ(-1deg);
+  }
+  25% {
+    transform: rotateX(5deg) rotateY(90deg) rotateZ(2deg);
+  }
+  50% {
+    transform: rotateX(-4deg) rotateY(180deg) rotateZ(-2deg);
+  }
+  75% {
+    transform: rotateX(5deg) rotateY(270deg) rotateZ(2deg);
+  }
+  100% {
+    transform: rotateX(-6deg) rotateY(360deg) rotateZ(-1deg);
+  }
+}
+
 .dzn-badge-tooltip {
   position: relative;
   display: inline-flex;
@@ -9349,7 +9408,8 @@ button.dzn-header-action {
   .dzn-badge-icon::before,
   .dzn-badge-icon::after,
   .dzn-badge-icon__shine,
-  .dzn-profile-frame {
+  .dzn-profile-frame,
+  .dzn-reward-card__art img {
     animation: none !important;
     transition-duration: 0.01ms !important;
   }
@@ -9362,6 +9422,17 @@ button.dzn-header-action {
   .dzn-badge-chip:hover,
   .dzn-badge-chip:focus-visible {
     transform: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .dzn-reward-card__art {
+    width: 6.75rem;
+  }
+
+  .dzn-reward-card__copy,
+  .dzn-reward-card__requirement {
+    max-width: calc(100% - 7.5rem);
   }
 }
 
