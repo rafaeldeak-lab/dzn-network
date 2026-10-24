@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { onRequest as playerHubRoute } from "../functions/api/player/hub";
 import type { Env, PagesContext } from "../functions/_lib/types";
@@ -21,6 +22,9 @@ assert.match(route, /readSuggestedEventServerRows/, "Player Hub route must read 
 assert.match(route, /suggestedEventRelevance/, "Player Hub route must label suggested event relevance without changing event systems.");
 assert.match(route, /readPlayerProfileProgression/, "Player Hub route must build the private profile/progression read model.");
 assert.match(route, /readTrustedPlayerGameplayAggregate/, "Player Hub profile/progression summary must use the shared trusted stat bridge.");
+assert.match(route, /avatar_url: privateDiscordAvatarUrl/, "Player Hub must expose a safe Discord avatar URL rather than a raw avatar hash.");
+assert.match(route, /cdn\.discordapp\.com\/avatars/, "Player Hub must resolve private avatars through Discord's CDN.");
+assert.doesNotMatch(route, /avatar:\s*user\.avatar/, "Player Hub must not send raw Discord avatar hashes to the browser.");
 assert.match(statBridge, /FROM player_profiles/, "Player Hub profile/progression summary may read current-user gameplay profile rows.");
 assert.match(statBridge, /player_profiles\.discord_id = \?/, "Player Hub profile/progression summary must be scoped to the current Discord user.");
 assert.match(statBridge, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Player Hub profile/progression summary must mirror leaderboard kills through the trusted player ID bridge.");
@@ -42,7 +46,15 @@ assert.match(playerHome, /My Server Stats/, "Player Hub UI must show current-use
 assert.match(playerHome, /href: "\/games"/, "Player Hub UI must link authenticated players to the Games Hub.");
 assert.match(playerHome, /title: "Games Hub"/, "Player Hub UI must provide a named Games Hub action.");
 assert.match(playerHome, /website-only progression/, "Games Hub navigation must keep progression separate from competitive systems.");
-assert.match(playerHome, /xl:grid-cols-5/, "Player Hub action cards must retain a stable wide-screen layout with the Games Hub action.");
+assert.match(playerHome, /TacticalPlayerHub/, "Player Hub home must use the tactical layout without replacing its data contracts.");
+assert.match(playerHome, /Player Hub destinations/, "Player Hub must retain a stable, labelled destination rail.");
+assert.match(playerHome, /Your next/, "Player Hub tactical hero must use the requested chapter-focused presentation.");
+assert.match(playerHome, /chapter starts here/, "Player Hub tactical hero must retain its chapter callout.");
+assert.match(playerHome, /DiscordIdentityAvatar/, "Player Hub must render the current signed-in Discord identity in the private view.");
+assert.match(playerHome, /safeAuthenticatedDiscordAvatarUrl/, "Player Hub must validate the private Discord avatar URL before rendering it.");
+assert.match(playerHome, /\/media\/player-hub\/command-centre\.webp/, "Player Hub must use the command-centre visual asset.");
+assert.match(playerHome, /\/media\/player-hub\/survival-command\.webp/, "Player Hub must use the survival-command visual asset.");
+assert.match(playerHome, /\/media\/player-hub\/network-events\.webp/, "Player Hub must use the network-events visual asset.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep XP/challenge/calling-card runtime disconnected.");
 assert.match(playerHome, /My profile actions/, "Player Hub UI must show direct profile actions.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep the owner setup boundary visible.");
@@ -61,6 +73,12 @@ assert.doesNotMatch(playerHome, /fetch\([^)]*(?:checkout|STRIPE|nitrado_connecti
 assert.match(platformSpec, /Player Hub real-data foundation/i, "Master platform spec must track the Player Hub real-data slice.");
 assert.match(platformSpec, /Followed\/saved servers/i, "Master platform spec must keep saved/followed servers in the player roadmap.");
 assert.match(packageJson, /"test:player-hub-real-data": "tsx scripts\/test-player-hub-real-data\.ts"/, "Dedicated Player Hub real-data test script must be registered.");
+
+for (const asset of ["command-centre.webp", "survival-command.webp", "network-events.webp"]) {
+  const assetPath = join("public", "media", "player-hub", asset);
+  assert.equal(existsSync(assetPath), true, `Player Hub visual asset must exist: ${asset}.`);
+  assert.ok(statSync(assetPath).size > 50_000, `Player Hub visual asset must be a substantive image: ${asset}.`);
+}
 
 async function testPlayerHubRouteRuntimeContract() {
   const db = new FakeD1Database();
@@ -316,6 +334,7 @@ async function testPlayerHubRouteRuntimeContract() {
   assert.equal(response.headers.get("vary"), "Cookie", "Player Hub response must vary by Cookie.");
 
   const payload = await response.json() as {
+    account: { avatar_url: string | null };
     saved_server_ids: string[];
     saved_servers: Array<{ linked_server_id: string; public_slug: string; server_name: string }>;
     matched_communities: Array<{ guild_id: string; name: string; public_server_count: number; matched_servers: Array<{ linked_server_id: string }> }>;
@@ -352,6 +371,7 @@ async function testPlayerHubRouteRuntimeContract() {
     fairness_boundary: string[];
   };
 
+  assert.equal(payload.account.avatar_url, null, "Mock session data must not fabricate a Discord avatar URL.");
   assert.deepEqual(payload.saved_server_ids, ["server-public"], "Player Hub saved ids must include only the current player's public saved servers.");
   assert.deepEqual(payload.saved_servers.map((server) => server.linked_server_id), ["server-public"], "Player Hub saved summaries must hide other-user and hidden saved rows.");
   assert.equal(payload.saved_servers[0]?.public_slug, "pandora-squad", "Saved server summary should expose only the public profile slug.");

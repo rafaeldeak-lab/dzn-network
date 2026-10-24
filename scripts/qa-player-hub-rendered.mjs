@@ -28,6 +28,13 @@ const scenarios = {
     mustContain: [
       "Player Hub",
       "Rafael DZN",
+      "Your next",
+      "chapter starts here.",
+      "Discord verified",
+      "Server Network",
+      "Command Centre",
+      "Survival Command",
+      "Network Records",
       "Pandora Squad",
       "Followed Servers",
       "Matched Communities",
@@ -767,7 +774,7 @@ function baseHubPayload({
     generated_at: "2026-09-01T12:00:00.000Z",
     account: {
       display_name: accountName,
-      avatar: null,
+      avatar_url: null,
       player_home_href: "/player",
       private_profile_href: "/player/profile",
     },
