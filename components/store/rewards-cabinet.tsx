@@ -7,12 +7,12 @@ import { toVisualBadge } from "@/lib/badges/visuals";
 const SERVER_REWARD_CODES = ["diamond", "verified_server", "death_dealer", "warlord", "king_of_dzn", "winter_champion"] as const;
 
 const ARTWORK_BY_CODE: Partial<Record<(typeof SERVER_REWARD_CODES)[number], string>> = {
-  diamond: "/rewards/reputation-shield-3d.png",
-  verified_server: "/rewards/verified-server-2d.png",
-  death_dealer: "/rewards/warlord-medal-3d.png",
-  warlord: "/rewards/warlord-medal-3d.png",
-  king_of_dzn: "/rewards/season-crown-3d.png",
-  winter_champion: "/rewards/season-crown-3d.png",
+  diamond: "/rewards/cabinet/reputation-shield-3d.webp",
+  verified_server: "/rewards/cabinet/verified-server-2d.webp",
+  death_dealer: "/rewards/cabinet/warlord-medal-3d.webp",
+  warlord: "/rewards/cabinet/warlord-medal-3d.webp",
+  king_of_dzn: "/rewards/cabinet/season-crown-3d.webp",
+  winter_champion: "/rewards/cabinet/season-crown-3d.webp",
 };
 
 const INDIVIDUAL_COLLECTION = [
@@ -73,7 +73,7 @@ export function RewardsCabinet() {
 
           <section aria-labelledby="individual-collection" className="relative overflow-hidden border border-amber-300/25 bg-[#100f13] p-5 sm:p-6">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/rewards/player-compass-2d.png" alt="" className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 object-contain opacity-35" />
+            <img src="/rewards/cabinet/player-compass-2d.webp" alt="" width={384} height={384} className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 object-contain opacity-35" />
             <div className="relative">
               <div className="flex items-start gap-4">
                 <span className="grid h-11 w-11 shrink-0 place-items-center border border-amber-300/30 bg-amber-300/10 text-amber-100"><LockKeyhole className="h-5 w-5" aria-hidden="true" /></span>
@@ -116,7 +116,7 @@ function RewardCard({ rule, artwork }: { rule: BadgeRule; artwork?: string }) {
       </div>
       {artwork ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={artwork} alt="" className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
+        <img src={artwork} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
       ) : null}
       <div className="relative mt-8 max-w-[48%] sm:max-w-[68%]">
         <p className="text-xs font-black uppercase text-cyan-200">{rule.category}</p>

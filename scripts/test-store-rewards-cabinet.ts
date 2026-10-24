@@ -1,18 +1,24 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const rewardAssets = [
-  "reputation-shield-3d.png",
-  "verified-server-2d.png",
-  "season-crown-3d.png",
-  "player-compass-2d.png",
-  "warlord-medal-3d.png",
+const rewardArtwork = [
+  "reputation-shield-3d",
+  "verified-server-2d",
+  "season-crown-3d",
+  "player-compass-2d",
+  "warlord-medal-3d",
 ];
 
-for (const asset of rewardAssets) {
-  assert.equal(existsSync(path.join(root, "public", "rewards", asset)), true, `Expected generated reward artwork: ${asset}`);
+for (const asset of rewardArtwork) {
+  const icon = path.join(root, "public", "rewards", "icons", `${asset}.webp`);
+  const cabinet = path.join(root, "public", "rewards", "cabinet", `${asset}.webp`);
+  assert.equal(existsSync(icon), true, `Expected optimized icon artwork: ${asset}`);
+  assert.equal(existsSync(cabinet), true, `Expected optimized cabinet artwork: ${asset}`);
+  assert.equal(statSync(icon).size < 20_000, true, `Badge icon should remain compact: ${asset}`);
+  assert.equal(statSync(cabinet).size < 100_000, true, `Cabinet artwork should remain compact: ${asset}`);
+  assert.equal(existsSync(path.join(root, "public", "rewards", `${asset}.png`)), false, `Unoptimized source PNG must not ship: ${asset}`);
 }
 
 const cabinet = readFileSync(path.join(root, "components", "store", "rewards-cabinet.tsx"), "utf8");
@@ -24,6 +30,8 @@ for (const futureOnlyCode of ["community_favourite", "headhunter", "hot_streak",
 }
 assert.match(cabinet, /Automatic player medal tracking is not live yet\./);
 assert.match(cabinet, /No paid competitive advantage/);
+assert.match(cabinet, /\/rewards\/cabinet\/.*\.webp/);
+assert.equal(cabinet.includes("/rewards/") && cabinet.includes(".png"), false, "Rewards Cabinet must not reference unoptimized PNG artwork.");
 assert.equal(cabinet.includes("fetch("), false, "Rewards Cabinet must not initiate a Store API request or checkout.");
 
 const storefront = readFileSync(path.join(root, "components", "store", "storefront.tsx"), "utf8");
