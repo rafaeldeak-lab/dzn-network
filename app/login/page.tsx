@@ -1,4 +1,12 @@
+import type { Metadata } from "next";
+
 import { AuthShell } from "@/components/onboarding/auth-shell";
+
+export const metadata: Metadata = {
+  title: "Sign In | DZN Network",
+  description: "Sign in with Discord to access DZN Network player and server-owner tools.",
+  robots: { index: false, follow: false },
+};
 
 export default function LoginPage() {
   return (

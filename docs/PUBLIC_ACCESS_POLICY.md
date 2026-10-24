@@ -12,23 +12,23 @@ Logged-out visitors may access:
 - `/pricing`
 - `/login`
 - `/signup`
+- `/servers` and public server-profile routes, with redacted preview data
+- `/leaderboards`, with a redacted public preview
 - the public Discord invite link
 
-Logged-out navigation must only expose the public funnel: homepage/features, DZN Comms, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known. Signed-out visitors may open the moderated Global Chat surface, but sending remains protected by Discord authentication and the live Comms feature switches. The browser-local DZN Assist may remain public because it resolves trusted guidance locally and reads the existing public leaderboard only when a visitor explicitly asks for rankings. It does not inspect accounts, send question text to a backend, track questions, or change settings. Any account-aware or generative AI runtime remains a separate release requiring explicit privacy, moderation, credential, cost, and operational controls.
+Logged-out navigation must only expose the public funnel: homepage/features, DZN Comms, pricing, Login/Signup, and Discord. It must not show dashboard, stats, events, owner tools, or add-server controls before a session is known. Public server browsing and leaderboards may appear only as deliberately redacted previews: player detail, invite links, reviews, private saved-server controls, and other account-aware actions remain locked behind Discord login. Signed-out visitors may open the moderated Global Chat surface, but sending remains protected by Discord authentication and the live Comms feature switches. The browser-local DZN Assist may remain public because it resolves trusted guidance locally and reads the existing public leaderboard only when a visitor explicitly asks for rankings. It does not inspect accounts, send question text to a backend, track questions, or change settings. Any account-aware or generative AI runtime remains a separate release requiring explicit privacy, moderation, credential, cost, and operational controls.
 
 Logged-out visitors are redirected to `/login?returnTo=...` before app-page rendering for:
 
 - `/dashboard`
 - `/dzn-pulse`
 - `/events`
-- `/leaderboards`
 - `/player`
 - `/seasons`
-- `/servers`
 - `/setup`
 - `/test`
 
-Nested routes under those paths follow the same rule. Examples include `/player/profile`, `/events/suggest`, `/events/server-wars`, `/servers/profile?slug=...`, `/servers/[slug]`, `/dashboard/events`, and `/setup/...`.
+Nested routes under those paths follow the same rule. Examples include `/player/profile`, `/events/suggest`, `/events/server-wars`, `/dashboard/events`, and `/setup/...`.
 
 ## Logged-In Visitors
 
@@ -62,7 +62,7 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/events/suggestions?sort=newest&limit=5`
 - `/api/dzn-pulse/config`
 
-These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.
+These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. `/servers` and `/leaderboards` intentionally render those redacted public previews; all private actions and account-specific data stay behind the authenticated APIs.
 
 Private player APIs are not public APIs. `/api/player/saved-servers` requires a logged-in Discord session, returns `private, no-store` responses, varies by Cookie, rejects mismatched `Origin` headers on mutations when present, and may only write rows owned by the current user in `player_saved_servers`.
 
@@ -72,7 +72,8 @@ Post-merge verification should expect:
 
 - `/` returns `200`.
 - `/pricing` returns `200` with a dedicated server-rendered owner comparison and payment FAQ. The homepage only contains a short pricing teaser.
-- Logged-out direct app pages such as `/player`, `/player/profile`, `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
+- `/servers`, public server-profile routes, and `/leaderboards` return `200` when logged out and show only their existing redacted public-preview data.
+- Logged-out direct app pages such as `/player`, `/player/profile`, `/events`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
 - Logged-out header/navigation does not expose app/product controls, while authenticated headers show package-appropriate Starter/Pro actions.
 - The dashboard sidebar shows package-aware guidance: trial-safe tools, Pro locks/upgrade prompts, or active Pro tools based on the authenticated account summary.
 - Public APIs above return `200` and no unexpected 5xx.

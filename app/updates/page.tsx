@@ -5,6 +5,14 @@ import { DznUpdatesFeed } from "@/components/comms/dzn-updates-feed";
 export const metadata: Metadata = {
   title: "DZN Updates | DZN Network",
   description: "Verified DZN Network updates for players and server owners.",
+  alternates: { canonical: "/updates" },
+  openGraph: {
+    title: "DZN Updates | DZN Network",
+    description: "Verified DZN Network updates for players and server owners.",
+    url: "/updates",
+    siteName: "DZN Network",
+    type: "website",
+  },
 };
 
 export default function DznUpdatesPage() {
