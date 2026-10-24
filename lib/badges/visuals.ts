@@ -60,6 +60,12 @@ export type CrownVisual = BadgeVisualConfig & {
   label: string;
 };
 
+const CABINET_ARTWORK_CUTOUTS: Record<string, string> = {
+  "/rewards/cabinet/reputation-shield-3d.webp": "/rewards/cabinet/reputation-shield-cutout-3d.webp",
+  "/rewards/cabinet/verified-server-2d.webp": "/rewards/cabinet/verified-server-cutout-2d.webp",
+  "/rewards/cabinet/warlord-medal-3d.webp": "/rewards/cabinet/warlord-medal-cutout-3d.webp",
+};
+
 export type SeasonalVisual = BadgeVisualConfig & {
   key: string;
   label: string;
@@ -241,9 +247,10 @@ export function getBadgeVisualConfig(code: string, category?: string | null, nam
 
 export function getBadgeCabinetArtworkUrl(code: string, category?: string | null, name?: string | null) {
   const artworkUrl = getBadgeVisualConfig(code, category, name).staticIconUrl;
-  return artworkUrl?.startsWith("/rewards/icons/compact/")
+  const cabinetArtworkUrl = artworkUrl?.startsWith("/rewards/icons/compact/")
     ? artworkUrl.replace("/rewards/icons/compact/", "/rewards/cabinet/")
     : artworkUrl;
+  return cabinetArtworkUrl ? CABINET_ARTWORK_CUTOUTS[cabinetArtworkUrl] ?? cabinetArtworkUrl : null;
 }
 
 export function toVisualBadge(source: AchievementVisualSource, options: { earnedAt?: string | null; locked?: boolean } = {}): VisualBadge {

@@ -81,7 +81,7 @@ export function RewardsCabinet() {
 
           <section aria-labelledby="individual-collection" className="relative overflow-hidden border border-amber-300/25 bg-[#100f13] p-5 sm:p-6">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/rewards/cabinet/player-compass-2d.webp" alt="" width={384} height={384} className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 object-contain opacity-35" />
+            <img src="/rewards/cabinet/player-compass-cutout-2d.webp" alt="" width={384} height={384} className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 object-contain opacity-35" />
             <div className="relative">
               <div className="flex items-start gap-4">
                 <span className="grid h-11 w-11 shrink-0 place-items-center border border-amber-300/30 bg-amber-300/10 text-amber-100"><LockKeyhole className="h-5 w-5" aria-hidden="true" /></span>
@@ -118,21 +118,23 @@ function RewardCard({ rule }: { rule: BadgeRule }) {
   const cabinetArtwork = getBadgeCabinetArtworkUrl(rule.badgeCode, rule.category, rule.name);
 
   return (
-    <article className="group relative min-h-[300px] overflow-hidden border border-white/10 bg-[#090e1c] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-      <div className="flex items-start justify-between gap-4">
+    <article className="dzn-reward-card group relative min-h-[320px] overflow-hidden border border-white/10 bg-[#090e1c] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+      <div className="relative z-10 flex items-start justify-between gap-4">
         <BadgeIcon badge={badge} size="lg" className="shrink-0" />
         <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{rewardStatus(rule)}</span>
       </div>
       {cabinetArtwork ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={cabinetArtwork} alt="" width={384} height={384} className="pointer-events-none absolute bottom-2 right-2 h-40 w-40 object-contain opacity-80 transition duration-300 group-hover:scale-105 group-hover:opacity-100" />
+        <span className="dzn-reward-card__art" aria-hidden="true">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={cabinetArtwork} alt="" width={384} height={384} loading="lazy" decoding="async" />
+        </span>
       ) : null}
-      <div className="relative mt-8 max-w-[48%] sm:max-w-[68%]">
+      <div className="dzn-reward-card__copy relative z-10 mt-8">
         <p className="text-xs font-black uppercase text-cyan-200">{rule.category}</p>
         <h4 className="mt-1 text-xl font-black uppercase text-white">{rule.name}</h4>
         <p className="mt-3 text-sm font-semibold leading-6 text-zinc-300">{rule.requirementDescription}</p>
       </div>
-      <div className="relative mt-5 max-w-[48%] border-t border-white/10 pt-4 text-xs font-black uppercase text-zinc-400 sm:max-w-none">{rule.requirementLabel}</div>
+      <div className="dzn-reward-card__requirement relative z-10 mt-5 border-t border-white/10 pt-4 text-xs font-black uppercase text-zinc-400">{rule.requirementLabel}</div>
     </article>
   );
 }
