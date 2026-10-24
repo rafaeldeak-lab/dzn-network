@@ -10,7 +10,7 @@ import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime
 import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
-import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy } from './layout-grid.js';
+import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
 
@@ -2037,11 +2037,43 @@ let layoutMode = 'move-building';
 let layoutStructure = 'hq';
 let layoutStart = null;
 let layoutWallId = null;
+let layoutPending = null;
 const layoutModes = {
   'move-building': 'Move building', 'build-wall': 'Build one wall', 'build-row': 'Build wall row',
   'upgrade-wall': 'Upgrade one wall', 'upgrade-row': 'Upgrade wall row', 'move-wall': 'Move wall',
 };
+function quoteLayoutAction(base, member, claimed, pending) {
+  const { mode, start, end, key, wallId } = pending;
+  const moving = mode === 'move-building' || mode === 'move-wall';
+  const cells = moving ? [end] : rowCells(start || end, end);
+  if (!cells) return { error: 'Choose a straight row of up to 16 cells.', cells: [] };
+  let error = null, partsCost = 0, timberCost = 0;
+  if (mode === 'move-building') {
+    const current = base.layout.structures[key];
+    error = current?.x === end.x && current?.z === end.z ? 'The building is already there.' : validateLayoutPosition(base.layout, claimed, key, end.x, end.z);
+  } else if (mode === 'move-wall') {
+    const wall = base.layout.walls.find(item => item.id === wallId);
+    error = !wall ? 'Select a wall first.' : wall.x === end.x && wall.z === end.z ? 'The wall is already there.' : validateWallPosition(base.layout, claimed, end.x, end.z, wallId);
+  } else if (mode.startsWith('build')) {
+    if (base.layout.walls.length + cells.length > MAX_WALLS_PER_HALL[base.levels.hq]) error = 'Command Hall wall capacity reached.';
+    for (const cell of cells) error ||= validateWallPosition(base.layout, claimed, cell.x, cell.z);
+    partsCost = WALL_COSTS[1].parts * cells.length;
+    timberCost = WALL_COSTS[1].timber * cells.length;
+  } else {
+    const walls = cells.map(cell => base.layout.walls.find(wall => wall.x === cell.x && wall.z === cell.z));
+    if (walls.some(wall => !wall)) error = 'Every selected cell needs an existing wall.';
+    else if (walls.some(wall => wall.level >= base.levels.hq || wall.level >= GAME_CONFIG.maxLevel)) error = 'Upgrade the Command Hall before raising this wall tier.';
+    else {
+      partsCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].parts, 0);
+      timberCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].timber, 0);
+    }
+  }
+  if (!error && (member.parts < partsCost || member.timber < timberCost)) error = `Need ${partsCost} Parts and ${timberCost} Timber.`;
+  return { cells, partsCost, timberCost, error, summary: `${layoutModes[mode]} · ${cells.length} ${mode === 'move-building' ? 'building' : cells.length === 1 ? 'piece' : 'pieces'} · ${partsCost} Parts + ${timberCost} Timber` };
+}
 function showLayoutPanel(errorMessage = '') {
+  const previousScroll = panel.querySelector('.layout-scroll');
+  const scrollLeft = previousScroll?.scrollLeft || 0, scrollTop = previousScroll?.scrollTop || 0;
   selectedKey = null;
   updateBuildingList();
   const snapshot = service.snapshot();
@@ -2062,42 +2094,76 @@ function showLayoutPanel(errorMessage = '') {
   for (let z = bounds.minZ; z <= bounds.maxZ; z += GRID_STEP) for (let x = bounds.minX; x <= bounds.maxX; x += GRID_STEP) {
     const key = `${x},${z}`, structure = centers[key], wall = walls.get(key);
     const chosen = layoutStart?.x === x && layoutStart?.z === z;
+    const preview = layoutPending && (layoutPending.mode.startsWith('move')
+      ? layoutPending.end.x === x && layoutPending.end.z === z
+      : rowCells(layoutPending.start || layoutPending.end, layoutPending.end)?.some(cell => cell.x === x && cell.z === z));
     const label = structure ? (GAME_CONFIG.buildings[structure]?.name || GAME_CONFIG.facilities[structure]?.name || structure) : wall ? `Wall Level ${wall.level}` : occupied.has(key) ? 'Reserved building or camp space' : 'Empty grid space';
-    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'WT' : structure === 'comms' ? 'CM' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
+    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''} ${preview ? 'preview' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'AB' : structure === 'comms' ? 'CM' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
   }
-  const stageHint = layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the map.';
+  const stageHint = layoutPending ? 'Check the highlighted cells and confirm below.' : layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the grid.';
   const zoneOptions = GAME_CONFIG.landPlots.filter(plot => claimed.has(plot.id)).map(plot => `<option value="${plot.id}">${escapeHTML(plot.name)}</option>`).join('');
-  openPanel(`<h2>DZN Base Layout</h2><p>The server owner arranges buildings and perimeter segments on unlocked land. Every wall uses the same shared save as the 3D base; upgrades are capped by Command Hall tier.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!owner ? `<p class="notice warn">${escapeHTML(snapshot.access.allowed ? 'Only this server owner can edit the layout.' : snapshot.access.reason)}</p>` : ''}<p class="notice">Your Parts: ${snapshot.member.parts} · Timber: ${snapshot.member.timber} · Walls: ${base.layout.walls.length}/${MAX_WALLS_PER_HALL[base.levels.hq]} · Hall L${base.levels.hq}</p><div class="layout-toolbar"><label>District<select id="layoutZone">${zoneOptions}</select></label><label>Action<select id="layoutMode">${Object.entries(layoutModes).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></label><label>Building<select id="layoutStructure" ${layoutMode === 'move-building' ? '' : 'disabled'}>${keys.map(key => `<option value="${key}">${escapeHTML(GAME_CONFIG.buildings[key]?.name || GAME_CONFIG.facilities[key]?.name || key)}</option>`).join('')}</select></label></div><p class="help">${stageHint} · New wall: ${WALL_COSTS[1].parts} Parts + ${WALL_COSTS[1].timber} Timber each. Moving is free; row purchases and upgrades charge all cells together.</p><div class="layout-scroll"><div class="layout-grid" style="grid-template-columns:repeat(${columns},36px)" aria-label="${escapeHTML(layoutZone)} build grid">${cells.join('')}</div></div><div class="layout-key"><span>HQ Command Hall</span><span>FG Forge</span><span>AB Arc Battery</span><span>CM Communications</span><span>YD district facility</span><span>W# wall tier</span></div><p class="help">Empty cells are 2 metres apart. Buildings need their full 3 × 3 footprint. A row can be up to 16 cells and cannot cross locked land or occupied cells.</p><div class="row"><button id="layoutCancelStart" ${layoutStart ? '' : 'disabled'}>Cancel selection</button><button id="closeBtn">Close</button></div>`);
+  const quote = layoutPending ? quoteLayoutAction(base, snapshot.member, claimed, layoutPending) : null;
+  openPanel(`<h2>Edit base</h2><p class="help">Place each wall, draw a straight row, or reposition a building. Select cells, review the cost, then confirm.</p>
+    ${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}
+    ${!owner ? `<p class="notice warn">${escapeHTML(snapshot.access.allowed ? 'Only the server owner can edit this shared base.' : snapshot.access.reason)}</p>` : ''}
+    <p class="notice">${snapshot.member.parts} Parts · ${snapshot.member.timber} Timber · ${base.layout.walls.length}/${MAX_WALLS_PER_HALL[base.levels.hq]} walls · Hall L${base.levels.hq}</p>
+    <div class="layout-actions" role="group" aria-label="Base edit actions">${Object.entries(layoutModes).map(([id, label]) => `<button type="button" data-layout-mode="${id}" class="${layoutMode === id ? 'active' : ''}" aria-pressed="${layoutMode === id}">${label}</button>`).join('')}</div>
+    <div class="layout-toolbar"><label>Area<select id="layoutZone">${zoneOptions}</select></label><label>Building<select id="layoutStructure" ${layoutMode === 'move-building' ? '' : 'disabled'}>${keys.map(key => `<option value="${key}">${escapeHTML(GAME_CONFIG.buildings[key]?.name || GAME_CONFIG.facilities[key]?.name || key)}</option>`).join('')}</select></label></div>
+    <p class="help" role="status">${stageHint}</p>
+    ${quote ? `<div class="layout-preview ${quote.error ? 'warn' : ''}" role="status"><strong>${escapeHTML(quote.summary || layoutModes[layoutPending.mode])}</strong>${quote.error ? `<p>${escapeHTML(quote.error)}</p>` : '<p>Preview only. Your resources are spent after you confirm.</p>'}<div class="row"><button id="layoutConfirm" ${quote.error || !owner ? 'disabled' : ''}>Confirm ${escapeHTML(layoutModes[layoutPending.mode].toLowerCase())}</button><button id="layoutDiscard">Change selection</button></div></div>` : ''}
+    <div class="layout-scroll"><div class="layout-grid" style="grid-template-columns:repeat(${columns},36px)" aria-label="${escapeHTML(layoutZone)} build grid">${cells.join('')}</div></div>
+    <div class="layout-key"><span>HQ Hall</span><span>FG Forge</span><span>AB Arc Battery</span><span>CM Comms</span><span>YD District</span><span>W# Wall level</span></div>
+    <p class="help">Each cell is 2 metres. Moving is free. Walls and upgrades use personal Parts and Timber; the finished base is shared with your server.</p>
+    <div class="row"><button id="layoutCancelStart" ${layoutStart ? '' : 'disabled'}>Clear start</button><button id="closeBtn">Done</button></div>`);
+  const layoutScroller = panel.querySelector('.layout-scroll');
+  layoutScroller.scrollLeft = scrollLeft; layoutScroller.scrollTop = scrollTop;
   $('layoutZone').value = layoutZone;
-  $('layoutMode').value = layoutMode;
   $('layoutStructure').value = layoutStructure;
-  $('layoutZone').onchange = e => { layoutZone = e.target.value; layoutStart = null; layoutWallId = null; showLayoutPanel(); };
-  $('layoutMode').onchange = e => { layoutMode = e.target.value; layoutStart = null; layoutWallId = null; showLayoutPanel(); };
-  $('layoutStructure').onchange = e => { layoutStructure = e.target.value; };
-  $('layoutCancelStart').onclick = () => { layoutStart = null; layoutWallId = null; showLayoutPanel(); };
+  $('layoutZone').onchange = e => { layoutZone = e.target.value; layoutStart = null; layoutWallId = null; layoutPending = null; showLayoutPanel(); };
+  panel.querySelectorAll('[data-layout-mode]').forEach(button => button.onclick = () => {
+    layoutMode = button.dataset.layoutMode;
+    layoutStart = null; layoutWallId = null; layoutPending = null;
+    showLayoutPanel();
+  });
+  $('layoutStructure').onchange = e => { layoutStructure = e.target.value; layoutPending = null; showLayoutPanel(); };
+  $('layoutCancelStart').onclick = () => { layoutStart = null; layoutWallId = null; layoutPending = null; showLayoutPanel(); };
   $('closeBtn').onclick = closePanel;
+  if (layoutPending) {
+    $('layoutDiscard').onclick = () => { layoutPending = null; showLayoutPanel(); };
+    $('layoutConfirm').onclick = () => {
+      const { mode, start, end, key, wallId } = layoutPending;
+      let result;
+      if (mode === 'move-building') result = service.moveStructure(snapshot.profile.id, key, end.x, end.z);
+      else if (mode === 'move-wall') result = service.moveWall(snapshot.profile.id, wallId, end.x, end.z);
+      else if (mode.startsWith('build')) result = service.placeWallRow(snapshot.profile.id, start || end, end);
+      else result = service.upgradeWallRow(snapshot.profile.id, start || end, end);
+      if (!result.ok) { showLayoutPanel(result.error); return; }
+      layoutStart = null; layoutWallId = null; layoutPending = null;
+      syncLayoutPositions(); reconcileLandScenery(); updateHud(); playClank();
+      if (mode.startsWith('upgrade')) celebrateUpgrade(end.x, end.z, 'Perimeter wall', result.walls[0].level);
+      toast(mode === 'move-building' ? 'Building repositioned.' : mode === 'move-wall' ? 'Wall moved.' : `${result.walls.length} wall segment${result.walls.length === 1 ? '' : 's'} ${mode.startsWith('upgrade') ? 'upgraded' : 'built'}.`);
+      showLayoutPanel();
+    };
+  }
   panel.querySelectorAll('[data-layout-x]').forEach(button => button.onclick = () => {
     const point = { x: Number(button.dataset.layoutX), z: Number(button.dataset.layoutZ) };
     const existingWall = base.layout.walls.find(wall => wall.x === point.x && wall.z === point.z);
-    let result;
-    if (layoutMode === 'move-building') result = service.moveStructure(snapshot.profile.id, layoutStructure, point.x, point.z);
-    else if (layoutMode === 'build-wall') result = service.placeWallRow(snapshot.profile.id, point);
-    else if (layoutMode === 'upgrade-wall') result = service.upgradeWallRow(snapshot.profile.id, point);
-    else if (!layoutStart) {
+    if (layoutMode === 'build-wall' || layoutMode === 'upgrade-wall' || layoutMode === 'move-building') {
+      layoutPending = { mode: layoutMode, end: point, key: layoutStructure };
+    } else if (!layoutStart) {
       if (layoutMode === 'move-wall' && !existingWall) { showLayoutPanel('Select an existing wall first.'); return; }
-      layoutStart = point; layoutWallId = existingWall?.id || null; showLayoutPanel(); return;
-    } else if (layoutMode === 'move-wall') result = service.moveWall(snapshot.profile.id, layoutWallId, point.x, point.z);
-    else if (layoutMode === 'build-row') result = service.placeWallRow(snapshot.profile.id, layoutStart, point);
-    else result = service.upgradeWallRow(snapshot.profile.id, layoutStart, point);
-    if (!result.ok) { showLayoutPanel(result.error); return; }
-    layoutStart = null; layoutWallId = null;
-    syncLayoutPositions(); reconcileLandScenery(); updateHud(); playClank();
-    if (layoutMode.startsWith('upgrade')) celebrateUpgrade(point.x, point.z, 'Perimeter wall', result.walls[0].level);
-    toast(layoutMode === 'move-building' ? 'Building repositioned.' : layoutMode === 'move-wall' ? 'Wall moved.' : `${result.walls.length} wall segment${result.walls.length === 1 ? '' : 's'} ${layoutMode.startsWith('upgrade') ? 'upgraded' : 'built'}.`);
+      layoutStart = point; layoutWallId = existingWall?.id || null; layoutPending = null;
+      showLayoutPanel(); return;
+    } else {
+      layoutPending = { mode: layoutMode, start: layoutStart, end: point, wallId: layoutWallId };
+    }
     showLayoutPanel();
   });
 }
-$('layoutBtn').onclick = () => showLayoutPanel();
+$('editBaseBtn').onclick = () => {
+  layoutStart = null; layoutWallId = null; layoutPending = null;
+  showLayoutPanel();
+};
 $('chronicleBtn').onclick = showChroniclePanel;
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();

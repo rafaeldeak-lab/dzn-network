@@ -219,7 +219,14 @@
       .world-mission { padding: 8px; margin: 7px 0; border: 1px solid #6f538c; border-radius: 9px; background: #211b2b; }
       .world-mission strong { color: #ddb8ff; font-size: 10px; }
       .panel:has(.collectible-grid) { width: min(950px, calc(100vw - 28px)); }
-      .panel:has(.layout-grid) { width: min(870px, calc(100vw - 28px)); max-height: 82vh; }
+      .panel:has(.layout-grid) { width: min(870px, calc(100vw - 28px)); max-height: min(82vh, calc(100dvh - 94px)); left: 50%; right: auto; bottom: 12px; transform: translateX(-50%); }
+      .layout-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+      .layout-actions button.active { border-color: var(--green); background: #27432e; color: #b5ffcb; }
+      .layout-preview { padding: 10px 12px; margin: 9px 0; border: 1px solid #799e72; border-radius: 10px; background: #1d3124; }
+      .layout-preview strong { color: #b5ffcb; }
+      .layout-preview.warn { border-color: #a87f4f; background: #30271b; }
+      .layout-preview.warn strong { color: #ffdaaa; }
+      .layout-preview .row { margin-top: 8px; }
       .layout-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
       .layout-toolbar label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
       .layout-toolbar select { min-width: 130px; }
@@ -230,6 +237,7 @@
       .layout-cell.occupied { background: #374944; border-color: #b69add; }
       .layout-cell.wall { background: #654b76; border-color: #c9a3ef; font-weight: 800; }
       .layout-cell.chosen { outline: 2px solid #b5ff70; outline-offset: -2px; }
+      .layout-cell.preview { outline: 2px solid #f7d674; outline-offset: -2px; }
       .layout-cell.locked { opacity: .35; }
       .layout-key { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0; color: #c5d2c9; font-size: 10px; }
       .layout-key span { border: 1px solid #5a725f; border-radius: 6px; padding: 4px 6px; }
@@ -380,9 +388,10 @@
       </div>
       <nav class="hud-actions" aria-label="Game sections">
         <button id="collectBtn">Collect</button>
+        <button id="editBaseBtn" title="Place and move buildings or individual wall pieces">Edit base</button>
         <button id="yardBtn" title="Find the Timberline Lumber Yard and its unlock steps">🪵 Lumber Yard</button>
         <details class="hud-menu"><summary>Build ▾</summary><div class="hud-menu-list">
-          <button id="projectsBtn">Projects</button><button id="forgeBtn">Forge</button><button id="landBtn">Land &amp; Forest</button><button id="layoutBtn">Base Layout</button>
+          <button id="projectsBtn">Projects</button><button id="forgeBtn">Forge</button><button id="landBtn">Land &amp; Forest</button>
         </div></details>
         <details class="hud-menu"><summary>Army ▾</summary><div class="hud-menu-list">
           <button id="squadsBtn">Squads</button><button id="operationsBtn">Operations</button><button id="warBtn">War Table</button><button id="progressionBtn">Progression</button>
