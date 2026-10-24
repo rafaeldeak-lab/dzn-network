@@ -143,7 +143,7 @@
     "test:owner-discord-delivery": "tsx scripts/test-owner-discord-delivery.ts",
     "test:owner-discord-delivery-discovery": "tsx scripts/test-owner-discord-delivery-discovery.ts",
     "test:server-community-directory": "tsx scripts/test-server-community-directory.ts && tsx scripts/test-server-community-directory-runtime.ts && tsx scripts/test-server-community-member-sources.ts",
-    "test:store-catalog-foundation": "tsx scripts/test-store-catalog-foundation.ts && tsx scripts/test-store-catalog-admin.ts && tsx scripts/test-store-catalog-activation-checklist.ts",
+    "test:store-catalog-foundation": "tsx scripts/test-store-catalog-foundation.ts && tsx scripts/test-store-catalog-admin.ts && tsx scripts/test-store-catalog-activation-checklist.ts && tsx scripts/test-store-rewards-cabinet.ts",
     "test:store-order-inventory-foundation": "tsx scripts/test-store-order-inventory-foundation.ts",
     "test:store-fulfilment-receipt-foundation": "tsx scripts/test-store-fulfilment-receipt-foundation.ts",
     "test:store-commerce-runtime": "tsx scripts/test-store-commerce-runtime.ts",
