@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "status": "First Edition concept artwork and local collection preview; no limited issuance or trade ledger",
+  "provenance": "Original DZN designs generated with the built-in image generation tool from the user's card style reference, 2026-10-23",
+  "assets": {
+    "guardian": { "file": "assets/cards/guardian-first-edition.png", "sha256": "0469e3a1c551b179dc2bc855a13b78594691475de0b0d6addaf2024aa6a17cf9" },
+    "ghost": { "file": "assets/cards/ghost-first-edition.png", "sha256": "2309167dd7ebadb3e0d9ad123998bf1b59165a8faa20b1e1f5dbd86fc768543b" },
+    "fixer": { "file": "assets/cards/fixer-first-edition.png", "sha256": "aa7edd3bb53a2855f0eacc27d114b458f07c7bd67056d37fcfc44fdd7bf4832c" }
+  }
+}

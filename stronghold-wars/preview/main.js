@@ -1,18 +1,46 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { GAME_CONFIG, LocalGameService, WAR_RULES } from './game-service.js';
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
+import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
+import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
+import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
+import { connectedProMatches, routeBriefing } from './world-map.js';
+import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
+import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
+import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
+import { operativeAsset } from './operative-assets.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
+const operations = new OperationsController(service);
 const DEFS = {
   hq: { name: 'Command Hall', pos: [0, 0] },
   workshop: { name: 'Workshop / Forge', pos: [-9, 4] },
-  tower: { name: 'Watchtower', pos: [8, 6] },
+  tower: { name: 'Arc Battery', pos: [8, 6] },
   comms: { name: 'Communications', pos: [6, -8] },
 };
+let activePatrolNodes = PATROL_NODES;
+const patrols = [];
+const defenderPatrols = new Map();
+let operativePatrol = null;
+function syncLayoutPositions() {
+  const layout = service.community()?.saved.base.layout;
+  if (!layout) return;
+  activePatrolNodes = patrolNodesForLayout(layout);
+  for (const patrol of patrols || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
+  for (const patrol of defenderPatrols?.values?.() || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
+  if (operativePatrol?.motion) { operativePatrol.motion.waypointNode = null; operativePatrol.motion.waypoints = null; }
+  for (const key of Object.keys(DEFS)) {
+    const point = layout.structures[key];
+    if (!point) continue;
+    DEFS[key].pos = [point.x, point.z];
+    if (buildings[key]) buildings[key].group.position.set(point.x, .05, point.z);
+  }
+}
 const PREVIEW_SERVICE_CHECKS = runServiceTests();
 console.info(`DZN local service checks passed (${PREVIEW_SERVICE_CHECKS.passed}).`);
 const state = new Proxy({}, {
@@ -139,6 +167,32 @@ function getCanvasBuildingImage(key, level) {
   const record = canvasBuildingImages.get(asset.png);
   return record.ready ? record.image : null;
 }
+const canvasSquadImages = new Map();
+function getCanvasSquadImage(role, tier) {
+  const path = squadPortrait(role, tier);
+  if (!path) return null;
+  if (!canvasSquadImages.has(path)) {
+    const image = new Image();
+    const record = { image, ready: false };
+    image.onload = () => { record.ready = true; };
+    image.onerror = () => console.warn(`Canvas 2D squad artwork failed to load: ${path}`);
+    image.src = path;
+    canvasSquadImages.set(path, record);
+  }
+  const record = canvasSquadImages.get(path);
+  return record.ready ? record.image : null;
+}
+function drawCanvasSoldier(ctx, project, mesh, unit) {
+  const image = getCanvasSquadImage(mesh.userData.squadRole || 'assault', mesh.userData.squadTier || 1);
+  if (!image) return;
+  const point = project(mesh.position.x, mesh.position.z);
+  const size = Math.max(45, unit * 2.75);
+  ctx.fillStyle = 'rgba(0,0,0,.34)';
+  ctx.beginPath();
+  ctx.ellipse(point.x, point.y, size * .2, size * .055, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.drawImage(image, point.x - size / 2, point.y - size * .97, size, size);
+}
 
 function drawCompatibilityScene() {
   const ctx = fallbackContext;
@@ -196,7 +250,8 @@ function drawCompatibilityScene() {
     ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#e8f1e9';
     ctx.fillText(`${config.name} · ${plot.status}`, label.x, label.y);
     if (plot.status === 'claimed') {
-      const center = project(x, z);
+      const facilityPoint = service.community()?.saved.base.layout?.structures[config.id];
+      const center = project(facilityPoint?.x ?? x, facilityPoint?.z ?? z);
       if (plot.facilityLevel > 0) {
         const size = Math.max(16, unit * 2.6);
         ctx.fillStyle = '#29382f'; ctx.fillRect(center.x - size * .5, center.y - size * .75, size, size * .75);
@@ -233,6 +288,14 @@ function drawCompatibilityScene() {
   for (const [x, z] of [[-17, -17], [17, -17], [17, 17], [-17, 17]]) wall.push(project(x, z));
   ctx.beginPath(); ctx.moveTo(wall[0].x, wall[0].y); wall.slice(1).forEach(pt => ctx.lineTo(pt.x, pt.y)); ctx.closePath();
   ctx.strokeStyle = `rgba(174,188,156,${0.44 + (state.levels?.hq || 1) * 0.07})`; ctx.lineWidth = Math.max(2, unit * (0.12 + (state.levels?.hq || 1) * 0.015)); ctx.stroke();
+  for (const segment of service.community()?.saved.base.layout?.walls || []) {
+    const p = project(segment.x, segment.z);
+    const size = Math.max(5, unit * .7);
+    ctx.fillStyle = segment.level >= 4 ? '#8154ae' : segment.level >= 3 ? '#75827e' : '#76543a';
+    ctx.fillRect(p.x - size, p.y - size * .75, size * 2, size * .9);
+    ctx.strokeStyle = segment.level >= 4 ? '#a5ff7b' : '#bbc5b4';
+    ctx.lineWidth = 2; ctx.strokeRect(p.x - size, p.y - size * .75, size * 2, size * .9);
+  }
 
   if (camTarget.x > 35) {
     diamond(55, -10, 19, 17, '#454a3e', '#7b7c66');
@@ -242,7 +305,7 @@ function drawCompatibilityScene() {
       ctx.fillStyle = i === 1 ? '#575b4d' : '#85877a'; ctx.fillRect(p.x - s / 2, p.y - s, s, s);
       if (raid && i === 0) { ctx.strokeStyle = '#ffad57'; ctx.lineWidth = 3; ctx.strokeRect(p.x - s / 2, p.y - s, s, s); }
     }
-    if (raid) raid.troops.forEach(t => { const p = project(t.position.x, t.position.z); ctx.fillStyle = '#bd83f2'; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill(); });
+    if (raid) raid.troops.forEach(t => drawCanvasSoldier(ctx, project, t, unit));
     if (warBattle) {
       for (let i = 0; i < 4; i++) {
         const p = project(55 + [-8, 0, 8, 6][i], -10 + [4, 0, 5, -8][i]);
@@ -250,12 +313,7 @@ function drawCompatibilityScene() {
         ctx.fillRect(p.x - 11, p.y - 20, 22, 24);
         ctx.strokeStyle = 'rgba(192,132,252,.8)'; ctx.strokeRect(p.x - 12, p.y - 21, 24, 26);
       }
-      const progress = Math.min(1, warBattle.time / warBattle.duration);
-      for (let i = 0; i < Math.min(8, warBattle.squadSize); i++) {
-        const p = project(34 + progress * 13, -10 + (i - 4) * 1.2);
-        ctx.fillStyle = warBattle.tactic === 'recon' ? '#c084fc' : '#ffb45f';
-        ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
-      }
+      warBattle.troops.forEach(troop => drawCanvasSoldier(ctx, project, troop.mesh, unit));
     }
     ctx.fillStyle = '#e7e2cf'; ctx.font = '700 12px Inter, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(warBattle ? `WAR ATTACK · ${warBattle.defenderName.toUpperCase()}` : 'OUTPOST DELTA · AI TRAINING', width / 2, height * .2);
@@ -285,11 +343,7 @@ function drawCompatibilityScene() {
     ctx.fillStyle = '#eff4e9'; ctx.font = '600 10px Inter, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(`${DEFS[key].name} · L${lvl}`, p.x, p.y + drawWidth * .32);
   }
-  for (let i = 0; i < 5; i++) {
-    const a = i * 1.256 + performance.now() * 0.0001;
-    const p = project(Math.cos(a) * 12, Math.sin(a) * 12);
-    ctx.fillStyle = '#495e40'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill();
-  }
+  patrols.forEach(patrol => { if (patrol.mesh.visible) drawCanvasSoldier(ctx, project, patrol.mesh, unit); });
 }
 
 const scene = new THREE.Scene();
@@ -299,6 +353,12 @@ scene.fog = new THREE.Fog(0x1a2420, 60, 130);
 let zoom = 28;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
+const cameraOffset = new THREE.Vector3(40, 40, 40);
+let focusedPatrolRole = null;
+function updateCameraPosition() {
+  camera.position.copy(camTarget).add(cameraOffset);
+  camera.lookAt(camTarget);
+}
 function updateCamera() {
   const aspect = window.innerWidth / window.innerHeight;
   camera.left = -zoom * aspect / 2;
@@ -306,8 +366,7 @@ function updateCamera() {
   camera.top = zoom / 2;
   camera.bottom = -zoom / 2;
   camera.updateProjectionMatrix();
-  camera.position.copy(camTarget).add(new THREE.Vector3(40, 40, 40));
-  camera.lookAt(camTarget);
+  updateCameraPosition();
 }
 updateCamera();
 window.addEventListener('resize', () => {
@@ -325,6 +384,17 @@ scene.add(sun);
 const purpleFill = new THREE.PointLight(0xa855f7, 60, 40);
 purpleFill.position.set(-6, 8, -6);
 scene.add(purpleFill);
+// Patrol inspection gets a close, soft key light without changing the base lighting.
+const patrolFocusLight = new THREE.PointLight(0xc3ffce, 18, 6, 2);
+patrolFocusLight.visible = false;
+scene.add(patrolFocusLight);
+const patrolFocusRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.62, 0.73, 40),
+  new THREE.MeshBasicMaterial({ color: 0x70e59a, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false }),
+);
+patrolFocusRing.rotation.x = -Math.PI / 2;
+patrolFocusRing.visible = false;
+scene.add(patrolFocusRing);
 
 const texLoader = new THREE.TextureLoader();
 function tiledTexture(url, repeat) {
@@ -372,6 +442,23 @@ function cyl(parent, rt, rb, h, mat, x = 0, y = 0, z = 0, seg = 12) {
   return mesh;
 }
 
+// A visible home for off-duty squads. Patrols leave this clearing for assigned
+// structures, stop to work or guard, then return here.
+const campMat = new THREE.MeshStandardMaterial({ color: 0x182520, roughness: 0.9 });
+const campAccent = new THREE.MeshStandardMaterial({ color: 0x7542a4, metalness: 0.35, roughness: 0.55 });
+const campFallback = new THREE.Group();
+scene.add(campFallback);
+const campTent = new THREE.Mesh(new THREE.ConeGeometry(1.45, 1.35, 4), campMat);
+campTent.rotation.y = Math.PI / 4;
+campTent.position.set(-6.6, 0.74, -13.1);
+campTent.castShadow = true;
+campFallback.add(campTent);
+box(campFallback, 1.2, 0.8, 0.85, MAT.dark, -6.6, 0, -13.1);
+box(campFallback, 1.5, 0.15, 0.38, campAccent, -6.6, 1.34, -13.1);
+for (const x of [-2.8, -1.7]) box(campFallback, 0.62, 0.53, 0.68, MAT.dark, x, 0, -13.7);
+const campBeacon = cyl(campFallback, 0.1, 0.18, 1.45, MAT.dark, -2.1, 0, -10.5);
+box(campFallback, 0.4, 0.19, 0.4, MAT.green, -2.1, 1.46, -10.5);
+
 // Perimeter fence posts
 for (let i = 0; i < 48; i++) {
   const a = (i / 48) * Math.PI * 2;
@@ -383,13 +470,93 @@ for (let i = 0; i < 48; i++) {
 
 // ---------- Buildings ----------
 const buildings = {};
-const animated = { radars: [], lights: [], chimneys: [] };
+const animated = { radars: [], lights: [], chimneys: [], yards: [] };
+let warTurretRig = null;
+
+function addArcMuzzle(yaw, distance) {
+  const muzzle = new THREE.Group();
+  muzzle.position.set(0, 0.12, distance);
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xc7ff73, transparent: true, opacity: 0, depthWrite: false }));
+  flash.scale.setScalar(0.01);
+  muzzle.add(flash);
+  const light = new THREE.PointLight(0xb5ff65, 0, 5, 2);
+  muzzle.add(light);
+  yaw.add(muzzle);
+  return { muzzle, flash, light };
+}
+
+// Rosebud's Arc Battery GLBs are one textured mesh each. Keep that artwork,
+// but give its upper assembly a real yaw pivot instead of spinning the base.
+function articulateArcBattery(model) {
+  const mesh = model.getObjectByProperty('isMesh', true);
+  const position = mesh?.geometry?.getAttribute('position');
+  const index = mesh?.geometry?.getIndex();
+  if (!mesh || !position || !index || index.count < 12) return null;
+  mesh.geometry.computeBoundingBox();
+  const bounds = mesh.geometry.boundingBox;
+  const cut = bounds.min.y + (bounds.max.y - bounds.min.y) * 0.61;
+  const fixed = [], moving = [];
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i), b = index.getX(i + 1), c = index.getX(i + 2);
+    ((position.getY(a) + position.getY(b) + position.getY(c)) / 3 >= cut ? moving : fixed).push(a, b, c);
+  }
+  if (Math.min(fixed.length, moving.length) < index.count * 0.12) return null;
+  const lowerGeometry = mesh.geometry.clone();
+  const upperGeometry = mesh.geometry.clone();
+  lowerGeometry.setIndex(fixed);
+  upperGeometry.setIndex(moving);
+  lowerGeometry.userData.arcSplit = upperGeometry.userData.arcSplit = true;
+  const pivotWorld = mesh.localToWorld(new THREE.Vector3((bounds.min.x + bounds.max.x) / 2, cut, (bounds.min.z + bounds.max.z) / 2));
+  const rotor = mesh.clone(false);
+  rotor.name = 'arc_battery_rotor';
+  rotor.geometry = upperGeometry;
+  rotor.castShadow = rotor.receiveShadow = true;
+  mesh.geometry = lowerGeometry;
+  mesh.parent.add(rotor);
+  const yaw = new THREE.Group();
+  yaw.name = 'arc_battery_yaw';
+  model.add(yaw);
+  model.updateMatrixWorld(true);
+  yaw.position.copy(model.worldToLocal(pivotWorld));
+  const recoil = new THREE.Group();
+  recoil.name = 'arc_battery_recoil';
+  yaw.add(recoil);
+  model.updateMatrixWorld(true);
+  recoil.attach(rotor);
+  const span = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
+  const muzzleParts = addArcMuzzle(yaw, span * 0.23);
+  return { yaw, recoil, ...muzzleParts, flashAmount: 0 };
+}
+
+function stepArcBattery(rig, dt, time, target = null, fire = false) {
+  if (!rig || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let desired = Math.sin(time * 0.45) * 0.85;
+  if (target) {
+    const local = rig.yaw.parent.worldToLocal(target.clone());
+    desired = Math.atan2(local.x - rig.yaw.position.x, local.z - rig.yaw.position.z);
+  }
+  const delta = Math.atan2(Math.sin(desired - rig.yaw.rotation.y), Math.cos(desired - rig.yaw.rotation.y));
+  rig.yaw.rotation.y += THREE.MathUtils.clamp(delta, -dt * 1.9, dt * 1.9);
+  if (fire) { rig.flashAmount = 1; if (rig.recoil) rig.recoil.position.z = -0.065; }
+  rig.flashAmount = Math.max(0, rig.flashAmount - dt * 4.2);
+  if (rig.recoil) rig.recoil.position.z = THREE.MathUtils.damp(rig.recoil.position.z, 0, 12, dt);
+  rig.flash.material.opacity = rig.flashAmount * 0.95;
+  rig.flash.scale.setScalar(0.01 + rig.flashAmount * 1.8);
+  rig.light.intensity = rig.flashAmount * 24;
+}
+
+function clearArcSplitGeometry(model) {
+  model?.traverse(object => {
+    if (object.isMesh && object.geometry?.userData.arcSplit) object.geometry.dispose();
+  });
+}
 const revealEffects = new Map();
 const celebrations = [];
 let revealBannerTimer = 0;
-function celebrateUpgrade(x, z, name, level) {
+function celebrateUpgrade(x, z, name, level, announce = true) {
   const banner = document.getElementById('upgradeReveal');
-  if (banner) {
+  if (banner && announce) {
     banner.querySelector('span').textContent = `${name} · Level ${level}`;
     banner.classList.remove('active');
     void banner.offsetWidth;
@@ -397,7 +564,7 @@ function celebrateUpgrade(x, z, name, level) {
     clearTimeout(revealBannerTimer);
     revealBannerTimer = setTimeout(() => banner.classList.remove('active'), GAME_CONFIG.revealSeconds * 1000);
   }
-  if (!state.muted) { beep(660, .17); setTimeout(() => beep(880, .19), 115); setTimeout(() => beep(1100, .25), 245); }
+  if (announce && !state.muted) { beep(660, .17); setTimeout(() => beep(880, .19), 115); setTimeout(() => beep(1100, .25), 245); }
   if (fallback2D || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const group = new THREE.Group();
   group.position.set(x, .15, z);
@@ -418,8 +585,18 @@ function celebrateUpgrade(x, z, name, level) {
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(.25, .8, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x9bffbb, transparent: true, opacity: .2, depthWrite: false, side: THREE.DoubleSide }));
   beam.position.y = 4.5;
   group.add(beam);
+  const chevrons = Array.from({ length: 8 }, (_, index) => {
+    const angle = index * Math.PI / 4;
+    const mesh = new THREE.Mesh(new THREE.ConeGeometry(.28, .65, 3), new THREE.MeshBasicMaterial({ color: index % 2 ? 0xc084fc : 0x70e59a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.rotation.y = angle;
+    group.add(mesh);
+    return { mesh, angle };
+  });
+  const flash = new THREE.PointLight(0x9bffbb, 0, 13, 2);
+  flash.position.y = 4;
+  group.add(flash);
   scene.add(group);
-  celebrations.push({ group, rings, sparks, beam, startedAt: performance.now() });
+  celebrations.push({ group, rings, sparks, beam, chevrons, flash, startedAt: performance.now() });
 }
 
 function updateCelebrations(now) {
@@ -436,11 +613,19 @@ function updateCelebrations(now) {
     effect.sparks.forEach(({ mesh, angle, speed, lift }) => { mesh.position.set(Math.cos(angle) * (.5 + progress * speed), .4 + Math.sin(progress * Math.PI) * lift * 3, Math.sin(angle) * (.5 + progress * speed)); mesh.rotation.y += .04; mesh.material.opacity = 1 - progress; });
     effect.beam.material.opacity = .22 * Math.sin(progress * Math.PI);
     effect.beam.scale.set(1 + progress * .8, 1, 1 + progress * .8);
+    effect.chevrons.forEach(({ mesh, angle }, index) => {
+      const rise = Math.max(0, Math.min(1, (progress - index * .035) * 1.45));
+      mesh.position.set(Math.cos(angle) * (2.1 + rise * 1.15), .35 + rise * 5.5, Math.sin(angle) * (2.1 + rise * 1.15));
+      mesh.material.opacity = Math.sin(rise * Math.PI) * .8;
+      mesh.rotation.z = rise * .35;
+    });
+    effect.flash.intensity = 4.5 * Math.sin(Math.min(1, progress * 1.5) * Math.PI);
   }
 }
 const gltfLoader = new GLTFLoader();
 const modelTemplateCache = new Map();
 const modelLoadPromises = new Map();
+const animatedSquadTemplates = new Map();
 const landScenery = new THREE.Group();
 scene.add(landScenery);
 const sceneryTemplates = new Map();
@@ -451,14 +636,17 @@ let sceneryRequest = 0;
 
 async function sceneryModel(name) {
   if (!sceneryTemplates.has(name)) {
-    sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${name}.glb`).then(gltf => gltf.scene));
+    const assetName = /^pine_l0[1-5]$/.test(name) ? `${name}-3`
+      : /^(granite_boulder|claim_marker)$/.test(name) ? `${name}-2` : name;
+    sceneryTemplates.set(name, gltfLoader.loadAsync(`assets/models/scenery/${assetName}.glb?v=forest-20261023`).then(gltf => gltf.scene));
   }
   return sceneryTemplates.get(name);
 }
 
 async function facilityModel(name) {
   const key = `facility/${name}`;
-  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${name}.glb`).then(gltf => gltf.scene).catch(error => {
+  const assetName = name.startsWith('timberline_l0') ? name.replace('timberline_', 'timberline_v4_') : name;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-motion-20261023`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Facility model ${name} could not load; keeping the claimed plot marker.`, error);
     return null;
@@ -486,6 +674,16 @@ async function chronicleModel(level) {
   return sceneryTemplates.get(key);
 }
 
+async function wallModel(level) {
+  const key = `wall/${level}`;
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+    sceneryTemplates.delete(key);
+    console.warn(`Wall Level ${level} model could not load.`, error);
+    return null;
+  }));
+  return sceneryTemplates.get(key);
+}
+
 function supplyRouteEndpoints([x, z]) {
   const distance = Math.hypot(x, z);
   const sideX = z / distance, sideZ = -x / distance;
@@ -500,21 +698,30 @@ async function reconcileLandScenery() {
   const request = ++sceneryRequest;
   const base = service.community()?.saved.base;
   if (!base) return;
-  const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder'];
+  const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder', 'fallen_trunk', 'fern_patch', 'mossy_rock_cluster', 'brush_pile', 'lumber_pallet'];
   try {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
       .map(plot => `${GAME_CONFIG.facilities[plot.id]?.model}_l0${plot.facilityLevel}`).filter(name => !name.startsWith('undefined'));
+    if (!base.landPlots.find(plot => plot.id === 'timberline-depot')?.facilityLevel) facilityNames.push('timberline_l01');
     const routeLevels = [...new Set(base.landPlots.filter(plot => plot.status === 'claimed' && plot.routeLevel > 0).map(plot => plot.routeLevel))];
+    const wallLevels = [...new Set(base.layout.walls.map(wall => wall.level))];
     const models = Object.fromEntries(await Promise.all([
       ...names.map(async name => [name, await sceneryModel(name)]),
       ...facilityNames.map(async name => [name, await facilityModel(name)]),
       ...routeLevels.map(async level => [`route_l0${level}`, await routeModel(level)]),
+      ...wallLevels.map(async level => [`wall_l0${level}`, await wallModel(level)]),
       [`chronicle_l0${base.levels.hq}`, await chronicleModel(base.levels.hq)],
     ]));
     if (request !== sceneryRequest) return;
-    for (const child of landScenery.children) if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
+    for (const child of landScenery.children) {
+      if (child.userData.ownedTerrain) { child.geometry.dispose(); child.material.dispose(); }
+      if (child.userData.ownedGhost) child.traverse(object => {
+        if (object.isMesh) for (const material of [].concat(object.material)) material.dispose();
+      });
+    }
     landScenery.clear();
     landTreePicks = [];
+    animated.yards.length = 0;
     const beacon = models[`chronicle_l0${base.levels.hq}`]?.clone(true);
     if (beacon) {
       beacon.position.set(-8, .1, -9);
@@ -543,6 +750,24 @@ async function reconcileLandScenery() {
       if (!plot) continue;
       const [x, z] = config.position;
       const claimed = plot.status === 'claimed';
+      if (config.id === 'timberline-depot' && plot.facilityLevel === 0 && models.timberline_l01) {
+        // A visible 3D blueprint makes the first district discoverable before Hall L2.
+        const blueprint = models.timberline_l01.clone(true);
+        blueprint.userData.ownedGhost = true;
+        blueprint.position.set(x, .1, z);
+        blueprint.traverse(object => {
+          if (!object.isMesh) return;
+          const ghostMaterial = material => {
+            const clone = material.clone();
+            clone.transparent = true;
+            clone.opacity = .72;
+            clone.depthWrite = false;
+            return clone;
+          };
+          object.material = Array.isArray(object.material) ? object.material.map(ghostMaterial) : ghostMaterial(object.material);
+        });
+        landScenery.add(blueprint);
+      }
       const clearing = new THREE.Mesh(
         new THREE.CircleGeometry(5.25, 10),
         new THREE.MeshStandardMaterial({ color: claimed ? 0x405b49 : plot.status === 'approved' ? 0x636044 : 0x344537, roughness: 1, transparent: true, opacity: 0.83 }),
@@ -574,9 +799,17 @@ async function reconcileLandScenery() {
         const name = plot.facilityLevel > 0 ? `${GAME_CONFIG.facilities[config.id].model}_l0${plot.facilityLevel}` : null;
         if (name && models[name]) {
           const facility = models[name].clone(true);
-          facility.position.set(x, 0.09, z);
+          const point = base.layout.structures[config.id];
+          facility.position.set(point?.x ?? x, 0.09, point?.z ?? z);
           facility.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
           landScenery.add(facility);
+          if (config.id === 'timberline-depot') animated.yards.push({
+            rotor: facility.getObjectByName('saw_rotor'),
+            rollers: [0, 10, 20, 30].map(index => facility.getObjectByName(`conveyor_roller_${index}`)).filter(Boolean),
+            carriage: facility.getObjectByName('saw_carriage'),
+            hook: facility.getObjectByName('loading_crane_hook'),
+            phase: 0,
+          });
         } else {
           const marker = models.claim_marker.clone();
           marker.position.set(x, 0.09, z);
@@ -589,7 +822,34 @@ async function reconcileLandScenery() {
           logs.rotation.y = a + Math.PI / 2;
           landScenery.add(logs);
         }
+        if (config.id === 'timberline-depot') {
+          const pallet = models.lumber_pallet.clone(true);
+          pallet.position.set(x + 3.9, .1, z + 2.1);
+          pallet.rotation.y = -.45;
+          landScenery.add(pallet);
+        }
       }
+      for (const [name, ox, oz, rotation] of [
+        ['fern_patch', -4.75, -1.2, .3], ['mossy_rock_cluster', 4.75, 1.25, .8],
+        [plot.treesRemaining ? 'brush_pile' : 'fallen_trunk', -4.65, 2.5, 1.25],
+      ]) {
+        const detail = models[name].clone(true);
+        detail.position.set(x + ox, .09, z + oz);
+        detail.rotation.y = rotation;
+        detail.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        landScenery.add(detail);
+      }
+    }
+    for (const wall of base.layout.walls) {
+      const template = models[`wall_l0${wall.level}`];
+      if (!template) continue;
+      const segment = template.clone(true);
+      segment.position.set(wall.x, .09, wall.z);
+      const horizontal = base.layout.walls.some(other => other.id !== wall.id && other.level === wall.level && other.z === wall.z && Math.abs(other.x - wall.x) === GRID_STEP);
+      const vertical = base.layout.walls.some(other => other.id !== wall.id && other.level === wall.level && other.x === wall.x && Math.abs(other.z - wall.z) === GRID_STEP);
+      if (vertical && !horizontal) segment.rotation.y = Math.PI / 2;
+      segment.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+      landScenery.add(segment);
     }
     for (let i = 0; i < 100; i++) {
       const a = i * 2.39996;
@@ -598,6 +858,12 @@ async function reconcileLandScenery() {
       asset.position.set(Math.cos(a) * radius, 0, Math.sin(a) * radius);
       asset.rotation.y = a;
       landScenery.add(asset);
+      if (i % 4 === 0) {
+        const detail = models[i % 12 === 0 ? 'fallen_trunk' : i % 8 === 0 ? 'mossy_rock_cluster' : 'fern_patch'].clone(true);
+        detail.position.set(Math.cos(a + .07) * (radius + 2.1), .03, Math.sin(a + .07) * (radius + 2.1));
+        detail.rotation.y = a;
+        landScenery.add(detail);
+      }
     }
   } catch (error) {
     console.error('Scenery GLB import failed; base preview remains available.', error);
@@ -659,11 +925,10 @@ function buildModel(key, level) {
       new THREE.MeshBasicMaterial({ color: 0xd8b4fe, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide })
     );
     beam.position.set(0, -(height + 6) / 2 + 0.3, 5);
-    beam.rotation.x = -Math.atan2(10, height) + Math.PI;
     beam.rotation.x = Math.PI - Math.atan2(10, height + 6);
     head.add(beam);
     g.add(head);
-    animated.lights.push({ head });
+    g.userData.turretRig = { yaw: head, recoil: null, ...addArcMuzzle(head, 0.72), flashAmount: 0 };
   } else if (key === 'comms') {
     box(g, 4.5, 0.4, 4.5, MAT.concrete);
     box(g, 3, 2, 3, MAT.olive, -0.5, 0.4, -0.5);
@@ -723,6 +988,42 @@ function loadBuildingTemplate(path) {
   return promise;
 }
 
+// Keep the squad home beside the camp route node so patrols walk to its open
+// entrance. The procedural shelter remains available only if the GLB fails.
+const campAssetPath = 'assets/models/camps/dzn-squad-bivouac-for-a-realistic-isometric-3d-survival-strategy-game-one-open-s.glb';
+if (!fallback2D) loadBuildingTemplate(campAssetPath).then(template => {
+  const shelter = template.clone(true);
+  shelter.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(shelter);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const footprint = Math.max(size.x, size.z);
+  if (!Number.isFinite(footprint) || footprint <= 0 || !Number.isFinite(bounds.min.y)) throw new Error('Camp GLB has empty bounds.');
+  shelter.position.set(-center.x, -bounds.min.y, -center.z);
+  shelter.traverse(object => {
+    if (object.isMesh) {
+      object.castShadow = true;
+      object.receiveShadow = true;
+    }
+  });
+  const camp = new THREE.Group();
+  camp.position.set(-6, 0.05, -12.2);
+  camp.scale.setScalar(4 / footprint);
+  camp.add(shelter);
+  scene.add(camp);
+  campFallback.visible = false;
+}).catch(error => console.warn(`Unable to load DZN squad camp GLB (${campAssetPath}); keeping fallback shelter.`, error));
+
+function loadAnimatedSquad(path) {
+  if (!animatedSquadTemplates.has(path)) {
+    animatedSquadTemplates.set(path, gltfLoader.loadAsync(path).catch(error => {
+      animatedSquadTemplates.delete(path);
+      throw error;
+    }));
+  }
+  return animatedSquadTemplates.get(path);
+}
+
 function normalizeBuildingClone(template, key, level) {
   const asset = getBuildingAsset(key, level);
   const source = template.clone(true);
@@ -749,6 +1050,7 @@ function normalizeBuildingClone(template, key, level) {
   normalized.userData.buildingLevel = level;
   normalized.userData.assetPath = asset.glb;
   normalized.updateMatrixWorld(true);
+  if (key === 'tower') normalized.userData.turretRig = articulateArcBattery(normalized);
   return normalized;
 }
 
@@ -757,7 +1059,7 @@ function setRendererDiagnostic(message) {
   if (message !== undefined) rendererDiagnosticMessage = message;
   const status = document.getElementById('rendererStatus');
   if (!status) return;
-  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · source PNGs' : 'Three.js WebGL · textured GLB models');
+  status.textContent = rendererDiagnosticMessage || (fallback2D ? 'Canvas 2D compatibility · DZN squad art' : 'Three.js WebGL · articulated 3D squads');
   status.classList.toggle('error', Boolean(rendererDiagnosticMessage));
 }
 
@@ -777,7 +1079,7 @@ function requestBuildingModel(key, level) {
     building.modelAssetPath = asset.glb;
     building.modelLevel = level;
     building.group.userData.buildingLevel = level;
-    if (previous) building.group.remove(previous);
+    if (previous) { building.group.remove(previous); clearArcSplitGeometry(previous); }
     setRendererDiagnostic('');
   }).catch(error => {
     if (building.loadToken !== requestToken) return;
@@ -848,20 +1150,348 @@ for (const key of Object.keys(DEFS)) {
   buildings[key] = building;
   renderedBuildingLevels[key] = state.levels[key];
 }
+syncLayoutPositions();
 if (!fallback2D) for (const key of Object.keys(DEFS)) requestBuildingModel(key, state.levels[key]);
 applyScaffoldState();
 
-// Patrol soldiers
-const patrols = [];
-for (let i = 0; i < 5; i++) {
+// Keep the owner's detailed character sheets in the Armoury. In the world, load
+// actual three-dimensional GLBs so the named limb pivots can walk and turn.
+function bindSquadEquipment(model, role) {
+  const right = model.getObjectByName('right_arm');
+  const left = model.getObjectByName('left_arm');
+  const held = {
+    assault: ['carbine_barrel', 'carbine_body', 'carbine_sight'],
+    recon: ['scanner', 'scanner_screen'],
+    engineer: ['axe_handle', 'axe_head'],
+    sentinel: ['heavy_carbine', 'heavy_barrel', 'reflex_sight', 'drum_magazine'],
+    medic: ['aid_injector', 'injector_charge'],
+  };
+  // The older articulated kits store tools in world coordinates beside the
+  // forearm. Move each tool's grip onto the glove before parenting it, so the
+  // whole item follows the shoulder instead of floating alongside the soldier.
+  const gripOffset = {
+    recon: [-.04, -.16, -.315], engineer: [-.10, -.07, -.285],
+    sentinel: [-.06, -.18, -.23], medic: [-.06, -.17, -.285],
+  }[role] || [0, 0, 0];
+  model.updateMatrixWorld(true);
+  for (const name of held[role] || []) {
+    const part = model.getObjectByName(name);
+    if (right && part) {
+      right.attach(part);
+      part.position.add(new THREE.Vector3(...gripOffset));
+    }
+  }
+  if (role === 'assault' && left) for (const name of ['forearm_shield', 'shield_light']) {
+    const part = model.getObjectByName(name);
+    if (part) left.attach(part);
+  }
+}
+function equipSoldier(soldier, role, tier) {
+  const path = squadAsset(role, tier);
+  if (soldier.userData.squadAsset === path) return;
+  soldier.userData.squadAsset = path;
+  soldier.userData.squadRole = role;
+  soldier.userData.squadTier = tier;
+  const token = (soldier.userData.loadToken || 0) + 1;
+  soldier.userData.loadToken = token;
+  soldier.userData.walkMixer?.stopAllAction();
+  soldier.userData.walkMixer = null;
+  soldier.userData.walkAction = null;
+  soldier.userData.idleAction = null;
+  soldier.userData.activeAction = null;
+  soldier.clear();
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.025;
+  soldier.add(shadow);
+  const rigged = role === 'assault' || role === 'recon' || role === 'engineer' || role === 'medic' || role === 'sentinel';
+  const request = rigged ? loadAnimatedSquad(path) : loadBuildingTemplate(path);
+  request.then(asset => {
+    if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
+    const model = rigged ? cloneSkeleton(asset.scene) : asset.clone(true);
+    model.name = 'squad_model';
+    if (!rigged) bindSquadEquipment(model, role);
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    soldier.add(model);
+    if (rigged) {
+      const clip = asset.animations.find(animation => animation.name === (role === 'assault' ? 'DZN_Warden_Walk' : 'DZN_Operative_Walk')) || asset.animations[0];
+      if (!clip) throw new Error(`Animated squad model has no walk clip: ${path}`);
+      // The Warden source faces +X; image-guided Ghost, Fixer, Lifeline and Sentinel face +Z.
+      if (role === 'assault') model.rotation.y = -Math.PI / 2;
+      const mixer = new THREE.AnimationMixer(model);
+      soldier.userData.walkMixer = mixer;
+      soldier.userData.walkAction = mixer.clipAction(clip);
+      const idleClip = asset.animations.find(animation => animation.name === 'DZN_Operative_Idle');
+      soldier.userData.idleAction = idleClip ? mixer.clipAction(idleClip) : null;
+      soldier.userData.activeAction = soldier.userData.idleAction || soldier.userData.walkAction;
+      soldier.userData.activeAction.play();
+      if (role !== 'assault') return;
+      loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
+        if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
+        const carbine = weapon.scene.clone(true);
+        carbine.name = 'warden_carbine';
+        carbine.rotation.y = Math.PI / 2;
+        carbine.scale.setScalar(0.84 + tier * 0.04);
+        carbine.position.set(0.06, 0.86, -0.27);
+        carbine.traverse(item => { if (item.isMesh) item.castShadow = true; });
+        model.add(carbine);
+        model.updateMatrixWorld(true);
+        const hand = model.getObjectByName('Hand_R');
+        if (hand) hand.attach(carbine);
+        else console.warn('DZN Warden rig has no right hand for its carbine.');
+      }).catch(weaponError => console.warn('DZN Warden carbine could not load.', weaponError));
+    }
+  }).catch(error => {
+    if (soldier.userData.loadToken !== token) return;
+    console.warn(`DZN squad model could not load: ${path}`, error);
+    if (!rigged) return;
+    const current = soldier.getObjectByName('squad_model');
+    if (current) soldier.remove(current);
+    loadBuildingTemplate(`assets/models/squads-v5/${role}_l0${tier}.glb`).then(template => {
+      if (soldier.userData.loadToken !== token) return;
+      const fallback = template.clone(true);
+      fallback.name = 'squad_model';
+      bindSquadEquipment(fallback, role);
+      soldier.add(fallback);
+    }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
+  });
+}
+function makeSoldier(role, levels) {
   const soldier = new THREE.Group();
-  box(soldier, 0.5, 0.8, 0.35, MAT.olive, 0, 0.6);
-  box(soldier, 0.18, 0.6, 0.18, MAT.dark, -0.13, 0);
-  box(soldier, 0.18, 0.6, 0.18, MAT.dark, 0.13, 0);
-  cyl(soldier, 0.22, 0.22, 0.3, MAT.olive, 0, 1.4);
-  box(soldier, 0.1, 0.1, 0.6, MAT.metal, 0.3, 0.9, 0.2);
+  equipSoldier(soldier, role, squadTier(role, levels));
+  return soldier;
+}
+function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (soldier.userData.walkMixer) {
+    const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
+    if (nextAction && nextAction !== soldier.userData.activeAction) {
+      nextAction.reset().play();
+      soldier.userData.activeAction.crossFadeTo(nextAction, .18, false);
+      soldier.userData.activeAction = nextAction;
+    }
+    soldier.userData.walkMixer.update(Math.max(0, dt) * (pace > 0.05 ? pace : (soldier.userData.idleAction ? 1 : 0)));
+    const model = soldier.getObjectByName('squad_model');
+    if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
+    return;
+  }
+  const swing = Math.sin(phase) * 0.42 * pace;
+  const equipped = ['recon', 'engineer', 'sentinel', 'medic'].includes(soldier.userData.squadRole);
+  for (const [name, angle] of [['left_leg', swing], ['right_leg', -swing], ['left_arm', equipped && soldier.userData.squadRole === 'sentinel' ? -.26 - swing * .15 : -swing * .55], ['right_arm', equipped ? -.34 + swing * .22 : swing * .65]]) {
+    const limb = soldier.getObjectByName(name);
+    if (limb) limb.rotation.x = angle;
+  }
+  const model = soldier.getObjectByName('squad_model');
+  if (model) {
+    model.position.y = pace ? Math.abs(Math.sin(phase)) * .035 : Math.sin(phase * .5) * .006;
+    model.rotation.y = !pace && stop ? Math.sin(phase * .35) * .08 : 0;
+  }
+  if (pace || !stop) return;
+  const role = soldier.userData.squadRole;
+  const right = soldier.getObjectByName('right_arm');
+  const left = soldier.getObjectByName('left_arm');
+  if (role === 'engineer' && (stop === 'workshop' || stop === 'hall')) {
+    if (right) right.rotation.x = -.48 + Math.sin(phase * 2.2) * .24;
+    if (left) left.rotation.x = -.2;
+  } else if (role === 'recon' && stop === 'comms') {
+    if (right) right.rotation.x = -.62 + Math.sin(phase) * .06;
+    if (left) left.rotation.x = -.28;
+  } else if (role === 'medic' && stop === 'workshop') {
+    if (right) right.rotation.x = -.5 + Math.sin(phase * 1.4) * .12;
+    if (left) left.rotation.x = -.22;
+  } else if ((role === 'assault' || role === 'sentinel') && (stop === 'tower' || stop === 'hall')) {
+    if (right) right.rotation.x = -.16;
+    if (left) left.rotation.x = -.12;
+  }
+}
+
+// Patrol soldiers
+for (let i = 0; i < 5; i++) {
+  const role = ['assault', 'recon', 'engineer', 'sentinel', 'medic'][i];
+  const soldier = makeSoldier(role, state.levels);
+  const motion = createPatrolMotion(role, i);
+  soldier.position.set(motion.x, 0, motion.z);
   scene.add(soldier);
-  patrols.push({ mesh: soldier, radius: 13 + (i % 2) * 2.5, phase: (i / 5) * Math.PI * 2, speed: 0.12 + i * 0.01 });
+  patrols.push({ mesh: soldier, role, motion });
+}
+function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
+// One chosen commander is physically present at the bivouac while at home.
+// Its existing role route leads to a useful building and back, with the same
+// wall/building avoidance as the ordinary patrols.
+const operativeMesh = new THREE.Group();
+scene.add(operativeMesh);
+operativePatrol = { mesh: operativeMesh, id: null, motion: null, loadToken: 0, mixer: null, action: null, actionName: null, away: false };
+function syncOperativePatrol() {
+  const identityId = service.state.currentIdentityId;
+  const id = operations.selected(identityId);
+  const role = OPERATIVES[id]?.role;
+  const access = service.getAccess().allowed;
+  const away = operations.current(identityId)?.status === 'active';
+  const visible = Boolean(!fallback2D && access && role && !away);
+  operativeMesh.visible = visible;
+  if (!visible) { operativePatrol.away = away; return; }
+  if (operativePatrol.id === id && !operativePatrol.away) return;
+  operativePatrol.away = false;
+  operativePatrol.id = id;
+  operativePatrol.loadToken++;
+  operativePatrol.mixer?.stopAllAction();
+  operativePatrol.mixer = null;
+  operativePatrol.action = null;
+  operativePatrol.actionName = null;
+  operativeMesh.clear();
+  const motion = createPatrolMotion(role, role === 'engineer' ? 2 : 0);
+  motion.wait = 3;
+  operativePatrol.motion = motion;
+  operativeMesh.position.set(motion.x, 0, motion.z);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.48, .57, 32),
+    new THREE.MeshBasicMaterial({ color: OPERATIVES[id].colour, transparent: true, opacity: .76, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = .045;
+  ring.name = 'commander_ground_marker';
+  operativeMesh.add(ring);
+  const token = operativePatrol.loadToken;
+  const path = operativeAsset(id);
+  loadAnimatedSquad(path).then(asset => {
+    if (token !== operativePatrol.loadToken || operativePatrol.id !== id) return;
+    const model = cloneSkeleton(asset.scene);
+    model.name = 'operative_model';
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    operativeMesh.add(model);
+    const walk = asset.animations.find(clip => clip.name === 'DZN_Operative_Walk');
+    const idle = asset.animations.find(clip => clip.name === 'DZN_Operative_Idle');
+    if (!walk || !idle) throw new Error(`DZN operative is missing walk or idle animation: ${path}`);
+    operativePatrol.mixer = new THREE.AnimationMixer(model);
+    operativePatrol.actions = { walk: operativePatrol.mixer.clipAction(walk), idle: operativePatrol.mixer.clipAction(idle) };
+    operativePatrol.action = operativePatrol.actions.idle;
+    operativePatrol.actionName = 'idle';
+    operativePatrol.action.play();
+  }).catch(error => console.warn(`DZN operative 3D model could not load: ${path}`, error));
+}
+
+function defenderLimbPivot(model, name) {
+  const limb = model.getObjectByName(name);
+  if (!limb?.parent) return null;
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(limb);
+  if (bounds.isEmpty()) return null;
+  const shoulder = bounds.getCenter(new THREE.Vector3());
+  shoulder.y = bounds.max.y - (bounds.max.y - bounds.min.y) * 0.08;
+  const parent = limb.parent;
+  const pivot = new THREE.Group();
+  pivot.name = `${name}_pivot`;
+  parent.add(pivot);
+  parent.updateMatrixWorld(true);
+  pivot.position.copy(parent.worldToLocal(shoulder));
+  pivot.updateMatrixWorld(true);
+  pivot.attach(limb);
+  return pivot;
+}
+
+function bindDefenderRig(model, role) {
+  const limbs = Object.fromEntries(['left_arm', 'right_arm', 'left_leg', 'right_leg',
+    'left_front_leg', 'right_front_leg', 'left_rear_leg', 'right_rear_leg', 'hound_head']
+    .map(name => [name, defenderLimbPivot(model, name)]));
+  for (const name of ['barrier_shield', 'scanner', 'left_drone', 'right_drone', 'tail',
+    'snare_module_0', 'snare_module_1', 'snare_module_2',
+    'snare_charge_0', 'snare_charge_1', 'snare_charge_2']) limbs[name] = model.getObjectByName(name);
+  model.updateMatrixWorld(true);
+  const held = role === 'guardian' ? { left_arm: ['barrier_shield'] }
+    : role === 'aegis' ? { right_arm: ['scanner', 'scanner_screen'] } : {};
+  for (const [armName, names] of Object.entries(held)) for (const name of names) {
+    const part = model.getObjectByName(name);
+    const arm = model.getObjectByName(armName);
+    if (part && arm) arm.attach(part);
+  }
+  return limbs;
+}
+
+function syncDefenderPatrols() {
+  const assigned = service.community()?.saved.base.defenders || {};
+  for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+    const unit = assigned[role];
+    const previous = defenderPatrols.get(role);
+    if (previous && unit?.level === previous.level && unit?.post === previous.post) continue;
+    if (previous) { previous.active = false; scene.remove(previous.mesh); defenderPatrols.delete(role); }
+    if (!unit?.level || !unit.post || fallback2D) continue;
+    const mesh = new THREE.Group();
+    const motion = createDefenderMotion(role, unit.post);
+    mesh.position.set(motion.x, 0, motion.z);
+    scene.add(mesh);
+    const patrol = { role, level: unit.level, post: unit.post, mesh, motion, active: true };
+    defenderPatrols.set(role, patrol);
+    loadBuildingTemplate(defenderAsset(role, unit.level)).then(template => {
+      if (!patrol.active) return;
+      const model = template.clone(true);
+      model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+      mesh.add(model);
+      patrol.limbs = bindDefenderRig(model, role);
+      patrol.model = model;
+    }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
+  }
+}
+function animateDefender(patrol, time = elapsed, threat = 0) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const { mesh, motion, role } = patrol;
+  const limbs = patrol.limbs || mesh.userData.defenderLimbs;
+  if (!limbs) return;
+  const moving = Boolean(motion.moving);
+  const swing = Math.sin(motion.stride) * (moving ? 0.34 : 0);
+  if (role === 'hound') {
+    for (const [name, sign] of [['left_front_leg', 1], ['right_rear_leg', 1], ['right_front_leg', -1], ['left_rear_leg', -1]]) {
+      const leg = limbs[name];
+      if (leg) leg.rotation.x = swing * sign;
+    }
+    if (limbs.hound_head) limbs.hound_head.rotation.y = Math.sin(time * (threat ? 3 : 0.8)) * (moving ? 0.08 : 0.24);
+    if (limbs.tail) limbs.tail.rotation.y = Math.sin(time * (threat ? 7 : 2)) * 0.2;
+  } else {
+    if (limbs.left_leg) limbs.left_leg.rotation.x = swing;
+    if (limbs.right_leg) limbs.right_leg.rotation.x = -swing;
+    if (limbs.left_arm) limbs.left_arm.rotation.x = (role === 'guardian' ? -0.28 - threat * 0.5 : role === 'aegis' ? -0.2 : -0.12) - swing * 0.22;
+    if (limbs.right_arm) limbs.right_arm.rotation.x = (role === 'aegis' ? -0.46 - threat * 0.3 : role === 'trapper' ? -0.25 - threat * 0.35 : -0.12) + swing * 0.28;
+  }
+  if (limbs.barrier_shield) limbs.barrier_shield.rotation.y = Math.sin(time * 5) * threat * 0.04;
+  if (patrol.model) patrol.model.position.y = moving ? Math.abs(Math.sin(motion.stride)) * 0.025 : Math.sin(time * 1.4) * 0.006;
+  if (role === 'aegis') for (const [index, name] of ['left_drone', 'right_drone'].entries()) {
+    const drone = limbs[name];
+    if (drone) {
+      if (!drone.userData.restPosition) drone.userData.restPosition = drone.position.clone();
+      const rest = drone.userData.restPosition;
+      drone.position.set(rest.x + Math.sin(time * (1 + threat * 2) + index * Math.PI) * threat * 0.26,
+        rest.y + Math.sin(time * (2 + threat * 3) + index * Math.PI) * (0.09 + threat * 0.08),
+        rest.z + Math.cos(time * (1 + threat * 2) + index * Math.PI) * threat * 0.2);
+      drone.rotation.y = Math.sin(time * (0.7 + threat * 2) + index * Math.PI) * (0.35 + threat * 0.5);
+    }
+  }
+  if (role === 'trapper') for (let index = 0; index < 3; index++) {
+    const snareModule = limbs[`snare_module_${index}`];
+    const charge = limbs[`snare_charge_${index}`];
+    if (snareModule) snareModule.rotation.y = Math.sin(time * (1.1 + threat * 3) + index * 2) * (0.06 + threat * 0.18);
+    if (charge) {
+      if (!charge.userData.restScale) charge.userData.restScale = charge.scale.clone();
+      charge.scale.copy(charge.userData.restScale).multiplyScalar(1 + Math.sin(time * (3 + threat * 5) + index * 2) * (0.06 + threat * 0.12));
+    }
+  }
+}
+syncDefenderPatrols();
+let defenderPreview = null;
+let defenderPreviewToken = 0;
+function placeDefenderPreview(role, level) {
+  const path = defenderAsset(role, level);
+  if (!path) return;
+  const token = ++defenderPreviewToken;
+  if (defenderPreview) { scene.remove(defenderPreview); defenderPreview = null; }
+  loadBuildingTemplate(path).then(template => {
+    if (token !== defenderPreviewToken) return;
+    const model = template.clone(true);
+    model.position.set(-2, 0.07, -8);
+    model.rotation.y = -0.6;
+    model.scale.setScalar(1.25);
+    model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+    model.userData.cosmeticConcept = true;
+    defenderPreview = model;
+    scene.add(model);
+  }).catch(error => console.warn(`Defender concept could not load: ${path}`, error));
+  toast(`${DEFENDER_CONCEPTS[role].name} L${level} · 3D concept at squad camp · no battle effect`);
 }
 
 // Smoke particles
@@ -883,6 +1513,8 @@ const warBaseGroup = new THREE.Group();
 warBaseGroup.visible = false;
 scene.add(warBaseGroup);
 const warTroopMeshes = [];
+const warDefenderMeshes = [];
+let warDefenderToken = 0;
 function buildOutpost() {
   outpostBlocks.forEach(b => scene.remove(b));
   outpostBlocks.length = 0;
@@ -898,6 +1530,27 @@ buildOutpost();
 // ---------- UI: identity, shared projects, progression and Forge ----------
 const $ = id => document.getElementById(id);
 const panel = $('panel');
+const patrolFocusExit = document.createElement('button');
+patrolFocusExit.type = 'button';
+patrolFocusExit.hidden = true;
+patrolFocusExit.textContent = '← Back to base';
+patrolFocusExit.style.cssText = 'position:fixed;z-index:9;left:50%;bottom:18px;transform:translateX(-50%);box-shadow:0 8px 30px #000a';
+document.body.append(patrolFocusExit);
+function stopPatrolFocus(returnToBase = false) {
+  focusedPatrolRole = null;
+  patrolFocusExit.hidden = true;
+  patrolFocusExit.textContent = '← Back to base';
+  patrolFocusLight.visible = false;
+  patrolFocusRing.visible = false;
+  if (returnToBase) { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); }
+}
+function focusedPatrol() {
+  if (!focusedPatrolRole) return null;
+  return focusedPatrolRole.startsWith('defender:')
+    ? defenderPatrols.get(focusedPatrolRole.slice('defender:'.length))
+    : patrols.find(item => item.role === focusedPatrolRole);
+}
+patrolFocusExit.onclick = () => stopPatrolFocus(true);
 let selectedKey = null;
 let raid = null;
 let warBattle = null;
@@ -908,8 +1561,11 @@ function toast(text) {
   toastTimer = 2.5;
 }
 function openPanel(html) {
-  panel.innerHTML = html;
+  document.querySelectorAll('.hud-menu[open]').forEach(menu => { menu.open = false; });
+  panel.innerHTML = `<button type="button" class="panel-dismiss" aria-label="Close panel">×</button>${html}`;
+  panel.querySelector('.panel-dismiss').onclick = closePanel;
   panel.style.display = 'block';
+  panel.scrollTop = 0;
 }
 function closePanel() {
   panel.style.display = 'none';
@@ -945,8 +1601,11 @@ function renderIdentityOptions() {
     service.selectIdentity(select.value);
     selectedKey = null;
     closePanel();
+    syncLayoutPositions();
     reconcileBasePresentation();
     reconcileLandScenery();
+    syncPatrolKits();
+    syncDefenderPatrols();
     updateHud();
     updateBuildingList();
     toast(`Preview identity: ${service.profile().name}`);
@@ -977,11 +1636,30 @@ function updateBuildingList() {
   }).join('');
   document.querySelectorAll('[data-building]').forEach(button => button.addEventListener('click', () => showBuildingPanel(button.dataset.building)));
 }
+function currentAwaySquads() {
+  const profile = service.profile();
+  return service.getWars(profile.id).filter(war => ['preparation', 'active'].includes(war.state))
+    .flatMap(war => service.getAwaySquads(profile.communityId, war.id));
+}
 function updateHud() {
   const profile = service.profile();
   const community = service.getCommunityInfo();
   const access = service.getAccess();
   $('communityBadge').textContent = `${access.allowed ? '●' : '🔒'} ${community.name} · ${community.proActive ? 'OWNER PRO ACTIVE' : 'PRO INACTIVE'} · ${profile.role.toUpperCase()}`;
+  const away = currentAwaySquads().length;
+  const defenceChip = $('defenceChip');
+  defenceChip.hidden = away === 0;
+  defenceChip.classList.toggle('exposed', away > 0);
+  defenceChip.textContent = `${away} SQUAD${away === 1 ? '' : 'S'} AWAY · HOME EXPOSED`;
+  let deployed = 0;
+  patrols.forEach(patrol => {
+    const unlocked = squadUnlocked(patrol.role, state.levels);
+    patrol.mesh.visible = unlocked && deployed >= Math.min(away, 3);
+    if (unlocked) deployed++;
+  });
+  if (focusedPatrolRole && !focusedPatrol()?.mesh.visible) stopPatrolFocus(true);
+  for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
+  syncOperativePatrol();
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -989,6 +1667,8 @@ function updateHud() {
   $('collectBtn').textContent = `Collect +${Math.floor(state.stored)}`;
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
   $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
+  const yard = service.community()?.saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
+  $('yardBtn').textContent = yard?.facilityLevel ? `🪵 Lumber Yard L${yard.facilityLevel}` : state.levels.hq < 2 ? '🪵 Lumber Yard · Hall L2' : '🪵 Lumber Yard';
   updatePreviewCard();
   updateBuildingList();
 }
@@ -999,13 +1679,20 @@ function formatRemaining(timestamp) {
 function startReveal(key) {
   const building = buildings[key];
   if (!building) return;
+  const previousLevels = { ...state.levels, [key]: Math.max(1, state.levels[key] - 1) };
   refreshBuilding(key);
+  syncPatrolKits();
   building.scaffold.visible = true;
   revealEffects.set(key, Date.now() + GAME_CONFIG.revealSeconds * 1000);
   celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], DEFS[key].name, state.levels[key]);
+  for (const [role, definition] of Object.entries(SQUAD_ROLES)) {
+    const tier = squadTier(role, state.levels);
+    if (squadUnlocked(role, state.levels) && !squadUnlocked(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} deployed`, tier, false);
+    else if (squadUnlocked(role, state.levels) && tier > squadTier(role, previousLevels)) celebrateUpgrade(DEFS[key].pos[0], DEFS[key].pos[1], `${definition.name} kit upgraded`, tier, false);
+  }
   if (key === 'hq') {
     reconcileLandScenery();
-    celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq);
+    celebrateUpgrade(-8, -9, 'DZN Chronicle Beacon', state.levels.hq, false);
   }
   playClank();
 }
@@ -1027,17 +1714,16 @@ function showBuildingPanel(key) {
   const cfg = GAME_CONFIG.buildings[key];
   const currentStats = cfg.stats[level - 1];
   const nextStats = requirement.targetLevel <= GAME_CONFIG.maxLevel ? cfg.stats[requirement.targetLevel - 1] : null;
-  let html = `<h2>${escapeHTML(def.name)} · Level ${level}/5</h2><p><span class="dim">Current benefit:</span> ${escapeHTML(requirement.currentBenefit)}</p><p class="help">Current stats: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p>`;
+  let html = `<h2>${escapeHTML(def.name)} · Level ${level}/5</h2><p><span class="dim">Now:</span> ${escapeHTML(requirement.currentBenefit)}</p>`;
   if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
-    html += `<hr><p><b>Next benefit · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p class="help">Next stats: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p>`;
-    html += `<p>Project target: <b>${requirement.cost.toLocaleString()} Parts</b> · funding completes construction immediately. A ${GAME_CONFIG.revealSeconds.toFixed(1)}s delivery/scaffold reveal follows.</p>`;
-    if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Requirements / status</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
+    html += `<p><b>Next · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p><b>Cost:</b> ${requirement.cost.toLocaleString()} Parts</p>`;
+    if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Before upgrading</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
+    html += `<details class="technical-details"><summary>Stats and construction details</summary><p class="help">Current: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Next: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Funding completes construction immediately. A ${GAME_CONFIG.revealSeconds.toFixed(1)}s delivery and scaffold reveal follows.</p></details>`;
     if (legacyJob) html += `<p class="notice">Previously paid legacy work is preserved. Completion is due ${new Date(legacyJob.end).toLocaleTimeString()}.</p>`;
     if (activeProject) {
       const remaining = Math.max(0, activeProject.targetAmount - activeProject.funded);
       html += `<div class="project-card ${activeProject.pinned ? 'pinned' : ''}"><strong>${activeProject.pinned ? '★ PRIORITY · ' : ''}Approved · L${activeProject.targetLevel}</strong><p>Funded ${activeProject.funded.toLocaleString()} / ${activeProject.targetAmount.toLocaleString()} Parts · ${remaining.toLocaleString()} remaining</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, activeProject.funded / activeProject.targetAmount * 100)}%"></div></div><div class="row"><button id="projectDetailsBtn">Open project funding</button></div></div>`;
     } else if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
-      html += `<p class="help">Prerequisites: ${requirement.prerequisites.length ? 'listed above' : 'met'} · HQ controls supporting-building caps.</p>`;
       if (isLeadership()) html += `<div class="row"><button id="approveProjectBtn" ${requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button></div>`;
       else html += `<p class="notice">Only the community owner/admin can approve this upgrade. Members can fund it after approval.</p>`;
     }
@@ -1167,6 +1853,116 @@ function showForgePanel() {
   });
 }
 
+function defenderCardsHTML() {
+  const base = service.community().saved.base;
+  const leadership = isLeadership();
+  const access = service.getAccess().allowed;
+  return Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
+    const defender = base.defenders[role];
+    const requirement = service.getDefenderRequirement(service.state.currentIdentityId, role);
+    const project = defender.project;
+    const tier = Math.max(1, defender.level);
+    const post = defender.post ? DEFENDER_POSTS[defender.post] : 'Reserve at camp';
+    const progress = project ? `<p class="help">Approved L${project.targetLevel} · ${project.funded}/${project.cost} Parts funded</p><div class="row"><input type="number" min="1" step="1" value="${Math.max(1, project.cost - project.funded)}" data-defender-amount="${role}" aria-label="Parts for ${escapeHTML(definition.name)}"><button data-defender-fund="${role}" ${access ? '' : 'disabled'}>Contribute Parts</button></div>` : '';
+    const approval = !project && defender.level < 5 ? `<p class="help">Next L${requirement.targetLevel}: ${requirement.cost} Parts · ${requirement.prerequisites.length ? escapeHTML(requirement.prerequisites.join(' ')) : 'Ready for leadership approval.'}</p><button data-defender-approve="${role}" ${leadership && requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button>` : '';
+    const assignment = defender.level ? `<div class="row"><select data-defender-post="${role}" aria-label="${escapeHTML(definition.name)} defensive post" ${leadership && access ? '' : 'disabled'}><option value="">Reserve at camp</option>${Object.entries(DEFENDER_POSTS).map(([key, label]) => `<option value="${key}" ${defender.post === key ? 'selected' : ''}>${escapeHTML(label)}</option>`).join('')}</select><button data-defender-assign="${role}" ${leadership && access ? '' : 'disabled'}>Assign post</button></div>` : '';
+    return `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.role)}</small></div><b>${defender.level ? `L${defender.level}` : 'LOCKED'}</b></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(definition.name)} supplied design"><p>${escapeHTML(definition.detail)}</p><p><b>Ability:</b> ${escapeHTML(definition.ability)}<br><b>Post:</b> ${escapeHTML(post)}</p>${approval}${progress}${assignment}${defender.level && defender.post ? `<button type="button" data-watch-defender="${role}">Watch defender in 3D</button>` : ''}<p class="help">Inspect any 3D appearance at camp without unlocking or equipping it:</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(definition.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`;
+  }).join('');
+}
+
+function showSquadPanel() {
+  selectedKey = null;
+  updateBuildingList();
+  const levels = state.levels;
+  const cards = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
+    const profile = squadProfile(role, levels);
+    const tier = profile.tier;
+    const sourceName = GAME_CONFIG.buildings[definition.source].name;
+    const unlock = profile.unlocked ? `DEPLOYED · L${tier}` : `LOCKED · Hall L${definition.unlockHall} + ${escapeHTML(sourceName)} L${definition.unlockSource}`;
+    return `<article class="squad-card ${role}${profile.unlocked ? '' : ' locked'}"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">${definition.emblem}</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.purpose)}</small></div><b>${profile.unlocked ? `L${tier}` : '🔒'}</b></div><p class="squad-status">${unlock}</p>${profile.unlocked ? `<button type="button" data-watch-patrol="${role}">Watch 3D patrol</button>` : ""}<img class="squad-portrait" src="${squadPortrait(role, tier)}" alt="${escapeHTML(definition.name)} Level ${tier} preview"><p class="squad-art-preview-label">Viewing L${tier} · ${escapeHTML(definition.equipment[tier - 1])}</p><div class="squad-tier-strip" aria-label="${escapeHTML(definition.name)} Level 1 to 5 artwork">${[1, 2, 3, 4, 5].map(level => `<button type="button" class="${level === tier ? 'selected' : ''}" data-squad-preview="${role}" data-level="${level}" aria-label="Preview ${escapeHTML(definition.name)} Level ${level} appearance" aria-pressed="${level === tier}" title="Level ${level} · ${escapeHTML(definition.equipment[level - 1])}"><img src="${squadPortrait(role, level)}" loading="lazy" alt=""></button>`).join('')}</div><p>${escapeHTML(definition.kit)}. Kit tier follows ${escapeHTML(sourceName)} and the Command Hall cap.</p><p><b>${profile.unlocked ? 'Current build' : 'Preview kit'}:</b> ${profile.maxHealth} HP · ${profile.damage} damage · ${profile.armour} armour<br><b>Ability:</b> ${escapeHTML(profile.ability)}</p><details class="technical-details"><summary>See all five kit levels</summary><ol>${definition.equipment.map((item, index) => `<li class="${profile.unlocked && index < tier ? 'equipped' : ''}">L${index + 1} · ${escapeHTML(item)} · ${definition.health[index]} HP / ${definition.damage[index]} dmg / ${definition.armour[index]} armour · ${escapeHTML(definition.ability[index])}</li>`).join('')}</ol></details></article>`;
+  }).join('');
+  const away = currentAwaySquads().length;
+  const defenderCards = defenderCardsHTML();
+  openPanel(`<h2>DZN Squad Armoury</h2><p>Inspect each outfit or watch its 3D patrol. Active gear follows building level; previewing an outfit does not equip it.</p>${away ? `<p class="notice warn">${away} squad${away === 1 ? '' : 's'} away. Home defence is reduced until return or recall.</p>` : ''}<details class="technical-details"><summary>How upgrades and battles work</summary><p>Command Hall and specialist buildings set active kit. Sentinel and Lifeline unlock at Hall L4 with a Level 3 specialist building. Upgraded damage boosts attacks; health, armour and Lifeline support reduce losses. Battles lock both bases and kits before the first move.</p></details><div class="squad-grid">${cards}</div><h3>DZN Base Defenders</h3><p>Leadership approves upgrades and assigns posts. Assigned defenders guard the base; reserves stay out of battle.</p><div class="squad-grid">${defenderCards}</div><div class="row"><button id="closeBtn">Close</button></div>`);
+  panel.querySelectorAll('[data-squad-preview]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.squadPreview;
+    const level = Number(button.dataset.level);
+    const definition = SQUAD_ROLES[role];
+    if (!definition || !Number.isInteger(level) || level < 1 || level > 5) return;
+    const card = button.closest('.squad-card');
+    const portrait = card.querySelector('.squad-portrait');
+    portrait.src = squadPortrait(role, level);
+    portrait.alt = `${definition.name} Level ${level} appearance preview`;
+    card.querySelector('.squad-art-preview-label').textContent = `Viewing L${level} · ${definition.equipment[level - 1]}`;
+    card.querySelectorAll('[data-squad-preview]').forEach(choice => {
+      const selected = choice === button;
+      choice.classList.toggle('selected', selected);
+      choice.setAttribute('aria-pressed', String(selected));
+    });
+  }));
+  panel.querySelectorAll('[data-watch-patrol]').forEach(button => button.addEventListener('click', () => {
+    const patrol = patrols.find(item => item.role === button.dataset.watchPatrol && item.mesh.visible);
+    if (!patrol || fallback2D || raid || warBattle) { toast('3D patrol is unavailable right now.'); return; }
+    focusedPatrolRole = patrol.role;
+    patrolFocusExit.hidden = false;
+    patrolFocusExit.textContent = `← Back to base · ${SQUAD_ROLES[patrol.role].name} L${patrol.mesh.userData.squadTier}`;
+    patrolFocusLight.visible = true;
+    patrolFocusRing.visible = true;
+    zoom = 8;
+    camTarget.copy(patrol.mesh.position);
+    updateCamera();
+    closePanel();
+    toast(`Watching ${SQUAD_ROLES[patrol.role].name} in 3D · drag to explore`);
+  }));
+  panel.querySelectorAll('[data-watch-defender]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.watchDefender;
+    const patrol = defenderPatrols.get(role);
+    if (!patrol?.mesh.visible || fallback2D || raid || warBattle) { toast('Assigned defender is unavailable in 3D right now.'); return; }
+    focusedPatrolRole = `defender:${role}`;
+    patrolFocusExit.hidden = false;
+    patrolFocusExit.textContent = `← Back to base · ${DEFENDER_CONCEPTS[role].name} L${patrol.level}`;
+    patrolFocusLight.visible = true;
+    patrolFocusRing.visible = true;
+    zoom = 8;
+    camTarget.copy(patrol.mesh.position);
+    updateCamera();
+    closePanel();
+    toast(`Watching ${DEFENDER_CONCEPTS[role].name} guard ${DEFENDER_POSTS[patrol.post]}`);
+  }));
+  panel.querySelectorAll('[data-defender-preview]').forEach(button => button.addEventListener('click', () => {
+    const level = Number(button.dataset.level);
+    if (!Number.isInteger(level) || level < 1 || level > 5) return;
+    placeDefenderPreview(button.dataset.defenderPreview, level);
+    closePanel();
+  }));
+  panel.querySelectorAll('[data-defender-approve]').forEach(button => button.addEventListener('click', () => {
+    const result = service.approveDefender(service.state.currentIdentityId, button.dataset.defenderApprove);
+    toast(result.ok ? `${DEFENDER_CONCEPTS[button.dataset.defenderApprove].name} L${result.targetLevel} approved for shared funding` : result.error);
+    showSquadPanel();
+  }));
+  panel.querySelectorAll('[data-defender-fund]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.defenderFund;
+    const amount = Number(panel.querySelector(`[data-defender-amount="${role}"]`)?.value);
+    const result = service.fundDefender(service.state.currentIdentityId, role, amount);
+    if (result.ok && result.completed && !result.replay) {
+      syncDefenderPatrols();
+      celebrateUpgrade(-4, -12, DEFENDER_CONCEPTS[role].name, result.level);
+      playClank();
+    }
+    toast(result.ok ? `${DEFENDER_CONCEPTS[role].name}: +${result.accepted} Parts${result.completed ? ` · Level ${result.level} complete` : ''}` : result.error);
+    showSquadPanel(); updateHud();
+  }));
+  panel.querySelectorAll('[data-defender-assign]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.defenderAssign;
+    const selected = panel.querySelector(`[data-defender-post="${role}"]`)?.value || null;
+    const result = service.assignDefender(service.state.currentIdentityId, role, selected);
+    if (result.ok) syncDefenderPatrols();
+    toast(result.ok ? `${DEFENDER_CONCEPTS[role].name} assigned: ${selected ? DEFENDER_POSTS[selected] : 'reserve at camp'}` : result.error);
+    showSquadPanel();
+  }));
+  $('closeBtn').onclick = closePanel;
+}
+
 function refreshForgePanel() {
   if (panel.style.display === 'none' || !panel.querySelector('#forgeSlotStatus') || !service.getAccess().allowed) return;
   const jobs = service.processForge();
@@ -1227,7 +2023,7 @@ function showChroniclePanel() {
   $('closeBtn').onclick = closePanel;
 }
 
-function showLandPanel() {
+function showLandPanel(focusPlotId = null) {
   const access = service.getAccess();
   if (!access.allowed) {
     openPanel(`<h2>Land & Forest</h2><p class="notice warn">${escapeHTML(access.reason)}</p><p>Shared land and personal Timber stay saved while access is locked.</p><div class="row"><button id="closeBtn">Close</button></div>`);
@@ -1282,9 +2078,14 @@ function showLandPanel() {
         if (target > hall) routeHtml += `<p class="help">Command Hall L${target} required for the next route tier.</p>`;
       }
     }
-    return `<article class="district-card"><strong>${escapeHTML(config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p><div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
+    const yardGuide = config.id === 'timberline-depot' && plot.facilityLevel === 0
+      ? '<p class="help">Lumber Yard path: Hall L2 → clear 3 trees → owner approves the land → members fund the claim and Level 1 yard.</p>' : '';
+    return `<article class="district-card ${focusPlotId === config.id ? 'focused' : ''}" data-plot-card="${config.id}"><strong>${escapeHTML(config.id === 'timberline-depot' ? 'Timberline Lumber Yard site' : config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p>${yardGuide}<div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
   }).join('');
-  openPanel(`<h2>Land & Forest</h2><p>Verified players clear trees and keep the Timber they cut. Leadership approves land, facilities and DZN supply routes; members contribute and build them together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed plots: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5 · Route tiers: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.routeLevel, 0)} · Built barricades: ${snapshot.base.landPlots.reduce((sum, plot) => sum + plot.barricades, 0)}</p><div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div><p class="help">Daily Salvage keeps Timber renewable after your forest is cleared. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim.</p>${cards}<p class="help">Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades are frozen when a local war is accepted. Supply routes do not change war scoring.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>Land & Forest</h2><p>Chop trees for Timber. The owner approves each cleared district; members fund its buildings together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed land: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5</p>${focusPlotId ? '<div class="row"><button id="returnBaseBtn">Return camera to base</button></div>' : ''}<div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div>${cards}<details class="technical-details"><summary>Routes, defence and renewable Timber</summary><p class="help">Daily Salvage keeps Timber renewable. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim. Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades freeze during an accepted local war; routes do not change war scoring.</p></details><div class="row"><button id="closeBtn">Close</button></div>`);
+  // Timberline is the first card, so retain the short explanation and return
+  // control at the top instead of scrolling them off screen.
+  if ($('returnBaseBtn')) $('returnBaseBtn').onclick = () => { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); closePanel(); };
   $('closeBtn').onclick = closePanel;
   $('recycleTimberBtn').onclick = () => { const result = service.recycleTimber(); toast(result.ok ? `+${result.amount} recycled Timber` : result.error); updateHud(); showLandPanel(); };
   panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
@@ -1378,8 +2179,160 @@ $('collectBtn').onclick = () => {
 };
 $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
+$('squadsBtn').onclick = showSquadPanel;
 $('progressionBtn').onclick = showProgressionPanel;
-$('landBtn').onclick = showLandPanel;
+$('landBtn').onclick = () => showLandPanel();
+$('yardBtn').onclick = () => {
+  if (raid || warBattle) { toast('Return from the battle to view the Lumber Yard.'); return; }
+  const [x, z] = GAME_CONFIG.landPlots.find(plot => plot.id === 'timberline-depot').position;
+  camTarget.set(x, 0, z);
+  zoom = 25;
+  updateCamera();
+  showLandPanel('timberline-depot');
+};
+$('identityBtn').onclick = () => { $('previewDetails').open = true; $('previewDetails').scrollIntoView({ block: 'nearest' }); };
+document.addEventListener('click', event => {
+  if (!event.target.closest('.hud-menu')) document.querySelectorAll('.hud-menu[open]').forEach(menu => { menu.open = false; });
+});
+document.querySelectorAll('.hud-menu').forEach(menu => {
+  menu.addEventListener('toggle', () => {
+    if (menu.open) document.querySelectorAll('.hud-menu[open]').forEach(other => { if (other !== menu) other.open = false; });
+  });
+  menu.querySelectorAll('button').forEach(button => button.addEventListener('click', () => { menu.open = false; }));
+});
+
+let layoutZone = 'command-compound';
+let layoutMode = 'move-building';
+let layoutStructure = 'hq';
+let layoutStart = null;
+let layoutWallId = null;
+let layoutPending = null;
+const layoutModes = {
+  'move-building': 'Move building', 'build-wall': 'Build one wall', 'build-row': 'Build wall row',
+  'upgrade-wall': 'Upgrade one wall', 'upgrade-row': 'Upgrade wall row', 'move-wall': 'Move wall',
+};
+function quoteLayoutAction(base, member, claimed, pending) {
+  const { mode, start, end, key, wallId } = pending;
+  const moving = mode === 'move-building' || mode === 'move-wall';
+  const cells = moving ? [end] : rowCells(start || end, end);
+  if (!cells) return { error: 'Choose a straight row of up to 16 cells.', cells: [] };
+  let error = null, partsCost = 0, timberCost = 0;
+  if (mode === 'move-building') {
+    const current = base.layout.structures[key];
+    error = current?.x === end.x && current?.z === end.z ? 'The building is already there.' : validateLayoutPosition(base.layout, claimed, key, end.x, end.z);
+  } else if (mode === 'move-wall') {
+    const wall = base.layout.walls.find(item => item.id === wallId);
+    error = !wall ? 'Select a wall first.' : wall.x === end.x && wall.z === end.z ? 'The wall is already there.' : validateWallPosition(base.layout, claimed, end.x, end.z, wallId);
+  } else if (mode.startsWith('build')) {
+    if (base.layout.walls.length + cells.length > MAX_WALLS_PER_HALL[base.levels.hq]) error = 'Command Hall wall capacity reached.';
+    for (const cell of cells) error ||= validateWallPosition(base.layout, claimed, cell.x, cell.z);
+    partsCost = WALL_COSTS[1].parts * cells.length;
+    timberCost = WALL_COSTS[1].timber * cells.length;
+  } else {
+    const walls = cells.map(cell => base.layout.walls.find(wall => wall.x === cell.x && wall.z === cell.z));
+    if (walls.some(wall => !wall)) error = 'Every selected cell needs an existing wall.';
+    else if (walls.some(wall => wall.level >= base.levels.hq || wall.level >= GAME_CONFIG.maxLevel)) error = 'Upgrade the Command Hall before raising this wall tier.';
+    else {
+      partsCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].parts, 0);
+      timberCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].timber, 0);
+    }
+  }
+  if (!error && (member.parts < partsCost || member.timber < timberCost)) error = `Need ${partsCost} Parts and ${timberCost} Timber.`;
+  return { cells, partsCost, timberCost, error, summary: `${layoutModes[mode]} · ${cells.length} ${mode === 'move-building' ? 'building' : cells.length === 1 ? 'piece' : 'pieces'} · ${partsCost} Parts + ${timberCost} Timber` };
+}
+function showLayoutPanel(errorMessage = '') {
+  const previousScroll = panel.querySelector('.layout-scroll');
+  const scrollLeft = previousScroll?.scrollLeft || 0, scrollTop = previousScroll?.scrollTop || 0;
+  selectedKey = null;
+  updateBuildingList();
+  const snapshot = service.snapshot();
+  const base = snapshot.base;
+  const owner = snapshot.profile.role === 'owner' && snapshot.access.allowed;
+  const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+  if (!claimed.has(layoutZone)) layoutZone = 'command-compound';
+  const bounds = LAYOUT_ZONES[layoutZone];
+  const keys = layoutZone === 'command-compound' ? Object.keys(CORE_DEFAULTS) : [layoutZone];
+  if (!keys.includes(layoutStructure)) layoutStructure = keys[0];
+  const centers = Object.fromEntries(Object.entries(base.layout.structures).filter(([key]) => key in CORE_DEFAULTS || claimed.has(key))
+    .map(([key, point]) => [`${point.x},${point.z}`, key]));
+  const walls = new Map(base.layout.walls.map(wall => [`${wall.x},${wall.z}`, wall]));
+  const occupied = layoutOccupancy(base.layout, claimed);
+  const columns = (bounds.maxX - bounds.minX) / GRID_STEP + 1;
+  const rows = (bounds.maxZ - bounds.minZ) / GRID_STEP + 1;
+  const cells = [];
+  for (let z = bounds.minZ; z <= bounds.maxZ; z += GRID_STEP) for (let x = bounds.minX; x <= bounds.maxX; x += GRID_STEP) {
+    const key = `${x},${z}`, structure = centers[key], wall = walls.get(key);
+    const chosen = layoutStart?.x === x && layoutStart?.z === z;
+    const preview = layoutPending && (layoutPending.mode.startsWith('move')
+      ? layoutPending.end.x === x && layoutPending.end.z === z
+      : rowCells(layoutPending.start || layoutPending.end, layoutPending.end)?.some(cell => cell.x === x && cell.z === z));
+    const label = structure ? (GAME_CONFIG.buildings[structure]?.name || GAME_CONFIG.facilities[structure]?.name || structure) : wall ? `Wall Level ${wall.level}` : occupied.has(key) ? 'Reserved building or camp space' : 'Empty grid space';
+    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''} ${preview ? 'preview' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'AB' : structure === 'comms' ? 'CM' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
+  }
+  const stageHint = layoutPending ? 'Check the highlighted cells and confirm below.' : layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the grid.';
+  const zoneOptions = GAME_CONFIG.landPlots.filter(plot => claimed.has(plot.id)).map(plot => `<option value="${plot.id}">${escapeHTML(plot.name)}</option>`).join('');
+  const quote = layoutPending ? quoteLayoutAction(base, snapshot.member, claimed, layoutPending) : null;
+  openPanel(`<h2>Edit base</h2><p class="help">Place each wall, draw a straight row, or reposition a building. Select cells, review the cost, then confirm.</p>
+    ${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}
+    ${!owner ? `<p class="notice warn">${escapeHTML(snapshot.access.allowed ? 'Only the server owner can edit this shared base.' : snapshot.access.reason)}</p>` : ''}
+    <p class="notice">${snapshot.member.parts} Parts · ${snapshot.member.timber} Timber · ${base.layout.walls.length}/${MAX_WALLS_PER_HALL[base.levels.hq]} walls · Hall L${base.levels.hq}</p>
+    <div class="layout-actions" role="group" aria-label="Base edit actions">${Object.entries(layoutModes).map(([id, label]) => `<button type="button" data-layout-mode="${id}" class="${layoutMode === id ? 'active' : ''}" aria-pressed="${layoutMode === id}">${label}</button>`).join('')}</div>
+    <div class="layout-toolbar"><label>Area<select id="layoutZone">${zoneOptions}</select></label><label>Building<select id="layoutStructure" ${layoutMode === 'move-building' ? '' : 'disabled'}>${keys.map(key => `<option value="${key}">${escapeHTML(GAME_CONFIG.buildings[key]?.name || GAME_CONFIG.facilities[key]?.name || key)}</option>`).join('')}</select></label></div>
+    <p class="help" role="status">${stageHint}</p>
+    ${quote ? `<div class="layout-preview ${quote.error ? 'warn' : ''}" role="status"><strong>${escapeHTML(quote.summary || layoutModes[layoutPending.mode])}</strong>${quote.error ? `<p>${escapeHTML(quote.error)}</p>` : '<p>Preview only. Your resources are spent after you confirm.</p>'}<div class="row"><button id="layoutConfirm" ${quote.error || !owner ? 'disabled' : ''}>Confirm ${escapeHTML(layoutModes[layoutPending.mode].toLowerCase())}</button><button id="layoutDiscard">Change selection</button></div></div>` : ''}
+    <div class="layout-scroll"><div class="layout-grid" style="grid-template-columns:repeat(${columns},36px)" aria-label="${escapeHTML(layoutZone)} build grid">${cells.join('')}</div></div>
+    <div class="layout-key"><span>HQ Hall</span><span>FG Forge</span><span>AB Arc Battery</span><span>CM Comms</span><span>YD District</span><span>W# Wall level</span></div>
+    <p class="help">Each cell is 2 metres. Moving is free. Walls and upgrades use personal Parts and Timber; the finished base is shared with your server.</p>
+    <div class="row"><button id="layoutCancelStart" ${layoutStart ? '' : 'disabled'}>Clear start</button><button id="closeBtn">Done</button></div>`);
+  const layoutScroller = panel.querySelector('.layout-scroll');
+  layoutScroller.scrollLeft = scrollLeft; layoutScroller.scrollTop = scrollTop;
+  $('layoutZone').value = layoutZone;
+  $('layoutStructure').value = layoutStructure;
+  $('layoutZone').onchange = e => { layoutZone = e.target.value; layoutStart = null; layoutWallId = null; layoutPending = null; showLayoutPanel(); };
+  panel.querySelectorAll('[data-layout-mode]').forEach(button => button.onclick = () => {
+    layoutMode = button.dataset.layoutMode;
+    layoutStart = null; layoutWallId = null; layoutPending = null;
+    showLayoutPanel();
+  });
+  $('layoutStructure').onchange = e => { layoutStructure = e.target.value; layoutPending = null; showLayoutPanel(); };
+  $('layoutCancelStart').onclick = () => { layoutStart = null; layoutWallId = null; layoutPending = null; showLayoutPanel(); };
+  $('closeBtn').onclick = closePanel;
+  if (layoutPending) {
+    $('layoutDiscard').onclick = () => { layoutPending = null; showLayoutPanel(); };
+    $('layoutConfirm').onclick = () => {
+      const { mode, start, end, key, wallId } = layoutPending;
+      let result;
+      if (mode === 'move-building') result = service.moveStructure(snapshot.profile.id, key, end.x, end.z);
+      else if (mode === 'move-wall') result = service.moveWall(snapshot.profile.id, wallId, end.x, end.z);
+      else if (mode.startsWith('build')) result = service.placeWallRow(snapshot.profile.id, start || end, end);
+      else result = service.upgradeWallRow(snapshot.profile.id, start || end, end);
+      if (!result.ok) { showLayoutPanel(result.error); return; }
+      layoutStart = null; layoutWallId = null; layoutPending = null;
+      syncLayoutPositions(); reconcileLandScenery(); updateHud(); playClank();
+      if (mode.startsWith('upgrade')) celebrateUpgrade(end.x, end.z, 'Perimeter wall', result.walls[0].level);
+      toast(mode === 'move-building' ? 'Building repositioned.' : mode === 'move-wall' ? 'Wall moved.' : `${result.walls.length} wall segment${result.walls.length === 1 ? '' : 's'} ${mode.startsWith('upgrade') ? 'upgraded' : 'built'}.`);
+      showLayoutPanel();
+    };
+  }
+  panel.querySelectorAll('[data-layout-x]').forEach(button => button.onclick = () => {
+    const point = { x: Number(button.dataset.layoutX), z: Number(button.dataset.layoutZ) };
+    const existingWall = base.layout.walls.find(wall => wall.x === point.x && wall.z === point.z);
+    if (layoutMode === 'build-wall' || layoutMode === 'upgrade-wall' || layoutMode === 'move-building') {
+      layoutPending = { mode: layoutMode, end: point, key: layoutStructure };
+    } else if (!layoutStart) {
+      if (layoutMode === 'move-wall' && !existingWall) { showLayoutPanel('Select an existing wall first.'); return; }
+      layoutStart = point; layoutWallId = existingWall?.id || null; layoutPending = null;
+      showLayoutPanel(); return;
+    } else {
+      layoutPending = { mode: layoutMode, start: layoutStart, end: point, wallId: layoutWallId };
+    }
+    showLayoutPanel();
+  });
+}
+$('editBaseBtn').onclick = () => {
+  layoutStart = null; layoutWallId = null; layoutPending = null;
+  showLayoutPanel();
+};
 $('chronicleBtn').onclick = showChroniclePanel;
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();
@@ -1415,7 +2368,7 @@ function warTimelineHTML(war) {
 
 function warSnapshotLine(side) {
   const levels = side.base.levels;
-  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Watchtower L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0} · Assault +${side.stats.assaultBonus || 0} · Recon +${side.stats.reconBonus || 0} · Works -${side.stats.worksDefence || 0}`;
+  return `Hall L${levels.hq} · Workshop L${levels.workshop} · Arc Battery L${levels.tower} · Comms L${levels.comms} · Squad ${side.stats.squadSize} · Walls T${side.stats.wallTier} · Claimed districts ${side.base.landPlots?.filter(plot => plot.status === 'claimed').length || 1} · Barricades ${side.stats.fortification || 0} · Assault +${side.stats.assaultBonus || 0} · Recon +${side.stats.reconBonus || 0} · Works -${side.stats.worksDefence || 0} · Warden L${side.stats.assaultKit.leadTier} kit +${side.stats.assaultKit.scoreBonus} / loss shield ${side.stats.assaultKit.casualtyShield} · Ghost L${side.stats.reconKit.leadTier} kit +${side.stats.reconKit.scoreBonus} / loss shield ${side.stats.reconKit.casualtyShield}`;
 }
 
 function renderWarRecord(war, currentCommunityId, currentIdentity) {
@@ -1432,7 +2385,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   const challengerCount = war.attacks.filter(attack => attack.communityId === war.challengerCommunityId).length;
   const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
   const atCap = challengerCount >= WAR_RULES.maxAttacksPerSide && defenderCount >= WAR_RULES.maxAttacksPerSide;
-  const canResolve = war.state === 'active' && leadership && (atCap || Date.now() >= war.attackEndsAt);
+  const canResolve = war.state === 'active' && leadership && (war.stages?.length ? Date.now() >= war.attackEndsAt : atCap || Date.now() >= war.attackEndsAt);
   const currentSide = isChallenger ? challenger : defender;
   const enemySide = isChallenger ? defender : challenger;
   let actions = '';
@@ -1451,15 +2404,30 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
-      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Ridgewatch adds 2 per level. Enemy barricades reduce Assault by 3 each; Defence Works reduces both tactics by 2 per level.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Signal Relay adds 2 per level. Enemy barricades reduce Recon by 1 each; Defence Works counters the sweep.</p></div></div>
+      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit adds +${currentSide.stats.assaultKit.scoreBonus} score and shields ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with Sentinel reinforcement' : ''}${currentSide.stats.assaultKit.supportRole ? ' and Lifeline support' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit adds +${currentSide.stats.reconKit.scoreBonus} score and shields ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with Lifeline support' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
       ${canAttack ? `<div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Deploy Assault squad</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Deploy Recon squad</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
-      ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve when attack cap is reached or timer ends'}</button></div>` : ''}`;
+      ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve after all timed stages close'}</button></div>` : ''}`;
+    if (war.stages?.length) actions += `<h3>Timed build challenges</h3><p class="help">One verified roster member per server completes each stage from the locked building tier. Stages open in sequence; first completion earns +2. Costs use personal DZN Parts and Timber, and points stay in this local war.</p>${war.stages.map(stage => {
+      const definition = WAR_STAGE_DEFS.find(item => item.id === stage.id);
+      if (!definition) return '';
+      const own = stage.completedBy[currentCommunityId], enemyId = currentCommunityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+      const enemy = stage.completedBy[enemyId];
+      const now = Date.now(), open = now >= stage.opensAt && now < stage.closesAt;
+      return `<article class="war-card ${open ? 'ready' : ''}"><b>${escapeHTML(definition.name)} · ${escapeHTML(definition.building)}</b><p>${escapeHTML(definition.objective)}</p><p class="help">${now < stage.opensAt ? `Opens in ${formatRemaining(stage.opensAt)}` : now < stage.closesAt ? `Closes in ${formatRemaining(stage.closesAt)}` : 'Closed'} · ${definition.parts} Parts + ${definition.timber} Timber · Your side: ${own ? `+${own.points} points` : 'pending'} · Rival: ${enemy ? `+${enemy.points} points` : 'pending'}</p>${!own && hasRoster && readiness.eligible && open ? `<button data-war-stage="${escapeHTML(stage.id)}" data-war-id="${escapeHTML(war.id)}">Complete ${escapeHTML(definition.name)}</button>` : ''}</article>`;
+    }).join('')}<button data-war-refresh="${escapeHTML(war.id)}">Refresh stage timers</button>`;
   } else if (war.state === 'resolved') {
     const winner = war.tie ? 'TIE · no winner' : warCommunityName(war.winnerCommunityId);
     const localReward = war.rewards?.length || war.rewardLedgerIds?.length || 0;
     actions = `<div class="notice"><b>${escapeHTML(winner)}</b><p>Final score ${war.score[war.challengerCommunityId] || 0} – ${war.score[war.defenderCommunityId] || 0}</p><p>Local-only activity rewards: ${localReward ? '40 Parts per deployed roster member, claimed once into this browser preview.' : 'No attacks were deployed; no reward.'}</p><p class="help">This result never changes a DZN server leaderboard, match result, event feed or DayZ stat.</p></div>`;
   } else {
     actions = `<p class="notice">War ${escapeHTML(war.state)} · no attack or reward can be issued.</p>`;
+  }
+  if (isParticipant && ['preparation', 'active'].includes(war.state)) {
+    const scouts = service.getScoutReports(currentIdentity.id, war.id);
+    const ownScout = scouts.find(scout => scout.identityId === currentIdentity.id);
+    const away = service.getAwaySquads(currentCommunityId, war.id);
+    const ownAwayAttacks = war.attacks.filter(attack => attack.identityId === currentIdentity.id && attack.returnAt > Date.now() && !attack.returnedAt);
+    actions += `<div class="world-mission"><strong>SCOUTS & HOME DEFENCE</strong><p>${away.length} squad${away.length === 1 ? '' : 's'} away from your base. Every away squad can expose home defence to a timely counterattack; barricades reduce the bonus.</p>${readiness.eligible && hasRoster && !ownScout && scouts.length < WAR_RULES.maxScoutsPerSide ? `<button data-war-scout="${escapeHTML(war.id)}">Send scout · ${WAR_RULES.scoutArrivalMs / 1000}s to intel</button>` : ''}${scouts.map(scout => `<p>${escapeHTML(scout.id)} · ${scout.recalledAt ? 'recalled' : scout.active ? scout.arrived ? `intel received, returns in ${formatRemaining(scout.returnAt)}` : `travelling, arrives in ${formatRemaining(scout.arrivalAt)}` : 'returned'}${scout.intel ? ` · Hall L${scout.intel.hallLevel}, Tower L${scout.intel.towerLevel}, ${scout.intel.fortification} barricades` : ''}${scout.active && scout.identityId === currentIdentity.id ? ` <button data-scout-recall="${escapeHTML(scout.id)}">Recall scout</button>` : ''}</p>`).join('')}${ownAwayAttacks.map(attack => `<p>War squad ${escapeHTML(attack.attackId)} returns in ${formatRemaining(attack.returnAt)} · <button data-war-recall="${escapeHTML(attack.attackId)}" data-war-id="${escapeHTML(war.id)}">Recall to defend (25% point cost)</button></p>`).join('')}</div>`;
   }
   const status = war.state.toUpperCase();
   return `<article class="war-card ${war.state === 'active' ? 'ready' : ''}" data-war-record="${escapeHTML(war.id)}" data-war-state="${escapeHTML(war.state)}"><span class="war-tag">${status} · ${escapeHTML(war.id)}</span><h3>${escapeHTML(challenger.name)} vs ${escapeHTML(defender.name)}</h3><p class="help">Captured before the challenge · fixed for scoring. ${isParticipant ? 'Shared war record for both preview communities.' : ''}</p>${actions}${warTimelineHTML(war)}</article>`;
@@ -1518,6 +2486,28 @@ function showWarTable(errorMessage = '') {
     toast('War active · two deployments per side.'); showWarTable();
   });
   panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => launchWarAttack(button.dataset.warId, button.dataset.warAttack));
+  panel.querySelectorAll('[data-war-stage]').forEach(button => button.onclick = () => {
+    const result = service.completeWarStage(profile.id, button.dataset.warId, button.dataset.warStage);
+    if (!result.ok) { showWarTable(result.error); return; }
+    toast(`${WAR_STAGE_DEFS.find(stage => stage.id === result.stageId).name} complete · +${result.points} local points.`);
+    updateHud(); showWarTable();
+  });
+  panel.querySelectorAll('[data-war-refresh]').forEach(button => button.onclick = () => showWarTable());
+  panel.querySelectorAll('[data-war-scout]').forEach(button => button.onclick = () => {
+    const result = service.dispatchScout(profile.id, button.dataset.warScout);
+    toast(result.ok ? 'Scout dispatched · home defence exposed until return or recall.' : result.error);
+    showWarTable();
+  });
+  panel.querySelectorAll('[data-scout-recall]').forEach(button => button.onclick = () => {
+    const result = service.recallScout(profile.id, button.dataset.scoutRecall);
+    toast(result.ok ? 'Scout returned to defend.' : result.error);
+    showWarTable();
+  });
+  panel.querySelectorAll('[data-war-recall]').forEach(button => button.onclick = () => {
+    const result = service.recallWarSquad(profile.id, button.dataset.warId, button.dataset.warRecall);
+    toast(result.ok ? `Squad recalled · ${result.penalty} points traded for home defence.` : result.error);
+    showWarTable();
+  });
   panel.querySelectorAll('[data-war-resolve]').forEach(button => button.onclick = () => {
     const result = service.resolveWar(profile.id, button.dataset.warResolve);
     if (!result.ok) { showWarTable(result.error); return; }
@@ -1525,7 +2515,220 @@ function showWarTable(errorMessage = '') {
     showWarTable();
   });
 }
-$('warBtn').onclick = showWarTable;
+$('warBtn').onclick = () => showWarTable();
+
+function showOperationsBoard(message = '') {
+  const identityId = service.state.currentIdentityId;
+  const board = operations.getBoard(identityId);
+  if (!board.ok) { toast(board.error); return; }
+  if (!board.access.allowed) {
+    openPanel(`<h2>DZN Operations</h2><p class="notice warn">${escapeHTML(board.access.reason)}</p><p class="help">Private community signals, preparation and missions are available to verified members of an eligible owner Pro server. This is a local preview identity, not a DZN login.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+    $('closeBtn').onclick = closePanel;
+    return;
+  }
+  const attempt = board.current;
+  const active = attempt?.status === 'active';
+  const selected = board.selected;
+  const roster = Object.entries(OPERATIVES).map(([id, op]) => {
+    const tier = squadTier(op.role, state.levels);
+    return `<article class="operative-card ${selected === id ? 'selected' : ''}"><img src="${escapeHTML(squadPortrait(op.role, tier))}" alt="${escapeHTML(op.name)} DZN kit preview" loading="lazy"><div><strong>${escapeHTML(op.name)}</strong><small>${escapeHTML(op.title)} · kit L${tier}</small><small>${escapeHTML(op.passive)} · ${escapeHTML(op.tactical)} · ${escapeHTML(op.ultimate)}</small></div><button data-select-operative="${id}" ${active || selected === id ? 'disabled' : ''}>${selected === id ? 'Command slot selected' : 'Assign commander'}</button></article>`;
+  }).join('');
+  const profile = operations.showcase(identityId);
+  const mastery = Object.entries(profile.mastery).map(([id, count]) => `<span>${escapeHTML(OPERATIVES[id].name)} ${count}</span>`).join(' · ');
+  const badges = [
+    ['First Through', profile.earned.firstThrough, 'Extract after breaching a route'],
+    ['Eyes on Target', profile.earned.eyesOnTarget, 'Extract with route intelligence'],
+    ['Siege Medic', profile.earned.siegeMedic, 'Extract after a real casualty recovery'],
+  ].map(([name, earned, criterion]) => `<div class="operation-ping"><strong>${earned ? '✦ ' : '◇ '}${name}</strong><span>${earned ? 'Earned in local PvE' : criterion}</span></div>`).join('');
+  let missionHTML = '';
+  if (!attempt) {
+    const troopInputs = Object.entries(SQUAD_ROLES).map(([role, squad]) => `<label class="field-label" for="opsTroop${role}">${escapeHTML(squad.name)} <input id="opsTroop${role}" data-ops-troop="${role}" type="number" min="0" max="12" step="1" value="${role === 'assault' || role === 'engineer' ? 1 : 0}" ${squadUnlocked(role, state.levels) ? '' : 'disabled'}></label>`).join('');
+    missionHTML = `<div class="war-card ready"><h3>Salvage Run · Outpost Ember</h3><p>Scout a route, open a shutter, choose a cache and extract before the ten minute window closes. One commander uses ${EXPEDITION_RULES.commanderSlots} of ${board.capacity} slots. The rest hold ordinary troops. ${EXPEDITION_RULES.launchSalvage} personal Salvage prepares the convoy.</p><div class="operation-orders">${troopInputs}</div><p id="opsCapacity" class="help"></p><div class="row"><button id="opsLaunch">Deploy ${escapeHTML(OPERATIVES[selected].name)}</button></div></div>`;
+  } else {
+    const phases = ['approach', 'barrier', 'cache', 'extraction'];
+    const currentIndex = phases.indexOf(attempt.phase);
+    const track = `<div class="operation-stage-track" aria-label="Expedition stage">${phases.map((phase, index) => `<span class="${active && index === currentIndex ? 'current' : index < currentIndex || !active ? 'done' : ''}">${phase.toUpperCase()}</span>`).join('')}</div>`;
+    const choices = { approach: [['scout', 'Scout · safer route'], ['push', 'Rush · higher risk']], barrier: [['cut', 'Engineer cut'], ['force', 'Force through']], cache: [['secure', 'Core cache · 40 Parts'], ['extra', 'Extra cache · 65 Parts, high risk']], extraction: [['extract', 'Call extraction convoy']] };
+    const abilityTargetReady = attempt.operativeId === 'rivet' ? attempt.phase === 'barrier'
+      : attempt.operativeId === 'signal' ? ['approach', 'barrier'].includes(attempt.phase)
+      : attempt.casualties > 0 || attempt.health < 100;
+    const fieldChoice = attempt.fieldUpgrade ? `<p class="notice">Field Upgrade: ${escapeHTML(FIELD_UPGRADES[attempt.fieldUpgrade])}</p>`
+      : attempt.phase === 'extraction' ? '<p class="help">Field Upgrade window closed at extraction.</p>'
+      : `<h3>Choose one temporary Field Upgrade</h3><div class="operation-orders">${Object.entries(FIELD_UPGRADES).map(([id, label]) => `<button data-field-upgrade="${id}">${escapeHTML(label)}</button>`).join('')}</div>`;
+    const actions = active ? `<div class="operation-orders">${choices[attempt.phase].map(([id, label]) => `<button data-op-step="${id}" ${id === 'cut' && !attempt.roster.engineer ? 'disabled title="Needs a Combat Engineer"' : ''}>${label}</button>`).join('')}</div><div class="operation-orders"><button id="opsTactical" ${attempt.turn < attempt.tacticalReadyTurn || !abilityTargetReady ? 'disabled' : ''}>Tactical · ${escapeHTML(OPERATIVES[attempt.operativeId].tactical)}</button><button id="opsUltimate" ${attempt.ultimateUsed || !abilityTargetReady ? 'disabled' : ''}>Ultimate · ${escapeHTML(OPERATIVES[attempt.operativeId].ultimate)}</button></div><p class="help">${escapeHTML(OPERATIVES[attempt.operativeId].tacticalText)} Tactical ready at turn ${attempt.tacticalReadyTurn}; Ultimate once per attempt. All effects are bounded.</p>${fieldChoice}<div class="row"><button id="opsWithdraw">Withdraw · lose cargo</button></div>` : `<p class="notice">${attempt.status === 'extracted' ? `Extraction complete · ${attempt.cargo} Parts delivered to personal inventory.` : `Expedition ${escapeHTML(attempt.status)} · no Parts awarded.`} Start a new run when ready.</p><div class="row"><button id="opsNew">Prepare another run</button></div>`;
+    missionHTML = `<div class="war-card ready"><h3>Outpost Ember · ${escapeHTML(OPERATIVES[attempt.operativeId].name)}</h3><p>Attempt ${escapeHTML(attempt.id)} · ${active ? `window closes in <b id="opsCountdown">${formatRemaining(attempt.deadlineAt)}</b>` : escapeHTML(attempt.status)}</p>${track}<div class="operation-statline"><b>Health ${attempt.health}/100</b><b>Shield ${attempt.shield}</b><b>Incapacitated ${attempt.casualties}</b><b>Recovered ${attempt.recovered}</b><b>Recovery charges ${attempt.recoveriesLeft}</b><b>Cargo ${attempt.cargo} Parts</b></div>${actions}<div class="operation-log"><strong>Field record</strong>${attempt.events.slice().reverse().map(event => `<p>${escapeHTML(event.text)}</p>`).join('')}</div></div>`;
+  }
+  const pings = board.pings.slice().reverse().map(ping => `<div class="operation-ping"><strong>${escapeHTML(PING_TYPES[ping.type])} · ${escapeHTML(ping.target)}</strong><span>${escapeHTML(ping.author)} · expires in ${formatRemaining(ping.expiresAt)} · ${ping.acknowledgedBy.length} acknowledged · suggestion</span>${!ping.acknowledgedBy.includes(identityId) ? `<button data-ack-ping="${escapeHTML(ping.id)}">Acknowledge</button>` : ''}</div>`).join('');
+  openPanel(`<h2>DZN Operations Board</h2><p>One operative commands the ordinary army. The selected commander is a textured, animated 3D character at the bivouac while home and leaves the base during an expedition. Shared construction and local wars keep their existing rules. <span class="sim">[LOCAL PREVIEW]</span></p>${message ? `<p class="notice" role="status">${escapeHTML(message)}</p>` : ''}<div class="operations-layout"><div><h3>Operative Bay</h3><div class="operative-roster">${roster}</div>${missionHTML}</div><aside class="operations-side"><h3>Community signals</h3><p class="help">Suggestions are visible only to this eligible preview community. They expire after 15 minutes; acknowledgement is not owner approval.</p><label class="field-label" for="opsPingType">Signal</label><select id="opsPingType">${Object.entries(PING_TYPES).map(([id, name]) => `<option value="${id}">${escapeHTML(name)}</option>`).join('')}</select><label class="field-label" for="opsPingTarget">Target or objective</label><input id="opsPingTarget" maxlength="70" placeholder="e.g. west shutter"><div class="row"><button id="opsPostPing">Place signal</button></div>${pings || '<p class="help">No active signals.</p>'}<h3>Personal showcase</h3><p>${profile.completed} extracted mission${profile.completed === 1 ? '' : 's'} · ${mastery}</p>${badges}<p class="help">These are local PvE achievements with attempt evidence. Calling cards are cosmetic and never grant combat power.</p></aside></div><div class="row"><button id="closeBtn">Return to base</button></div>`);
+  $('closeBtn').onclick = closePanel;
+  panel.querySelectorAll('[data-select-operative]').forEach(button => button.onclick = () => { const result = operations.selectOperative(identityId, button.dataset.selectOperative); showOperationsBoard(result.ok ? `${OPERATIVES[result.operativeId].name} assigned to your command slot.` : result.error); });
+  const troopFields = [...panel.querySelectorAll('[data-ops-troop]')];
+  if (troopFields.length) {
+    const updateCapacity = () => {
+      const total = troopFields.reduce((sum, field) => sum + (Number(field.value) || 0), 0) + EXPEDITION_RULES.commanderSlots;
+      $('opsCapacity').textContent = `${total}/${board.capacity} command slots · selected operative costs 2 · troop kit follows shared Hall/support levels.`;
+      $('opsLaunch').disabled = total < 3 || total > board.capacity || service.member(identityId).salvage < EXPEDITION_RULES.launchSalvage || troopFields.some(field => !Number.isSafeInteger(Number(field.value)) || Number(field.value) < 0);
+    };
+    troopFields.forEach(field => field.oninput = updateCapacity); updateCapacity();
+    $('opsLaunch').onclick = () => {
+      const troops = Object.fromEntries(troopFields.map(field => [field.dataset.opsTroop, Number(field.value)]));
+      const result = operations.startExpedition(identityId, troops);
+      if (result.ok) { toast('Salvage convoy deployed.'); updateHud(); }
+      showOperationsBoard(result.ok ? 'Outpost Ember mission started. Choose your first route.' : result.error);
+    };
+  }
+  panel.querySelectorAll('[data-op-step]').forEach(button => button.onclick = () => {
+    const result = operations.advance(identityId, button.dataset.opStep);
+    if (result.ok && result.status === 'extracted') { celebrateUpgrade(-5, -12, 'Salvage convoy extracted', 1, false); toast(`Extraction complete · +${result.cargo} personal Parts`); updateHud(); }
+    showOperationsBoard(result.ok ? '' : result.error);
+  });
+  panel.querySelectorAll('[data-field-upgrade]').forEach(button => button.onclick = () => { const result = operations.chooseFieldUpgrade(identityId, button.dataset.fieldUpgrade); showOperationsBoard(result.ok ? 'Field Upgrade installed for this attempt.' : result.error); });
+  if ($('opsTactical')) $('opsTactical').onclick = () => { const result = operations.useAbility(identityId, 'tactical'); showOperationsBoard(result.ok ? 'Tactical ability activated.' : result.error); };
+  if ($('opsUltimate')) $('opsUltimate').onclick = () => { const result = operations.useAbility(identityId, 'ultimate'); showOperationsBoard(result.ok ? 'Ultimate ability activated.' : result.error); };
+  if ($('opsWithdraw')) $('opsWithdraw').onclick = () => { const result = operations.withdraw(identityId); showOperationsBoard(result.ok ? 'Squad withdrawn. Salvage and cargo remain spent.' : result.error); };
+  if ($('opsNew')) $('opsNew').onclick = () => { const result = operations.prepareNext(identityId); showOperationsBoard(result.ok ? '' : result.error); };
+  $('opsPostPing').onclick = () => { const result = operations.postPing(identityId, $('opsPingType').value, $('opsPingTarget').value); showOperationsBoard(result.ok ? 'Signal placed for your community.' : result.error); };
+  panel.querySelectorAll('[data-ack-ping]').forEach(button => button.onclick = () => { const result = operations.acknowledgePing(identityId, button.dataset.ackPing); showOperationsBoard(result.ok ? 'Signal acknowledged.' : result.error); });
+}
+$('operationsBtn').onclick = () => showOperationsBoard();
+setInterval(() => {
+  const countdown = $('opsCountdown');
+  if (!countdown || panel.style.display === 'none') return;
+  const current = operations.current();
+  if (!current || current.status !== 'active') { showOperationsBoard(); return; }
+  countdown.textContent = formatRemaining(current.deadlineAt);
+}, 1000);
+
+function showCardVault() {
+  const base = service.community()?.saved.base;
+  const access = service.getAccess();
+  const cards = FIRST_EDITION_CARDS.map(card => {
+    const earned = cardEarned(card.id, base);
+    return `<article class="collectible-card ${earned ? 'earned' : ''}"><div class="collectible-card-art"><img src="${escapeHTML(card.image)}" alt="${escapeHTML(card.name)} First Edition card art" loading="lazy"></div><strong>${escapeHTML(card.name)}</strong><span>${escapeHTML(card.rarity)} · ${earned ? 'Earned in this preview' : 'Discoverable'}</span><p>${earned ? 'Milestone reached. This local collection mark follows the current base.' : escapeHTML(card.condition)}</p></article>`;
+  }).join('');
+  const showcase = access.allowed ? operations.showcase() : null;
+  const operative = OPERATIVES[operations.selected()];
+  const serviceBadges = showcase ? [
+    ['First Through', showcase.earned.firstThrough], ['Eyes on Target', showcase.earned.eyesOnTarget], ['Siege Medic', showcase.earned.siegeMedic],
+  ].map(([name, earned]) => `<span class="world-kit">${earned ? '✦' : '◇'} ${name} · ${earned ? 'earned' : 'locked'}</span>`).join('') : '';
+  const evidence = showcase?.evidence?.length ? showcase.evidence.slice().reverse().map(record => `<p class="war-event">${escapeHTML(record.id)} · ${escapeHTML(OPERATIVES[record.operativeId].name)} · ${record.reward} Parts extracted · ${record.recovered} recovered · ${record.scanned ? 'scouted' : 'unscouted'} · ${record.breached ? 'breached' : 'no breach'}</p>`).join('') : '<p class="help">Complete a local salvage extraction to begin your service record.</p>';
+  const profilePanel = showcase ? `<hr><h3>Personal Showcase · ${escapeHTML(service.profile().name)}</h3><div class="row"><img src="${escapeHTML(squadPortrait(operative.role, squadTier(operative.role, state.levels)))}" alt="Selected DZN operative kit" style="width:90px;height:105px;object-fit:contain;background:#202924;border-radius:9px"><div><strong>${escapeHTML(operative.name)} · ${escapeHTML(operative.title)}</strong><p>${showcase.completed} local PvE extractions · mastery ${showcase.mastery[operations.selected()] || 0}</p><div class="world-kits">${serviceBadges}</div></div></div><h3>Achievement evidence</h3>${evidence}` : `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
+  openPanel(`<h2>DZN First Edition Cards</h2><p>Guardian, Ghost and Fixer bring DZN's squads and base upgrades into a collectible art series. Milestones reveal cards in this local preview.</p><div class="collectible-grid">${cards}</div>${profilePanel}<p class="help">Cards and mastery are cosmetic local previews. No globally limited edition, trading rights, or competitive buffs have been issued.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  $('closeBtn').onclick = closePanel;
+}
+$('cardsBtn').onclick = showCardVault;
+
+let selectedWorldCommunityId = 'iron-pines';
+let worldSearch = '';
+const worldMapView = { scale: 1, x: 0, y: 0 };
+function applyWorldMapView(overlay) {
+  const viewport = overlay.querySelector('.world-map-viewport');
+  const content = overlay.querySelector('.world-map-content');
+  if (!viewport || !content) return;
+  const maxX = (worldMapView.scale - 1) * viewport.clientWidth / 2;
+  const maxY = (worldMapView.scale - 1) * viewport.clientHeight / 2;
+  worldMapView.x = THREE.MathUtils.clamp(worldMapView.x, -maxX, maxX);
+  worldMapView.y = THREE.MathUtils.clamp(worldMapView.y, -maxY, maxY);
+  content.style.transform = `translate3d(${worldMapView.x}px, ${worldMapView.y}px, 0) scale(${worldMapView.scale})`;
+  content.style.setProperty('--pin-inverse', String(1 / worldMapView.scale));
+  const label = overlay.querySelector('#worldZoomStatus');
+  if (label) label.textContent = `${Math.round(worldMapView.scale * 100)}%`;
+}
+function setWorldMapZoom(overlay, scale) {
+  worldMapView.scale = THREE.MathUtils.clamp(Math.round(scale * 10) / 10, 1, 4);
+  if (worldMapView.scale === 1) { worldMapView.x = 0; worldMapView.y = 0; }
+  applyWorldMapView(overlay);
+}
+function showWorldMap() {
+  closePanel();
+  const overlay = $('worldMapOverlay');
+  const profile = service.profile();
+  const communities = service.getWorldMap();
+  const selected = communities.find(community => community.id === selectedWorldCommunityId) || communities[0];
+  selectedWorldCommunityId = selected.id;
+  const ownBase = selected.id === profile.communityId;
+  const access = service.getAccess(profile.id);
+  const war = service.getWars(profile.id).find(item => ['preparation', 'active'].includes(item.state) && [item.challengerCommunityId, item.defenderCommunityId].includes(selected.id));
+  const reports = war ? service.getScoutReports(profile.id, war.id) : [];
+  const canScout = Boolean(war && access.allowed && selected.id !== profile.communityId && service.getWarReadiness(profile.communityId, profile.id).eligible && war.roster[profile.communityId]?.some(member => member.identityId === profile.id) && !reports.some(report => report.identityId === profile.id) && reports.length < WAR_RULES.maxScoutsPerSide);
+  const away = war ? service.getAwaySquads(selected.id, war.id) : [];
+  const pins = communities.map(community => `<button class="world-pin ${community.id === selected.id ? 'selected' : ''} ${community.accessTier === 'view only' ? 'view-only' : ''}" style="left:${community.map[0]}%;top:${community.map[1]}%" data-world-community="${escapeHTML(community.id)}" data-world-name="${escapeHTML(community.name.toLocaleLowerCase())}" aria-label="Inspect ${escapeHTML(community.name)}">${community.construction.length ? '⚒' : '◆'}</button>`).join('');
+  const proResults = connectedProMatches(communities).map(community => `<button class="world-result" data-world-community="${escapeHTML(community.id)}" data-world-name="${escapeHTML(community.name.toLocaleLowerCase())}"><span>◆ ${escapeHTML(community.name)}</span><small>PRO · Hall L${community.hallLevel}</small></button>`).join('');
+  const origin = communities.find(community => community.id === profile.communityId);
+  const route = origin && selected.id !== origin.id && selected.accessTier !== 'view only' ? routeBriefing(origin, selected) : null;
+  const routePanel = route ? `<div class="world-route"><strong>Route briefing · ${escapeHTML(origin.name)} → ${escapeHTML(selected.name)}</strong><div class="world-route-stats"><span><b>${route.distanceKm.toLocaleString()} km</b> great-circle</span><span><b>~${route.travelHours} h</b> travel + mobilisation</span><span><b>${escapeHTML(route.riskLabel)}</b> risk ${route.risk}/5</span><span><b>×${route.rewardMultiplier.toFixed(2)}</b> victory Parts</span></div><p>Planning estimate from fictional regional markers, using 850 km/h plus 1.5 hours mobilisation. Risk reflects distance, Hall level and assigned defenders. A local war victory earns the capped risk multiplier from the accepted, frozen bases; scores and rankings stay unchanged. Travel time is strategic context while preview battles retain accelerated mission timers.</p></div>` : '';
+  const buildings = Object.entries(selected.buildings).map(([key, level]) => {
+    const asset = getBuildingAsset(key, level);
+    const construction = selected.construction.find(project => project.key === key);
+    return `<div class="world-building ${construction ? 'constructing' : ''}"><img src="${escapeHTML(asset.png)}" alt="${escapeHTML(GAME_CONFIG.buildings[key].name)} Level ${level}${construction ? ', under construction' : ''}"><strong>${escapeHTML(GAME_CONFIG.buildings[key].name)} · L${level}${construction ? ' · ⚒' : ''}</strong></div>`;
+  }).join('');
+  const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
+  const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
+  const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${squadUnlocked(role, selected.buildings) ? `gear L${squadTier(role, selected.buildings)}` : `locked · Hall L${definition.unlockHall} / ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}`}</span>`).join('');
+  const visibleDefenders = Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
+    const unit = selected.defenders?.[role];
+    return `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${unit?.level ? `L${unit.level} · ${unit.post ? escapeHTML(DEFENDER_POSTS[unit.post]) : 'reserve'}` : 'locked'}</span>`;
+  }).join('');
+  const mission = war ? `<div class="world-mission"><strong>${escapeHTML(war.state.toUpperCase())} · ${escapeHTML(war.id)}</strong><p>${away.length} ${away.length === 1 ? 'squad' : 'squads'} away from ${escapeHTML(selected.name)} right now. Each exposed squad can give an attacker up to +6 points, reduced by barricades and assigned Hounds. Recalled squads stop exposing home defence.</p>${canScout ? `<button id="worldScoutBtn">Send scout · arrives in ${WAR_RULES.scoutArrivalMs / 1000}s</button>` : ''}${reports.map(report => `<p>Scout ${escapeHTML(report.id)}: ${report.recalledAt ? 'recalled' : report.active ? report.arrived ? `intel received · returns in ${formatRemaining(report.returnAt)}` : `travelling · arrives in ${formatRemaining(report.arrivalAt)}` : 'returned'}${report.intel ? ` · Hall L${report.intel.hallLevel}, Arc Battery L${report.intel.towerLevel}, ${report.intel.fortification} barricades` : ''} ${report.active && report.identityId === profile.id ? `<button data-recall-scout="${escapeHTML(report.id)}">Recall to defend</button>` : ''}</p>`).join('')}</div>` : '';
+  overlay.innerHTML = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><h2>DZN · World Strongholds</h2><button id="closeWorldBtn">Return to base</button></div><p>Explore three fictional communities. The Pro search is populated from this preview roster; a reviewed DZN Network connection can later supply eligible servers using coarse public regions. No player or server coordinates are shown.</p><div class="world-layout"><div class="world-map"><div class="world-map-toolbar"><label class="world-search-label" for="worldSearch">Find connected Pro stronghold<input id="worldSearch" type="search" autocomplete="off" placeholder="Search Pro servers" value="${escapeHTML(worldSearch)}"></label><div class="world-zoom-controls"><button id="worldZoomOut" aria-label="Zoom out">−</button><span id="worldZoomStatus" aria-live="polite">100%</span><button id="worldZoomIn" aria-label="Zoom in">+</button><button id="worldZoomReset">Reset</button></div></div><div class="world-map-viewport" tabindex="0" aria-label="World map. Drag to move; use plus, minus, Home and arrow keys to navigate"><div class="world-map-content"><img src="assets/world/stronghold-world.png" draggable="false" alt="Stylized world map showing continents and illustrative community markers">${pins}</div></div><div class="world-results" aria-label="Connected Pro preview servers">${proResults}</div><p id="worldSearchStatus" class="help" role="status"></p></div><div class="world-details"><h3>${escapeHTML(selected.name)}</h3><p>${ownBase ? 'Your connected community' : 'Visitor preview · read only'} · ${escapeHTML(selected.accessTier)} · Command Hall L${selected.hallLevel}</p><p class="help">DZN perimeter: ${selected.wallSegments} wall segments · ${selected.wallTierTotal} combined wall tiers.</p>${routePanel}<div class="world-buildings">${buildings}</div><h3>Active construction</h3>${construction}<h3>Land and districts</h3><p>${districts}</p><h3>Visible squad kit</h3><div class="world-kits">${visibleKits}</div><h3>Base defenders</h3><div class="world-kits">${visibleDefenders}</div>${mission}<p class="help">Only verified players connected to their own eligible community may fund, build or scout. Main infrastructure still requires owner/admin approval. This local preview does not connect to live DZN accounts or launch real attacks.</p><div class="row"><button id="worldWarBtn">Open War Table</button></div></div></div>`;
+  overlay.style.display = 'block';
+  applyWorldMapView(overlay);
+  const updateWorldSearch = () => {
+    worldSearch = $('worldSearch').value;
+    const matches = connectedProMatches(communities, worldSearch);
+    const needle = worldSearch.trim().toLocaleLowerCase();
+    overlay.querySelectorAll('[data-world-name]').forEach(item => { item.hidden = !!needle && !item.dataset.worldName.includes(needle); });
+    $('worldSearchStatus').textContent = `${matches.length} connected Pro ${matches.length === 1 ? 'server' : 'servers'} in this preview${needle ? ' match your search' : ''}.`;
+  };
+  $('worldSearch').oninput = updateWorldSearch;
+  updateWorldSearch();
+  const viewport = overlay.querySelector('.world-map-viewport');
+  let drag = null;
+  viewport.onpointerdown = event => {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    viewport.setPointerCapture(event.pointerId);
+  };
+  viewport.onpointermove = event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    worldMapView.x += event.clientX - drag.x;
+    worldMapView.y += event.clientY - drag.y;
+    drag.x = event.clientX; drag.y = event.clientY;
+    applyWorldMapView(overlay);
+  };
+  viewport.onpointerup = viewport.onpointercancel = () => { drag = null; };
+  viewport.onwheel = event => { event.preventDefault(); setWorldMapZoom(overlay, worldMapView.scale + (event.deltaY < 0 ? .2 : -.2)); };
+  viewport.ondblclick = () => setWorldMapZoom(overlay, worldMapView.scale + .5);
+  viewport.onkeydown = event => {
+    if (event.key === '+' || event.key === '=') setWorldMapZoom(overlay, worldMapView.scale + .2);
+    else if (event.key === '-') setWorldMapZoom(overlay, worldMapView.scale - .2);
+    else if (event.key === 'Home') { worldMapView.scale = 1; worldMapView.x = 0; worldMapView.y = 0; applyWorldMapView(overlay); }
+    else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+      worldMapView.x += event.key === 'ArrowLeft' ? 25 : event.key === 'ArrowRight' ? -25 : 0;
+      worldMapView.y += event.key === 'ArrowUp' ? 25 : event.key === 'ArrowDown' ? -25 : 0;
+      applyWorldMapView(overlay);
+    } else return;
+    event.preventDefault();
+  };
+  $('worldZoomIn').onclick = () => setWorldMapZoom(overlay, worldMapView.scale + .25);
+  $('worldZoomOut').onclick = () => setWorldMapZoom(overlay, worldMapView.scale - .25);
+  $('worldZoomReset').onclick = () => { worldMapView.scale = 1; worldMapView.x = 0; worldMapView.y = 0; applyWorldMapView(overlay); };
+  $('closeWorldBtn').onclick = () => { overlay.style.display = 'none'; $('worldBtn').focus(); };
+  $('worldWarBtn').onclick = () => { overlay.style.display = 'none'; showWarTable(); };
+  overlay.querySelectorAll('[data-world-community]').forEach(button => button.onclick = () => { selectedWorldCommunityId = button.dataset.worldCommunity; showWorldMap(); });
+  if ($('worldScoutBtn')) $('worldScoutBtn').onclick = () => {
+    const result = service.dispatchScout(profile.id, war.id);
+    toast(result.ok ? 'Scout dispatched · home defence exposed until return or recall.' : result.error);
+    showWorldMap();
+  };
+  overlay.querySelectorAll('[data-recall-scout]').forEach(button => button.onclick = () => {
+    const result = service.recallScout(profile.id, button.dataset.recallScout);
+    toast(result.ok ? 'Scout recalled · home defence reinforced.' : result.error);
+    showWorldMap();
+  });
+}
+$('worldBtn').onclick = showWorldMap;
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && $('worldMapOverlay').style.display === 'block') { $('worldMapOverlay').style.display = 'none'; $('worldBtn').focus(); } });
 
 function refreshWarTableTimers() {
   if (panel.style.display === 'none' || !panel.querySelector('[data-war-record]')) return;
@@ -1550,28 +2753,66 @@ function refreshWarTableTimers() {
       const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
       const capped = challengerCount >= WAR_RULES.maxAttacksPerSide && defenderCount >= WAR_RULES.maxAttacksPerSide;
       const resolve = card.querySelector('[data-war-resolve]');
-      if (resolve) resolve.disabled = !(leadership && readiness.eligible && (closed || capped));
-      if (resolve && leadership && readiness.eligible && (closed || capped)) resolve.textContent = 'Resolve war · lock result';
+      const readyToResolve = closed || (!war.stages?.length && capped);
+      if (resolve) resolve.disabled = !(leadership && readiness.eligible && readyToResolve);
+      if (resolve && leadership && readiness.eligible && readyToResolve) resolve.textContent = 'Resolve war · lock result';
     }
   }
 }
 
 function clearWarBaseVisuals() {
+  warDefenderToken++;
+  warTurretRig = null;
+  for (const bolt of warBattle?.bolts || []) {
+    scene.remove(bolt.line);
+    bolt.line.geometry.dispose();
+    bolt.line.material.dispose();
+  }
+  for (const defender of warDefenderMeshes) {
+    scene.remove(defender.mesh);
+    if (defender.snareField) {
+      defender.snareField.geometry.dispose();
+      defender.snareField.material.dispose();
+    }
+  }
+  warDefenderMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
-    child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+    if (child.userData.sharedTemplate) clearArcSplitGeometry(child);
+    else child.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
     warBaseGroup.remove(child);
   }
 }
 
 function buildWarBaseVisual(side) {
   clearWarBaseVisuals();
+  const token = warDefenderToken;
   const animationCounts = { radars: animated.radars.length, lights: animated.lights.length, chimneys: animated.chimneys.length };
   warBaseGroup.position.set(OUTPOST.x, 0, OUTPOST.z);
   for (const [key, building] of Object.entries(DEFS)) {
     const model = buildModel(key, side.base.levels[key]);
-    model.position.set(building.pos[0], 0.05, building.pos[1]);
+    const point = side.base.layout?.structures?.[key];
+    model.position.set(point?.x ?? building.pos[0], 0.05, point?.z ?? building.pos[1]);
     warBaseGroup.add(model);
+    if (key === 'tower') warTurretRig = model.userData.turretRig;
+    const asset = getBuildingAsset(key, side.base.levels[key]);
+    if (asset) loadBuildingTemplate(asset.glb).then(template => {
+      if (token !== warDefenderToken) return;
+      const detailed = normalizeBuildingClone(template, key, side.base.levels[key]);
+      detailed.position.copy(model.position);
+      detailed.userData.sharedTemplate = true;
+      warBaseGroup.add(detailed);
+      warBaseGroup.remove(model);
+      model.traverse(object => { if (object.isMesh) object.geometry?.dispose(); });
+      if (key === 'tower') warTurretRig = detailed.userData.turretRig;
+    }).catch(error => console.warn(`War base ${key} model could not load; retaining fallback.`, error));
   }
+  for (const wall of side.base.layout?.walls || []) wallModel(wall.level).then(template => {
+    if (token !== warDefenderToken || !template) return;
+    const segment = template.clone(true);
+    segment.position.set(wall.x, .09, wall.z);
+    segment.userData.sharedTemplate = true;
+    warBaseGroup.add(segment);
+  });
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, -17);
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, 17);
   box(warBaseGroup, 0.65, 0.45, 34, MAT.dark, -17, 0, 0);
@@ -1580,6 +2821,32 @@ function buildWarBaseVisual(side) {
   animated.lights.length = animationCounts.lights;
   animated.chimneys.length = animationCounts.chimneys;
   warBaseGroup.visible = true;
+  for (const [role, defender] of Object.entries(side.base.defenders || {})) {
+    const node = DEFENDER_POST_NODES[defender.post];
+    if (!defender.level || !node) continue;
+    const [x, z] = PATROL_NODES[node];
+    const mesh = new THREE.Group();
+    mesh.position.set(OUTPOST.x + x, 0, OUTPOST.z + z);
+    mesh.rotation.y = -Math.PI / 2;
+    scene.add(mesh);
+    const patrol = { role, level: defender.level, mesh, home: mesh.position.clone() };
+    if (role === 'trapper') {
+      const field = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 32),
+        new THREE.MeshBasicMaterial({ color: 0xafff52, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      field.rotation.x = -Math.PI / 2;
+      field.position.y = 0.055;
+      mesh.add(field);
+      patrol.snareField = field;
+    }
+    warDefenderMeshes.push(patrol);
+    loadBuildingTemplate(defenderAsset(role, defender.level)).then(template => {
+      if (token !== warDefenderToken) return;
+      const model = template.clone(true);
+      mesh.add(model);
+      patrol.model = model;
+      patrol.limbs = bindDefenderRig(model, role);
+    }).catch(error => console.warn(`War defender model could not load: ${role}`, error));
+  }
 }
 
 function launchWarAttack(warId, tactic) {
@@ -1589,18 +2856,18 @@ function launchWarAttack(warId, tactic) {
   if (!result.ok) { showWarTable(result.error); return; }
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+  const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
   buildWarBaseVisual(defendingSide);
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
-  const squadSize = Math.min(10, (profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender).stats.squadSize);
+  const squadSize = Math.min(10, attackingSide.stats.squadSize);
   const target = OUTPOST.clone().add(new THREE.Vector3(-3, 0, 0));
   const troops = [];
   for (let i = 0; i < squadSize; i++) {
-    const troop = new THREE.Group();
-    box(troop, 0.48, 0.8, 0.35, MAT.olive, 0, 0.45);
-    box(troop, 0.17, 0.52, 0.16, MAT.dark, -0.13, 0);
-    box(troop, 0.17, 0.52, 0.16, MAT.dark, 0.13, 0);
-    cyl(troop, 0.2, 0.2, 0.26, MAT.olive, 0, 1.05);
+    let role = tactic === 'recon' ? 'recon' : 'assault';
+    if (squadUnlocked('medic', attackingSide.base.levels) && i === squadSize - 1) role = 'medic';
+    else if (tactic === 'assault' && squadUnlocked('sentinel', attackingSide.base.levels) && i % 4 === 3) role = 'sentinel';
+    const troop = makeSoldier(role, attackingSide.base.levels);
     const start = new THREE.Vector3(OUTPOST.x - 22, 0, OUTPOST.z + (i - (squadSize - 1) / 2) * 1.15);
     const troopTarget = target.clone().add(new THREE.Vector3(0, 0, (i - (squadSize - 1) / 2) * 0.9));
     troop.position.copy(start);
@@ -1608,12 +2875,12 @@ function launchWarAttack(warId, tactic) {
     warTroopMeshes.push(troop);
     troops.push({ mesh: troop, start, target: troopTarget, phase: i * 0.45 });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 7, smokeTimer: 0 };
+  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 10, smokeTimer: 0, shotClock: 0, bolts: [] };
   camTarget.copy(OUTPOST);
   zoom = 32;
   updateCamera();
   panel.style.display = 'none';
-  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed · ${result.score} points · ${result.feedback}`);
+  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed · ${result.score} points · ${result.casualties} troops withdrawn. Full breakdown in War Table.`);
   playClank();
 }
 
@@ -1625,6 +2892,53 @@ function updateWarBattle(dt) {
     troop.mesh.position.lerpVectors(troop.start, troop.target, progress);
     troop.mesh.position.y = Math.abs(Math.sin(warBattle.time * 8 + troop.phase)) * 0.08;
     troop.mesh.rotation.y = Math.PI / 2;
+    animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, 1, null, dt);
+  }
+  for (const defender of warDefenderMeshes) {
+    const nearest = warBattle.troops.reduce((best, troop) => {
+      const distance = troop.mesh.position.distanceTo(defender.home);
+      return !best || distance < best.distance ? { mesh: troop.mesh, distance } : best;
+    }, null);
+    const threat = nearest ? THREE.MathUtils.clamp((20 - nearest.distance) / 12, 0, 1) : 0;
+    if (threat) {
+      const direction = nearest.mesh.position.clone().sub(defender.home);
+      const facing = Math.atan2(direction.x, direction.z);
+      const turn = Math.atan2(Math.sin(facing - defender.mesh.rotation.y), Math.cos(facing - defender.mesh.rotation.y));
+      defender.mesh.rotation.y += THREE.MathUtils.clamp(turn, -dt * 2.8, dt * 2.8);
+      if (defender.role === 'hound') {
+        direction.y = 0;
+        defender.mesh.position.copy(defender.home).add(direction.normalize().multiplyScalar(Math.max(0, Math.sin(warBattle.time * 9)) * threat * 0.55));
+      }
+    } else defender.mesh.position.copy(defender.home);
+    if (defender.snareField) {
+      defender.snareField.scale.setScalar(1 + threat * (0.4 + Math.sin(warBattle.time * 8) * 0.2));
+      defender.snareField.material.opacity = threat * (0.2 + Math.sin(warBattle.time * 8) * 0.08);
+    }
+    animateDefender({ ...defender, motion: { stride: warBattle.time * 8, moving: defender.role === 'hound' && threat > 0.1 } }, warBattle.time, threat);
+  }
+  const target = warBattle.troops.find(troop => troop.mesh.position.distanceTo(OUTPOST) < 22)?.mesh;
+  warBattle.shotClock += dt;
+  const fire = Boolean(warTurretRig && target && progress < 0.94 && warBattle.shotClock >= 0.8);
+  if (fire) warBattle.shotClock = 0;
+  const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+  stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire);
+  if (fire) {
+    const origin = warTurretRig.muzzle.getWorldPosition(new THREE.Vector3());
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, aim]),
+      new THREE.LineBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
+    scene.add(line);
+    warBattle.bolts.push({ line, life: 0 });
+  }
+  for (let i = warBattle.bolts.length - 1; i >= 0; i--) {
+    const bolt = warBattle.bolts[i];
+    bolt.life += dt;
+    bolt.line.material.opacity = Math.max(0, 0.95 * (1 - bolt.life / 0.22));
+    if (bolt.life >= 0.22) {
+      scene.remove(bolt.line);
+      bolt.line.geometry.dispose();
+      bolt.line.material.dispose();
+      warBattle.bolts.splice(i, 1);
+    }
   }
   warBattle.smokeTimer += dt;
   if (warBattle.smokeTimer >= 0.8 && progress > 0.65) {
@@ -1643,7 +2957,7 @@ function updateWarBattle(dt) {
   camTarget.set(0, 0, 0);
   zoom = 28;
   updateCamera();
-  toast(`${completed.result.feedback} · Open War Table for the updated score and event replay.`);
+  toast(`Raid replay complete · ${completed.result.score} points. Open War Table for the full result.`);
   showWarTable();
 }
 
@@ -1666,9 +2980,8 @@ function launchRaid() {
   const troops = [];
   const count = 2 + state.levels.hq * 2;
   for (let i = 0; i < count; i++) {
-    const t = new THREE.Group();
-    box(t, 0.6, 0.9, 0.4, MAT.olive);
-    cyl(t, 0.25, 0.25, 0.3, MAT.purple, 0, 0.9);
+    const t = makeSoldier('assault', state.levels);
+    t.userData.stride = i * 0.65;
     t.position.set(OUTPOST.x - 18, 0, OUTPOST.z + (i - count / 2) * 1.5);
     scene.add(t);
     troops.push(t);
@@ -1694,7 +3007,9 @@ function updateRaid(dt) {
     if (dir.length() > 4) {
       t.position.addScaledVector(dir.normalize(), dt * 5);
       t.rotation.y = Math.atan2(dir.x, dir.z);
+      animateSoldier(t, raid.time * 8 + t.userData.stride, 1, null, dt);
     } else {
+      animateSoldier(t, raid.time * 2 + t.userData.stride, 0.22, null, dt);
       target.userData.hp -= firepower * dt;
       if (Math.random() < dt * 6) {
         spawnSmoke(target.position.clone().add(new THREE.Vector3(0, 1, 0)));
@@ -1812,6 +3127,7 @@ renderer.domElement.addEventListener('pointermove', e => {
     pinchStart = dist;
   } else {
     dragDistance += Math.abs(dx) + Math.abs(dy);
+    if (focusedPatrolRole && dragDistance > 6) stopPatrolFocus();
     const scale = zoom / window.innerHeight;
     const right = new THREE.Vector3(1, 0, -1).normalize();
     const forward = new THREE.Vector3(-1, 0, -1).normalize();
@@ -1840,6 +3156,7 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 renderer.domElement.addEventListener('pointercancel', e => pointers.delete(e.pointerId));
 renderer.domElement.addEventListener('wheel', e => {
+  if (focusedPatrolRole) stopPatrolFocus();
   zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 12, 60);
   updateCamera();
 }, { passive: true });
@@ -1865,6 +3182,7 @@ renderer.setAnimationLoop(time => {
   animated.radars.forEach(r => {
     r.rotation.y += dt * 1.5;
   });
+  if (buildings.tower?.group.visible) stepArcBattery(buildings.tower.model?.userData.turretRig, dt, elapsed);
   animated.lights.forEach(l => {
     if (l.head) {
       l.head.rotation.y = Math.sin(elapsed * 0.5) * 1.6 + 0.8;
@@ -1872,6 +3190,13 @@ renderer.setAnimationLoop(time => {
     if (l.flag) {
       l.flag.rotation.y = Math.sin(elapsed * 3) * 0.3;
     }
+  });
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) animated.yards.forEach(yard => {
+    yard.phase += dt;
+    if (yard.rotor) yard.rotor.rotation.z -= dt * 6.2;
+    for (const roller of yard.rollers) roller.rotateY(dt * 1.9);
+    if (yard.carriage) yard.carriage.position.z = 1.55 + Math.sin(yard.phase * 1.25) * .09;
+    if (yard.hook) yard.hook.position.y = 2.54 + Math.sin(yard.phase * .8) * .12;
   });
   smokeTimer += dt;
   if (smokeTimer > 0.25) {
@@ -1896,10 +3221,42 @@ renderer.setAnimationLoop(time => {
     }
   }
   patrols.forEach(p => {
-    const a = p.phase + elapsed * p.speed;
-    p.mesh.position.set(Math.cos(a) * p.radius, Math.abs(Math.sin(elapsed * 8)) * 0.08, Math.sin(a) * p.radius);
-    p.mesh.rotation.y = -a;
+    const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
+    p.mesh.position.set(motion.x, 0, motion.z);
+    p.mesh.rotation.y = motion.yaw;
+    animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null, dt);
   });
+  if (focusedPatrolRole) {
+    const patrol = focusedPatrol();
+    if (!patrol?.mesh.visible || raid || warBattle) stopPatrolFocus(true);
+    else {
+      camTarget.lerp(patrol.mesh.position, Math.min(1, dt * 7));
+      updateCameraPosition();
+      patrolFocusLight.position.set(patrol.mesh.position.x + 1.2, 2.6, patrol.mesh.position.z + 1.2);
+      patrolFocusRing.position.set(patrol.mesh.position.x, 0.055, patrol.mesh.position.z);
+      patrolFocusRing.scale.setScalar(1 + Math.sin(elapsed * 3) * 0.04);
+    }
+  }
+  for (const patrol of defenderPatrols.values()) {
+    const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
+    patrol.mesh.position.set(motion.x, 0, motion.z);
+    patrol.mesh.rotation.y = motion.yaw;
+    animateDefender(patrol, elapsed);
+  }
+  if (operativeMesh.visible && operativePatrol.motion) {
+    const motion = stepPatrolMotion(operativePatrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
+    operativeMesh.position.set(motion.x, 0, motion.z);
+    operativeMesh.rotation.y = motion.yaw;
+    const name = motion.moving ? 'walk' : 'idle';
+    if (operativePatrol.mixer && operativePatrol.actionName !== name) {
+      const next = operativePatrol.actions[name];
+      next.reset().fadeIn(.18).play();
+      operativePatrol.action?.fadeOut(.18);
+      operativePatrol.action = next;
+      operativePatrol.actionName = name;
+    }
+    operativePatrol.mixer?.update(dt);
+  }
   Object.values(buildings).forEach(b => {
     if (b.scaffold.visible) {
       b.scaffold.userData.crane.rotation.y = elapsed * 0.8;

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Generated in the owner Rosebud AI account with its Tripo text-to-3D Create option using existing credits. Static source GLBs were separately rigged and animated in Blender; source meshes are retained.",
+  "usage": "DZN Stronghold Wars local preview. Rights remain subject to the owner account and Rosebud terms.",
+  "coordinateSystem": "glTF Y-up; source character faces +X and game placement rotates it toward +Z",
+  "assets": {
+    "assault_l01": {
+      "file": "assets/models/squads-v6/assault_l01.glb",
+      "source": "source-art/squads/warden_l01_rosebud_tripo.glb",
+      "rosebudJob": "af9dc93f-2eb1-45de-bf18-8d48a5e3ac8c",
+      "bytes": 2930324,
+      "sha256": "e0c2b0f9cb16fd51b8525d30981add25e3096c5ef05f41b6e8644161c9a3e27b",
+      "sourceSha256": "f719cca1c99cb51eaae905c2f0c55cdfded873663be2a0fa8074bff9df4cb9e1",
+      "triangles": 5362,
+      "skins": 1,
+      "textures": 3,
+      "animation": "DZN_Warden_Walk",
+      "heightMetres": 1.8
+    },
+    "assault_l02": {
+      "file": "assets/models/squads-v6/assault_l02.glb",
+      "source": "source-art/squads/warden_l02_rosebud_tripo.glb",
+      "rosebudJob": "d74a234b-7c22-4415-95ae-fa3468e36ebc",
+      "bytes": 2985548,
+      "sha256": "d26bd49c309ba692d46003df926f47d1b6229b62629599340e44ce7e07fac04b",
+      "sourceSha256": "7854e778e28d8135f206eb71c848d95b5fff5586ad1801932e74ff451eeb53f4",
+      "triangles": 5329,
+      "skins": 1,
+      "textures": 3,
+      "animation": "DZN_Warden_Walk",
+      "heightMetres": 1.8
+    },
+    "assault_l03": {
+      "file": "assets/models/squads-v6/assault_l03.glb",
+      "source": "source-art/squads/warden_l03_rosebud_tripo.glb",
+      "rosebudJob": "3d746674-7007-445b-abfe-267839a2ee9c",
+      "bytes": 3306028,
+      "sha256": "f72ddd68b67ad6e0d135a2e6c44134c6fbb9241562a99faaceb6dedcdbb3bdbd",
+      "sourceSha256": "4c5f192ecdbf2faa3a934bddad42e3c70dd8fae3d62c2b62a163bbacc708aed1",
+      "triangles": 5635,
+      "skins": 1,
+      "textures": 3,
+      "animation": "DZN_Warden_Walk",
+      "heightMetres": 1.8
+    },
+    "assault_l04": {
+      "file": "assets/models/squads-v6/assault_l04.glb",
+      "source": "source-art/squads/warden_l04_rosebud_tripo.glb",
+      "rosebudJob": "3534dfcf-183f-436d-adb3-16d888c6ba3f",
+      "bytes": 3220004,
+      "sha256": "c95f20143b517e630cbcf0e6909f9ec3232c5f1235b6121a8f30b7b702ed4c63",
+      "sourceSha256": "49e97c42fb50f6139127cfae672644633c889a50993a68c5c8191ed05045f4ea",
+      "triangles": 5623,
+      "skins": 1,
+      "textures": 3,
+      "animation": "DZN_Warden_Walk",
+      "heightMetres": 1.8
+    },
+    "assault_l05": {
+      "file": "assets/models/squads-v6/assault_l05.glb",
+      "source": "source-art/squads/warden_l05_rosebud_tripo.glb",
+      "rosebudJob": "dcd13f36-6560-4163-baa9-c8dd7cfbf86e",
+      "bytes": 4233448,
+      "sha256": "24489e4ccea3ff908589aa50b320c3f1cd386024bf9e33f5aa865544b6596c88",
+      "sourceSha256": "cf9460894f49d6e9d4489cf191c279943ea81eb3bd202c9d817f618133b951f8",
+      "triangles": 5648,
+      "skins": 1,
+      "textures": 3,
+      "animation": "DZN_Warden_Walk",
+      "heightMetres": 1.8
+    }
+  },
+  "equipment": {
+    "warden_carbine": {
+      "file": "assets/models/squads-v6/warden_carbine.glb",
+      "source": "source-art/squads/warden_carbine_rosebud_tripo.glb",
+      "rosebudJob": "f652da23-b56f-432b-bd03-d2216356123f",
+      "bytes": 2317152,
+      "sha256": "44477ecee542cec1e56faf8ad363ef977c640a5af2c9d71803117dcc5c11ed7a",
+      "sourceSha256": "44477ecee542cec1e56faf8ad363ef977c640a5af2c9d71803117dcc5c11ed7a",
+      "meshes": 1,
+      "textures": 3
+    }
+  }
+}

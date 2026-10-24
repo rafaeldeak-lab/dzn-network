@@ -4,6 +4,11 @@
  * inventories, idempotent actions, progression, and Forge persistence. It is
  * intentionally local-only; it is not an authentication or security boundary.
  */
+import { squadBattleStats } from './squad-assets.js';
+import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
+import { routeBriefing } from './world-map.js';
+import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
+import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -18,7 +23,15 @@ export const WAR_RULES = Object.freeze({
   attackWindowMs: 10 * 60 * 1000,
   maxAttacksPerSide: 2,
   localRewardParts: 40,
+  scoutArrivalMs: 30 * 1000,
+  squadReturnMs: 90 * 1000,
+  maxScoutsPerSide: 2,
 });
+export const WAR_STAGE_DEFS = Object.freeze([
+  Object.freeze({ id: 'forge-convoy', name: 'Forge Convoy', building: 'Workshop / Forge', key: 'workshop', parts: 30, timber: 10, objective: 'Dispatch repair kits and Timber to the front.' }),
+  Object.freeze({ id: 'relay-capture', name: 'Relay Capture', building: 'Communications', key: 'comms', parts: 40, timber: 0, objective: 'Secure the DZN signal link before the rival side.' }),
+  Object.freeze({ id: 'tower-stand', name: 'Tower Stand', building: 'Arc Battery', key: 'tower', parts: 25, timber: 15, objective: 'Hold the perimeter through the final timed phase.' }),
+]);
 
 export const GAME_CONFIG = Object.freeze({
   maxLevel: 5,
@@ -70,7 +83,7 @@ export const GAME_CONFIG = Object.freeze({
       benefits: Object.freeze(['2 Parts/sec; personal Forge access', '4 Parts/sec', '6 Parts/sec', '8 Parts/sec', '10 Parts/sec']),
     }),
     tower: Object.freeze({
-      name: 'Watchtower', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
+      name: 'Arc Battery', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
       stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ firepowerPercent: level * 25 }))),
       benefits: Object.freeze([25, 50, 75, 100, 125].map(value => `Training squad firepower +${value}%`)),
     }),
@@ -102,9 +115,9 @@ export const PREVIEW_IDENTITIES = Object.freeze([
 ]);
 
 const COMMUNITIES = Object.freeze([
-  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
-  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
-  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, members: Object.freeze(['free-owner', 'free-member']) }),
+  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, map: [47, 29], members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
+  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, map: [23, 32], members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
+  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, map: [82, 38], members: Object.freeze(['free-owner', 'free-member']) }),
 ]);
 
 const SUPPORT_KEYS = Object.freeze(['workshop', 'tower', 'comms']);
@@ -121,6 +134,8 @@ function emptyBase(treasury = 200) {
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
+    layout: defaultLayout(),
+    defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
       timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null,
@@ -148,9 +163,12 @@ function createFreshState() {
     communities,
     members,
     wars: [],
+    scouts: [],
+    nextScoutNumber: 1,
     warActionRecords: [],
     warRewardLedger: [],
     nextWarNumber: 1,
+    operations: newOperationsState(),
     migratedLegacy: false,
     createdAt: Date.now(),
   };
@@ -216,15 +234,27 @@ function normalizeWarRecord(war) {
       const status = saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild';
       return { id: config.id, status, barricades: status === 'claimed' ? Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) : 0, facilityLevel: status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.facilityLevel)) : 0 };
     });
-    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0);
+    const structures = defaultLayout().structures;
+    for (const key of Object.keys(structures)) {
+      const point = source?.base?.layout?.structures?.[key];
+      if (isGridCell(point?.x, point?.z)) structures[key] = { x: point.x, z: point.z };
+    }
+    const walls = Array.isArray(source?.base?.layout?.walls) ? source.base.layout.walls.filter(wall => wall && /^wall-\d+$/.test(wall.id) && isGridCell(wall.x, wall.z)).map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: Math.min(hq, Math.max(1, safeInt(wall.level, 1))) })).slice(0, MAX_WALLS_PER_HALL[hq]) : [];
+    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => {
+      const saved = source?.base?.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      return [role, { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null }];
+    }));
     return {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
-      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots },
+      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders, layout: { structures, walls } },
       stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
-        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
+        assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
     };
   };
   const snapshots = { challenger: side(war.snapshots?.challenger), defender: side(war.snapshots?.defender) };
@@ -240,8 +270,14 @@ function normalizeWarRecord(war) {
   const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => ({
     attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
     tactic: a.tactic === 'recon' ? 'recon' : 'assault', at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
+    returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
   })) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
+  const stages = Array.isArray(war.stages) ? war.stages.filter(item => WAR_STAGE_DEFS.some(def => def.id === item?.id)).slice(0, WAR_STAGE_DEFS.length).map(item => ({
+    id: item.id, opensAt: safeInt(item.opensAt), closesAt: safeInt(item.closesAt),
+    completedBy: Object.fromEntries(communities.map(id => [id, item.completedBy?.[id] && typeof item.completedBy[id].identityId === 'string'
+      ? { identityId: item.completedBy[id].identityId, at: safeInt(item.completedBy[id].at), points: Math.min(20, safeInt(item.completedBy[id].points)) } : null])),
+  })) : [];
   return {
     id: war.id, challengerCommunityId: war.challengerCommunityId, defenderCommunityId: war.defenderCommunityId,
     challengerIdentityId: String(war.challengerIdentityId || ''), state,
@@ -249,7 +285,7 @@ function normalizeWarRecord(war) {
     acceptedAt: safeInt(war.acceptedAt), prepReadyAt: safeInt(war.prepReadyAt), prepDeadlineAt: safeInt(war.prepDeadlineAt),
     startedBy: String(war.startedBy || ''), startedAt: safeInt(war.startedAt), attackEndsAt: safeInt(war.attackEndsAt),
     resolvedAt: safeInt(war.resolvedAt), declinedAt: safeInt(war.declinedAt), expiredAt: safeInt(war.expiredAt),
-    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score,
+    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score, stages,
     winnerCommunityId: communities.includes(war.winnerCommunityId) ? war.winnerCommunityId : null, tie: Boolean(war.tie),
     rewardLedgerIds: Array.isArray(war.rewardLedgerIds) ? war.rewardLedgerIds.filter(id => typeof id === 'string') : [],
     events: Array.isArray(war.events) ? war.events.filter(e => e && typeof e.type === 'string').map(e => ({ type: String(e.type), at: safeInt(e.at), actorId: String(e.actorId || ''), text: String(e.text || ''), details: e.details && typeof e.details === 'object' ? clone(e.details) : {} })) : [],
@@ -272,6 +308,17 @@ function normalizeLoadedState(raw) {
     const base = savedCommunity.base || {};
     const normalized = emptyBase(safeInt(base.treasury));
     for (const key of Object.keys(GAME_CONFIG.buildings)) normalized.levels[key] = normalizeLevel(base.levels?.[key], 1);
+    for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+      const saved = base.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      const targetLevel = level + 1;
+      const cost = DEFENDER_COSTS[targetLevel];
+      const project = cost && saved?.project?.targetLevel === targetLevel ? {
+        targetLevel, cost, funded: Math.min(cost, safeInt(saved.project.funded)),
+        donors: Array.isArray(saved.project.donors) ? saved.project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), amount: safeInt(d.amount), at: safeInt(d.at) })) : [],
+      } : null;
+      normalized.defenders[role] = { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null, project };
+    }
     normalized.projects = Array.isArray(base.projects) ? base.projects.filter(p => p && typeof p.id === 'string' && GAME_CONFIG.buildings[p.key]).map(p => ({
       id: p.id, key: p.key, targetLevel: normalizeLevel(p.targetLevel, 1), targetAmount: safeInt(p.targetAmount),
       funded: Math.min(safeInt(p.funded), safeInt(p.targetAmount)), benefit: String(p.benefit || ''),
@@ -285,10 +332,10 @@ function normalizeLoadedState(raw) {
     normalized.actionRecords = Array.isArray(base.actionRecords) ? base.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [];
     const chronicleIds = new Set();
     normalized.chronicle = Array.isArray(base.chronicle) ? base.chronicle.filter(item => {
-      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
+      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war|defender):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
       chronicleIds.add(item.id);
       return true;
-    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
+    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war', 'defender'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
     normalized.raidCount = safeInt(base.raidCount);
     normalized.lastRaidClaimed = safeInt(base.lastRaidClaimed);
     normalized.raidCount = Math.max(normalized.raidCount, normalized.lastRaidClaimed);
@@ -329,6 +376,23 @@ function normalizeLoadedState(raw) {
         };
       }
     }
+    const claimed = new Set(normalized.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const savedLayout = base.layout && typeof base.layout === 'object' ? base.layout : {};
+    for (const key of Object.keys(normalized.layout.structures)) {
+      const point = savedLayout.structures?.[key];
+      if (isGridCell(point?.x, point?.z) && !validateLayoutPosition(normalized.layout, claimed, key, point.x, point.z))
+        normalized.layout.structures[key] = { x: point.x, z: point.z };
+    }
+    const wallIds = new Set();
+    for (const wall of Array.isArray(savedLayout.walls) ? savedLayout.walls : []) {
+      if (normalized.layout.walls.length >= MAX_WALLS_PER_HALL[normalized.levels.hq]) break;
+      if (!wall || typeof wall.id !== 'string' || !/^wall-\d+$/.test(wall.id) || wallIds.has(wall.id)) continue;
+      if (!isGridCell(wall.x, wall.z) || validateWallPosition(normalized.layout, claimed, wall.x, wall.z)) continue;
+      const level = Math.min(normalized.levels.hq, GAME_CONFIG.maxLevel, Math.max(1, safeInt(wall.level, 1)));
+      normalized.layout.walls.push({ id: wall.id, x: wall.x, z: wall.z, level });
+      wallIds.add(wall.id);
+    }
+    normalized.layout.nextWallNumber = Math.max(1, safeInt(savedLayout.nextWallNumber, 1), ...normalized.layout.walls.map(wall => Number(wall.id.slice(5)) + 1));
     normalized.legacyJobs = Array.isArray(base.legacyJobs) ? base.legacyJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.buildings[j.key] && Number.isFinite(Number(j.end))).map(j => ({ id: j.id, key: j.key, targetLevel: normalizeLevel(j.targetLevel, 1), end: Number(j.end), migratedPaid: true })) : [];
     fresh.communities[community.id] = { proActive: community.eligible ? Boolean(savedCommunity.proActive) : false, base: normalized };
   }
@@ -353,9 +417,15 @@ function normalizeLoadedState(raw) {
     };
   }
   fresh.wars = Array.isArray(raw.wars) ? raw.wars.map(normalizeWarRecord).filter(Boolean) : [];
+  fresh.scouts = Array.isArray(raw.scouts) ? raw.scouts.filter(scout => scout && typeof scout.id === 'string' && ['iron-pines', 'violet-ridge'].includes(scout.communityId) && ['iron-pines', 'violet-ridge'].includes(scout.targetCommunityId) && scout.communityId !== scout.targetCommunityId && PREVIEW_IDENTITIES.some(profile => profile.id === scout.identityId && profile.communityId === scout.communityId)).slice(-100).map(scout => ({
+    id: scout.id, warId: String(scout.warId || ''), identityId: scout.identityId, communityId: scout.communityId, targetCommunityId: scout.targetCommunityId,
+    at: safeInt(scout.at), arrivalAt: safeInt(scout.arrivalAt), returnAt: safeInt(scout.returnAt), recalledAt: safeInt(scout.recalledAt),
+  })) : [];
+  fresh.nextScoutNumber = Math.max(1, safeInt(raw.nextScoutNumber, fresh.scouts.length + 1));
   fresh.warActionRecords = Array.isArray(raw.warActionRecords) ? raw.warActionRecords.filter(r => r && typeof r.id === 'string' && typeof r.actorId === 'string' && r.result && typeof r.result === 'object').slice(-2000).map(r => ({ id: r.id, actorId: r.actorId, kind: String(r.kind || ''), result: clone(r.result), at: safeInt(r.at) })) : [];
   fresh.warRewardLedger = Array.isArray(raw.warRewardLedger) ? raw.warRewardLedger.filter(r => r && typeof r.id === 'string' && typeof r.identityId === 'string').map(r => ({ id: r.id, warId: String(r.warId || ''), identityId: r.identityId, amount: safeInt(r.amount), at: safeInt(r.at) })) : [];
   fresh.nextWarNumber = Math.max(1, safeInt(raw.nextWarNumber, fresh.wars.length + 1));
+  fresh.operations = normalizeOperationsState(raw.operations, PREVIEW_IDENTITIES);
   fresh.schemaVersion = 3;
   return fresh;
 }
@@ -503,6 +573,61 @@ export class LocalGameService {
     return { id: entry.definition.id, name: entry.definition.name, eligible: entry.definition.eligible, proActive: entry.saved.proActive, role: profile.role };
   }
 
+  // Public-style projection for the local map. No member inventory, donor,
+  // treasury, exact location or private roster data crosses this boundary.
+  getWorldMap() {
+    return COMMUNITIES.map(definition => {
+      const saved = this.state.communities[definition.id];
+      const base = saved.base;
+      return {
+        id: definition.id, name: definition.name, map: [...definition.map], illustrative: true,
+        accessTier: definition.eligible && saved.proActive ? 'owner Pro active' : 'view only',
+        hallLevel: base.levels.hq,
+        wallSegments: base.layout.walls.length,
+        wallTierTotal: base.layout.walls.reduce((sum, wall) => sum + wall.level, 0),
+        buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
+        defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
+        districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
+          facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades })),
+        construction: base.projects.filter(project => project.status === 'approved').map(project => ({
+          kind: 'building', name: GAME_CONFIG.buildings[project.key].name, key: project.key, targetLevel: project.targetLevel,
+          percent: project.targetAmount > 0 ? Math.floor(project.funded / project.targetAmount * 100) : 0,
+        })).concat(base.landPlots.flatMap(plot => [
+          plot.facilityProject ? { kind: 'facility', name: GAME_CONFIG.facilities[plot.id]?.name || 'District facility', targetLevel: plot.facilityProject.targetLevel,
+            percent: Math.floor(100 * (plot.facilityProject.partsFunded + plot.facilityProject.timberFunded) / (plot.facilityProject.partsCost + plot.facilityProject.timberCost)) } : null,
+          plot.routeProject ? { kind: 'route', name: 'Supply route', targetLevel: plot.routeProject.targetLevel,
+            percent: Math.floor(100 * (plot.routeProject.partsFunded + plot.routeProject.timberFunded) / (plot.routeProject.partsCost + plot.routeProject.timberCost)) } : null,
+        ].filter(Boolean))).concat(Object.entries(base.defenders).flatMap(([role, defender]) => defender.project ? [{
+          kind: 'defender', name: DEFENDER_CONCEPTS[role].name, key: role, targetLevel: defender.project.targetLevel,
+          percent: Math.floor(100 * defender.project.funded / defender.project.cost),
+        }] : [])),
+      };
+    });
+  }
+
+  getAwaySquads(communityId, warId) {
+    const war = this._warById(warId);
+    if (!war || !['preparation', 'active'].includes(war.state)) return [];
+    const now = this.now();
+    const attacks = war.attacks.filter(attack => attack.communityId === communityId && attack.returnAt > now && (!attack.returnedAt || attack.returnedAt > now));
+    const scouts = this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === communityId && scout.returnAt > now && (!scout.recalledAt || scout.recalledAt > now));
+    return [...attacks.map(attack => ({ id: attack.attackId, kind: 'attack', returnAt: attack.returnAt })), ...scouts.map(scout => ({ id: scout.id, kind: 'scout', returnAt: scout.returnAt }))];
+  }
+
+  getScoutReports(identityId = this.state.currentIdentityId, warId = null) {
+    const profile = this.profile(identityId);
+    if (!profile || !this.getAccess(identityId).allowed) return [];
+    const now = this.now();
+    return this.state.scouts.filter(scout => scout.communityId === profile.communityId && (!warId || scout.warId === warId)).map(scout => {
+      const arrived = scout.arrivalAt <= now && (!scout.recalledAt || scout.recalledAt >= scout.arrivalAt);
+      const war = this._warById(scout.warId);
+      const target = war?.snapshots?.challenger?.communityId === scout.targetCommunityId ? war.snapshots.challenger : war?.snapshots?.defender;
+      return { ...scout, arrived, active: !scout.recalledAt && now < scout.returnAt,
+        intel: arrived && target ? { hallLevel: target.base.levels.hq, towerLevel: target.base.levels.tower,
+          fortification: target.stats.fortification, worksDefence: target.stats.worksDefence } : null };
+    });
+  }
+
   getAccess(identityId = this.state.currentIdentityId) {
     const profile = this.profile(identityId);
     const entry = this.community(identityId);
@@ -567,13 +692,17 @@ export class LocalGameService {
     const levels = { ...base.levels };
     const hall = levels.hq;
     const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0, facilityLevel: plot.status === 'claimed' ? plot.facilityLevel : 0 }));
-    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0);
+    const structures = clone(base.layout.structures);
+    const walls = base.layout.walls.map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: wall.level }));
+    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
-      base: { levels, treasury: safeInt(base.treasury), landPlots },
+      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders, layout: { structures, walls } },
       stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
-        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
+        assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
     };
   }
 
@@ -641,7 +770,7 @@ export class LocalGameService {
       resolvedAt: 0, declinedAt: 0, expiredAt: 0,
       snapshots: { challenger: this._warSideSnapshot(communityId), defender: this._warSideSnapshot(opponentCommunityId) },
       roster: { [communityId]: this._warRoster(communityId), [opponentCommunityId]: this._warRoster(opponentCommunityId) },
-      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 },
+      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 }, stages: [],
       winnerCommunityId: null, tie: false, rewardLedgerIds: [], events: [], replay: null,
     };
     war.events.push({ type: 'challenge', at: now, actorId: identityId, text: `${this.community(identityId).definition.name} challenged ${COMMUNITIES.find(item => item.id === opponentCommunityId).name}.`, details: { challengeExpiresAt: war.challengeExpiresAt } });
@@ -711,9 +840,91 @@ export class LocalGameService {
     if (now < war.prepReadyAt) return { ok: false, error: `Preparation is still underway for ${Math.ceil((war.prepReadyAt - now) / 1000)} seconds.` };
     if (now > war.prepDeadlineAt) return { ok: false, error: 'The preparation window has ended.' };
     war.state = 'active'; war.startedBy = identityId; war.startedAt = now; war.attackEndsAt = now + WAR_RULES.attackWindowMs;
+    const stageLength = WAR_RULES.attackWindowMs / WAR_STAGE_DEFS.length;
+    war.stages = WAR_STAGE_DEFS.map((stage, index) => ({ id: stage.id, opensAt: now + stageLength * index,
+      closesAt: now + stageLength * (index + 1), completedBy: { [war.challengerCommunityId]: null, [war.defenderCommunityId]: null } }));
     war.events.push({ type: 'started', at: now, actorId: identityId, text: 'War started. Each side may deploy up to two verified roster members before the attack window closes.', details: { attackEndsAt: war.attackEndsAt, attackCap: WAR_RULES.maxAttacksPerSide } });
     const result = { ok: true, warId, state: war.state, attackEndsAt: war.attackEndsAt };
     this._recordWarAction(identityId, actionId, 'start', result);
+    this.save();
+    return result;
+  }
+
+  completeWarStage(identityId, warId, stageId, actionId = this.newActionId('war-stage')) {
+    const replay = this._warActionReplay(identityId, actionId, `stage:${warId}:${stageId}`);
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    const definition = WAR_STAGE_DEFS.find(item => item.id === stageId);
+    if (!war || !profile || !definition) return { ok: false, error: 'Choose a valid active war stage.' };
+    const communityId = profile.communityId;
+    if (![war.challengerCommunityId, war.defenderCommunityId].includes(communityId)) return { ok: false, error: 'Only a participating server can complete this stage.' };
+    const accessError = this._warIdentityError(identityId, communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'Only a verified member on the accepted-war roster can take part.' };
+    if (war.state !== 'active') return { ok: false, error: 'Stages run only during an active war.' };
+    const stage = war.stages?.find(item => item.id === stageId);
+    const now = this.now();
+    if (!stage || now < stage.opensAt || now >= stage.closesAt) return { ok: false, error: 'This timed stage is not open.' };
+    if (stage.completedBy[communityId]) return { ok: false, error: 'Your server has already completed this stage.' };
+    const member = this.member(identityId);
+    if (member.parts < definition.parts || member.timber < definition.timber) return { ok: false, error: `Need ${definition.parts} Parts and ${definition.timber} Timber for ${definition.name}.` };
+    const side = war.snapshots.challenger.communityId === communityId ? war.snapshots.challenger : war.snapshots.defender;
+    const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const firstBonus = stage.completedBy[opponentId] ? 0 : 2;
+    const points = 6 + Math.min(5, side.base.levels[definition.key]) + firstBonus;
+    member.parts -= definition.parts; member.timber -= definition.timber;
+    stage.completedBy[communityId] = { identityId, at: now, points };
+    war.score[communityId] += points;
+    war.events.push({ type: 'stage', at: now, actorId: identityId, text: `${profile.name} completed ${definition.name} at ${definition.building} · +${points} local war points.`, details: { stageId, communityId, points, firstBonus } });
+    const result = { ok: true, warId, stageId, points, firstBonus, totalScore: war.score[communityId] };
+    this._recordWarAction(identityId, actionId, `stage:${warId}:${stageId}`, result);
+    this.save();
+    return result;
+  }
+
+  dispatchScout(identityId, warId, actionId = this.newActionId('scout-dispatch')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-dispatch');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    if (!war || !profile || ![war.challengerCommunityId, war.defenderCommunityId].includes(profile.communityId)) return { ok: false, error: 'Choose a war involving your connected community.' };
+    const accessError = this._warIdentityError(identityId, profile.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[profile.communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'This member was not on the verified pre-war roster.' };
+    if (!['preparation', 'active'].includes(war.state)) return { ok: false, error: 'Scouts can deploy during preparation or an active war.' };
+    const now = this.now();
+    if (war.state === 'preparation' && now > war.prepDeadlineAt || war.state === 'active' && now > war.attackEndsAt) return { ok: false, error: 'The mission window has closed.' };
+    if (this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === profile.communityId).length >= WAR_RULES.maxScoutsPerSide) return { ok: false, error: 'This community has deployed its two scouts.' };
+    if (this.state.scouts.some(scout => scout.warId === warId && scout.identityId === identityId)) return { ok: false, error: 'This member has already scouted in this war.' };
+    if (this.getAwaySquads(profile.communityId, warId).some(squad => war.attacks.some(attack => attack.attackId === squad.id && attack.identityId === identityId))) return { ok: false, error: 'Your war squad is away. Wait for its return before scouting.' };
+    const targetCommunityId = profile.communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const scout = { id: `scout-${this.state.nextScoutNumber++}`, warId, identityId, communityId: profile.communityId, targetCommunityId,
+      at: now, arrivalAt: now + WAR_RULES.scoutArrivalMs, returnAt: now + WAR_RULES.squadReturnMs, recalledAt: 0 };
+    this.state.scouts.push(scout);
+    if (this.state.scouts.length > 100) this.state.scouts.splice(0, this.state.scouts.length - 100);
+    war.events.push({ type: 'scout', at: now, actorId: identityId, text: `${profile.name} dispatched a scout. Home defence is exposed until recall or return.`, details: { scoutId: scout.id, returnAt: scout.returnAt } });
+    const result = { ok: true, scoutId: scout.id, arrivalAt: scout.arrivalAt, returnAt: scout.returnAt, targetCommunityId };
+    this._recordWarAction(identityId, actionId, 'scout-dispatch', result);
+    this.save();
+    return result;
+  }
+
+  recallScout(identityId, scoutId, actionId = this.newActionId('scout-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-recall');
+    if (replay) return replay;
+    const scout = this.state.scouts.find(item => item.id === scoutId);
+    const profile = this.profile(identityId);
+    if (!scout || !profile || scout.identityId !== identityId) return { ok: false, error: 'Only the scout owner can recall this mission.' };
+    const accessError = this._warIdentityError(identityId, scout.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const war = this._warById(scout.warId);
+    const now = this.now();
+    if (!war || !['preparation', 'active'].includes(war.state) || scout.recalledAt || now >= scout.returnAt) return { ok: false, error: 'This scout has already returned or the war has closed.' };
+    scout.recalledAt = now;
+    war.events.push({ type: 'scout-recall', at: now, actorId: identityId, text: `${profile.name} recalled their scout to reinforce home defence.`, details: { scoutId } });
+    const result = { ok: true, scoutId, arrived: now >= scout.arrivalAt, recalledAt: now };
+    this._recordWarAction(identityId, actionId, 'scout-recall', result);
     this.save();
     return result;
   }
@@ -735,22 +946,52 @@ export class LocalGameService {
     const sideAttacks = war.attacks.filter(attack => attack.communityId === profile.communityId);
     if (sideAttacks.length >= WAR_RULES.maxAttacksPerSide) return { ok: false, error: `Attack cap reached (${WAR_RULES.maxAttacksPerSide} per community).` };
     if (war.attacks.some(attack => attack.identityId === identityId)) return { ok: false, error: 'Each roster member may deploy once per war.' };
+    if (this.getScoutReports(identityId, warId).some(scout => scout.identityId === identityId && scout.active)) return { ok: false, error: 'Your scout squad is still away. Recall it or wait for its return before attacking.' };
     const attacker = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
     const a = attacker.base.levels; const d = defender.base.levels;
+    const kit = tactic === 'assault' ? attacker.stats.assaultKit : attacker.stats.reconKit;
     const rawScore = tactic === 'assault'
       ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
       : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
-    const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0))));
+    const awaySquads = this.getAwaySquads(defender.communityId, warId).length;
+    const defence = defenderBattleEffect(defender.base.defenders, tactic);
+    const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2) - defence.exposureShield));
+    const scoutBonus = this.getScoutReports(identityId, warId).some(scout => scout.warId === warId && scout.arrived) ? 4 : 0;
+    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus - defence.scorePenalty)));
+    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure)));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} gained +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support and scored ${score}.`;
-    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, score, casualties, feedback };
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage, scoring ${score}.`;
+    const returnAt = now + WAR_RULES.squadReturnMs;
+    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, score, casualties, feedback };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
+    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
+    this.save();
+    return result;
+  }
+
+  recallWarSquad(identityId, warId, attackId, actionId = this.newActionId('war-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'war-recall');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const attack = war?.attacks.find(item => item.attackId === attackId);
+    const profile = this.profile(identityId);
+    if (!attack || !profile || attack.identityId !== identityId) return { ok: false, error: 'Only the deployed squad owner can recall this attack.' };
+    const accessError = this._warIdentityError(identityId, attack.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const now = this.now();
+    if (war.state !== 'active' || attack.returnedAt || !attack.returnAt || now >= attack.returnAt) return { ok: false, error: 'This squad has returned or the war is closed.' };
+    const penalty = Math.ceil(attack.score / 4);
+    attack.returnedAt = now;
+    attack.recallPenalty = penalty;
+    attack.score -= penalty;
+    war.score[attack.communityId] -= penalty;
+    war.events.push({ type: 'squad-recall', at: now, actorId: identityId, text: `${profile.name} recalled a war squad to defend home · -${penalty} attack points.`, details: { attackId, penalty } });
+    const result = { ok: true, warId, attackId, returnedAt: now, penalty, score: attack.score, totalScore: war.score[attack.communityId] };
+    this._recordWarAction(identityId, actionId, 'war-recall', result);
     this.save();
     return result;
   }
@@ -767,6 +1008,7 @@ export class LocalGameService {
     if (war.state !== 'active') return { ok: false, error: `War has already ended or cannot resolve from state ${war.state}.` };
     const challengerCount = war.attacks.filter(attack => attack.communityId === war.challengerCommunityId).length;
     const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
+    if (war.stages?.length && this.now() < war.attackEndsAt) return { ok: false, error: 'The three timed build challenges must finish before this war can resolve.' };
     if (this.now() < war.attackEndsAt && (challengerCount < WAR_RULES.maxAttacksPerSide || defenderCount < WAR_RULES.maxAttacksPerSide)) return { ok: false, error: 'Resolve when both attack caps are reached or after the attack window ends.' };
     const now = this.now();
     const challengerScore = war.score[war.challengerCommunityId];
@@ -774,18 +1016,28 @@ export class LocalGameService {
     war.tie = challengerScore === defenderScore;
     war.winnerCommunityId = war.tie ? null : challengerScore > defenderScore ? war.challengerCommunityId : war.defenderCommunityId;
     war.state = 'resolved'; war.resolvedAt = now;
+    const winnerSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    const loserSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    const winnerRegion = COMMUNITIES.find(item => item.id === war.winnerCommunityId);
+    const loserRegion = COMMUNITIES.find(item => item.id === loserSide.communityId);
+    const victoryMultiplier = war.tie ? 1 : routeBriefing(
+      { map: winnerRegion.map, hallLevel: winnerSide.base.levels.hq },
+      { map: loserRegion.map, hallLevel: loserSide.base.levels.hq, defenders: loserSide.base.defenders },
+    ).rewardMultiplier;
     const rewards = [];
     for (const identity of [...new Set(war.attacks.map(attack => attack.identityId))]) {
       const ledgerId = `war-reward:${war.id}:${identity}`;
       if (this.state.warRewardLedger.some(entry => entry.id === ledgerId)) continue;
       const member = this.member(identity);
       if (!member) continue;
-      member.parts += WAR_RULES.localRewardParts;
-      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount: WAR_RULES.localRewardParts, at: now });
+      const attacker = war.attacks.find(attack => attack.identityId === identity);
+      const amount = attacker.communityId === war.winnerCommunityId ? Math.round(WAR_RULES.localRewardParts * victoryMultiplier) : WAR_RULES.localRewardParts;
+      member.parts += amount;
+      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount, at: now });
       war.rewardLedgerIds.push(ledgerId);
-      rewards.push({ identityId: identity, amount: WAR_RULES.localRewardParts, ledgerId });
+      rewards.push({ identityId: identity, amount, ledgerId });
     }
-    war.replay = { version: 1, attackIds: [...war.attackIds], attacks: clone(war.attacks), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
+    war.replay = { version: 2, attackIds: [...war.attackIds], attacks: clone(war.attacks), stages: clone(war.stages || []), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;
     war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards) } });
     for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
@@ -851,6 +1103,9 @@ export class LocalGameService {
       if (plot.facilityLevel) addEarlier(`facility:${plot.id}:${plot.facilityLevel}`, 'facility', `${GAME_CONFIG.facilities[plot.id].name} reached Level ${plot.facilityLevel}.`);
       if (plot.routeLevel) addEarlier(`route:${plot.id}:${plot.routeLevel}`, 'route', `${config.name} supply route reached Level ${plot.routeLevel}.`);
     }
+    for (const [role, defender] of Object.entries(base.defenders)) {
+      for (let level = 1; level <= defender.level; level++) addEarlier(`defender:${role}:${level}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${level}.`);
+    }
     for (const war of this.state.wars.filter(item => item.state === 'resolved' && [item.challengerCommunityId, item.defenderCommunityId].includes(entry.definition.id))) {
       const opponentId = war.challengerCommunityId === entry.definition.id ? war.defenderCommunityId : war.challengerCommunityId;
       const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
@@ -911,6 +1166,94 @@ export class LocalGameService {
 
   _findAction(records, id) {
     return records.find(record => record.id === id) || null;
+  }
+
+  getDefenderRequirement(identityId, role) {
+    const config = DEFENDER_CONCEPTS[role];
+    const entry = this.community(identityId);
+    if (!config || !entry) return { ok: false, role, prerequisites: ['Defender unavailable.'] };
+    const base = entry.saved.base;
+    const defender = base.defenders[role];
+    const targetLevel = defender.level + 1;
+    const prerequisites = [];
+    const accessError = this._accessError(identityId);
+    if (accessError) prerequisites.push(accessError);
+    if (targetLevel > GAME_CONFIG.maxLevel) prerequisites.push('Maximum defender level reached.');
+    if (base.levels.hq < Math.max(config.hall, targetLevel)) prerequisites.push(`Command Hall Level ${Math.max(config.hall, targetLevel)} required.`);
+    if (base.levels[config.support] < Math.max(config.supportLevel, targetLevel)) prerequisites.push(`${GAME_CONFIG.buildings[config.support].name} Level ${Math.max(config.supportLevel, targetLevel)} required.`);
+    if (defender.project) prerequisites.push('An approved upgrade is already being funded.');
+    return { ok: prerequisites.length === 0, role, level: defender.level, targetLevel,
+      cost: DEFENDER_COSTS[targetLevel] || 0, prerequisites, project: clone(defender.project), post: defender.post };
+  }
+
+  _defenderContext(identityId, role, actionId, operation) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member || !DEFENDER_CONCEPTS[role]) return { error: 'Defender or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `defender-${operation}-${role}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind ? { replay: { ...clone(prior.result), replay: true } } : { error: 'This action ID was already used for another action or identity.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    return { entry, member, defender: entry.saved.base.defenders[role], kind };
+  }
+
+  approveDefender(identityId, role, actionId = this.newActionId('defender-approve')) {
+    const context = this._defenderContext(identityId, role, actionId, 'approve');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const requirement = this.getDefenderRequirement(identityId, role);
+    if (!requirement.ok) return { ok: false, error: requirement.prerequisites.join(' ') };
+    context.defender.project = { targetLevel: requirement.targetLevel, cost: requirement.cost, funded: 0, donors: [] };
+    const result = { ok: true, role, targetLevel: requirement.targetLevel, cost: requirement.cost };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  fundDefender(identityId, role, amount, actionId = this.newActionId('defender-fund')) {
+    const context = this._defenderContext(identityId, role, actionId, 'fund');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const numeric = Number(amount);
+    if (!Number.isSafeInteger(numeric) || numeric < 1) return { ok: false, error: 'Enter a positive whole number of Parts.' };
+    const project = context.defender.project;
+    if (!project) return { ok: false, error: 'Leadership must approve this defender upgrade before funding.' };
+    const accepted = Math.min(numeric, project.cost - project.funded, context.member.parts);
+    if (accepted < 1) return { ok: false, error: 'No personal Parts are available or the project is fully funded.' };
+    context.member.parts -= accepted;
+    context.member.lifetimeContributed += accepted;
+    project.funded += accepted;
+    project.donors.push({ identityId, name: this.profile(identityId).name, amount: accepted, at: this.now() });
+    project.donors = project.donors.slice(-8);
+    const completed = project.funded === project.cost && context.defender.level === project.targetLevel - 1;
+    if (completed) {
+      context.defender.level = project.targetLevel;
+      context.defender.project = null;
+      this._recordChronicle(context.entry.saved.base, `defender:${role}:${project.targetLevel}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${project.targetLevel}.`);
+    }
+    const result = { ok: true, role, accepted, remaining: completed ? 0 : project.cost - project.funded, completed, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  assignDefender(identityId, role, post, actionId = this.newActionId('defender-assign')) {
+    const context = this._defenderContext(identityId, role, actionId, 'assign');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (!context.defender.level) return { ok: false, error: 'Unlock this defender before assigning a post.' };
+    if (post !== null && !DEFENDER_POSTS[post]) return { ok: false, error: 'Choose a valid defensive post or stand down.' };
+    context.defender.post = post;
+    const result = { ok: true, role, post, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
   }
 
   _landContext(identityId, plotId, actionId, kind) {
@@ -994,6 +1337,103 @@ export class LocalGameService {
     plot.barricades += 1;
     const result = { ok: true, plotId, barricades: plot.barricades };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  _layoutContext(identityId, actionId, operation, request) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return { error: 'Community or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `layout-${operation}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind && prior.result.request === request
+      ? { replay: { ...clone(prior.result), replay: true } }
+      : { error: 'This action ID was already used for another layout action.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    const roleError = this._roleError(identityId, ['owner']);
+    if (roleError) return { error: roleError };
+    return { entry, member, base: entry.saved.base, kind, request };
+  }
+
+  moveStructure(identityId, key, x, z, actionId = this.newActionId('move-structure')) {
+    const context = this._layoutContext(identityId, actionId, 'move-structure', `${key}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateLayoutPosition(base.layout, claimed, key, x, z);
+    if (error) return { ok: false, error };
+    base.layout.structures[key] = { x, z };
+    const result = { ok: true, key, x, z, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  placeWallRow(identityId, start, end = start, actionId = this.newActionId('wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    if (base.layout.walls.length + cells.length > MAX_WALLS_PER_HALL[base.levels.hq]) return { ok: false, error: 'Command Hall wall capacity reached.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    for (const cell of cells) {
+      const error = validateWallPosition(base.layout, claimed, cell.x, cell.z);
+      if (error) return { ok: false, error: `${error} Row unchanged.` };
+    }
+    const cost = WALL_COSTS[1];
+    const partsCost = cost.parts * cells.length, timberCost = cost.timber * cells.length;
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this row.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    const walls = cells.map(cell => ({ id: `wall-${base.layout.nextWallNumber++}`, ...cell, level: 1 }));
+    base.layout.walls.push(...walls);
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  moveWall(identityId, wallId, x, z, actionId = this.newActionId('move-wall')) {
+    const context = this._layoutContext(identityId, actionId, 'move-wall', `${wallId}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const wall = base.layout.walls.find(item => item.id === wallId);
+    if (!wall) return { ok: false, error: 'Choose a wall in this base.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateWallPosition(base.layout, claimed, x, z, wallId);
+    if (error) return { ok: false, error };
+    wall.x = x; wall.z = z;
+    const result = { ok: true, wall: clone(wall), request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  upgradeWallRow(identityId, start, end = start, actionId = this.newActionId('upgrade-wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'upgrade-wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    const walls = cells.map(cell => base.layout.walls.find(wall => wall.x === cell.x && wall.z === cell.z));
+    if (walls.some(wall => !wall)) return { ok: false, error: 'Every cell in the upgrade row needs an existing wall.' };
+    if (walls.some(wall => wall.level >= base.levels.hq || wall.level >= GAME_CONFIG.maxLevel)) return { ok: false, error: 'Unlock a higher Command Hall tier before upgrading this whole row.' };
+    const partsCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].parts, 0);
+    const timberCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].timber, 0);
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this upgrade.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    for (const wall of walls) wall.level++;
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
     this.save();
     return result;
   }

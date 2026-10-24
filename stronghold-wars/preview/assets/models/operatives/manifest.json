@@ -1,0 +1,24 @@
+{
+  "source": "Rosebud Create 3D Model, 2026-10-23; Blender 5.2 skin and walk/idle rig",
+  "creditsUsed": 3000,
+  "assets": {
+    "rivet": {
+      "file": "assets/models/operatives/rivet.glb",
+      "sourceFile": "source-assets/operatives/rivet_source.glb",
+      "bytes": 1878820,
+      "sha256": "1f84b93c4b93fcdad312fcfd77ca5a2ba1d006f739aac68e98d94165fab61165"
+    },
+    "signal": {
+      "file": "assets/models/operatives/signal.glb",
+      "sourceFile": "source-assets/operatives/signal_source.glb",
+      "bytes": 1675560,
+      "sha256": "c0639acf96db4124752ca892edcef0059129cb1b8bb5626390a08b01d4b24d9b"
+    },
+    "remedy": {
+      "file": "assets/models/operatives/remedy.glb",
+      "sourceFile": "source-assets/operatives/remedy_source.glb",
+      "bytes": 1842224,
+      "sha256": "fb4666b5fa5a27c2b2b19afff6cabe22e71cb79662c63d11b3f74e14828833cc"
+    }
+  }
+}

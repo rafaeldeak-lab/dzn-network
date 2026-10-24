@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural 3D geometry and animation pivots styled after the owner-supplied DZN character sheets; no paid provider.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up; forward +Z",
+  "roles": {
+    "assault": "DZN Warden: direct-push carbine, armour and shield",
+    "recon": "DZN Ghost: scout optics, scanner and signal mast",
+    "engineer": "DZN Fixer: timber axe, construction and repair kit",
+    "sentinel": "DZN Sentinel: black tactical armour, green optics and heavy carbine",
+    "medic": "DZN Lifeline: field medical pack, injector and squad support"
+  },
+  "assets": {
+    "assault_l01": {
+      "file": "assets/models/squads-v3/assault_l01.glb",
+      "sha256": "dee01db2e5e2c09ec6fbbfdb451d25abc58f35c84b24fbf508e562c632eb4d46",
+      "bytes": 1712024,
+      "dimensions": [
+        0.941,
+        1.859,
+        1.155
+      ],
+      "meshes": 52
+    },
+    "assault_l02": {
+      "file": "assets/models/squads-v3/assault_l02.glb",
+      "sha256": "ad41f14b1963e1749d4a11ac8420993235a25b374950cd061f15026ec191a490",
+      "bytes": 1941288,
+      "dimensions": [
+        0.941,
+        1.863,
+        1.155
+      ],
+      "meshes": 56
+    },
+    "assault_l03": {
+      "file": "assets/models/squads-v3/assault_l03.glb",
+      "sha256": "ec4ed36c442f162776fd27af5622a7c637d8334d79d1e1bc9127bb8eda0734b2",
+      "bytes": 2227776,
+      "dimensions": [
+        0.941,
+        1.867,
+        1.155
+      ],
+      "meshes": 61
+    },
+    "assault_l04": {
+      "file": "assets/models/squads-v3/assault_l04.glb",
+      "sha256": "e70155948c194aa9af7c139be0abb2477d410828ccd02210a7d58a028a8c7ad2",
+      "bytes": 2514096,
+      "dimensions": [
+        1.12,
+        1.871,
+        1.155
+      ],
+      "meshes": 66
+    },
+    "assault_l05": {
+      "file": "assets/models/squads-v3/assault_l05.glb",
+      "sha256": "8885731a8a0b9c600ac7fc5dbefb69831af1154401a119ee9817803262c8c680",
+      "bytes": 2628668,
+      "dimensions": [
+        1.12,
+        1.875,
+        1.155
+      ],
+      "meshes": 68
+    },
+    "recon_l01": {
+      "file": "assets/models/squads-v3/recon_l01.glb",
+      "sha256": "68709658995ba4720179c5b62275af80632da233cf320a5aa183c83c5dbea675",
+      "bytes": 1829332,
+      "dimensions": [
+        0.965,
+        1.975,
+        0.795
+      ],
+      "meshes": 55
+    },
+    "recon_l02": {
+      "file": "assets/models/squads-v3/recon_l02.glb",
+      "sha256": "f237b769f4701c96b08da42d7845b6207a56d8b2d0a20ef92822e600f3c09d5d",
+      "bytes": 2058556,
+      "dimensions": [
+        0.98,
+        2.105,
+        0.795
+      ],
+      "meshes": 59
+    },
+    "recon_l03": {
+      "file": "assets/models/squads-v3/recon_l03.glb",
+      "sha256": "c6fefbcfbb7473a3b654712d9a520e898e5fecf89f6cb6d85e32226a1c4b571b",
+      "bytes": 2287776,
+      "dimensions": [
+        0.998,
+        2.235,
+        0.795
+      ],
+      "meshes": 63
+    },
+    "recon_l04": {
+      "file": "assets/models/squads-v3/recon_l04.glb",
+      "sha256": "9da0f20a4a434f9b33c9eeaaea101e00cb6145ab0fd5d7d7a4ea03d7721e91c0",
+      "bytes": 2631236,
+      "dimensions": [
+        1.015,
+        2.365,
+        0.795
+      ],
+      "meshes": 69
+    },
+    "recon_l05": {
+      "file": "assets/models/squads-v3/recon_l05.glb",
+      "sha256": "7356daad46352013599057b978e60cd2401a88504bc3e88b33cfe63b1d8500de",
+      "bytes": 2688528,
+      "dimensions": [
+        1.033,
+        2.495,
+        0.795
+      ],
+      "meshes": 70
+    },
+    "engineer_l01": {
+      "file": "assets/models/squads-v3/engineer_l01.glb",
+      "sha256": "ad08c9ea33eb5040ef9e7b45cf612e964c26d37c31c7ed8773668f21581ad779",
+      "bytes": 1826564,
+      "dimensions": [
+        1.04,
+        1.93,
+        0.71
+      ],
+      "meshes": 54
+    },
+    "engineer_l02": {
+      "file": "assets/models/squads-v3/engineer_l02.glb",
+      "sha256": "2783cf444ff3b10b56e577db3da92eef46ed2217e558ca7313ef63a5097c8585",
+      "bytes": 2113116,
+      "dimensions": [
+        1.04,
+        1.93,
+        0.71
+      ],
+      "meshes": 59
+    },
+    "engineer_l03": {
+      "file": "assets/models/squads-v3/engineer_l03.glb",
+      "sha256": "d3e192ed759a9928cb27e8060aa8b70b576202482a6f984dae6738aba68c5a92",
+      "bytes": 2342292,
+      "dimensions": [
+        1.04,
+        1.93,
+        0.71
+      ],
+      "meshes": 63
+    },
+    "engineer_l04": {
+      "file": "assets/models/squads-v3/engineer_l04.glb",
+      "sha256": "39cced277b873d265f272edd1b050ea66ce25c37fd9c27ff7bb249edb1b59768",
+      "bytes": 2628616,
+      "dimensions": [
+        1.04,
+        1.93,
+        0.71
+      ],
+      "meshes": 68
+    },
+    "engineer_l05": {
+      "file": "assets/models/squads-v3/engineer_l05.glb",
+      "sha256": "7a2cfbc86613d70ca644bbcec1dbee15c4b85e3cf6e3231a1129b686582ef508",
+      "bytes": 2685908,
+      "dimensions": [
+        1.04,
+        1.93,
+        0.71
+      ],
+      "meshes": 69
+    },
+    "sentinel_l01": {
+      "file": "assets/models/squads-v3/sentinel_l01.glb",
+      "sha256": "5d062c6080d54f5b618d6ca9d517f04ce180456bf9b6bd915d9c0ee532b01e66",
+      "bytes": 1883628,
+      "dimensions": [
+        0.941,
+        1.859,
+        1.28
+      ],
+      "meshes": 55
+    },
+    "sentinel_l02": {
+      "file": "assets/models/squads-v3/sentinel_l02.glb",
+      "sha256": "329c81892c10875200d752cedfd5c88b586d7482060e0e8bdbaf45b3f8554f9c",
+      "bytes": 2227444,
+      "dimensions": [
+        0.96,
+        1.863,
+        1.315
+      ],
+      "meshes": 61
+    },
+    "sentinel_l03": {
+      "file": "assets/models/squads-v3/sentinel_l03.glb",
+      "sha256": "9a928add69c7cc4e084721a27c8de2291258271c2b8355a16e7526ecec3bc89b",
+      "bytes": 2628524,
+      "dimensions": [
+        0.975,
+        1.867,
+        1.35
+      ],
+      "meshes": 68
+    },
+    "sentinel_l04": {
+      "file": "assets/models/squads-v3/sentinel_l04.glb",
+      "sha256": "b4d0c27521ef2c6c1c2a92216a306a6245c466a528391517bdd1bc80535f8616",
+      "bytes": 2972444,
+      "dimensions": [
+        0.99,
+        1.871,
+        1.385
+      ],
+      "meshes": 74
+    },
+    "sentinel_l05": {
+      "file": "assets/models/squads-v3/sentinel_l05.glb",
+      "sha256": "4f94174bf98115d5f425a7e558e37c2cbfcad80bef55128d5c4e0e08a43a4fee",
+      "bytes": 3144304,
+      "dimensions": [
+        1.005,
+        1.875,
+        1.46
+      ],
+      "meshes": 77
+    },
+    "medic_l01": {
+      "file": "assets/models/squads-v3/medic_l01.glb",
+      "sha256": "c4233eb88e30fca2124869a0d91954e6a9eed83118cae8120db37b54565796d9",
+      "bytes": 1881384,
+      "dimensions": [
+        0.941,
+        1.859,
+        0.852
+      ],
+      "meshes": 54
+    },
+    "medic_l02": {
+      "file": "assets/models/squads-v3/medic_l02.glb",
+      "sha256": "0ef2f203c6b80a15eafee9cafcfb2bdca9fcab58b371676908e8697cb5d7881d",
+      "bytes": 2167976,
+      "dimensions": [
+        0.941,
+        1.863,
+        0.852
+      ],
+      "meshes": 59
+    },
+    "medic_l03": {
+      "file": "assets/models/squads-v3/medic_l03.glb",
+      "sha256": "20bc381dcff026437fbb62ab4a861e249f4deaaabb03c4cb7873aa9d002e2545",
+      "bytes": 2454440,
+      "dimensions": [
+        0.941,
+        1.867,
+        0.852
+      ],
+      "meshes": 64
+    },
+    "medic_l04": {
+      "file": "assets/models/squads-v3/medic_l04.glb",
+      "sha256": "541e5313a47fd2e9d356e4861088974d60e83c83d287771d85d3f8ada0c58fc8",
+      "bytes": 2741060,
+      "dimensions": [
+        0.941,
+        1.871,
+        0.852
+      ],
+      "meshes": 69
+    },
+    "medic_l05": {
+      "file": "assets/models/squads-v3/medic_l05.glb",
+      "sha256": "3faf5b96813201af21bcb73ecad8df2c3bed8a90f22d3563f0506964d5122719",
+      "bytes": 2858528,
+      "dimensions": [
+        0.941,
+        1.875,
+        0.852
+      ],
+      "meshes": 72
+    }
+  }
+}
