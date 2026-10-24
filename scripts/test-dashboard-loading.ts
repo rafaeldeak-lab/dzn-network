@@ -412,7 +412,6 @@ includesAll(siteHeader, [
   "playsInline",
   "document.addEventListener(\"visibilitychange\"",
   "DZN_PUBLIC_DISCORD_INVITE_URL",
-  "/#features",
   "/leaderboards",
   "/servers",
   "/pricing",

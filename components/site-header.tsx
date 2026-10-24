@@ -14,7 +14,6 @@ import {
   Plus,
   Server,
   ShoppingBag,
-  Sparkles,
   Trophy,
   User,
   Wrench,
@@ -27,7 +26,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "store" | "pricing" | "stats" | "events" | "community" | "dashboard";
+type SiteHeaderActive = "player" | "games" | "leaderboards" | "servers" | "store" | "pricing" | "stats" | "events" | "community" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -75,14 +74,13 @@ const rootHeaderHiddenPrefixes = [
 ];
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle },
   { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
   { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
 const starterHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
   { href: "/player", label: "Player Hub", active: "player", icon: User },
   { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
   { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
@@ -93,7 +91,6 @@ const starterHeaderLinks: HeaderNavLink[] = [
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
   { href: "/player", label: "Player Hub", active: "player", icon: User },
   { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
   { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
