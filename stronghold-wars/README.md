@@ -39,6 +39,16 @@ count and tiers. Building positions and wall tiers persist with older V3 saves,
 and war snapshots freeze the defended layout when a challenge is accepted.
 Canvas 2D retains usable layout controls when WebGL is unavailable.
 
+War deployments now open a tactical order before committing the one-use squad.
+Players pick west, south or east entry; a Command Hall, Arc Battery or Comms
+objective; and a direct breach or covered flank. `preview/war-tactics.js`
+calculates route, wall pressure, score and casualty changes from the accepted
+defender snapshot. The 3D replay follows those waypoints, opens the selected
+wall segments and shows troops withdrawing under counterfire. The after-action
+record retains the choice across save reloads; old attacks without an order
+keep their original score and replay compatibility. This remains deterministic
+browser-local scoring, not a live player-controlled combat server.
+
 The active war's ten-minute attack period has three one-time objectives:
 Forge Convoy, Relay Capture, and Tower Stand. Each opens in a timed stage,
 requires the corresponding support building and personal resources, and can be

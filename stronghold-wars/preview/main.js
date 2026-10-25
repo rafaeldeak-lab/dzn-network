@@ -13,6 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, evaluateWarPlan } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -312,11 +313,28 @@ function drawCompatibilityScene() {
     }
     if (raid) raid.troops.forEach(t => drawCanvasSoldier(ctx, project, t, unit));
     if (warBattle) {
-      for (let i = 0; i < 4; i++) {
-        const p = project(55 + [-8, 0, 8, 6][i], -10 + [4, 0, 5, -8][i]);
-        ctx.fillStyle = i === 0 ? '#6b735d' : '#79816b';
-        ctx.fillRect(p.x - 11, p.y - 20, 22, 24);
-        ctx.strokeStyle = 'rgba(192,132,252,.8)'; ctx.strokeRect(p.x - 12, p.y - 21, 24, 26);
+      const layout = warBattle.defenderSnapshot.base.layout;
+      const breached = new Set(warBattle.result.tactics?.breachedWallIds || []);
+      for (const segment of layout.walls) {
+        if (warBattle.time / warBattle.duration >= 0.35 && breached.has(segment.id)) continue;
+        const p = project(OUTPOST.x + segment.x, OUTPOST.z + segment.z);
+        ctx.fillStyle = segment.level >= 4 ? '#8254aa' : '#76857b';
+        ctx.fillRect(p.x - 6, p.y - 9, 12, 11);
+      }
+      for (const [key, point] of Object.entries(layout.structures)) {
+        if (!GAME_CONFIG.buildings[key]) continue;
+        const p = project(OUTPOST.x + point.x, OUTPOST.z + point.z);
+        ctx.fillStyle = key === warBattle.result.tactics?.plan.objective ? '#a86fe1' : '#596f60';
+        ctx.fillRect(p.x - 15, p.y - 27, 30, 29);
+        ctx.strokeStyle = '#a9c6a4'; ctx.strokeRect(p.x - 15, p.y - 27, 30, 29);
+        ctx.fillStyle = '#f4fff0'; ctx.font = '700 9px Inter, sans-serif';
+        ctx.fillText(key === 'hq' ? 'HALL' : key === 'tower' ? 'ARC' : key === 'comms' ? 'COMMS' : 'FORGE', p.x, p.y - 29);
+      }
+      const route = warBattle.result.tactics?.route;
+      if (route) {
+        ctx.beginPath();
+        route.forEach((point, index) => { const p = project(OUTPOST.x + point.x, OUTPOST.z + point.z); if (index) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+        ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 3; ctx.stroke();
       }
       warBattle.troops.forEach(troop => drawCanvasSoldier(ctx, project, troop.mesh, unit));
     }
@@ -1588,6 +1606,7 @@ warBaseGroup.visible = false;
 scene.add(warBaseGroup);
 const warTroopMeshes = [];
 const warDefenderMeshes = [];
+const warWallMeshes = [];
 let warDefenderToken = 0;
 function buildOutpost() {
   if (outpostBlocks.length) {
@@ -1658,6 +1677,11 @@ trainingHud.hidden = true;
 trainingHud.setAttribute('role', 'status');
 trainingHud.style.cssText = 'position:fixed;z-index:8;right:12px;top:64px;max-width:min(300px,calc(100vw - 24px));padding:9px 12px;border:1px solid #70e59a88;border-radius:10px;background:#0d1914ee;color:#edf4ee;font:700 11px Inter,system-ui,sans-serif;box-shadow:0 8px 25px #0008';
 document.body.append(trainingHud);
+const warHud = document.createElement('div');
+warHud.hidden = true;
+warHud.setAttribute('role', 'status');
+warHud.style.cssText = trainingHud.style.cssText.replace('#70e59a88', '#c084fc88');
+document.body.append(warHud);
 let warBattle = null;
 let toastTimer = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -2559,7 +2583,7 @@ function warCommunityName(communityId) {
 
 function warTimelineHTML(war) {
   const events = (war.events || []).slice(-10);
-  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
+  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts${event.details.tactics?.plan ? ` · ${escapeHTML(event.details.tactics.laneName)} → ${escapeHTML(event.details.tactics.objectiveName)} · ${escapeHTML(event.details.tactics.methodName)}` : ''}</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
 }
 
 function warSnapshotLine(side) {
@@ -2601,7 +2625,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
       <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit adds +${currentSide.stats.assaultKit.scoreBonus} score and shields ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with Sentinel reinforcement' : ''}${currentSide.stats.assaultKit.supportRole ? ' and Lifeline support' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit adds +${currentSide.stats.reconKit.scoreBonus} score and shields ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with Lifeline support' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
-      ${canAttack ? `<div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Deploy Assault squad</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Deploy Recon squad</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
+      ${canAttack ? `<p class="help">Choose a route, target and approach before committing your one attack. The locked wall layout changes the risk and score.</p><div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Plan Assault</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Plan Recon</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
       ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve after all timed stages close'}</button></div>` : ''}`;
     if (war.stages?.length) actions += `<h3>Timed build challenges</h3><p class="help">One verified roster member per server completes each stage from the locked building tier. Stages open in sequence; first completion earns +2. Costs use personal DZN Parts and Timber, and points stay in this local war.</p>${war.stages.map(stage => {
       const definition = WAR_STAGE_DEFS.find(item => item.id === stage.id);
@@ -2693,7 +2717,7 @@ function showWarTable(errorMessage = '') {
     if (!result.ok) { showWarTable(result.error); return; }
     toast('War active · two deployments per side.'); showWarTable();
   });
-  panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => launchWarAttack(button.dataset.warId, button.dataset.warAttack));
+  panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => showWarPlanner(button.dataset.warId, button.dataset.warAttack));
   panel.querySelectorAll('[data-war-stage]').forEach(button => button.onclick = () => {
     const result = service.completeWarStage(profile.id, button.dataset.warId, button.dataset.warStage);
     if (!result.ok) { showWarTable(result.error); return; }
@@ -2982,11 +3006,12 @@ function clearWarBaseVisuals() {
     }
   }
   warDefenderMeshes.length = 0;
+  warWallMeshes.length = 0;
   for (const child of [...warBaseGroup.children]) {
     if (child.userData.sharedTemplate) clearArcSplitGeometry(child);
     else child.traverse(object => {
       if (object.isMesh) object.geometry?.dispose();
-      if (object.userData.arcFlash) object.material.dispose();
+      if (object.userData.arcFlash || object.userData.warMarker) object.material.dispose();
     });
     warBaseGroup.remove(child);
   }
@@ -3058,7 +3083,9 @@ function buildWarBaseVisual(side) {
     const segment = template.clone(true);
     segment.position.set(wall.x, .09, wall.z);
     segment.userData.sharedTemplate = true;
+    segment.userData.wallId = wall.id;
     warBaseGroup.add(segment);
+    warWallMeshes.push(segment);
   });
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, -17);
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, 17);
@@ -3096,50 +3123,118 @@ function buildWarBaseVisual(side) {
   }
 }
 
-function launchWarAttack(warId, tactic) {
+function warPlanMapHTML(defender, tactics) {
+  const map = ({ x, z }) => `${160 + x * 5},${130 + z * 5}`;
+  const breached = new Set(tactics.breachedWallIds);
+  const route = tactics.route.map(point => map(point)).join(' ');
+  const walls = (defender.base.layout.walls || []).map(wall => `<rect x="${160 + wall.x * 5 - 5}" y="${130 + wall.z * 5 - 5}" width="10" height="10" rx="2" fill="${breached.has(wall.id) ? '#ffab70' : '#87928b'}"><title>${escapeHTML(wall.id)} · tier ${wall.level}</title></rect>`).join('');
+  const structures = Object.entries(defender.base.layout.structures).filter(([key]) => WAR_OBJECTIVES[key]).map(([key, position]) => `<g><circle cx="${160 + position.x * 5}" cy="${130 + position.z * 5}" r="${key === tactics.plan.objective ? 13 : 10}" fill="${key === tactics.plan.objective ? '#c084fc' : '#284b3a'}" stroke="#bde8c7" stroke-width="2"/><text x="${160 + position.x * 5}" y="${134 + position.z * 5}" text-anchor="middle" fill="#fff" font-size="11" font-weight="bold">${key === 'hq' ? 'H' : key === 'tower' ? 'T' : 'C'}</text></g>`).join('');
+  return `<svg class="war-plan-map" viewBox="0 0 320 260" role="img" aria-label="Locked defending base with selected attack route, buildings and wall segments"><rect x="0" y="0" width="320" height="260" fill="#102019"/><path d="M75 45 L245 45 L245 215 L75 215 Z" fill="#263d31" stroke="#8a9c82" stroke-width="2"/><path d="M88 58 L232 58 L232 202 L88 202 Z" fill="none" stroke="#4b7258" stroke-dasharray="4 5"/>${walls}${structures}<polyline points="${route}" fill="none" stroke="#c084fc" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${160 + tactics.route[0].x * 5}" cy="${130 + tactics.route[0].z * 5}" r="7" fill="#8cff9b" stroke="#102019" stroke-width="2"/></svg>`;
+}
+
+function showWarPlanner(warId, tactic) {
+  const profile = service.profile();
+  const war = service.getWar(warId);
+  if (!war || war.state !== 'active' || !['assault', 'recon'].includes(tactic)) { showWarTable('This war attack is no longer available.'); return; }
+  const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+  const options = (values, selected) => Object.entries(values).map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${escapeHTML(typeof label === 'string' ? label : label.name)}</option>`).join('');
+  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. This uses the accepted war’s locked building and wall positions. Confirming spends your one deployment.</p><div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(WAR_OBJECTIVES, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">A breach opens the wall segments on the chosen line but draws heavier counterfire. A flank avoids the cut and trades speed for safer movement. Scores remain capped; this is a local war preview.</p>`);
+  const select = () => ({ lane: $('warPlanLane').value, objective: $('warPlanObjective').value, method: $('warPlanMethod').value });
+  const refresh = () => {
+    const tactics = evaluateWarPlan(defender, tactic, select());
+    $('warPlanPreview').innerHTML = tactics.ok ? `${warPlanMapHTML(defender, tactics)}<div class="war-plan-summary"><b>${escapeHTML(tactics.laneName)} → ${escapeHTML(tactics.objectiveName)}</b><span>${tactics.wallCount} wall segments on route · ${tactics.wallPressure} combined tier</span><span>${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical score · ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} casualty pressure</span></div>` : `<p class="notice warn">${escapeHTML(tactics.error)}</p>`;
+  };
+  for (const id of ['warPlanLane', 'warPlanObjective', 'warPlanMethod']) $(id).onchange = refresh;
+  $('warPlanConfirm').onclick = () => launchWarAttack(warId, tactic, select());
+  $('warPlanCancel').onclick = showWarTable;
+  refresh();
+}
+
+function launchWarAttack(warId, tactic, plan) {
   if (raid || warBattle) return;
   const profile = service.profile();
-  const result = service.submitWarAttack(profile.id, warId, tactic);
+  const result = service.submitWarAttack(profile.id, warId, tactic, service.newActionId('war-attack'), plan);
   if (!result.ok) { showWarTable(result.error); return; }
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
   const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
   buildWarBaseVisual(defendingSide);
+  const objective = defendingSide.base.layout.structures[result.tactics.plan.objective];
+  const objectiveMarker = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.45, 40),
+    new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.65, depthWrite: false, side: THREE.DoubleSide }));
+  objectiveMarker.rotation.x = -Math.PI / 2;
+  objectiveMarker.position.set(objective.x, 0.13, objective.z);
+  objectiveMarker.userData.warMarker = true;
+  warBaseGroup.add(objectiveMarker);
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
-  const squadSize = Math.min(10, attackingSide.stats.squadSize);
-  const target = OUTPOST.clone().add(new THREE.Vector3(-3, 0, 0));
+  const squadSize = attackingSide.stats.squadSize;
+  const route = result.tactics?.route || [{ x: -22, z: 0 }, { x: -17, z: 0 }, { x: -3, z: 0 }];
+  const first = route[0], second = route[1];
+  const dx = second.x - first.x, dz = second.z - first.z;
+  const length = Math.hypot(dx, dz) || 1;
+  const across = { x: -dz / length, z: dx / length };
   const troops = [];
   for (let i = 0; i < squadSize; i++) {
     let role = tactic === 'recon' ? 'recon' : 'assault';
     if (squadUnlocked('medic', attackingSide.base.levels) && i === squadSize - 1) role = 'medic';
     else if (tactic === 'assault' && squadUnlocked('sentinel', attackingSide.base.levels) && i % 4 === 3) role = 'sentinel';
     const troop = makeSoldier(role, attackingSide.base.levels);
-    const start = new THREE.Vector3(OUTPOST.x - 22, 0, OUTPOST.z + (i - (squadSize - 1) / 2) * 1.15);
-    const troopTarget = target.clone().add(new THREE.Vector3(0, 0, (i - (squadSize - 1) / 2) * 0.9));
-    troop.position.copy(start);
+    const spread = (i - (squadSize - 1) / 2) * 0.9;
+    const path = route.map(point => new THREE.Vector3(OUTPOST.x + point.x + across.x * spread, 0, OUTPOST.z + point.z + across.z * spread));
+    troop.position.copy(path[0]);
     scene.add(troop);
     warTroopMeshes.push(troop);
-    troops.push({ mesh: troop, start, target: troopTarget, phase: i * 0.45 });
+    troops.push({ mesh: troop, path, phase: i * 0.45, withdrawn: i >= squadSize - result.casualties });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, squadSize, troops, time: 0, duration: 10, smokeTimer: 0, shotClock: 0, bolts: [] };
+  warBattle = { warId, tactic, result, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], breachShown: false };
+  warHud.hidden = false;
   camTarget.copy(OUTPOST);
   zoom = 32;
   updateCamera();
   panel.style.display = 'none';
-  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed · ${result.score} points · ${result.casualties} troops withdrawn. Full breakdown in War Table.`);
+  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed via ${result.tactics.laneName} · ${result.score} points · ${result.casualties} withdrawn.`);
   playClank();
+}
+
+function warPathPosition(path, fraction, destination) {
+  const lengths = path.slice(1).map((point, index) => point.distanceTo(path[index]));
+  const total = lengths.reduce((sum, length) => sum + length, 0) || 1;
+  let remaining = THREE.MathUtils.clamp(fraction, 0, 1) * total;
+  for (let index = 0; index < lengths.length; index++) {
+    if (remaining <= lengths[index] || index === lengths.length - 1) {
+      destination.lerpVectors(path[index], path[index + 1], lengths[index] ? remaining / lengths[index] : 1);
+      return Math.atan2(path[index + 1].x - path[index].x, path[index + 1].z - path[index].z);
+    }
+    remaining -= lengths[index];
+  }
+  return 0;
 }
 
 function updateWarBattle(dt) {
   if (!warBattle) return;
   warBattle.time += dt;
   const progress = THREE.MathUtils.clamp(warBattle.time / warBattle.duration, 0, 1);
+  const tactics = warBattle.result.tactics;
+  warBattle.objectiveMarker.scale.setScalar(1 + Math.sin(warBattle.time * 6) * 0.12);
+  warHud.textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.86 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${warBattle.squadSize - warBattle.result.casualties}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
   for (const troop of warBattle.troops) {
-    troop.mesh.position.lerpVectors(troop.start, troop.target, progress);
+    const retreating = troop.withdrawn && progress > 0.62;
+    const travel = retreating ? Math.max(0, 0.62 - (progress - 0.62) * 1.6) : progress;
+    troop.mesh.rotation.y = warPathPosition(troop.path, travel, troop.mesh.position) + (retreating ? Math.PI : 0);
     troop.mesh.position.y = Math.abs(Math.sin(warBattle.time * 8 + troop.phase)) * 0.08;
-    troop.mesh.rotation.y = Math.PI / 2;
+    troop.mesh.visible = !retreating || progress < 0.98;
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, 1, null, dt);
+  }
+  if (tactics?.breachedWallIds.length && progress >= 0.35) {
+    const breached = new Set(tactics.breachedWallIds);
+    for (const wall of warWallMeshes) if (breached.has(wall.userData.wallId)) wall.visible = false;
+    if (!warBattle.breachShown) {
+      warBattle.breachShown = true;
+      const breach = tactics.route[2];
+      spawnSmoke(new THREE.Vector3(OUTPOST.x + breach.x, 1, OUTPOST.z + breach.z));
+      toast(`${tactics.breachedWallIds.length} locked wall segment${tactics.breachedWallIds.length === 1 ? '' : 's'} breached on the ${tactics.laneName} route.`);
+    }
   }
   for (const defender of warDefenderMeshes) {
     const nearest = warBattle.troops.reduce((best, troop) => {
@@ -3190,6 +3285,7 @@ function updateWarBattle(dt) {
   for (const building of Object.values(buildings)) building.group.visible = true;
   const completed = warBattle;
   warBattle = null;
+  warHud.hidden = true;
   camTarget.set(0, 0, 0);
   zoom = 28;
   updateCamera();

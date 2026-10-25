@@ -113,6 +113,12 @@
       .war-tactic { flex: 1; min-width: 150px; padding: 9px; border: 1px solid rgba(112,229,154,.25); border-radius: 9px; background: rgba(112,229,154,.045); }
       .war-tactic strong { color: var(--green); font-size: 11px; }
       .war-tactic p { color: var(--muted); font-size: 9px !important; }
+      .war-plan-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 9px; margin: 12px 0; }
+      .war-plan-controls label { display: grid; gap: 5px; color: var(--green); font-size: 11px; font-weight: 700; }
+      .war-plan-controls select { width: 100%; min-width: 0; }
+      .war-plan-map { display: block; width: min(100%, 480px); height: auto; margin: 8px auto; border: 1px solid rgba(192,132,252,.45); border-radius: 10px; }
+      .war-plan-summary { display: flex; flex-wrap: wrap; gap: 7px 14px; align-items: center; padding: 9px 11px; margin: 8px 0 12px; border: 1px solid rgba(112,229,154,.35); border-radius: 9px; background: rgba(112,229,154,.05); font-size: 11px; }
+      .war-plan-summary b { color: var(--green); }
       .war-tag { color: var(--purple); font: 700 9px Orbitron, sans-serif; letter-spacing: .07em; }
       .panel:has(.operations-layout) { width: min(920px, calc(100vw - 28px)); max-height: 84vh; }
       .operations-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr); gap: 14px; }
