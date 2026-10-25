@@ -13,6 +13,8 @@ const REPORTS_PER_MINUTE = 10;
 const MESSAGE_RETENTION_DAYS = 30;
 const OWNER_ARCHIVE_PAGE_SIZE = 50;
 const RATE_SLOT_RETENTION_DAYS = 2;
+const RECENT_CONTEXT_MESSAGE_COUNT = 2;
+const RECENT_CONTEXT_WINDOW_MINUTES = 10;
 const reportReasons = new Set(["harassment", "hate", "threat", "spam", "personal_information", "other"]);
 const moderationActions = new Set(["hide", "restore", "delete", "resolve_report", "dismiss_report"]);
 // Comms is deliberately English-only. A translation provider is not called from
@@ -22,9 +24,9 @@ const nonLatinScriptPattern = /[^\p{Script_Extensions=Latin}\p{Script=Common}\p{
 // These are high-confidence whole phrases, not a pretend general language
 // detector. They cover common attempts to post a non-English message written
 // with Latin characters while avoiding a broad, error-prone dictionary gate.
-const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao)\b/i;
-const likelyNonEnglishPhrasePattern = /\b(?:no\s+hablo\s+ingles|me\s+llamo|quiero\s+(?:jugar|un\s+servidor)|necesito\s+ayuda|bonjour\s+je\s+ne\s+parle\s+pas|je\s+suis|salut\s+(?:tout\s+le\s+monde|les\s+amis)|ich\s+bin|ich\s+mochte|ola\s+preciso\s+de\s+ajuda|quero\s+jogar|nao\s+entendo|non\s+capisco|voglio\s+giocare|ho\s+bisogno\s+di\s+aiuto|nie\s+rozumiem|potrzebuje\s+pomocy)\b/i;
-const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci)\s*[.!?]*$/i;
+const nonEnglishPhrasePattern = /\b(?:buen(?:os|as)\s+(?:dias|tardes|noches)|como\s+estas|como\s+esta|que\s+tal|no\s+entiendo|por\s+favor|hola\s+(?:amigos|a\s+todos|chicos)|gracias\s+muchas|bonjour\s+(?:tout\s+le\s+monde|mon\s+ami|madame|monsieur)|merci\s+beaucoup|comment\s+vas|je\s+ne\s+comprends\s+pas|s(?:'|\s)il\s+vous\s+plait|ciao\s+(?:bella|bello|come\s+stai)|come\s+stai|per\s+favore|hallo\s+(?:wie\s+geht\s+es\s+dir|zusammen)|wie\s+geht\s+es\s+dir|ich\s+verstehe\s+nicht|como\s+voce\s+esta|privet\s+(?:drug|druzya)|ni\s+hao|hogy\s+vagy|moi\s+(?:mit[aá]\s+kuuluu|kaikille)|merhaba\s+(?:nasilsin|arkadaslar)|xin\s+chao|ban\s+coe\s+khoe\s+khong|konnichiwa\s+minna|ohayo\s+gozaimasu|annyeong(?:haseyo)?\s+yeoreobun|halo\s+(?:semua|teman)|apa\s+kabar|kumusta\s+(?:kayo|mga\s+kaibigan))\b/i;
+const likelyNonEnglishPhrasePattern = /\b(?:no\s+hablo\s+ingles|me\s+llamo|quiero\s+(?:jugar|un\s+servidor)|necesito\s+ayuda|bonjour\s+je\s+ne\s+parle\s+pas|je\s+suis|salut\s+(?:tout\s+le\s+monde|les\s+amis)|ich\s+bin|ich\s+mochte|ola\s+preciso\s+de\s+ajuda|quero\s+jogar|nao\s+entendo|non\s+capisco|voglio\s+giocare|ho\s+bisogno\s+di\s+aiuto|nie\s+rozumiem|potrzebuje\s+pomocy|jak\s+sie\s+masz|co\s+tam|hogy\s+vagy(?:tok)?|mit\s+csinalsz|ce\s+faci|nu\s+inteleg|hoe\s+gaat\s+het|ik\s+ben|jeg\s+forstar\s+ikke|hvordan\s+gar\s+det|nasilsin|tesekkur\s+ederim|ben\s+ingilizce\s+bilmiyorum|kak\s+dela|ya\s+ne\s+ponimayu|namaste\s+dost|mujhe\s+madad\s+chahiye|sawasdee\s+khrap|xin\s+chao\s+ban|terima\s+kasih|selamat\s+datang|salamat\s+po|ako\s+ay)\b/i;
+const nonEnglishGreetingOnlyPattern = /^(?:bonjour|bonsoir|ciao|grazie|hallo|danke|ola|obrigad[oa]|cze(?:s|ś)c|dziekuje|merhaba|tesekkurler|privet|spasibo|namaste|hola|gracias|merci|szia|hej|moi|terve|xin\s+chao|konnichiwa|ohayo|annyeong(?:haseyo)?|kumusta|salamat)\s*[.!?]*$/i;
 const foreignPhraseExplanationPattern = /^(?:(?:i|we|they|he|she)\s+(?:explain(?:ed|s|ing)?|said|wrote)\b.*\b(?:means?|translates?)\b|use\s+.+\s+when\s+(?:asking|saying|writing)\b)/i;
 // Exact, safe everyday phrases are translated locally. Unknown foreign text
 // remains blocked instead of being sent to an external translation service.
@@ -63,6 +65,20 @@ const localEnglishTranslations = new Map<string, string>([
   ["namaste", "Hello."],
   ["czesc", "Hello."],
   ["dziekuje", "Thank you."],
+  ["szia", "Hello."],
+  ["hogy vagy", "How are you?"],
+  ["hej", "Hello."],
+  ["moi", "Hello."],
+  ["terve", "Hello."],
+  ["merhaba", "Hello."],
+  ["merhaba nasilsin", "Hello, how are you?"],
+  ["xin chao", "Hello."],
+  ["konnichiwa", "Hello."],
+  ["ohayo", "Good morning."],
+  ["annyeong", "Hello."],
+  ["annyeonghaseyo", "Hello."],
+  ["kumusta", "Hello."],
+  ["salamat", "Thank you."],
 ]);
 // Ordinary profanity, discriminatory slurs, explicit sexual insults, and
 // targeted identity abuse are rejected without retaining the submitted text.
@@ -77,10 +93,11 @@ const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)
 const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
 const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:g(?:ay|[4@]y)?|ay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
 const sexualHarassmentPattern = /\b(?:clit|(?:nice|big|small|show|touch|your|ur|my)\s+cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
+const compoundHarassmentPattern = /\b(?:g(?:a|@|4)y(?:head|[-_./\\]+head)|ginger[\W_]*(?:knob(?:head)?|twat|prick))\b/i;
 // Common profanity and insults that are often pasted into English-language
 // chat in another language. This supplements the script/phrase guards above;
 // it is not represented as a complete global language catalogue.
-const multilingualAbusePattern = /\b(?:arschloch|blyat|cabron|caralho|cazzo|chinga(?:do)?|connard|encule|filho\s+da\s+puta|hijo\s+(?:de\s+)?puta|joder|kurwa|kurva|maricon|merde|mierda|pendejo|pierdol|pizda|puta|putain|puto|scheisse|schei(?:ss|ß)e|stronzo|suka|vaffanculo|verga)\b/i;
+const multilingualAbusePattern = /\b(?:amcik|arrombado|arschloch|bakayaro|batard|bhenchod|blyat|cabron|caralho|cazzo|chinga(?:do)?|chuj|chutiya|coglione|cojones|connard|connasse|encule|fdp|filho\s+da\s+puta|fotze|gaesaekki|gilipollas|hijo\s+(?:de\s+)?puta|hurensohn|imbecil|jeba[ck]|joder|kuso|kurwa|kurva|madarchod|maricon|merde|mierda|mudak|orospu|otario|pendejo|pidor|pierdol|pizda|puta|putain|puto|salope|scheisse|schei(?:ss|ß)e|siktir|skurwysyn|ssibal|stronzo|suka|vaffanculo|verga|viado|wichser|yeban?|yob[a-z]*)\b/i;
 const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i;
 // A separate expression catches blocked roots when their letters are
 // deliberately separated. It never collapses arbitrary words, so ordinary
@@ -128,7 +145,7 @@ export function readDznCommsPrivateGroupFlags(env: Env, request?: Request) {
   return { ...live, enabled: live.enabled && booleanFlag(env.DZN_COMMS_PRIVATE_GROUPS_ENABLED) };
 }
 
-export function moderateDznCommsBody(value: unknown) {
+export function moderateDznCommsBody(value: unknown, options: { recentBodies?: readonly string[] } = {}) {
   if (typeof value !== "string") return { decision: "block" as const, code: "INVALID_MESSAGE", body: "" };
   const body = value.normalize("NFKC").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim();
   const codePoints = [...body].length;
@@ -137,14 +154,23 @@ export function moderateDznCommsBody(value: unknown) {
     return { decision: "block" as const, code: "INVALID_MESSAGE", body: "" };
   }
   const folded = foldForModeration(body);
-  const compact = folded.replace(/[^a-z0-9@.:/]+/g, " ");
+  const compact = compactForModeration(folded);
+  const recentBodies = (options.recentBodies ?? []).filter((item): item is string => typeof item === "string").slice(-RECENT_CONTEXT_MESSAGE_COUNT);
+  const hasRecentContext = recentBodies.length > 0;
+  const contextFolded = hasRecentContext ? foldForModeration(`${recentBodies.join(" ")} ${body}`) : folded;
+  const contextCompact = hasRecentContext ? compactForModeration(contextFolded) : compact;
+  const hasCurrentNonEnglishPhrase = nonEnglishPhrasePattern.test(compact) || likelyNonEnglishPhrasePattern.test(compact);
+  const hasCrossMessageNonEnglishPhrase = hasRecentContext && recentBodies.some((recentBody) => {
+    const lastWord = compactForModeration(recentBody).trim().split(/\s+/).at(-1);
+    return Boolean(lastWord && (nonEnglishPhrasePattern.test(`${lastWord} ${compact}`) || likelyNonEnglishPhrasePattern.test(`${lastWord} ${compact}`)));
+  });
   if (/mfa\.[a-z0-9_-]{20,}|[a-z0-9_-]{24,}\.[a-z0-9_-]{6}\.[a-z0-9_-]{20,}/i.test(body)) {
     return { decision: "block" as const, code: "SECRET_DETECTED", body: "" };
   }
   if (/(?:discord\.gg|discord(?:app)?\.com\/invite)\//i.test(body) || /(.)\1{14,}/u.test(body)) {
     return { decision: "block" as const, code: "SPAM_BLOCKED", body: "" };
   }
-  if (severeAbusePattern.test(compact)) {
+  if (severeAbusePattern.test(contextCompact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
   const translatedBody = localEnglishTranslations.get(compact.trim().replace(/\s+/g, " ").replace(/[.!?]+$/g, ""));
@@ -152,21 +178,22 @@ export function moderateDznCommsBody(value: unknown) {
     return { decision: "allow" as const, code: "MESSAGE_TRANSLATED", body: translatedBody };
   }
   const explainsForeignPhrase = foreignPhraseExplanationPattern.test(body);
-  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || ((nonEnglishPhrasePattern.test(compact) || likelyNonEnglishPhrasePattern.test(compact)) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
+  if ((nonLatinScriptPattern.test(body) && !explainsForeignPhrase) || ((hasCurrentNonEnglishPhrase || hasCrossMessageNonEnglishPhrase) && !explainsForeignPhrase) || nonEnglishGreetingOnlyPattern.test(compact.trim())) {
     return { decision: "block" as const, code: "ENGLISH_ONLY", body: "" };
   }
   if (
-    profanityPattern.test(compact)
-    || identitySlurPattern.test(compact)
-    || severeHateSpeechPattern.test(compact)
-    || targetedProfanityPattern.test(compact)
-    || targetedIdentityAbusePattern.test(compact)
-    || contextualAmbiguousAbusePattern.test(compact)
-    || possessiveIdentityInsultPattern.test(compact)
-    || sexualHarassmentPattern.test(compact)
-    || multilingualAbusePattern.test(compact)
-    || obfuscatedProfanityPattern.test(folded)
-    || obfuscatedSevereHateSpeechPattern.test(folded)
+    profanityPattern.test(contextCompact)
+    || identitySlurPattern.test(contextCompact)
+    || severeHateSpeechPattern.test(contextCompact)
+    || targetedProfanityPattern.test(contextCompact)
+    || targetedIdentityAbusePattern.test(contextCompact)
+    || contextualAmbiguousAbusePattern.test(contextCompact)
+    || possessiveIdentityInsultPattern.test(contextCompact)
+    || sexualHarassmentPattern.test(contextCompact)
+    || compoundHarassmentPattern.test(contextFolded)
+    || multilingualAbusePattern.test(contextCompact)
+    || obfuscatedProfanityPattern.test(contextFolded)
+    || obfuscatedSevereHateSpeechPattern.test(contextFolded)
   ) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
@@ -187,7 +214,6 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   if (!/^[a-z0-9-]{1,64}$/.test(channelSlug) || !/^[a-zA-Z0-9_-]{16,80}$/.test(requestId)) {
     return error(400, "INVALID_REQUEST", "Choose an available DZN Comms channel and retry.");
   }
-  const moderated = moderateDznCommsBody(parsed.value.body);
   const db = requireDb(env);
   const ownerArchiveEnabled = readDznCommsOwnerArchiveFlags(env, request).enabled;
   const channel = await readSendChannel(db, channelSlug);
@@ -222,6 +248,13 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   }
   const timeout = await db.prepare("SELECT expires_at FROM dzn_comms_timeouts WHERE actor_user_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(user.id).first<{ expires_at: string }>();
   if (timeout) return error(423, "CHAT_TIMEOUT", "Chat is temporarily unavailable for this account.");
+  let recentBodies: string[];
+  try {
+    recentBodies = await readRecentVisibleBodies(db, channel.id, user.id);
+  } catch {
+    return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not verify recent message context. Retry shortly.");
+  }
+  const moderated = moderateDznCommsBody(parsed.value.body, { recentBodies });
   if (moderated.decision !== "allow") return storeRejected(db, user, actorReceiptKey, channel, requestId, bodyHash, moderated.decision, moderated.code);
   const messageId = crypto.randomUUID();
   const receiptId = crypto.randomUUID();
@@ -720,6 +753,16 @@ async function hasActivePrivateGroupMembership(db: D1Database, channelId: string
   return membership?.allowed === 1;
 }
 
+async function readRecentVisibleBodies(db: D1Database, channelId: string, userId: string) {
+  const result = await db.prepare(`SELECT body
+    FROM dzn_comms_messages
+    WHERE channel_id = ? AND author_user_id = ? AND visibility_state = 'visible'
+      AND created_at >= datetime('now', '-${RECENT_CONTEXT_WINDOW_MINUTES} minutes')
+    ORDER BY created_at DESC
+    LIMIT ${RECENT_CONTEXT_MESSAGE_COUNT}`).bind(channelId, userId).all<{ body: string }>();
+  return (result.results ?? []).map((row) => row.body).filter((body): body is string => typeof body === "string").reverse();
+}
+
 function deleteExpiredReceipt(db: D1Database, actorReceiptKey: string, channelId: string, requestId: string) {
   return db.prepare("DELETE FROM dzn_comms_send_receipts WHERE actor_receipt_key = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) <= julianday('now')").bind(actorReceiptKey, channelId, requestId);
 }
@@ -736,7 +779,7 @@ function receiptResponse(row: { decision: string; response_status: number; reaso
 }
 function rejectedCommsMessage(decision: string, reason: string | null) {
   if (decision === "timeout") return "This account has a short chat timeout for a safety review.";
-  if (reason === "ENGLISH_ONLY") return "DZN Comms only posts English. This message could not be translated automatically, so please send it in English.";
+  if (reason === "ENGLISH_ONLY") return "DZN Comms is English-only. Please resend this message in English.";
   return "That message was blocked by DZN Safety.";
 }
 function unavailable() { return error(404, "DZN_COMMS_LIVE_DISABLED", "Live DZN Comms is not enabled in this environment."); }
@@ -744,7 +787,13 @@ function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABL
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function booleanFlag(value: unknown) { return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
-function foldForModeration(value: string) { return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/ß/g, "ss"); }
+function foldForModeration(value: string) { return value.normalize("NFKD").replace(/[\p{M}\p{Cf}]/gu, "").toLowerCase().replace(/ß/g, "ss"); }
+function compactForModeration(value: string) {
+  return value
+    .replace(/(?<=[a-z0-9])[@!$+|](?=[a-z0-9])/g, (character) => ({ "@": "a", "!": "i", "$": "s", "+": "t", "|": "i" })[character] ?? character)
+    .replace(/[0]/g, "o").replace(/[1]/g, "i").replace(/[3]/g, "e").replace(/[4]/g, "a").replace(/[5]/g, "s").replace(/[7]/g, "t")
+    .replace(/[^a-z0-9]+/g, " ");
+}
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }
