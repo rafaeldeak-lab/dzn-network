@@ -1,5 +1,5 @@
 .page { min-height: 100vh; background: #02070d; color: #ecf8fb; padding: 34px clamp(18px, 4vw, 64px) 70px; }
-.hero { max-width: 1320px; margin: 0 auto; border: 1px solid #164657; background: linear-gradient(125deg, #061722 0%, #07111d 58%, #10102a 100%); overflow: hidden; }
+.hero { max-width: 1320px; margin: 0 auto; border: 1px solid #164657; background: #07111a; overflow: hidden; }
 .heroTopline { display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #133d4c; color: #87b2bb; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .back { display: inline-flex; align-items: center; gap: 4px; color: #a8f4ea; text-decoration: none; }
 .heroGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(370px, .94fr); min-height: 380px; }
@@ -13,9 +13,29 @@
 .primaryAction:hover:not(:disabled), .secondaryAction:hover:not(:disabled) { transform: translateY(-1px); background: #8ef6e9; }
 .primaryAction:disabled, .secondaryAction:disabled { cursor: not-allowed; border-color: #315a62; background: #082d34; color: #79a9ae; opacity: 1; }
 .notice { margin-top: 18px; border-left: 3px solid #ffb45d; background: #251b0b; color: #ffdcae; padding: 11px 13px; font-weight: 700; }
-.sceneFrame { position: relative; min-height: 360px; border-left: 1px solid #164657; background: radial-gradient(circle at 55% 46%, rgba(43, 170, 164, .17), transparent 42%), #030a11; }
-.sceneFrame :global(.dzn-command-centre-3d) { position: absolute; inset: 0; }
-.sceneFrame :global(.dzn-command-centre-3d canvas) { width: 100%; height: 100%; display: block; }
+.sceneFrame { position: relative; min-height: 360px; border-left: 1px solid #164657; background: #071014 url("/media/stronghold/rosebud/concrete-pad.webp") center / 390px repeat; }
+.sceneFrame :global(.dzn-command-centre-3d) { position: absolute; inset: 0; overflow: hidden; isolation: isolate; box-shadow: inset 0 0 110px rgba(1, 7, 10, .78); }
+.sceneFrame :global(.dzn-command-centre-3d::after) { position: absolute; z-index: 5; inset: 0; border: 16px solid rgba(3, 12, 17, .64); content: ""; pointer-events: none; }
+.sceneFrame :global(.dzn-command-centre-3d__grid) { position: absolute; z-index: 0; inset: 13% 7%; border: 1px solid rgba(116, 228, 209, .34); transform: perspective(540px) rotateX(58deg) rotateZ(-9deg); transform-origin: center; box-shadow: 0 0 0 28px rgba(8, 31, 35, .25), 0 0 34px rgba(102, 236, 214, .14); }
+.sceneFrame :global(.dzn-command-centre-3d__beacon) { position: absolute; z-index: 1; top: 38%; left: 49%; width: 24%; aspect-ratio: 1; border: 1px solid rgba(140, 247, 231, .52); border-radius: 50%; opacity: .55; transform: translate(-50%, -50%) rotateX(66deg); box-shadow: 0 0 38px rgba(72, 236, 203, .34); }
+.sceneFrame :global(.dzn-command-centre-3d__asset) { position: absolute; z-index: 2; display: grid; margin: 0; filter: drop-shadow(0 18px 18px rgba(0, 0, 0, .65)); transform-origin: center bottom; transition: filter .2s ease, opacity .2s ease, transform .2s ease; }
+.sceneFrame :global(.dzn-command-centre-3d__asset img) { display: block; width: 100%; height: auto; }
+.sceneFrame :global(.dzn-command-centre-3d__asset figcaption) { position: absolute; bottom: 1px; left: 50%; display: grid; min-width: 88px; transform: translateX(-50%); color: #d9fff8; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-align: center; text-transform: uppercase; text-shadow: 0 1px 8px #02070d; }
+.sceneFrame :global(.dzn-command-centre-3d__asset figcaption span) { margin-top: 3px; color: #8eb6b3; font-size: 8px; }
+.sceneFrame :global(.dzn-command-centre-3d__asset[data-building="headquarters"]) { bottom: 11%; left: 28%; width: min(46%, 304px); z-index: 4; }
+.sceneFrame :global(.dzn-command-centre-3d__asset[data-building="workshop"]) { bottom: 12%; left: 3%; width: min(32%, 214px); }
+.sceneFrame :global(.dzn-command-centre-3d__asset[data-building="watchtower"]) { top: 4%; right: 6%; width: min(26%, 178px); z-index: 3; }
+.sceneFrame :global(.dzn-command-centre-3d__asset[data-building="communications"]) { right: 7%; bottom: 11%; width: min(32%, 208px); }
+.sceneFrame :global(.dzn-command-centre-3d[data-active="false"] .dzn-command-centre-3d__asset) { filter: grayscale(.46) brightness(.66) drop-shadow(0 18px 18px rgba(0, 0, 0, .72)); opacity: .8; }
+.sceneFrame :global(.dzn-command-centre-3d[data-active="false"] .dzn-command-centre-3d__beacon) { opacity: .18; }
+.sceneFrame :global(.dzn-command-centre-3d[data-motion="true"] .dzn-command-centre-3d__asset[data-building="headquarters"]) { animation: stronghold-hq-drift 10s ease-in-out infinite; }
+.sceneFrame :global(.dzn-command-centre-3d[data-motion="true"] .dzn-command-centre-3d__asset[data-building="workshop"]) { animation: stronghold-left-drift 12s ease-in-out infinite; }
+.sceneFrame :global(.dzn-command-centre-3d[data-motion="true"] .dzn-command-centre-3d__asset[data-building="watchtower"]) { animation: stronghold-right-drift 11s ease-in-out infinite; }
+.sceneFrame :global(.dzn-command-centre-3d[data-motion="true"] .dzn-command-centre-3d__asset[data-building="communications"]) { animation: stronghold-comms-drift 13s ease-in-out infinite; }
+@keyframes stronghold-hq-drift { 0%, 100% { transform: translate3d(0, 0, 0) rotateY(-3deg); } 50% { transform: translate3d(0, -7px, 0) rotateY(3deg); } }
+@keyframes stronghold-left-drift { 0%, 100% { transform: translate3d(0, 0, 0) rotateY(2deg); } 50% { transform: translate3d(-5px, -5px, 0) rotateY(-3deg); } }
+@keyframes stronghold-right-drift { 0%, 100% { transform: translate3d(0, 0, 0) rotateY(-2deg); } 50% { transform: translate3d(5px, -7px, 0) rotateY(3deg); } }
+@keyframes stronghold-comms-drift { 0%, 100% { transform: translate3d(0, 0, 0) rotateY(3deg); } 50% { transform: translate3d(4px, -4px, 0) rotateY(-2deg); } }
 .sceneStatus { position: absolute; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 7px; border: 1px solid #2b6070; background: rgba(2, 14, 22, .82); color: #d8f5ee; padding: 9px 11px; font-size: 12px; font-weight: 800; }
 .liveDot { width: 7px; height: 7px; border-radius: 50%; background: #56f0be; box-shadow: 0 0 12px #56f0be; }
 .sceneFallback { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; padding: 24px; color: #b4d7dd; text-align: center; background: #07151e; }
@@ -24,7 +44,10 @@
 .sectionHeading h2 { font-size: clamp(25px, 3vw, 38px); }
 .sectionHeading > p { max-width: 370px; margin: 0; color: #8eafb8; font-size: 14px; line-height: 1.5; }
 .buildingGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding-top: 18px; }
-.buildingCard { display: flex; min-height: 270px; flex-direction: column; border: 1px solid #164557; background: linear-gradient(155deg, #071621, #050c14); padding: 18px; }
+.buildingCard { display: flex; min-height: 364px; flex-direction: column; border: 1px solid #164557; background: #07111a; padding: 18px; }
+.buildingVisual { position: relative; display: grid; height: 118px; margin: -8px -8px 14px; place-items: center; overflow: hidden; background: #0b1718 url("/media/stronghold/rosebud/concrete-pad.webp") center / 260px repeat; box-shadow: inset 0 0 50px rgba(0, 0, 0, .66); }
+.buildingVisual img { position: relative; z-index: 1; width: min(80%, 180px); height: 118px; object-fit: contain; filter: drop-shadow(0 11px 10px rgba(0, 0, 0, .56)); }
+.buildingVisual[data-building="watchtower"] img { height: 134px; width: min(58%, 122px); transform: translateY(8px); }
 .buildingTitle { display: flex; align-items: center; gap: 12px; }
 .buildingTitle p { margin: 0; color: #94c7cf; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .buildingTitle strong { color: #fff; font-size: 18px; }
@@ -38,4 +61,4 @@
 .locked, .complete { margin: auto 0 0; color: #ffce83; font-size: 13px; line-height: 1.45; }
 .complete { color: #80e9c7; }
 @media (max-width: 980px) { .heroGrid { grid-template-columns: 1fr; } .sceneFrame { min-height: 330px; border-top: 1px solid #164657; border-left: 0; } .buildingGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) { .page { padding: 14px 12px 44px; } .heroTopline { padding: 11px 14px; font-size: 10px; } .heroCopy { padding: 28px 19px; } .hero h1 { font-size: 36px; } .heroCopy > p:not(.eyebrow) { font-size: 14px; } .sceneFrame { min-height: 265px; } .sceneStatus { right: 10px; bottom: 10px; font-size: 10px; } .sectionHeading { display: block; } .sectionHeading > p { margin-top: 10px; } .buildingGrid { grid-template-columns: 1fr; gap: 10px; } .buildingCard { min-height: 0; } .buildingCopy { min-height: 0; } }
+@media (max-width: 620px) { .page { padding: 14px 12px 44px; } .heroTopline { padding: 11px 14px; font-size: 10px; } .heroCopy { padding: 28px 19px; } .hero h1 { font-size: 36px; } .heroCopy > p:not(.eyebrow) { font-size: 14px; } .sceneFrame { min-height: 265px; } .sceneFrame :global(.dzn-command-centre-3d__asset figcaption) { display: none; } .sceneStatus { right: 10px; bottom: 10px; font-size: 10px; } .sectionHeading { display: block; } .sectionHeading > p { margin-top: 10px; } .buildingGrid { grid-template-columns: 1fr; gap: 10px; } .buildingCard { min-height: 0; } .buildingCopy { min-height: 0; } }

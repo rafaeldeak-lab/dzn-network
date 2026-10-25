@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Boxes, ChevronLeft, Clock3, Hammer, Radio, ShieldCheck, TowerControl, Wrench } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   COMMAND_CENTRE_BUILDING_COPY,
@@ -18,6 +19,13 @@ const ICONS: Record<CommandCentreBuilding, typeof TowerControl> = {
   workshop: Wrench,
   watchtower: ShieldCheck,
   communications: Radio,
+};
+
+const BUILDING_ASSETS: Record<CommandCentreBuilding, string> = {
+  headquarters: "/media/stronghold/rosebud/hq_l01.webp",
+  workshop: "/media/stronghold/rosebud/forge_l01.webp",
+  watchtower: "/media/stronghold/rosebud/watchtower_l01.webp",
+  communications: "/media/stronghold/rosebud/comms_l01.webp",
 };
 
 function formatRemaining(milliseconds: number) {
@@ -152,6 +160,9 @@ function BuildingCard({ building, value, serverNow, xp, parts, active, busy, onS
   const startKey = `start:${building}`;
   const completeKey = `complete:${building}`;
   return <article className={styles.buildingCard}>
+    <div className={styles.buildingVisual} data-building={building}>
+      <Image src={BUILDING_ASSETS[building]} alt="" width={960} height={960} sizes="(max-width: 620px) 80vw, 18vw" />
+    </div>
     <div className={styles.buildingTitle}><span className={styles.iconWell}><Icon size={20} /></span><div><p>{copy.name}</p><strong>{active ? `Level ${value?.level ?? 0}` : "Not established"}</strong></div></div>
     <p className={styles.buildingCopy}>{copy.short}</p>
     {!active ? <p className={styles.locked}>Establish the Command Centre to create authoritative building records.</p>
