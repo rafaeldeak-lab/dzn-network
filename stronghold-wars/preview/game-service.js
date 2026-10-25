@@ -137,6 +137,10 @@ const safeInt = (value, fallback = 0) => {
 const clone = value => JSON.parse(JSON.stringify(value));
 const TRAINING_ROLES = Object.freeze(Object.keys(SQUAD_ROLES));
 const trainingCapacity = levels => 2 + (levels.hq || 1) * 2;
+export const TRAINING_COSTS = Object.freeze({ assault: 30, recon: 40, engineer: 40, sentinel: 60, medic: 50 });
+export const TRAINING_SECONDS = Object.freeze({ assault: 12, recon: 16, engineer: 16, sentinel: 24, medic: 20 });
+const starterReserve = () => Object.fromEntries(TRAINING_ROLES.map(role => [role, role === 'assault' ? 4 : 0]));
+const normalizedReserve = reserve => Object.fromEntries(TRAINING_ROLES.map(role => [role, Math.min(100, safeInt(reserve?.[role]))]));
 function defaultTrainingLoadout(levels) {
   const counts = Object.fromEntries(TRAINING_ROLES.map(role => [role, 0]));
   counts.assault = trainingCapacity(levels);
@@ -176,7 +180,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
+  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -493,6 +497,11 @@ function normalizeLoadedState(raw) {
       actionRecords: Array.isArray(saved.actionRecords) ? saved.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [],
       trainingLoadout: saved.trainingLoadout && typeof saved.trainingLoadout === 'object' && !Array.isArray(saved.trainingLoadout)
         ? clone(saved.trainingLoadout) : null,
+      // Older saves receive one starter squad; an explicitly empty reserve stays empty.
+      trainingReserve: saved.trainingReserve && typeof saved.trainingReserve === 'object' && !Array.isArray(saved.trainingReserve)
+        ? normalizedReserve(saved.trainingReserve) : starterReserve(),
+      trainingJobs: Array.isArray(saved.trainingJobs) ? saved.trainingJobs.filter(job => job && typeof job.id === 'string' && TRAINING_ROLES.includes(job.role) && Number.isFinite(Number(job.finishAt)))
+        .slice(-100).map(job => ({ id: job.id, role: job.role, count: Math.min(12, safeInt(job.count)), finishAt: safeInt(job.finishAt) })).filter(job => job.count > 0) : [],
       fieldOrders: {
         day: typeof saved.fieldOrders?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.fieldOrders.day) ? saved.fieldOrders.day : '',
         completed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.completed.includes(id)),
@@ -2270,6 +2279,56 @@ export class LocalGameService {
     return { counts: normalizedTrainingLoadout(member.trainingLoadout, levels), capacity: trainingCapacity(levels) };
   }
 
+  _settleTraining(identityId) {
+    const member = this.member(identityId);
+    if (!member) return;
+    const now = this.now();
+    const pending = [];
+    let changed = false;
+    for (const job of member.trainingJobs) {
+      if (job.finishAt > now) { pending.push(job); continue; }
+      member.trainingReserve[job.role] = Math.min(100, member.trainingReserve[job.role] + job.count);
+      changed = true;
+    }
+    if (changed) { member.trainingJobs = pending; this.save(); }
+  }
+
+  getTrainingReadiness(identityId = this.state.currentIdentityId) {
+    const loadout = this.getTrainingLoadout(identityId);
+    const member = this.member(identityId);
+    if (!loadout || !member) return null;
+    this._settleTraining(identityId);
+    const reserve = normalizedReserve(member.trainingReserve);
+    const missing = Object.fromEntries(TRAINING_ROLES.map(role => [role, Math.max(0, loadout.counts[role] - reserve[role])]));
+    return { ...loadout, reserve, missing, ready: TRAINING_ROLES.every(role => missing[role] === 0),
+      jobs: clone(member.trainingJobs), reserveCapacity: loadout.capacity * 2,
+      occupied: TRAINING_ROLES.reduce((sum, role) => sum + reserve[role], 0) + member.trainingJobs.reduce((sum, job) => sum + job.count, 0) };
+  }
+
+  trainTroops(identityId, role, count, actionId = this.newActionId('training')) {
+    const access = this.getAccess(identityId);
+    if (!access.allowed) return { ok: false, error: access.reason };
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!TRAINING_ROLES.includes(role) || !squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'This troop is not unlocked.' };
+    if (!Number.isSafeInteger(count) || count < 1 || count > trainingCapacity(entry.saved.base.levels)) return { ok: false, error: 'Choose a whole troop count within camp capacity.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique training action is required.' };
+    const prior = this._findAction(member.actionRecords, actionId);
+    if (prior) return prior.kind === `train-${role}-${count}` ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (readiness.occupied + count > readiness.reserveCapacity) return { ok: false, error: `Camp holds ${readiness.reserveCapacity} ready or training troops.` };
+    const cost = TRAINING_COSTS[role] * count;
+    if (member.parts < cost) return { ok: false, error: `Need ${cost} personal Parts to train ${count} ${SQUAD_ROLES[role].name}.` };
+    const lastFinish = member.trainingJobs.at(-1)?.finishAt || 0;
+    const finishAt = Math.max(this.now(), lastFinish) + TRAINING_SECONDS[role] * count * 1000;
+    member.parts -= cost;
+    member.trainingJobs.push({ id: actionId, role, count, finishAt });
+    const result = { ok: true, role, count, cost, finishAt };
+    this._recordAction(member.actionRecords, actionId, result, `train-${role}-${count}`);
+    this.save();
+    return result;
+  }
+
   setTrainingLoadout(identityId, counts) {
     const access = this.getAccess(identityId);
     if (!access.allowed) return { ok: false, error: access.reason };
@@ -2319,13 +2378,24 @@ export class LocalGameService {
     return completed;
   }
 
-  recordTrainingAttempt(raidId) {
-    const entry = this.community();
-    if (!entry || !this.getAccess().allowed) return { ok: false, error: 'Training access is locked.' };
+  recordTrainingAttempt(raidId, identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    if (!entry || !this.getAccess(identityId).allowed) return { ok: false, error: 'Training access is locked.' };
     const id = safeInt(raidId);
     if (id < 1) return { ok: false, error: 'Invalid training encounter.' };
-    entry.saved.base.raidCount = Math.max(entry.saved.base.raidCount, id);
+    const base = entry.saved.base;
+    const actionKey = `training-attempt:${id}`;
+    const prior = this._findAction(base.actionRecords, actionKey);
+    if (prior) return prior.kind === `training-attempt-${identityId}` ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This encounter belongs to another member.' };
+    if (id !== base.raidCount + 1) return { ok: false, error: 'Prepare the next training encounter.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (!readiness.ready) return { ok: false, error: 'Train the missing troops before launching the drill.' };
+    const member = this.member(identityId);
+    for (const role of TRAINING_ROLES) member.trainingReserve[role] -= readiness.counts[role];
+    base.raidCount = id;
+    const result = { ok: true, raidId: id, counts: clone(readiness.counts) };
+    this._recordAction(base.actionRecords, actionKey, result, `training-attempt-${identityId}`);
     this.save();
-    return { ok: true, raidId: id };
+    return result;
   }
 }

@@ -4,6 +4,7 @@ import { cellKey, footprintCells } from './layout-grid.js';
 import { BUILDING_ASSETS } from './building-assets.js';
 export const PATROL_NODES = Object.freeze({
   camp: [-4, -12], westSouth: [-9, -8], westLane: [-15, 0], westNorth: [-15, 10],
+  yard: [-17, -4],
   workshop: [-9, 9], northWest: [-5, 12], hall: [0, 6],
   northEast: [5, 12], tower: [8, 11], eastNorth: [14, 11], eastLane: [14, 0],
   comms: [10, -10], southEast: [6, -13], southLane: [0, -13],
@@ -32,12 +33,13 @@ export const PATROL_ORDERS = Object.freeze({
 });
 export const DEFENDER_POST_NODES = Object.freeze({ gate: 'southLane', hall: 'hall', tower: 'tower', comms: 'comms', workshop: 'workshop' });
 
-export function setPatrolOrder(motion, order) {
+export function setPatrolOrder(motion, order, standardStops = null) {
   if (!Object.hasOwn(PATROL_ORDERS, order) || !PATROL_STOPS[motion.role]) throw new Error('Unknown patrol order');
-  if (motion.order === order) return motion;
-  motion.order = order;
-  motion.stops = order === 'standard' ? PATROL_STOPS[motion.role]
+  const stops = order === 'standard' ? standardStops || PATROL_STOPS[motion.role]
     : order === 'camp' ? ['camp'] : ['camp', order, 'camp'];
+  if (motion.order === order && motion.stops.join('|') === stops.join('|')) return motion;
+  motion.order = order;
+  motion.stops = stops;
   motion.stopIndex = motion.stops.indexOf(motion.node);
   if (motion.stopIndex < 0 && order !== 'standard' && order !== 'camp') motion.stopIndex = 0;
   motion.route = [];
@@ -63,6 +65,11 @@ export function patrolNodesForLayout(layout) {
       [point.x + radius, point.z - radius], [point.x - radius, point.z - radius],
     ]);
     nodes[stop] = choices.find(([x, z]) => !blockedByLayout(x, z, layout) && !occupied.has(cellKey(x, z))) || nodes[stop];
+  }
+  if (layout?.yardAccessible && layout.structures?.['timberline-depot']) {
+    const point = layout.structures['timberline-depot'];
+    const choices = [[point.x + 5, point.z], [point.x + 5, point.z + 2], [point.x + 5, point.z - 2], [point.x, point.z + 5]];
+    nodes.yard = choices.find(([x, z]) => !blockedByLayout(x, z, layout)) || nodes.yard;
   }
   return nodes;
 }
@@ -103,10 +110,12 @@ export function createDefenderMotion(role, post) {
 }
 
 function blockedByLayout(x, z, layout) {
-  if (x < -17 || x > 17 || z < -15 || z > 15) return true;
+  const core = x >= -17 && x <= 17 && z >= -15 && z <= 15;
+  const yard = layout?.yardAccessible && x >= -29 && x < -17 && z >= -10 && z <= 2;
+  if (!core && !yard) return true;
   for (const [key, point] of Object.entries(layout?.structures || {})) {
     const clearance = (BUILDING_ASSETS[key]?.footprint ?? 6) / 2 + .3;
-    if (Math.abs(point.x) <= 16 && Math.abs(point.z) <= 14 && Math.abs(x - point.x) <= clearance && Math.abs(z - point.z) <= clearance) return true;
+    if ((Math.abs(point.x) <= 16 && Math.abs(point.z) <= 14 || key === 'timberline-depot' && layout.yardAccessible) && Math.abs(x - point.x) <= clearance && Math.abs(z - point.z) <= clearance) return true;
   }
   for (const wall of layout?.walls || []) if (Math.abs(x - wall.x) <= 1 && Math.abs(z - wall.z) <= 1) return true;
   return false;

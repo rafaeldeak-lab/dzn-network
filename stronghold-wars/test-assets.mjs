@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
-import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
+import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
 import { defaultLayout } from './preview/layout-grid.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
@@ -361,6 +361,17 @@ for (const [x, z] of [[0, 4], [4, 0], [-4, 0], [0, -4]]) walledHallLayout.walls.
 const walledHallStop = patrolNodesForLayout(walledHallLayout).hall;
 if (walledHallLayout.walls.some(wall => wall.x === walledHallStop[0] && wall.z === walledHallStop[1]) ||
     !walkablePatrolPath(PATROL_NODES.camp, walledHallStop, walledHallLayout)) throw new Error('A ring of wall segments must not put the Hall patrol stop inside a wall.');
+const workingYardLayout = { ...defaultLayout(), yardAccessible: true };
+const workingYardNodes = patrolNodesForLayout(workingYardLayout);
+const yardMotion = setPatrolOrder(createPatrolMotion('engineer'), 'standard', ['workshop', 'yard', 'camp', 'workshop']);
+const yardVisits = new Set();
+for (let frame = 0; frame < 4800; frame++) {
+  stepPatrolMotion(yardMotion, .05, workingYardNodes, workingYardLayout);
+  if (!yardMotion.route.length && yardMotion.wait > 0) yardVisits.add(yardMotion.node);
+  const site = workingYardLayout.structures['timberline-depot'];
+  if (Math.abs(yardMotion.x - site.x) < 3.2 && Math.abs(yardMotion.z - site.z) < 3.2) throw new Error('Fixer walked through the Lumber Yard model.');
+}
+if (!yardVisits.has('yard') || !yardVisits.has('workshop') || !yardVisits.has('camp')) throw new Error('Fixer did not visit the completed Lumber Yard and return to camp.');
 console.log('Dynamic patrol nodes and wall-avoiding grid paths verified.');
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (const [post, node] of Object.entries(DEFENDER_POST_NODES)) {
   const motion = createDefenderMotion(role, post);

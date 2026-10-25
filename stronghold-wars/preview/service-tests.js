@@ -317,6 +317,7 @@ export function runServiceTests() {
   trainingService.state.communities['iron-pines'].base.levels = { hq: 4, workshop: 3, tower: 3, comms: 3 };
   assert(trainingService.setTrainingLoadout('iron-owner', { assault: 3, recon: 1, engineer: 1, sentinel: 2, medic: 1 }).ok, 'advanced squad roles unlock through Hall and specialist buildings');
   checks.push('member-specific training loadouts, capacity and role gates, Pro access and save reload');
+  assert(trainingService.setTrainingLoadout('iron-owner', { assault: 4 }).ok, 'owner can ready the starter Warden unit for a drill');
   const trainingStartParts = trainingService.snapshot('iron-owner').member.parts;
   assert(!trainingService.recordTrainingVictory('iron-owner', 1, 300).ok, 'an unrecorded training encounter cannot claim a reward');
   assert(trainingService.recordTrainingAttempt(1).ok, 'a training attempt is recorded before the encounter');
@@ -326,6 +327,28 @@ export function runServiceTests() {
   assert(afterTrainingReward === trainingStartParts + 300, 'training reward credits the current member inventory');
   assert(!trainingService.recordTrainingVictory('iron-owner', 1, 300).ok && trainingService.snapshot('iron-owner').member.parts === afterTrainingReward, 'repeated raid victory cannot claim twice');
   checks.push('recorded AI training attempt, member reward and duplicate-victory protection');
+
+  let campClock = 1_900_000_000_000;
+  const campStorage = new MemoryStorage();
+  let campService = new LocalGameService({ storage: campStorage, now: () => campClock });
+  assert(campService.getTrainingReadiness('iron-owner').ready && campService.getTrainingReadiness('iron-owner').reserve.assault === 4, 'fresh camp starts with a usable four-Warden squad');
+  assert(!campService.trainTroops('free-owner', 'assault', 1, 'camp-free').ok && !campService.trainTroops('iron-unverified', 'assault', 1, 'camp-unverified').ok, 'training uses the Pro and verified-member gates');
+  assert(!campService.trainTroops('iron-owner', 'sentinel', 1, 'camp-locked').ok && !campService.trainTroops('iron-owner', 'assault', 0, 'camp-zero').ok, 'locked and invalid troop orders are rejected');
+  const firstOrder = campService.trainTroops('iron-owner', 'assault', 2, 'camp-first');
+  assert(firstOrder.ok && firstOrder.cost === 60 && campService.member('iron-owner').parts === 540, 'camp debits personal Parts once at queue time');
+  assert(campService.trainTroops('iron-owner', 'assault', 2, 'camp-first').replay && campService.member('iron-owner').parts === 540, 'replayed training action cannot debit again');
+  assert(!campService.trainTroops('iron-owner', 'assault', 3, 'camp-overflow').ok, 'ready plus queued troops cannot exceed camp storage');
+  assert(campService.recordTrainingAttempt(1, 'iron-owner').ok && campService.getTrainingReadiness('iron-owner').reserve.assault === 0, 'drill consumes exactly the selected ready squad');
+  assert(campService.recordTrainingAttempt(1, 'iron-owner').replay && campService.getTrainingReadiness('iron-owner').reserve.assault === 0, 'replayed drill cannot consume a second squad');
+  assert(!campService.recordTrainingAttempt(2, 'iron-owner').ok, 'a second drill waits for trained replacements');
+  campService = new LocalGameService({ storage: campStorage, now: () => campClock });
+  assert(campService.getTrainingReadiness('iron-owner').reserve.assault === 0 && campService.getTrainingReadiness('iron-owner').jobs.length === 1, 'camp reserve and queue survive reload without free troops');
+  campClock = firstOrder.finishAt + 1;
+  assert(campService.getTrainingReadiness('iron-owner').reserve.assault === 2 && campService.getTrainingReadiness('iron-owner').jobs.length === 0, 'offline training completes once at its deadline');
+  assert(!campService.getTrainingReadiness('iron-owner').ready && campService.trainTroops('iron-owner', 'assault', 2, 'camp-second').ok, 'camp reports a partial squad and allows replenishment');
+  campClock = campService.member('iron-owner').trainingJobs[0].finishAt + 1;
+  assert(campService.getTrainingReadiness('iron-owner').ready && campService.getTrainingReadiness('iron-owner').reserve.assault === 4, 'replenished squad becomes deployable at the expected time');
+  checks.push('personal camp training queue, Parts debit, offline completion, capacity, access and one-time drill deployment');
 
   let orderClock = 1_900_000_000_000;
   const orderStorage = new MemoryStorage();

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
-import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES } from './game-service.js';
+import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES, TRAINING_COSTS, TRAINING_SECONDS } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, evaluateWarSquad } from './squad-assets.js';
 import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './patrol-routes.js';
@@ -25,13 +25,16 @@ const DEFS = {
   comms: { name: 'Communications', pos: [6, -8] },
 };
 let activePatrolNodes = PATROL_NODES;
+let activePatrolLayout = null;
 const patrols = [];
 const defenderPatrols = new Map();
 let operativePatrol = null;
 function syncLayoutPositions() {
   const layout = service.community()?.saved.base.layout;
   if (!layout) return;
-  activePatrolNodes = patrolNodesForLayout(layout);
+  const yardAccessible = service.community()?.saved.base.landPlots.some(plot => plot.id === 'timberline-depot' && plot.facilityLevel > 0);
+  activePatrolLayout = { ...layout, yardAccessible };
+  activePatrolNodes = patrolNodesForLayout(activePatrolLayout);
   for (const patrol of patrols || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
   for (const patrol of defenderPatrols?.values?.() || []) { patrol.motion.waypointNode = null; patrol.motion.waypoints = null; }
   if (operativePatrol?.motion) { operativePatrol.motion.waypointNode = null; operativePatrol.motion.waypoints = null; }
@@ -767,6 +770,8 @@ async function reconcileLandScenery() {
   const request = ++sceneryRequest;
   const base = service.community()?.saved.base;
   if (!base) return;
+  syncLayoutPositions();
+  syncPatrolOrders();
   const names = [...Array.from({ length: 5 }, (_, i) => `pine_l0${i + 1}`), 'pine_stump', 'pine_log_stack', 'claim_marker', 'granite_boulder', 'fallen_trunk', 'fern_patch', 'mossy_rock_cluster', 'brush_pile', 'lumber_pallet'];
   try {
     const facilityNames = base.landPlots.filter(plot => plot.status === 'claimed' && plot.facilityLevel > 0)
@@ -817,7 +822,9 @@ async function reconcileLandScenery() {
     for (const config of GAME_CONFIG.landPlots.slice(1)) {
       const plot = base.landPlots.find(item => item.id === config.id);
       if (!plot) continue;
-      const [x, z] = config.position;
+      const [x, z] = plot.facilityLevel > 0
+        ? [base.layout.structures[config.id]?.x ?? config.position[0], base.layout.structures[config.id]?.z ?? config.position[1]]
+        : config.position;
       const claimed = plot.status === 'claimed';
       if (config.id === 'timberline-depot' && plot.facilityLevel === 0 && models.timberline_l01) {
         // A visible 3D blueprint makes the first district discoverable before Hall L2.
@@ -849,7 +856,9 @@ async function reconcileLandScenery() {
       for (let i = 0; i < config.trees; i++) {
         if (claimed && plot.facilityLevel > 0) continue;
         const a = i * 2.39996 + config.hall;
-        const radius = 1.4 + (i % 3) * 0.8;
+        // Keep the 3D blueprint readable before construction; the trees still
+        // ring the site and remain individually clickable for clearing.
+        const radius = config.id === 'timberline-depot' ? 5.8 + (i % 3) * .55 : 1.4 + (i % 3) * .8;
         const standing = i < plot.treesRemaining;
         const asset = models[standing ? `pine_l0${config.hall}` : 'pine_stump'].clone();
         asset.position.set(x + Math.cos(a) * radius, 0.09, z + Math.sin(a) * radius);
@@ -1308,7 +1317,14 @@ function equipSoldier(soldier, role, tier) {
       const mixer = new THREE.AnimationMixer(model);
       soldier.userData.walkMixer = mixer;
       soldier.userData.walkAction = mixer.clipAction(clip);
-      const idleClip = asset.animations.find(animation => animation.name === 'DZN_Operative_Idle');
+      // The Warden source only contains a walk. Hold its first keyed pose as a
+      // real idle clip so waiting at a building never freezes a mid-step frame.
+      const idleClip = asset.animations.find(animation => animation.name === 'DZN_Operative_Idle') ||
+        (role === 'assault' ? new THREE.AnimationClip('DZN_Warden_Idle', 1, clip.tracks.map(track => {
+          const size = track.getValueSize();
+          const first = Array.from(track.values.slice(0, size));
+          return new track.constructor(track.name, [0, 1], [...first, ...first]);
+        })) : null);
       soldier.userData.idleAction = idleClip ? mixer.clipAction(idleClip) : null;
       soldier.userData.activeAction = soldier.userData.idleAction || soldier.userData.walkAction;
       soldier.userData.activeAction.play();
@@ -1404,7 +1420,8 @@ for (let i = 0; i < 5; i++) {
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
 function syncPatrolOrders() {
   const orders = service.community()?.saved.base.patrolOrders || {};
-  for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard');
+  const yardRoute = activePatrolLayout?.yardAccessible ? ['workshop', 'yard', 'camp', 'workshop'] : null;
+  for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard', patrol.role === 'engineer' ? yardRoute : null);
 }
 // One chosen commander is physically present at the bivouac while at home.
 // Its existing role route leads to a useful building and back, with the same
@@ -2385,9 +2402,10 @@ $('progressionBtn').onclick = showProgressionPanel;
 $('landBtn').onclick = () => showLandPanel();
 $('yardBtn').onclick = () => {
   if (raid || warBattle) { toast('Return from the battle to view the Lumber Yard.'); return; }
-  const [x, z] = GAME_CONFIG.landPlots.find(plot => plot.id === 'timberline-depot').position;
+  const point = service.community()?.saved.base.layout.structures['timberline-depot'];
+  const [x, z] = point ? [point.x, point.z] : GAME_CONFIG.landPlots.find(plot => plot.id === 'timberline-depot').position;
   camTarget.set(x, 0, z);
-  zoom = 25;
+  zoom = 17;
   updateCamera();
   showLandPanel('timberline-depot');
 };
@@ -2605,13 +2623,15 @@ function trainingSquadSummary(counts) {
 function showTrainingLoadout(errorMessage = '') {
   const profile = service.profile();
   const access = service.getAccess(profile.id);
-  const { counts, capacity } = service.getTrainingLoadout(profile.id);
+  const readiness = service.getTrainingReadiness(profile.id);
+  const { counts, capacity, reserve, jobs, occupied, reserveCapacity } = readiness;
   const used = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const rows = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
     const kit = squadProfile(role, state.levels);
-    return `<div class="project-card"><label class="field-label" for="training${role}">${escapeHTML(definition.name)} · ${kit.unlocked ? `L${kit.tier} · ${kit.maxHealth} HP · ${kit.damage} damage` : 'LOCKED'}</label><div class="row"><input id="training${role}" data-training-role="${role}" type="number" min="0" max="${capacity}" step="1" value="${counts[role]}" ${kit.unlocked && access.allowed ? '' : 'disabled'}><span class="help">${escapeHTML(definition.purpose)}</span></div></div>`;
+    return `<div class="project-card"><label class="field-label" for="training${role}">${escapeHTML(definition.name)} · ${kit.unlocked ? `L${kit.tier} · ${kit.maxHealth} HP · ${kit.damage} damage` : 'LOCKED'}</label><div class="row"><input id="training${role}" data-training-role="${role}" type="number" min="0" max="${capacity}" step="1" value="${counts[role]}" ${kit.unlocked && access.allowed ? '' : 'disabled'}><span class="help">Ready ${reserve[role]} · ${TRAINING_COSTS[role]} Parts · ${TRAINING_SECONDS[role]}s each</span><button data-train-role="${role}" ${kit.unlocked && access.allowed && occupied < reserveCapacity && service.member(profile.id).parts >= TRAINING_COSTS[role] ? '' : 'disabled'}>Train +1</button></div></div>`;
   }).join('');
-  openPanel(`<h2>Training squad</h2><p>Prepare your own DZN squad for the simulated Outpost Delta drill. Your Command Hall allows ${capacity} troops; ${used} are assigned.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : ''}${rows}<p class="help">Ghosts move quickly, Fixers pressure the battery, Sentinels absorb fire, and Lifeline medics recover nearby allies. Unlocked kit levels apply automatically.</p><div class="row"><button id="saveTrainingLoadout" ${access.allowed ? '' : 'disabled'}>Save squad</button><button id="backToWarTable">War Table</button></div>`);
+  const queue = jobs.length ? jobs.map(job => `${job.count} ${SQUAD_ROLES[job.role].name.replace('DZN ', '')} · ${formatRemaining(job.finishAt)}`).join(' · ') : 'Empty';
+  openPanel(`<h2>Camp & training</h2><p>Assign up to ${capacity} troops for Outpost Delta. ${used} assigned · ${occupied}/${reserveCapacity} camp spaces used. Each drill deploys its assigned troops; train replacements here.</p><p class="${readiness.ready ? 'help' : 'notice warn'}">${readiness.ready ? 'Squad ready to deploy.' : 'Missing: ' + trainingSquadSummary(readiness.missing)}</p><p class="help">Training queue: ${escapeHTML(queue)}. Jobs finish while you are away.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : ''}${rows}<p class="help">Ghosts move quickly, Fixers pressure the battery, Sentinels absorb fire, and Lifeline medics recover nearby allies. Unlocked kit levels apply automatically.</p><div class="row"><button id="saveTrainingLoadout" ${access.allowed ? '' : 'disabled'}>Save squad</button><button id="backToWarTable">War Table</button></div>`);
   $('saveTrainingLoadout').onclick = () => {
     const selected = Object.fromEntries([...panel.querySelectorAll('[data-training-role]')].map(input => [input.dataset.trainingRole, Number(input.value)]));
     const result = service.setTrainingLoadout(profile.id, selected);
@@ -2620,6 +2640,11 @@ function showTrainingLoadout(errorMessage = '') {
     showWarTable();
   };
   $('backToWarTable').onclick = () => showWarTable();
+  panel.querySelectorAll('[data-train-role]').forEach(button => button.onclick = () => {
+    const result = service.trainTroops(profile.id, button.dataset.trainRole, 1);
+    if (result.ok) { toast(`${SQUAD_ROLES[result.role].name} training · ${formatRemaining(result.finishAt)}.`); updateHud(); }
+    showTrainingLoadout(result.ok ? '' : result.error);
+  });
 }
 
 function warCommunityName(communityId) {
@@ -2730,7 +2755,7 @@ function showWarTable(errorMessage = '') {
   const canChallenge = leadership && currentReadiness.eligible && targetReadiness.eligible && !activeWar && !raid && !warBattle && ['iron-pines', 'violet-ridge'].includes(community.id);
   const otherOption = service.getIdentityOptions().find(identity => identity.communityId === otherCommunityId);
   const access = service.getAccess(profile.id);
-  const trainingLoadout = service.getTrainingLoadout(profile.id);
+  const trainingLoadout = service.getTrainingReadiness(profile.id);
   const trainingSquad = Object.values(trainingLoadout.counts).reduce((sum, count) => sum + count, 0);
   const baseCondition = service.snapshot(profile.id).base;
   const damaged = baseCondition.landPlots.filter(plot => plot.wear > 0);
@@ -2742,7 +2767,7 @@ function showWarTable(errorMessage = '') {
   if (!activeWar) html += '<p class="help">No war underway. Open eligibility and challenge below to start one.</p>';
   html += `<details class="war-card" ${activeWar && !errorMessage ? '' : 'open'}><summary><b>Eligibility & new challenge</b></summary><p class="help">Owner/admin issues a challenge; the opposing owner/admin accepts. One local war at a time.</p>${communities}<div class="war-card"><b>Issue a challenge</b><div class="row"><label class="field-label" for="warOpponentSelect">Opponent community</label><select id="warOpponentSelect"><option value="${escapeHTML(otherCommunityId)}">${escapeHTML(otherOption?.communityName || otherCommunityId)}${targetReadiness.eligible ? '' : ' · locked'}</option><option value="mossback-free" disabled>Mossback Free Community · locked (Free tier)</option></select><button id="warChallengeBtn" ${canChallenge ? '' : 'disabled'}>Send challenge</button></div>${!leadership ? '<p class="notice warn">Only this community’s owner/admin may issue a challenge.</p>' : ''}${activeWar ? `<p class="notice">War ${escapeHTML(activeWar.id)} is already ${escapeHTML(activeWar.state)}. Resolve or close it before another challenge.</p>` : !targetReadiness.eligible ? `<p class="notice warn">Opponent gates: ${targetReadiness.unmetGates.map(escapeHTML).join(' ')}</p>` : !currentReadiness.eligible ? `<p class="notice warn">Your gates: ${currentReadiness.unmetGates.map(escapeHTML).join(' ')}</p>` : ''}</div></details>`;
   const lockedMessage = access.allowed ? '' : `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
-  html += `<details class="war-card"><summary><b>AI training · Outpost Delta</b></summary><p>${trainingSquad}/${trainingLoadout.capacity} troops · ${escapeHTML(trainingSquadSummary(trainingLoadout.counts))} · Attempts ${state.raidCount}.</p>${lockedMessage}<div class="row"><button id="configureTrainingBtn">Set squad</button><label class="field-label" for="trainingApproach">Approach</label><select id="trainingApproach"><option value="west">West cover</option><option value="south">South ridge</option><option value="east">East battery flank</option></select><button id="raidBtn" ${raid || raidLaunching || warBattle || !access.allowed ? 'disabled' : ''}>Launch drill</button></div><p class="help">Practice is separate from server war scores.</p></details><div class="row"><button id="closeBtn">Close</button></div>`;
+  html += `<details class="war-card"><summary><b>AI training · Outpost Delta</b></summary><p>${trainingSquad}/${trainingLoadout.capacity} troops · ${escapeHTML(trainingSquadSummary(trainingLoadout.counts))} · ${trainingLoadout.ready ? 'READY' : `Missing ${escapeHTML(trainingSquadSummary(trainingLoadout.missing))}`} · Attempts ${state.raidCount}.</p>${lockedMessage}<div class="row"><button id="configureTrainingBtn">Camp & squad</button><label class="field-label" for="trainingApproach">Approach</label><select id="trainingApproach"><option value="west">West cover</option><option value="south">South ridge</option><option value="east">East battery flank</option></select><button id="raidBtn" ${raid || raidLaunching || warBattle || !access.allowed || !trainingLoadout.ready ? 'disabled' : ''}>Launch drill</button></div><p class="help">Practice is separate from server war scores. Deployed troops leave your personal camp reserve; training jobs finish while away.</p></details><div class="row"><button id="closeBtn">Close</button></div>`;
   openPanel(html);
   if ($('warRepairBtn')) $('warRepairBtn').onclick = () => showLandPanel(repairPriority || damaged[0].id);
   $('closeBtn').onclick = closePanel;
@@ -4205,7 +4230,8 @@ async function launchRaid() {
     return;
   }
   const levels = { ...state.levels };
-  const loadout = service.getTrainingLoadout(identityId);
+  const loadout = service.getTrainingReadiness(identityId);
+  if (!loadout.ready) { toast('Train the missing troops at camp first.'); showTrainingLoadout(); return; }
   const approach = selectedTrainingApproach;
   raidLaunching = true;
   try {
@@ -4224,7 +4250,7 @@ async function launchRaid() {
     return;
   }
   const raidId = Math.max(state.raidCount, state.lastRaidClaimed) + 1;
-  const attempt = service.recordTrainingAttempt(raidId);
+  const attempt = service.recordTrainingAttempt(raidId, identityId);
   if (!attempt.ok) {
     toast(attempt.error);
     showWarTable();
@@ -4543,7 +4569,7 @@ renderer.setAnimationLoop(time => {
     }
   }
   patrols.forEach(p => {
-    const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
+    const motion = stepPatrolMotion(p.motion, dt, activePatrolNodes, activePatrolLayout);
     p.mesh.position.set(motion.x, 0, motion.z);
     p.mesh.rotation.y = motion.yaw;
     animateSoldier(p.mesh, motion.moving ? motion.stride : elapsed * 1.5, motion.moving ? 1 : 0, motion.wait > 0 ? motion.node : null, dt);
