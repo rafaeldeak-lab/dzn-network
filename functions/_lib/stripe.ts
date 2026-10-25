@@ -64,6 +64,21 @@ export function getAppUrl(env: Env, request: Request) {
   return `${url.protocol}//${url.host}`;
 }
 
+const PRODUCTION_STRIPE_HOSTS = new Set([
+  "dayz-network.com",
+  "www.dayz-network.com",
+  "dzn-network.pages.dev",
+]);
+
+export function isTestStripeModeOnProductionHost(env: Env, request: Request) {
+  if (!env.STRIPE_SECRET_KEY?.trim().startsWith("sk_test_")) return false;
+  try {
+    return PRODUCTION_STRIPE_HOSTS.has(new URL(request.url).hostname.toLowerCase().replace(/\.$/, ""));
+  } catch {
+    return false;
+  }
+}
+
 export function billingRedirectUrl(env: Env, request: Request, returnTo: string | null, status: "success" | "cancelled") {
   const appUrl = getAppUrl(env, request);
   const safePath = safeReturnTo(returnTo, "/dashboard");

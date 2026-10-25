@@ -2,10 +2,14 @@ import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import { privateNoStoreHeaders } from "../../../_lib/performance";
 import { requirePlatformOwner } from "../../../_lib/platform-owner";
 import { publishStoreProduct } from "../../../_lib/store-commerce";
+import { isTestStripeModeOnProductionHost } from "../../../_lib/stripe";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ env, request }) => {
   if (request.method !== "POST") return methodNotAllowed();
+  if (isTestStripeModeOnProductionHost(env, request)) {
+    return json({ ok: false, error: "TEST_MODE_PRODUCTION_ORIGIN_BLOCKED" }, { status: 403, headers: privateNoStoreHeaders() });
+  }
   const auth = await requirePlatformOwner(env, request);
   if (!auth.ok) return auth.response;
   if (!sameOrigin(request)) return json({ ok: false, error: "FORBIDDEN" }, { status: 403, headers: privateNoStoreHeaders() });

@@ -1,12 +1,17 @@
 import { json, methodNotAllowed } from "../../_lib/http";
 import { reconcileStoreWebhook } from "../../_lib/store-commerce";
-import { verifyStripeWebhook } from "../../_lib/stripe";
+import { isTestStripeModeOnProductionHost, verifyStripeWebhook } from "../../_lib/stripe";
 import type { PagesFunction } from "../../_lib/types";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
 export const onRequest: PagesFunction = async ({ env, request }) => {
   if (request.method !== "POST") return methodNotAllowed();
+  if (isTestStripeModeOnProductionHost(env, request)) {
+    return json({ error: "Store webhook is unavailable in this environment." }, {
+      status: 403, headers: { "Cache-Control": "private, no-store" },
+    });
+  }
   const secret = (env as unknown as Record<string, string | undefined>).STRIPE_STORE_WEBHOOK_SECRET;
   if (!secret) return json({ error: "Store webhook is not configured." }, { status: 503 });
   const contentLength = Number(request.headers.get("content-length") ?? 0);
