@@ -22,15 +22,12 @@ import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import { mergeDeletionNotices, type DeletionNotice } from "./deletion-notices";
 import {
-  addCommsReaction,
   deleteCommsMessage,
   loadCommsHistory,
-  removeCommsReaction,
   reportCommsMessage,
   sendCommsMessage,
   type CommsHistoryMessage,
   type CommsHistoryPayload,
-  type CommsReactionKey,
 } from "./comms-history-client";
 
 type CommsHistoryState =
@@ -41,7 +38,6 @@ type CommsHistoryState =
 
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
-const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
 const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
 const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED === "true";
@@ -165,9 +161,7 @@ export function DznCommsShell() {
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
   const [historyPageMode, setHistoryPageMode] = useState<"latest" | "earlier">("latest");
   const [unseenMessageCount, setUnseenMessageCount] = useState(0);
-  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "signed-out">("checking");
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
-  const reactionAttemptRef = useRef(new Map<string, string>());
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyProbeEnabled ? "loading" : "static",
     payload: staticPayload,
@@ -302,9 +296,7 @@ export function DznCommsShell() {
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
   const selfDeleteUiEnabled = historyReady && payload.feature_flags.self_delete_enabled;
-  const reactionUiEnabled = historyReady && reactionUiFlagEnabled && payload.feature_flags.reactions_enabled;
   const statusLabel = useMemo(() => statusCopy(history.status, sendingEnabled), [history.status, sendingEnabled]);
-  const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
 
   useEffect(() => {
     if (!historyReady || isUpdatesChannel) return;
@@ -330,27 +322,6 @@ export function DznCommsShell() {
     if (newlyLoadedMessageCount > 0) setUnseenMessageCount((count) => count + newlyLoadedMessageCount);
   }, [historyReady, historyPageMode, isUpdatesChannel, payload.channel.slug, visibleMessages]);
 
-  useEffect(() => {
-    if (!reactionWritesAvailable) return;
-
-    const controller = new AbortController();
-    fetch("/api/auth/me", { cache: "no-store", credentials: "include", signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) return false;
-        const payload = await response.json().catch(() => null) as { authenticated?: unknown } | null;
-        return payload?.authenticated === true;
-      })
-      .then((authenticated) => {
-        if (!controller.signal.aborted) setAuthStatus(authenticated ? "authenticated" : "signed-out");
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setAuthStatus("signed-out");
-      });
-    return () => controller.abort();
-  }, [reactionWritesAvailable]);
-
-  const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
-  const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
   const selectedChannelAccessLabel = isUpdatesChannel
     ? "Official updates"
@@ -421,43 +392,6 @@ export function DznCommsShell() {
       }
     } finally {
       setSending(false);
-    }
-  }
-
-  async function handleReaction(messageId: string, reactionKey: CommsReactionKey, remove: boolean) {
-    if (!reactionWritesEnabled) throw new Error("Reactions are not enabled yet.");
-    const targetChannel = payload.channel.slug;
-    if (selectedChannelRef.current !== targetChannel) throw new Error("The selected channel changed. Retry the reaction.");
-    const addAttemptKey = `${messageId}:${reactionKey}:add`;
-    const removeAttemptKey = `${messageId}:${reactionKey}:remove`;
-    const attemptKey = remove ? removeAttemptKey : addAttemptKey;
-    const mutationId = reactionAttemptRef.current.get(attemptKey) ?? crypto.randomUUID();
-    reactionAttemptRef.current.set(attemptKey, mutationId);
-    try {
-      if (remove) await removeCommsReaction(messageId, reactionKey, mutationId);
-      else await addCommsReaction(messageId, reactionKey, mutationId);
-      reactionAttemptRef.current.delete(addAttemptKey);
-      reactionAttemptRef.current.delete(removeAttemptKey);
-    } catch (error) {
-      throw error;
-    }
-    if (selectedChannelRef.current !== targetChannel) return;
-    setLoadingEarlierMessages(false);
-    setHistoryPageMode("latest");
-    const requestGeneration = ++historyRequestGenerationRef.current;
-    try {
-      const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
-      if (
-        historyRequestGenerationRef.current === requestGeneration
-        && selectedChannelRef.current === targetChannel
-        && refreshed.channel.slug === targetChannel
-      ) {
-        setHistory({ status: "ready", payload: refreshed, message: "Reaction saved." });
-      }
-    } catch {
-      if (historyRequestGenerationRef.current === requestGeneration && selectedChannelRef.current === targetChannel) {
-        setHistory((current) => ({ ...current, message: "Reaction saved. Counts will refresh shortly." }));
-      }
     }
   }
 
@@ -726,7 +660,7 @@ export function DznCommsShell() {
                   aria-live="polite"
                   aria-relevant="additions text"
                   onScroll={handleMessageLogScroll}
-                  className="h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-color:rgba(103,232,249,0.45)_rgba(255,255,255,0.03)] [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/45 [&::-webkit-scrollbar-track]:bg-[#060a12] [&::-webkit-scrollbar]:w-2 lg:max-h-[32rem]"
+                  className="h-[min(32rem,calc(100svh-18rem))] min-h-64 max-h-[46svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-color:rgba(103,232,249,0.45)_rgba(255,255,255,0.03)] [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/45 [&::-webkit-scrollbar-track]:bg-[#060a12] [&::-webkit-scrollbar]:w-2 lg:max-h-[28rem]"
                 >
                 {historyReady && (payload.page.has_more || historyPageMode === "earlier") ? <div className="flex items-center justify-center gap-2 border-b border-white/8 py-3">
                   {historyPageMode === "earlier" ? <button type="button" onClick={returnToLatestMessages} className="min-h-8 border border-white/12 bg-white/[0.035] px-3 text-xs font-bold text-zinc-300 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white">Latest messages</button> : null}
@@ -738,10 +672,6 @@ export function DznCommsShell() {
                     message={message}
                     reportEnabled={reportActionsEnabled}
                     deleteEnabled={selfDeleteUiEnabled}
-                    reactionUiEnabled={reactionUiEnabled}
-                    reactionWriteEnabled={reactionWritesEnabled}
-                    reactionLoginRequired={reactionLoginRequired}
-                    onReactionChange={handleReaction}
                     onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
                   />
                 )) : (
@@ -767,21 +697,19 @@ export function DznCommsShell() {
                 </div> : null}
               </div>
 
-              <form onSubmit={handleSend} className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
-                <button
-                  type="button"
-                  disabled
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-white/10 bg-white/5 text-zinc-500"
-                  aria-label="Attachments are unavailable"
-                >
-                  <MessageCircle className="h-5 w-5" aria-hidden="true" />
-                </button>
-                <input
+              <form onSubmit={handleSend} className="mt-3 flex items-end gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
+                <textarea
                   disabled={!sendingEnabled || sending}
                   value={draft}
                   onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || !canSend) return;
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }}
                   placeholder={sendingEnabled ? `Message ${payload.channel.name}` : "Sending unavailable"}
-                  className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
+                  rows={1}
+                  className="min-h-10 max-h-28 min-w-0 flex-1 resize-y bg-transparent px-2 py-2 text-sm font-semibold leading-5 text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
                   type="submit"
@@ -845,21 +773,16 @@ export function recentVisibleSpeakers(messages: readonly CommsHistoryMessage[]) 
   return newestDistinct.reverse();
 }
 
-function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {
+function MessageRow({ message, reportEnabled, deleteEnabled, onMessageDeleted }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
   deleteEnabled: boolean;
-  reactionUiEnabled: boolean;
-  reactionWriteEnabled: boolean;
-  reactionLoginRequired: boolean;
-  onReactionChange: (messageId: string, reactionKey: CommsReactionKey, remove: boolean) => Promise<void>;
   onMessageDeleted: (messageId: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
   const canDelete = deleteEnabled && message.can_delete;
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [deleteState, setDeleteState] = useState<"idle" | "deleting" | "error">("idle");
-  const [reactionState, setReactionState] = useState<{ key: CommsReactionKey | null; status: "idle" | "sending" | "saved" | "error" }>({ key: null, status: "idle" });
 
   async function submitReport() {
     if (reportState === "sending" || reportState === "sent") return;
@@ -869,17 +792,6 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
       setReportState("sent");
     } catch {
       setReportState("error");
-    }
-  }
-
-  async function toggleReaction(key: CommsReactionKey, reacted: boolean) {
-    if (!reactionWriteEnabled || reactionState.status === "sending") return;
-    setReactionState({ key, status: "sending" });
-    try {
-      await onReactionChange(message.id, key, reacted);
-      setReactionState({ key, status: "saved" });
-    } catch {
-      setReactionState({ key, status: "error" });
     }
   }
 
@@ -895,62 +807,25 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
   }
 
   return (
-    <article className={`py-3 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
-      <div className="flex items-start gap-3">
+    <article className={`group py-2.5 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
+      <div className="flex items-start gap-2.5">
         <MessageAvatar message={message} muted={muted} />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-black text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
-            <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-100">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="text-sm font-black leading-5 text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
+            <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-px text-[9px] font-black uppercase tracking-[0.08em] text-cyan-100">
               {message.author_role_label}
             </span>
             <CommsMessageTime value={message.created_at} />
-            {canDelete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="ml-auto inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
+            {(canDelete || (reportEnabled && !muted)) ? <div className="ml-auto flex items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+              {reportEnabled && !muted ? <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-amber-300/40 hover:text-amber-100 disabled:cursor-not-allowed disabled:text-zinc-600" title={reportState === "sent" ? "Message reported" : "Report this message to DZN moderation"} aria-label={reportState === "sending" ? "Reporting message" : reportState === "sent" ? "Message reported" : "Report this message"}><Flag className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
+              {canDelete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
+            </div> : null}
           </div>
-          <p className={`mt-1.5 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
-          {deleteState === "error" ? <p role="alert" className="mt-2 text-xs font-bold text-amber-200">Message could not be deleted. Try again.</p> : null}
-          {reactionUiEnabled && message.reactions && !muted ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Message reactions">
-              {message.reactions.available_reactions.map((reaction) => {
-                const count = message.reactions?.counts.find((item) => item.key === reaction.key);
-                const reacted = count?.current_user_reacted === true;
-                if (!reactionWriteEnabled && !count) return null;
-                const pending = reactionState.status === "sending" && reactionState.key === reaction.key;
-                return (
-                  <button
-                    key={reaction.key}
-                    type="button"
-                    disabled={!reactionWriteEnabled || reactionState.status === "sending"}
-                    aria-label={`${reacted ? "Remove" : "Add"} ${reaction.label} reaction`}
-                    aria-pressed={reacted}
-                    title={reactionWriteEnabled ? reaction.label : `${reaction.label} reactions`}
-                    onClick={() => void toggleReaction(reaction.key, reacted)}
-                    className={`inline-flex h-8 min-w-10 items-center justify-center gap-1 rounded-md border px-2 text-xs font-black transition-colors ${
-                      reacted ? "border-violet-300/55 bg-violet-400/18 text-violet-100" : "border-white/10 bg-white/5 text-zinc-300"
-                    } disabled:cursor-default disabled:opacity-75`}
-                  >
-                    <span aria-hidden="true">{reaction.emoji}</span>
-                    <span>{pending ? "..." : count?.count ?? 0}</span>
-                  </button>
-                );
-              })}
-              {reactionLoginRequired ? (
-                <a href="/login?returnTo=%2Fcommunity" className="text-xs font-black text-cyan-200 hover:text-white">
-                  Log in to react
-                </a>
-              ) : null}
-              {reactionState.status === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Reaction failed. Try again.</span> : null}
-            </div>
-          ) : null}
-          {reportEnabled && !muted ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-amber-200 disabled:cursor-not-allowed disabled:text-zinc-600" title="Report this message to DZN moderation">
-                <Flag className="h-3.5 w-3.5" aria-hidden="true" /> {reportState === "sending" ? "Sending" : reportState === "sent" ? "Reported" : "Report"}
-              </button>
-              {reportState === "sent" ? <span role="status" className="text-xs font-bold text-cyan-200">Report received.</span> : null}
-              {reportState === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Report failed. Try again.</span> : null}
-            </div>
-          ) : null}
+          <p className={`mt-0.5 text-sm font-semibold leading-5 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          {deleteState === "error" ? <p role="alert" className="mt-1 text-xs font-bold text-amber-200">Message could not be deleted. Try again.</p> : null}
+          {reportState === "sent" ? <p role="status" className="mt-1 text-xs font-bold text-cyan-200">Report received.</p> : null}
+          {reportState === "error" ? <p role="alert" className="mt-1 text-xs font-bold text-amber-200">Report failed. Try again.</p> : null}
         </div>
       </div>
     </article>
@@ -962,8 +837,8 @@ function MessageAvatar({ message, muted }: { message: CommsHistoryMessage; muted
   const avatarUrl = !muted && failedAvatarUrl !== message.author_avatar_url ? message.author_avatar_url : null;
 
   return (
-    <span className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
-      {avatarUrl ? <Image src={avatarUrl} alt="" width={40} height={40} unoptimized className="h-full w-full object-cover" onError={() => setFailedAvatarUrl(message.author_avatar_url ?? null)} /> : initials(message.author_display_name)}
+    <span className={`grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border text-xs font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
+      {avatarUrl ? <Image src={avatarUrl} alt="" width={32} height={32} unoptimized className="h-full w-full object-cover" onError={() => setFailedAvatarUrl(message.author_avatar_url ?? null)} /> : initials(message.author_display_name)}
     </span>
   );
 }

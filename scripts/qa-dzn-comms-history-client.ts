@@ -44,7 +44,7 @@ try {
     { name: "unauthorized", width: 390, kind: "401" }, { name: "forbidden", width: 390, kind: "403" },
     { name: "offline", width: 390, kind: "offline" }, { name: "timeout", width: 390, kind: "timeout" },
     { name: "full-unicode-page", width: 390, kind: "unicode" }, { name: "assist-anchor", width: 390, kind: "assist-anchor" },
-    { name: "follow-latest", width: 900, kind: "follow-latest" },
+    { name: "follow-latest", width: 900, kind: "follow-latest" }, { name: "fixed-reactions-hidden", width: 390, kind: "fixed-reactions-hidden" },
   ]) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), errors: string[] = [], prohibited: string[] = [], sockets: string[] = [];
@@ -78,6 +78,19 @@ try {
           created_at: "2026-09-13T01:00:00.000Z",
         }];
       }
+      if (scenario.kind === "fixed-reactions-hidden") {
+        fixture.feature_flags.reactions_enabled = true;
+        fixture.feature_flags.reactions_write_enabled = true;
+        Object.assign(fixture.messages[0], { reactions: {
+          revision: "2026-10-25T16:00:00.000Z",
+          available_reactions: [
+            { key: "heart", emoji: "\u{1F49C}", label: "Heart" }, { key: "boost", emoji: "\u{1F680}", label: "Boost" },
+            { key: "laugh", emoji: "\u{1F602}", label: "Laugh" }, { key: "salute", emoji: "\u{1FAE1}", label: "Salute" },
+            { key: "fire", emoji: "\u{1F525}", label: "Fire" }, { key: "skull", emoji: "\u{1F480}", label: "Skull" },
+          ],
+          counts: [{ key: "heart", emoji: "\u{1F49C}", label: "Heart", count: 2, current_user_reacted: true }],
+        } });
+      }
       if (scenario.kind === "empty") fixture.messages = [];
       if (scenario.kind === "private") { fixture.channel.slug = "private-group"; fixture.messages[0].body = "PRIVATE-LEAK-SENTINEL"; }
       if (scenario.kind === "hidden") Object.assign(fixture.messages[0], { visibility_state: "hidden", author_display_name: "PRIVATE-AUTHOR", body: "PRIVATE-LEAK-SENTINEL" });
@@ -87,7 +100,7 @@ try {
       return route.fulfill({ status: 200, contentType: "application/json", body });
     });
     await page.goto(`${base}${scenario.kind === "assist-anchor" ? "/community#dzn-assist" : "/community"}`);
-    const success = ["ready", "empty", "hidden", "long", "unicode", "assist-anchor", "follow-latest"].includes(scenario.kind);
+    const success = ["ready", "empty", "hidden", "long", "unicode", "assist-anchor", "follow-latest", "fixed-reactions-hidden"].includes(scenario.kind);
     const expectedHistoryMessage = scenario.kind === "follow-latest"
       ? "Global Chat is live. English only. Keep it respectful and report abuse."
       : "Message history is available. Sending is not enabled yet.";
@@ -95,7 +108,7 @@ try {
       : "Message history is temporarily unavailable. No old or fabricated messages are shown.", { exact: true }).waitFor({ timeout: 9_000 });
     await page.evaluate(() => document.fonts.ready);
     const metrics = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
-      disabledComposer: [...document.querySelectorAll<HTMLButtonElement | HTMLInputElement>("#global-chat form input, #global-chat form button")].every(element => element.disabled),
+      disabledComposer: [...document.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>("#global-chat form textarea, #global-chat form button")].every(element => element.disabled),
       brokenImages: [...document.images].filter(image => !image.complete || !image.naturalWidth).map(image => image.src),
     }));
     assert.ok(metrics.scrollWidth <= metrics.width, `${scenario.name}: no horizontal page overflow`);
@@ -105,6 +118,10 @@ try {
     assert.deepEqual(errors, []); assert.deepEqual(prohibited, []); assert.deepEqual(sockets, []);
     assert.doesNotMatch(await page.locator("main").innerText(), /PRIVATE-LEAK-SENTINEL|PRIVATE-AUTHOR|must not render/);
     const globalChatLog = page.locator("#global-chat [role='log']");
+    if (scenario.kind === "fixed-reactions-hidden") {
+      assert.equal(await globalChatLog.getByLabel("Message reactions").count(), 0, "The compact chat must not render the legacy preset-reaction strip.");
+      assert.equal(await globalChatLog.getByRole("button", { name: /reaction/i }).count(), 0, "The compact chat must not retain reaction mutation controls.");
+    }
     if (scenario.kind === "empty") assert.equal(await globalChatLog.locator("article").count(), 0);
     if (scenario.kind === "hidden") assert.equal(await page.getByText("Message hidden by DZN Safety.", { exact: true }).count(), 1);
     if (scenario.kind === "unicode") assert.equal(await globalChatLog.locator("article").count(), 30);
