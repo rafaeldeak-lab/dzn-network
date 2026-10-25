@@ -1,3 +1,5 @@
+import { formatPublicServerName } from "../../lib/public-display-text";
+
 export type TrustedPlayerGameplayAggregateRow = {
   linked_game_profiles: number | null;
   linked_public_servers: number | null;
@@ -177,7 +179,11 @@ async function readTrustedPlayerFeaturedServerWithScope(db: D1Database, discordI
   const result = await (includeVerifiedLinks ? statement.bind(discordId, discordId) : statement.bind(discordId))
     .first<TrustedPlayerFeaturedServerRow>();
 
-  return result ?? null;
+  if (!result) return null;
+  return {
+    ...result,
+    server_name: formatPublicServerName(result.server_name),
+  };
 }
 
 function isMissingVerifiedIdentityLinkTable(error: unknown) {

@@ -1,5 +1,6 @@
 import { requireDb } from "./db";
 import type { Env } from "./types";
+import { formatPublicServerName } from "../../lib/public-display-text";
 
 export type PlayerSavedServerSummary = {
   linked_server_id: string;
@@ -59,7 +60,7 @@ export async function readPlayerSavedServersForUser(env: Env, userId: string, li
       `SELECT
         player_saved_servers.linked_server_id,
         linked_servers.public_slug,
-        linked_servers.server_name,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.server_type,
         discord_guilds.name AS guild_name,
         discord_guilds.icon_url AS guild_icon_url,
@@ -82,7 +83,7 @@ export async function readPlayerSavedServersForUser(env: Env, userId: string, li
   const savedServers = (rows.results ?? []).map((row) => ({
     linked_server_id: row.linked_server_id,
     public_slug: row.public_slug,
-    server_name: row.server_name,
+    server_name: formatPublicServerName(row.server_name),
     server_type: row.server_type,
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,

@@ -29,6 +29,8 @@ assert.match(statBridge, /FROM player_profiles/, "Player Hub profile/progression
 assert.match(statBridge, /player_profiles\.discord_id = \?/, "Player Hub profile/progression summary must be scoped to the current Discord user.");
 assert.match(statBridge, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Player Hub profile/progression summary must mirror leaderboard kills through the trusted player ID bridge.");
 assert.match(statBridge, /kill_events\.victim_id = trusted_public_player_profiles\.player_id/, "Player Hub profile/progression summary must mirror leaderboard deaths through the trusted player ID bridge.");
+assert.match(statBridge, /formatPublicServerName\(result\.server_name\)/, "Player Hub featured-server data must use the shared public server-name formatter.");
+assert.match(route, /formatPublicServerName\(row\.server_name\)/, "Player Hub community server previews must use the shared public server-name formatter.");
 assert.doesNotMatch(statBridge, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Player Hub profile/progression summary must not attach gameplay rows by ambiguous public names.");
 assert.match(route, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Owner setup CTA must route through pricing.");
 assert.doesNotMatch(route, /\b(?:INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Player Hub route must not contain direct SQL writes.");

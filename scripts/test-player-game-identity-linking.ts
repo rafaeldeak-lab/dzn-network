@@ -62,6 +62,9 @@ assert.match(ownerReviewRoute, /const \{ delivery, \.\.\.publicResult \} = resul
 assert.match(ownerReviewRoute, /return json\(publicResult,/, "Successful review responses must contain only the public decision result.");
 assert.match(ownerClaimRoutePage, /PlayerGameIdentityClaimsPage/, "Owners/admins need a durable review queue route.");
 assert.match(ownerConsole, /\/owner\/player-game-identity-claims/, "Owner console must expose the player stat claim review queue.");
+assert.match(identityPanel, /formatPublicServerName\(link\.server_name\)/, "Game-account links must use the shared public server-name formatter.");
+assert.match(identityPanel, /formatPublicServerName\(claim\.server_name\)/, "Pending game-account claims must use the shared public server-name formatter.");
+assert.match(identityPanel, /formatPublicServerName\(safeText\(row\.server_name \?\? row\.name\)\)/, "Server choices must use the shared public server-name formatter.");
 
 assert.match(helper, /parsePlayerGameIdentityClaimInput/, "Helper must parse claim inputs centrally.");
 assert.match(helper, /public_slug/, "Players should be able to reference a public server slug without exposing raw internals.");

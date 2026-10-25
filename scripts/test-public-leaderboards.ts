@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
-import { calculateKd, calculateServerScore, calculateServerScoreBreakdown, filterRankedPublicServersByMode, normalizePublicLeaderboardMode, rankLongestKills, rankPublicPlayers, selectLatestKill, type PublicLeaderboardServer } from "../functions/_lib/public-leaderboards";
+import { calculateKd, calculateServerScore, calculateServerScoreBreakdown, filterRankedPublicServersByMode, getPublicServerLeaderboardById, mergePublicPlayerRows, normalizePublicLeaderboardMode, rankLongestKills, rankPublicPlayers, selectLatestKill, type PublicLeaderboardServer } from "../functions/_lib/public-leaderboards";
 import { rankServers } from "../functions/_lib/server-ranking";
+import { formatPublicServerName } from "../lib/public-display-text";
+import type { Env } from "../functions/_lib/types";
+
+type SqliteRow = Record<string, unknown>;
+type SqliteDatabase = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    all(...values: unknown[]): SqliteRow[];
+    get(...values: unknown[]): SqliteRow | undefined;
+    run(...values: unknown[]): { changes: number | bigint };
+  };
+};
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+  DatabaseSync: new (path: string) => SqliteDatabase;
+};
 
 const players = rankPublicPlayers([
   {
@@ -37,6 +55,27 @@ assert.equal(players[1].kd, 0.25);
 assert.deepEqual(calculateKd(0, 0), { value: null, label: "Awaiting data" });
 assert.deepEqual(calculateKd(4, 0), { value: 4, label: "Flawless" });
 assert.deepEqual(calculateKd(2, 8), { value: 0.25, label: "0.25" });
+
+const publicLeaderboardSource = readFileSync("functions/_lib/public-leaderboards.ts", "utf8");
+assert.match(publicLeaderboardSource, /COALESCE\(death_stats\.deaths, 0\) AS deaths/, "Every kill-ranked player must carry their full death total before the result limit is applied.");
+assert.match(publicLeaderboardSource, /GROUP BY death_events\.linked_server_id, COALESCE\(death_events\.victim_id, lower\(death_events\.victim_name\)\)/, "Death totals must be grouped by the same server-scoped player identity used by the ranking.");
+
+const topPlayerWithDeathsOutsideTheDeathTopTen = mergePublicPlayerRows([
+  {
+    linked_server_id: "nuketown",
+    player_key: "aka-mini",
+    player_name: "xAKA-MINI_KickAs",
+    server_name: "NUKETOWN DEATHMATCH- HTTPS:/DAYZ-NETWORK.COM",
+    server_slug: "nuketown-deathmatch",
+    kills: 114,
+    deaths: 62,
+    longest_kill: 47.6,
+    last_seen: "2026-10-25T14:00:00.000Z",
+  },
+], []);
+assert.equal(topPlayerWithDeathsOutsideTheDeathTopTen[0]?.deaths, 62, "Kill leaders must keep their exact deaths even when they are absent from a separately ranked death list.");
+assert.equal(rankPublicPlayers(topPlayerWithDeathsOutsideTheDeathTopTen, 10)[0]?.kd_label, "1.84");
+assert.equal(formatPublicServerName("NUKETOWN DEATHMATCH- HTTPS:/DAYZ-NETWORK.COM"), "NukeTown Deathmatch", "Malformed single-slash URLs must not leak into public server labels.");
 
 const killRows = [
   {
@@ -236,4 +275,111 @@ assert.equal(new Set(sameNameDifferentServers.map((player) => player.server_slug
 assert.equal(sameNameDifferentServers.find((player) => player.server_slug === "pandora-dayz")?.kills, 1);
 assert.equal(sameNameDifferentServers.find((player) => player.server_slug === "nuketown-deathmatch")?.kills, 6);
 
-console.log("Public leaderboard ranking tests passed.");
+void testLeaderboardStatParity().then(
+  () => console.log("Public leaderboard ranking tests passed."),
+  (error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+  },
+);
+
+async function testLeaderboardStatParity() {
+  const leaderboardStatParityFixture = createLeaderboardStatParityFixture();
+  try {
+    const compactPlayers = await getPublicServerLeaderboardById(leaderboardStatParityFixture.env, "nuketown", 10);
+    const fullPlayers = await getPublicServerLeaderboardById(leaderboardStatParityFixture.env, "nuketown", 250);
+    const compactLeader = compactPlayers.find((player) => player.player_name === "xAKA-MINI_KickAs");
+    const fullLeader = fullPlayers.find((player) => player.player_name === "xAKA-MINI_KickAs");
+
+    assert.equal(compactLeader?.kills, 114, "The compact leaderboard fixture must retain its highest kill leader.");
+    assert.equal(compactLeader?.deaths, 62, "The compact leaderboard must retain a kill leader's complete death total outside the death Top 10.");
+    assert.equal(compactLeader?.kd_label, "1.84");
+    assert.deepEqual(
+      { kills: compactLeader?.kills, deaths: compactLeader?.deaths, kd: compactLeader?.kd_label },
+      { kills: fullLeader?.kills, deaths: fullLeader?.deaths, kd: fullLeader?.kd_label },
+      "Compact and full server leaderboards must expose identical stats for their shared players.",
+    );
+  } finally {
+    leaderboardStatParityFixture.close();
+  }
+}
+
+function createLeaderboardStatParityFixture() {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(`
+    CREATE TABLE linked_servers (
+      id TEXT PRIMARY KEY,
+      status TEXT,
+      listing_visibility TEXT,
+      merged_into_server_id TEXT,
+      lifecycle_status TEXT,
+      display_name TEXT,
+      hostname TEXT,
+      server_name TEXT,
+      nitrado_service_name TEXT,
+      public_slug TEXT
+    );
+    CREATE TABLE kill_events (
+      id TEXT PRIMARY KEY,
+      linked_server_id TEXT,
+      killer_id TEXT,
+      killer_name TEXT,
+      victim_id TEXT,
+      victim_name TEXT,
+      distance REAL,
+      occurred_at TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE player_profiles (
+      id TEXT PRIMARY KEY,
+      linked_server_id TEXT,
+      player_id TEXT,
+      player_name TEXT,
+      discord_id TEXT,
+      last_seen_at TEXT,
+      updated_at TEXT,
+      created_at TEXT
+    );
+    INSERT INTO linked_servers (
+      id, status, listing_visibility, merged_into_server_id, lifecycle_status,
+      display_name, server_name, public_slug
+    ) VALUES (
+      'nuketown', 'live', 'public', NULL, 'active_live',
+      'NUKETOWN DEATHMATCH- HTTPS:/DAYZ-NETWORK.COM', 'NukeTown Deathmatch', 'nuketown-deathmatch'
+    );
+  `);
+
+  const insertKill = sqlite.prepare(`
+    INSERT INTO kill_events (
+      id, linked_server_id, killer_id, killer_name, victim_id, victim_name, distance, occurred_at, created_at
+    ) VALUES (?, 'nuketown', ?, ?, ?, ?, ?, ?, ?)
+  `);
+  let eventIndex = 0;
+  const insert = (killerId: string, killerName: string, victimId: string, victimName: string, distance = 10) => {
+    eventIndex += 1;
+    const occurredAt = `2026-10-25T14:${String(eventIndex % 60).padStart(2, "0")}:00.000Z`;
+    insertKill.run(`event-${eventIndex}`, killerId, killerName, victimId, victimName, distance, occurredAt, occurredAt);
+  };
+
+  for (let index = 0; index < 114; index += 1) {
+    insert("aka-mini", "xAKA-MINI_KickAs", `target-${index}`, `Target ${index}`, 47.6);
+  }
+  for (let index = 0; index < 62; index += 1) {
+    insert(`attacker-${index}`, `Attacker ${index}`, "aka-mini", "xAKA-MINI_KickAs");
+  }
+  for (let playerIndex = 0; playerIndex < 10; playerIndex += 1) {
+    for (let deathIndex = 0; deathIndex < 63 + playerIndex; deathIndex += 1) {
+      insert(`heavy-killer-${playerIndex}`, `Heavy Killer ${playerIndex}`, `heavy-victim-${playerIndex}`, `Heavy Victim ${playerIndex}`);
+    }
+  }
+
+  const prepare = (sql: string, bindings: unknown[] = []) => ({
+    bind: (...values: unknown[]) => prepare(sql, values),
+    all: async <T>() => ({ results: sqlite.prepare(sql).all(...bindings) as T[], success: true }),
+    first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | null,
+  });
+  return {
+    env: { DB: { prepare } } as unknown as Env,
+    close: () => sqlite.close(),
+  };
+}

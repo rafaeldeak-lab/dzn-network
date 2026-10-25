@@ -2,6 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, Gamepad2, KeyRound, Loader2, Search, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { formatPublicServerName } from "@/lib/public-display-text";
 import { DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -256,7 +257,7 @@ export function PlayerGameIdentityLinks() {
             {data.revoked_links?.length ? <section aria-label="Revoked game stats links" className="border-l-2 border-rose-400 pl-3">
               <h3 className="text-sm font-bold text-white">Revoked links</h3>
               {data.revoked_links.map(link => <div key={link.id} className="border-b border-white/10 py-3 text-sm [overflow-wrap:anywhere]">
-                <p className="font-bold text-rose-100">{link.server_name ?? "DZN server"} - {link.player_name ?? "Game account"}</p>
+                <p className="font-bold text-rose-100">{formatPublicServerName(link.server_name)} - {link.player_name ?? "Game account"}</p>
                 <p className="mt-1 text-zinc-300">{link.reason ?? "Contact DZN support for the recorded reason."}</p>
                 <p className="mt-1 text-xs text-zinc-400">Revoked {formatDate(link.revoked_at)}</p>
                 <PlayerDiscordDeliveryStatus status={link.discord_delivery_status} />
@@ -268,7 +269,7 @@ export function PlayerGameIdentityLinks() {
                 {activeLinks.map((link) => (
                   <IdentityRow
                     key={link.id}
-                    title={link.server_name ?? "DZN Server"}
+                    title={formatPublicServerName(link.server_name)}
                     subtitle={`${link.player_name ?? "Game profile"} - ${link.player_id}`}
                     statusLabel={link.verified_source === "dzn_admin_approved" ? "DZN checked" : "Owner checked"}
                     statusTone="emerald"
@@ -279,7 +280,7 @@ export function PlayerGameIdentityLinks() {
                 {claims.map((claim) => (
                   <div key={claim.id} className="space-y-2">
                     <IdentityRow
-                      title={claim.server_name ?? "DZN Server"}
+                      title={formatPublicServerName(claim.server_name)}
                       subtitle={`${claim.player_name ?? "Game profile"} - ${claim.player_id}`}
                       statusLabel={friendlyStatusLabel(claim.status)}
                       statusTone={claim.status === "approved" ? "emerald" : claim.status === "rejected" ? "red" : "violet"}
@@ -465,7 +466,7 @@ function toServerChoices(rows: PublicServerOption[]) {
     const ref = publicSlug ?? linkedServerId;
     if (!ref || choices.has(ref)) continue;
 
-    const name = safeText(row.server_name ?? row.name) ?? "DZN Server";
+    const name = formatPublicServerName(safeText(row.server_name ?? row.name));
     const details = [
       safeText(row.server_type),
       safeText(row.map_name),
