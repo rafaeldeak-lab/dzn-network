@@ -194,6 +194,14 @@ async function testSendRuntime() {
     assert.equal((await payload(hateSpeech)).code, "LANGUAGE_FILTERED");
     assert.equal(f.count("dzn_comms_messages"), 2, "Rejected hate speech must not create a visible chat row.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%nigger%'").get()?.count, 0, "Rejected hate speech must never be retained in the message table.");
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const homophobicAbuse = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-homophobic-abuse", body: "schwuchtel",
+    }), f.env);
+    assert.equal(homophobicAbuse.status, 422, "Direct homophobic abuse must be rejected by the send route.");
+    assert.equal((await payload(homophobicAbuse)).code, "LANGUAGE_FILTERED");
+    assert.equal(f.count("dzn_comms_messages"), 2, "Rejected homophobic abuse must not create a visible chat row.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_messages WHERE body LIKE '%schwuchtel%'").get()?.count, 0, "Rejected homophobic abuse must never be retained in the message table.");
     const englishOnlyInput = { channelSlug: "global-chat", clientRequestId: "request-english-only", body: "hola amigos please help me" };
     const englishOnly = await handleDznCommsSend(request("/api/comms/messages", "player-token", englishOnlyInput), f.env);
     assert.equal(englishOnly.status, 422);
@@ -882,6 +890,7 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
   assert.equal(moderateDznCommsBody("Gay pride event details are available in the DZN Updates feed.").decision, "allow", "Identity terms must not be treated as abuse without a hostile context.");
   assert.equal(moderateDznCommsBody("Your gay teammate is welcome.").decision, "allow", "Possessive identity references must not be treated as abuse without hostile context.");
+  assert.equal(moderateDznCommsBody("Lesbian, gay, bi, trans and queer members are welcome here.").decision, "allow", "Neutral identity and inclusion language must remain allowed.");
   assert.equal(moderateDznCommsBody("gayhead").decision, "block", "Compound identity harassment must be rejected.");
   assert.equal(moderateDznCommsBody("g@y-head").decision, "block", "Leetspeak and punctuation must not bypass compound identity harassment checks.");
   assert.equal(moderateDznCommsBody("I am a gay boy.").decision, "allow", "Neutral identity references must not be treated as compound harassment.");
@@ -966,6 +975,12 @@ function testAutomaticLanguageFilter() {
   }
   for (const body of ["mierda", "scheisse", "scheiße", "SCHEIẞE", "vaffanculo", "kurwa", "blyat", "hijo de puta", "puto", "gilipollas", "hurensohn", "chutiya", "siktir", "madarchod", "ssibal"]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Common multilingual abuse must not be accepted: ${body}`);
+  }
+  for (const body of ["baitola", "buzerant", "ciota", "frocio", "frocia", "ibne", "joto", "marica", "maricón", "pédé", "pidoras", "poponar", "ricchione", "schwuchtel", "viado"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Direct homophobic abuse must not be accepted: ${body}`);
+  }
+  for (const body of ["m.a.r.i.c.o.n", "mar1con", "m@ricon", "p1dor", "vi4do", "s c h w u c h t e l", "p\u200be\u200bd\u200be", "r-i-c-c-h-i-o-n-e"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Obfuscated homophobic abuse must not be accepted: ${body}`);
   }
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
   assert.equal(moderateDznCommsBody("Take cover behind the privet hedge.").decision, "allow", "Ambiguous English words must not trigger the English-only filter.");
