@@ -92,12 +92,18 @@ const severeHateSpeechPattern = /\b(?:n[i1!][gq]{2}[e3]r|n[i1!][gq]{2}[a@])s?\b/
 const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
 const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
 const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:g(?:ay|[4@]y)?|ay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
+// Direct homophobic insults that are unambiguous in an English-only chat. The
+// native-script guard above rejects every non-Latin-script message before
+// storage; this list covers common Latin-script and transliterated bypasses.
+// Neutral identity words (for example, gay, lesbian, trans, or queer) are not
+// included here and must continue to be assessed by the contextual rules.
+const homophobicAbusePattern = /\b(?:baitola|buzerant|ciota|froci[oa]|ibne|joto|marica|maricon(?:es)?|pede|pidor(?:as)?|poponar|ricchione|schwuchtel|viado)\b/i;
 const sexualHarassmentPattern = /\b(?:clit|(?:nice|big|small|show|touch|your|ur|my)\s+cock|suck\s+(?:my|your|ur)\s+(?:mum|mom|mother|dick|cock)|(?:your|ur)\s+(?:mum|mom|mother)\s+(?:is|was)\s+a\s+(?:slut|whore))\b/i;
 const compoundHarassmentPattern = /\b(?:g(?:a|@|4)y(?:head|[-_./\\]+head)|ginger[\W_]*(?:knob(?:head)?|twat|prick))\b/i;
 // Common profanity and insults that are often pasted into English-language
 // chat in another language. This supplements the script/phrase guards above;
 // it is not represented as a complete global language catalogue.
-const multilingualAbusePattern = /\b(?:amcik|arrombado|arschloch|bakayaro|batard|bhenchod|blyat|cabron|caralho|cazzo|chinga(?:do)?|chuj|chutiya|coglione|cojones|connard|connasse|encule|fdp|filho\s+da\s+puta|fotze|gaesaekki|gilipollas|hijo\s+(?:de\s+)?puta|hurensohn|imbecil|jeba[ck]|joder|kuso|kurwa|kurva|madarchod|maricon|merde|mierda|mudak|orospu|otario|pendejo|pidor|pierdol|pizda|puta|putain|puto|salope|scheisse|schei(?:ss|ß)e|siktir|skurwysyn|ssibal|stronzo|suka|vaffanculo|verga|viado|wichser|yeban?|yob[a-z]*)\b/i;
+const multilingualAbusePattern = /\b(?:amcik|arrombado|arschloch|bakayaro|batard|bhenchod|blyat|cabron|caralho|cazzo|chinga(?:do)?|chuj|chutiya|coglione|cojones|connard|connasse|encule|fdp|filho\s+da\s+puta|fotze|gaesaekki|gilipollas|hijo\s+(?:de\s+)?puta|hurensohn|imbecil|jeba[ck]|joder|kuso|kurwa|kurva|madarchod|merde|mierda|mudak|orospu|otario|pendejo|pierdol|pizda|puta|putain|puto|salope|scheisse|schei(?:ss|ß)e|siktir|skurwysyn|ssibal|stronzo|suka|vaffanculo|verga|wichser|yeban?|yob[a-z]*)\b/i;
 const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i;
 // A separate expression catches blocked roots when their letters are
 // deliberately separated. It never collapses arbitrary words, so ordinary
@@ -106,6 +112,8 @@ const obfuscatedProfanityPattern =
   /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|a[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*l[\W_]*[i1!][\W_]*t|c[\W_]+o[\W_]*c[\W_]*k|c[\W_]*o[\W_]+c[\W_]*k|c[\W_]*o[\W_]*c[\W_]+k|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*a[\W_]*g(?:[\W_]*g[\W_]*o[\W_]*t)?|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|h(?:[\W_]+o[\W_]*m[\W_]*o|[\W_]*o[\W_]+m[\W_]*o|[\W_]*o[\W_]*m[\W_]+o)|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|r[\W_]*e[\W_]*t[\W_]*a[\W_]*r[\W_]*d(?:[\W_]*e[\W_]*d)?|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|t[\W_]*r[\W_]*a[\W_]*n[\W_]*n(?:[\W_]*y|[\W_]*i[\W_]*e)|t[\W_]*w[\W_]*a[\W_]*t|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
 const obfuscatedSevereHateSpeechPattern =
   /(?<![a-z0-9])n[\W_]*[i1!][\W_]*[gq][\W_]*[gq][\W_]*(?:[e3][\W_]*r|[a@])s?(?![a-z0-9])/i;
+const obfuscatedHomophobicAbusePattern =
+  /(?<![a-z0-9])(?:b[\W_]*a[\W_]*i[\W_]*t[\W_]*o[\W_]*l[\W_]*a|b[\W_]*u[\W_]*z[\W_]*e[\W_]*r[\W_]*a[\W_]*n[\W_]*t|c[\W_]*i[\W_]*o[\W_]*t[\W_]*a|f[\W_]*r[\W_]*o[\W_]*c[\W_]*i[\W_]*[oa]|i[\W_]*b[\W_]*n[\W_]*e|j[\W_]*o[\W_]*t[\W_]*o|m[\W_]*a[\W_]*r[\W_]*i[\W_]*c[\W_]*[ao][\W_]*n?(?:[\W_]*e[\W_]*s)?|p[\W_]*e[\W_]*d[\W_]*e|p[\W_]*i[\W_]*d[\W_]*o[\W_]*r(?:[\W_]*a[\W_]*s)?|p[\W_]*o[\W_]*p[\W_]*o[\W_]*n[\W_]*a[\W_]*r|r[\W_]*i[\W_]*c[\W_]*c[\W_]*h[\W_]*i[\W_]*o[\W_]*n[\W_]*e|s[\W_]*c[\W_]*h[\W_]*w[\W_]*u[\W_]*c[\W_]*h[\W_]*t[\W_]*e[\W_]*l|v[\W_]*i[\W_]*a[\W_]*d[\W_]*o)(?![a-z0-9])/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -189,11 +197,14 @@ export function moderateDznCommsBody(value: unknown, options: { recentBodies?: r
     || targetedIdentityAbusePattern.test(contextCompact)
     || contextualAmbiguousAbusePattern.test(contextCompact)
     || possessiveIdentityInsultPattern.test(contextCompact)
+    || homophobicAbusePattern.test(contextCompact)
+    || homophobicAbusePattern.test(contextFolded)
     || sexualHarassmentPattern.test(contextCompact)
     || compoundHarassmentPattern.test(contextFolded)
     || multilingualAbusePattern.test(contextCompact)
     || obfuscatedProfanityPattern.test(contextFolded)
     || obfuscatedSevereHateSpeechPattern.test(contextFolded)
+    || obfuscatedHomophobicAbusePattern.test(contextFolded)
   ) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
