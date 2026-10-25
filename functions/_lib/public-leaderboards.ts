@@ -153,7 +153,13 @@ export type PublicLeaderboardsOptions = {
   mode?: string | null;
   page?: number;
   pageSize?: number;
+  directory?: string | null;
 };
+
+export type PublicLeaderboardDirectory = "servers" | "players";
+
+// Public browsing is intentionally capped so a single directory response remains quick to load and cache.
+export const PUBLIC_LEADERBOARD_DIRECTORY_CAP = 250;
 
 export type PublicLongestKillRow = {
   player_key?: string | null;
@@ -181,6 +187,9 @@ export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = tr
 
   await ensurePublicLeaderboardSchema(env);
   const requestOptions = normalizePublicLeaderboardOptions(options);
+  if (requestOptions.directory) {
+    return getPublicLeaderboardDirectoryPayload(env, viewerLoggedIn, requestOptions);
+  }
   const limit = requestOptions.full ? requestOptions.pageSize : 10;
   const offset = requestOptions.full ? (requestOptions.page - 1) * requestOptions.pageSize : 0;
   const selectedMetric = normalizeLeaderboardMetric(requestOptions.metric);
@@ -210,6 +219,46 @@ export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = tr
     build_leaderboard: buildLeaderboard,
     player_leaderboards: playerLeaderboards,
     selected_metric_leaderboard: selectedMetricLeaderboard,
+    updated_at: new Date().toISOString(),
+  }, viewerLoggedIn);
+}
+
+async function getPublicLeaderboardDirectoryPayload(
+  env: Env,
+  viewerLoggedIn: boolean,
+  options: ReturnType<typeof normalizePublicLeaderboardOptions>,
+) {
+  const directory = options.directory;
+  const [topServers, topPlayers] = await Promise.all([
+    directory === "servers"
+      ? getRankedPublicServers(env, PUBLIC_LEADERBOARD_DIRECTORY_CAP, options.mode)
+      : Promise.resolve([] as PublicLeaderboardServer[]),
+    directory === "players"
+      ? getTopPlayers(env, PUBLIC_LEADERBOARD_DIRECTORY_CAP)
+      : Promise.resolve([] as PublicLeaderboardPlayer[]),
+  ]);
+  const directoryRows = directory === "servers" ? topServers : topPlayers;
+
+  return applyLeaderboardsAccess({
+    ok: true,
+    full: true,
+    directory,
+    directory_cap: PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+    directory_total: directoryRows.length,
+    directory_capped: directoryRows.length >= PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+    leaderboard_limit: PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+    page: 1,
+    page_size: PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+    selected_metric: options.metric,
+    top_servers: topServers,
+    top_players: topPlayers,
+    best_overall_kill: null,
+    latest_kill: null,
+    personal_best_kills: [],
+    longest_kills: [],
+    build_leaderboard: [],
+    player_leaderboards: emptyTelemetryLeaderboards(),
+    selected_metric_leaderboard: [],
     updated_at: new Date().toISOString(),
   }, viewerLoggedIn);
 }
@@ -718,18 +767,27 @@ export function normalizeLeaderboardMetric(value: unknown): PublicLeaderboardMet
 }
 
 export function normalizePublicLeaderboardOptions(options: PublicLeaderboardsOptions = {}) {
-  const full = options.full === true;
-  const page = full ? Math.max(1, Math.trunc(Number(options.page ?? 1)) || 1) : 1;
-  const pageSize = full
+  const directory = normalizePublicLeaderboardDirectory(options.directory);
+  const full = directory !== null || options.full === true;
+  const page = directory ? 1 : full ? Math.max(1, Math.trunc(Number(options.page ?? 1)) || 1) : 1;
+  const pageSize = directory
+    ? PUBLIC_LEADERBOARD_DIRECTORY_CAP
+    : full
     ? Math.max(1, Math.min(Math.trunc(Number(options.pageSize ?? 100)) || 100, 500))
     : 10;
   return {
     full,
+    ...(directory ? { directory } : {}),
     metric: normalizeLeaderboardMetric(options.metric),
     mode: normalizePublicLeaderboardMode(options.mode),
     page,
     pageSize,
   };
+}
+
+export function normalizePublicLeaderboardDirectory(value: unknown): PublicLeaderboardDirectory | null {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "servers" || normalized === "players" ? normalized : null;
 }
 
 export function normalizePublicLeaderboardMode(value: unknown): PublicLeaderboardMode {
@@ -1150,6 +1208,14 @@ export function emptyPublicLeaderboards(options: PublicLeaderboardsOptions = {})
   return {
     ok: true,
     full: requestOptions.full,
+    ...(requestOptions.directory
+      ? {
+        directory: requestOptions.directory,
+        directory_cap: PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+        directory_total: 0,
+        directory_capped: false,
+      }
+      : {}),
     leaderboard_limit: limit,
     page: requestOptions.full ? requestOptions.page : 1,
     page_size: limit,

@@ -2090,6 +2090,171 @@ body.dzn-pricing-modal-open {
   animation: leaderboardBoardReveal 180ms ease-out;
 }
 
+.leaderboard-ref-directory {
+  margin-top: 0.72rem;
+}
+
+.leaderboard-ref-directory-eyebrow {
+  margin: 0 0 0.16rem;
+  color: #67e8f9;
+  font-size: 0.6rem;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.leaderboard-ref-directory-cap {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.leaderboard-ref-directory-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.leaderboard-ref-directory-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  background: rgba(2, 9, 23, 0.78);
+}
+
+.leaderboard-ref-directory-search > svg {
+  width: 1rem;
+  height: 1rem;
+  color: #67e8f9;
+}
+
+.leaderboard-ref-directory-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.leaderboard-ref-directory-search input::placeholder {
+  color: #71809a;
+}
+
+.leaderboard-ref-directory-search button,
+.leaderboard-ref-directory-more,
+.leaderboard-ref-directory-state--error button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  background: rgba(8, 47, 73, 0.44);
+  color: #e0f7ff;
+  font-weight: 900;
+  text-transform: uppercase;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.leaderboard-ref-directory-search button {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.leaderboard-ref-directory-search button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.leaderboard-ref-directory-search button:hover,
+.leaderboard-ref-directory-more:hover,
+.leaderboard-ref-directory-state--error button:hover {
+  border-color: rgba(224, 247, 255, 0.8);
+  background: rgba(8, 145, 178, 0.38);
+  color: #fff;
+}
+
+.leaderboard-ref-directory-search button:focus-visible,
+.leaderboard-ref-directory-more:focus-visible,
+.leaderboard-ref-directory-state--error button:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 2px;
+}
+
+.leaderboard-ref-directory-count {
+  margin: 0;
+  color: #b9c7da;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.leaderboard-ref-directory-scroll {
+  max-height: min(66vh, 820px);
+  margin-top: 0.75rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(103, 232, 249, 0.65) rgba(2, 9, 23, 0.72);
+  scrollbar-width: thin;
+}
+
+.leaderboard-ref-directory-scroll::-webkit-scrollbar { width: 0.65rem; height: 0.65rem; }
+.leaderboard-ref-directory-scroll::-webkit-scrollbar-thumb { border: 2px solid rgba(2, 9, 23, 0.72); background: rgba(103, 232, 249, 0.65); }
+.leaderboard-ref-directory-scroll::-webkit-scrollbar-track { background: rgba(2, 9, 23, 0.72); }
+
+.leaderboard-ref-directory-footer,
+.leaderboard-ref-directory-state {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  color: #a8b6cb;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.leaderboard-ref-directory-state {
+  min-height: 7rem;
+  justify-content: center;
+  padding: 1rem;
+  border: 1px dashed rgba(125, 211, 252, 0.28);
+  background: rgba(2, 9, 23, 0.52);
+  text-align: center;
+}
+
+.leaderboard-ref-directory-state--error {
+  justify-content: space-between;
+  color: #fde68a;
+  text-align: left;
+}
+
+.leaderboard-ref-directory-state--error button,
+.leaderboard-ref-directory-more {
+  min-height: 2.3rem;
+  gap: 0.45rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.64rem;
+}
+
+.leaderboard-ref-directory-more svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
 .leaderboard-ref-records-grid {
   display: grid;
   grid-template-columns: minmax(360px, 0.72fr) minmax(0, 1.28fr);
@@ -2673,6 +2838,25 @@ body.dzn-pricing-modal-open {
     flex-direction: column;
     gap: 0.2rem;
     font-size: 0.57rem;
+  }
+
+  .leaderboard-ref-directory-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-ref-directory-count {
+    text-align: left;
+  }
+
+  .leaderboard-ref-directory-footer,
+  .leaderboard-ref-directory-state--error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .leaderboard-ref-directory-footer .leaderboard-ref-directory-more,
+  .leaderboard-ref-directory-state--error button {
+    width: 100%;
   }
 
   .leaderboard-ref-stat-card {
