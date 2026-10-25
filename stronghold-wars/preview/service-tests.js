@@ -728,12 +728,15 @@ export function runServiceTests() {
   assert(ops.chooseFieldUpgrade('iron-member', 'cover', 'rivet-cover').ok && !ops.chooseFieldUpgrade('iron-member', 'route', 'rivet-cover-twice').ok, 'temporary Field Upgrade is a single bounded choice');
   assert(ops.useAbility('iron-member', 'tactical', 'rivet-breach').ok && ops.current('iron-member').phase === 'cache', 'Rivet opens a barrier without replacing ordinary troops');
   assert(ops.advance('iron-member', 'secure', 'rivet-cache').ok && ops.advance('iron-member', 'extract', 'rivet-extract').status === 'extracted', 'safer cache reaches an actual extraction outcome');
+  assert(ops.current('iron-member').reward === 30 && ops.current('iron-member').cargo === 40 && missionGame.member('iron-member').parts === 630, 'rapid pickup saves the convoy but delivers only 75 percent of collected cargo');
   const partsAfterExtraction = missionGame.member('iron-member').parts;
   assert(ops.advance('iron-member', 'extract', 'rivet-extract').replay && missionGame.member('iron-member').parts === partsAfterExtraction, 'duplicate extraction never duplicates personal Parts');
   assert(ops.showcase('iron-member').earned.firstThrough && ops.showcase('iron-member').earned.eyesOnTarget && ops.showcase('iron-member').mastery.rivet === 1, 'earned PvE badges and mastery follow the recorded completed attempt');
   missionGame = new LocalGameService({ storage: missionStorage, now: () => missionClock }); ops = new OperationsController(missionGame);
   assert(ops.current('iron-member').status === 'extracted' && missionGame.member('iron-member').parts === partsAfterExtraction && ops.showcase('iron-member').completed === 1, 'mission, reward ledger and evidence survive reload without another grant');
+  assert(ops.getBoard('iron-member').history[0].extractionMode === 'rapid' && ops.getBoard('iron-member').history[0].events.some(event => event.text.includes('Rapid convoy')) && ops.getBoard('iron-member').history[0].events.at(-1).text.includes('30 Parts'), 'after-action evidence preserves the pickup choice and actual once-only payout');
   assert(ops.prepareNext('iron-member', 'mission-next').ok && ops.showcase('iron-member').completed === 1, 'next-run preparation retains permanent mastery and reward evidence');
+  assert(ops.getBoard('iron-member').history[0].events.length > 1, 'preparing a new attempt does not erase the earlier field record');
   checks.push('operative command slot, local Pro gate, ordinary troop unlocks, tactical targets, one Field Upgrade, extraction ledger and mastery persistence');
 
   const remedyGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });
@@ -745,7 +748,14 @@ export function runServiceTests() {
   assert(remedyOps.chooseFieldUpgrade('iron-owner', 'triage', 'remedy-triage').ok, 'temporary triage adds only one charge');
   assert(remedyOps.advance('iron-owner', 'force', 'remedy-force').ok && remedyOps.current('iron-owner').casualties === 1, 'forced breach can incapacitate another troop');
   assert(remedyOps.useAbility('iron-owner', 'ultimate', 'remedy-ultimate').ok && remedyOps.current('iron-owner').recovered === 2 && !remedyOps.useAbility('iron-owner', 'ultimate', 'remedy-ultimate-again').ok, 'one ultimate cannot produce unlimited recoveries');
-  assert(remedyOps.advance('iron-owner', 'secure', 'remedy-cache').ok && remedyOps.advance('iron-owner', 'extract', 'remedy-extract').ok && remedyOps.showcase('iron-owner').earned.siegeMedic, 'meaningful recovered casualties count only after extraction');
+  assert(remedyOps.advance('iron-owner', 'secure', 'remedy-cache').ok && remedyOps.advance('iron-owner', 'hold', 'remedy-extract').ok && remedyOps.showcase('iron-owner').earned.siegeMedic, 'meaningful recovered casualties count only after extraction');
+  assert(remedyOps.current('iron-owner').reward === 40 && remedyOps.getBoard('iron-owner').history[0].extractionMode === 'held' && remedyOps.getBoard('iron-owner').history[0].events.some(event => event.text.includes('Held the extraction beacon')), 'holding the beacon takes hazard but pays full collected cargo and records why');
+  const hazardGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });
+  const hazardOps = new OperationsController(hazardGame);
+  assert(hazardOps.startExpedition('iron-owner', { assault: 1 }, 'hazard-start').ok, 'high-risk route starts with an ordinary unit');
+  assert(hazardOps.advance('iron-owner', 'push', 'hazard-push').ok && hazardOps.advance('iron-owner', 'force', 'hazard-force').ok && hazardOps.advance('iron-owner', 'extra', 'hazard-extra').ok, 'rushing, forced entry and extra cargo consume finite protection');
+  assert(hazardOps.advance('iron-owner', 'hold', 'hazard-hold').status === 'failed' && hazardGame.member('iron-owner').parts === 600 && hazardOps.getBoard('iron-owner').history[0].reward === 0, 'reckless full-cargo hold can fail and cannot award Parts');
+  assert(hazardOps.advance('iron-owner', 'hold', 'hazard-hold').replay && hazardGame.member('iron-owner').parts === 600, 'retrying the failed extraction action cannot mint cargo');
   checks.push('bounded incapacitation, recovery charges, once-per-attempt ultimate and evidence-backed medic award');
 
   const pingGame = new LocalGameService({ storage: new MemoryStorage(), now: () => missionClock });

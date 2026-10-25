@@ -11,6 +11,7 @@ export const OPERATIVES = Object.freeze({
 export const EXPEDITION_RULES = Object.freeze({
   commanderSlots: 2, launchSalvage: 30, durationMs: 10 * 60 * 1000,
   tacticalCooldownTurns: 2, maxRecoveryPerUnit: 1, maxCargoParts: 65,
+  rapidPickupPercent: 75, heldPickupHazard: 50,
   pingLifetimeMs: 15 * 60 * 1000,
 });
 export const FIELD_UPGRADES = Object.freeze({
@@ -53,6 +54,8 @@ export function normalizeOperationsState(raw, identities) {
       scanned: Boolean(source.scanned), breached: Boolean(source.breached), cargo: safeInt(source.cargo, EXPEDITION_RULES.maxCargoParts),
       tacticalReadyTurn: safeInt(source.tacticalReadyTurn, 20), tacticalUses: safeInt(source.tacticalUses, 20),
       ultimateUsed: Boolean(source.ultimateUsed), fieldUpgrade: FIELD_UPGRADES[source.fieldUpgrade] ? source.fieldUpgrade : '',
+      extractionMode: ['rapid', 'held'].includes(source.extractionMode) ? source.extractionMode : '',
+      reward: safeInt(source.reward ?? (source.status === 'extracted' ? source.cargo : 0), EXPEDITION_RULES.maxCargoParts),
       routeProtection: safeInt(source.routeProtection, 24), signalProtection: safeInt(source.signalProtection, 24),
       events: Array.isArray(source.events) ? source.events.filter(event => event && typeof event.text === 'string').slice(-16).map(event => ({ text: event.text.slice(0, 180), at: safeInt(event.at) })) : [],
     };
@@ -62,7 +65,11 @@ export function normalizeOperationsState(raw, identities) {
     status: ['extracted', 'failed', 'expired', 'withdrawn'].includes(record.status) ? record.status : 'failed',
     reward: safeInt(record.reward, EXPEDITION_RULES.maxCargoParts), cargo: safeInt(record.cargo, EXPEDITION_RULES.maxCargoParts),
     scanned: Boolean(record.scanned), breached: Boolean(record.breached), recovered: safeInt(record.recovered, 12),
-    finishedAt: safeInt(record.finishedAt),
+    finishedAt: safeInt(record.finishedAt), startedAt: safeInt(record.startedAt),
+    extractionMode: ['rapid', 'held'].includes(record.extractionMode) ? record.extractionMode : '',
+    fieldUpgrade: FIELD_UPGRADES[record.fieldUpgrade] ? record.fieldUpgrade : '',
+    health: safeInt(record.health, 100), shield: safeInt(record.shield, 60),
+    events: Array.isArray(record.events) ? record.events.filter(event => event && typeof event.text === 'string').slice(-16).map(event => ({ text: event.text.slice(0, 180), at: safeInt(event.at) })) : [],
   })) : [];
   state.rewardLedger = Array.isArray(raw.rewardLedger) ? raw.rewardLedger.filter(entry => entry && validId(entry.id) && allowed.has(entry.identityId)).slice(-100).map(entry => ({ id: entry.id, identityId: entry.identityId, amount: safeInt(entry.amount, EXPEDITION_RULES.maxCargoParts) })) : [];
   state.actionRecords = Array.isArray(raw.actionRecords) ? raw.actionRecords.filter(entry => entry && validId(entry.id) && allowed.has(entry.identityId) && typeof entry.kind === 'string' && entry.result).slice(-400).map(entry => ({ id: entry.id, identityId: entry.identityId, kind: entry.kind, result: copy(entry.result) })) : [];
@@ -97,19 +104,23 @@ export class OperationsController {
   _finish(attempt, status) {
     if (attempt.status !== 'active') return;
     attempt.status = status;
-    const reward = status === 'extracted' ? attempt.cargo : 0;
+    const reward = status === 'extracted' ? attempt.extractionMode === 'rapid'
+      ? Math.floor(attempt.cargo * EXPEDITION_RULES.rapidPickupPercent / 100) : attempt.cargo : 0;
+    attempt.reward = reward;
     const ledgerId = `expedition:${attempt.id}`;
     if (reward && !this.state.rewardLedger.some(entry => entry.id === ledgerId)) {
       this.game.member(attempt.identityId).parts += reward;
       this.state.rewardLedger.push({ id: ledgerId, identityId: attempt.identityId, amount: reward });
     }
+    this._event(attempt, status === 'extracted' ? `Convoy extracted ${reward} Parts to personal inventory.` : `Expedition ${status}; no cargo awarded.`);
     if (!this.state.history.some(entry => entry.id === attempt.id)) this.state.history.push({
       id: attempt.id, identityId: attempt.identityId, communityId: attempt.communityId, operativeId: attempt.operativeId,
       status, reward, cargo: attempt.cargo, scanned: attempt.scanned, breached: attempt.breached,
-      recovered: attempt.recovered, finishedAt: this.now(),
+      recovered: attempt.recovered, finishedAt: this.now(), startedAt: attempt.startedAt,
+      extractionMode: attempt.extractionMode, fieldUpgrade: attempt.fieldUpgrade,
+      health: attempt.health, shield: attempt.shield, events: copy(attempt.events),
     });
     this.state.history = this.state.history.slice(-40);
-    this._event(attempt, status === 'extracted' ? `Convoy extracted ${reward} Parts to personal inventory.` : `Expedition ${status}; no cargo awarded.`);
     this.game.save();
   }
   current(identityId = this.game.state.currentIdentityId) {
@@ -155,7 +166,8 @@ export class OperationsController {
     const attempt = { id, identityId, communityId: profile.communityId, operativeId: this.selected(identityId), roster: troops,
       startedAt: this.now(), deadlineAt: this.now() + EXPEDITION_RULES.durationMs, status: 'active', phase: 'approach', turn: 0,
       health: 100, shield: 40, casualties: 0, recovered: 0, recoveriesLeft: 1, scanned: false, breached: false, cargo: 0,
-      tacticalReadyTurn: 0, tacticalUses: 0, ultimateUsed: false, fieldUpgrade: '', routeProtection: 0, signalProtection: 0, events: [] };
+      tacticalReadyTurn: 0, tacticalUses: 0, ultimateUsed: false, fieldUpgrade: '', extractionMode: '', reward: 0,
+      routeProtection: 0, signalProtection: 0, events: [] };
     member.salvage -= EXPEDITION_RULES.launchSalvage;
     this._event(attempt, `${OPERATIVES[attempt.operativeId].name} deployed with ${count} ordinary troops; 2 command slots reserved.`);
     this.state.attempts[identityId] = attempt;
@@ -212,7 +224,7 @@ export class OperationsController {
     const error = this._access(identityId); if (error) return { ok: false, error };
     const attempt = this.current(identityId); if (!attempt || attempt.status !== 'active') return { ok: false, error: 'No active expedition.' };
     const target = this.state.attempts[identityId], troopCount = Object.values(target.roster).reduce((a, b) => a + b, 0);
-    const valid = { approach: ['scout', 'push'], barrier: ['cut', 'force'], cache: ['secure', 'extra'], extraction: ['extract'] };
+    const valid = { approach: ['scout', 'push'], barrier: ['cut', 'force'], cache: ['secure', 'extra'], extraction: ['extract', 'hold'] };
     if (!valid[target.phase].includes(choice)) return { ok: false, error: 'That action is not available at this objective.' };
     if (target.phase === 'barrier' && choice === 'cut' && !target.roster.engineer) return { ok: false, error: 'A Combat Engineer or Rivet ability is needed to cut the barrier.' };
     target.turn++;
@@ -230,10 +242,17 @@ export class OperationsController {
       this._damage(target, choice === 'extra' ? 45 : 15);
       if (choice === 'extra') target.casualties = Math.min(troopCount, target.casualties + 1);
       this._event(target, choice === 'extra' ? 'Extra cache secured; convoy exposed to severe hazard.' : 'Core cache secured; convoy moving to extraction.');
-    } else this._finish(target, 'extracted');
+    } else {
+      target.extractionMode = choice === 'hold' ? 'held' : 'rapid';
+      if (choice === 'hold') {
+        this._damage(target, EXPEDITION_RULES.heldPickupHazard);
+        this._event(target, `Held the extraction beacon under ${EXPEDITION_RULES.heldPickupHazard} hazard pressure for the full cargo.`);
+      } else this._event(target, `Rapid convoy pickup secured ${EXPEDITION_RULES.rapidPickupPercent}% of collected cargo without another hazard.`);
+      this._finish(target, target.health === 0 ? 'failed' : 'extracted');
+    }
     if (target.status === 'active' && target.health === 0) this._finish(target, 'failed');
     this.game.save();
-    return this._record(identityId, 'expedition-step', actionId, { ok: true, choice, phase: target.phase, status: target.status, cargo: target.cargo, health: target.health, shield: target.shield });
+    return this._record(identityId, 'expedition-step', actionId, { ok: true, choice, phase: target.phase, status: target.status, cargo: target.cargo, reward: target.reward, health: target.health, shield: target.shield });
   }
   withdraw(identityId, actionId = this.game.newActionId('expedition-withdraw')) {
     const replay = this._replay(identityId, 'expedition-withdraw', actionId); if (replay) return replay;

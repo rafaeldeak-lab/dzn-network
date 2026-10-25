@@ -6,7 +6,7 @@ https://rosebud.ai/edit/57892787-5e89-4c9b-bb59-dde128e859ae.
 
 ## Current boundary
 
-The [user-supplied Apex expansion addendum](briefs/apex-expansion.md) is appended to the existing shared-base plan. The current local preview now includes an Operations Board with three selectable DZN commanders, a bounded PvE salvage extraction, temporary Field Upgrades, finite recovery, community signals and an evidence-backed personal showcase. It reuses the existing army and resources. The operative visuals currently use the existing DZN squad kit; unique rigged models and a spatial mission arena remain separate art work. These missions are browser-local and never submit live war, membership or reward records.
+The [user-supplied Apex expansion addendum](briefs/apex-expansion.md) is appended to the existing shared-base plan. [Gameplay coverage](GAMEPLAY_COVERAGE.md) tracks the playable local loops and the remaining milestones. The current local preview includes an Operations Board with three selectable DZN commanders, a bounded PvE salvage extraction with a rapid pickup or hazardous full-cargo hold, temporary Field Upgrades, finite recovery, community signals, saved after-action field records and an evidence-backed personal showcase. It reuses the existing army and resources. A spatial mission arena remains separate work. These missions are browser-local and never submit live war, membership or reward records.
 
 The game service in `preview/game-service.js` uses fictional communities and
 browser local storage. Its owner, admin, member, Pro, and membership checks are
