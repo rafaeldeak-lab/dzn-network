@@ -14,6 +14,12 @@ const protectedAppPagePrefixes = [
 
 export const onRequest: PagesFunction = async ({ request, env, next }) => {
   const url = new URL(request.url);
+  if (isManagedPagesPreviewHost(url.hostname)) {
+    return new Response("Not found", {
+      status: 404,
+      headers: { "cache-control": "no-store" },
+    });
+  }
   if (!isProtectedAppPagePath(url.pathname) || !isPageNavigationMethod(request.method)) {
     return next();
   }
@@ -32,6 +38,11 @@ export const onRequest: PagesFunction = async ({ request, env, next }) => {
 
 export function isProtectedAppPagePath(pathname: string) {
   return protectedAppPagePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function isManagedPagesPreviewHost(hostname: string) {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  return host !== "dzn-network.pages.dev" && host.endsWith(".dzn-network.pages.dev");
 }
 
 function isPageNavigationMethod(method: string) {

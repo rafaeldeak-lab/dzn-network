@@ -1,0 +1,16 @@
+name = "dzn-network-checkout-sandbox"
+compatibility_date = "2026-05-13"
+pages_build_output_dir = "./out"
+
+[vars]
+# This configuration is only for the isolated Stripe test-mode sandbox.
+DZN_APP_URL = "https://dzn-network-checkout-sandbox.pages.dev"
+NEXT_PUBLIC_APP_URL = "https://dzn-network-checkout-sandbox.pages.dev"
+DZN_LIVE_CHECKOUT_ENABLED = "false"
+DZN_DISCORD_NOTIFICATIONS_ENABLED = "false"
+DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED = "false"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dzn_network_db_checkout_sandbox_20261025"
+database_id = "e8563ccb-7f30-4950-8137-6a7eb3a8cc3c"
