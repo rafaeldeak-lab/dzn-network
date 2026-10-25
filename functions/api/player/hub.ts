@@ -12,6 +12,7 @@ import {
 } from "../../_lib/player-stat-bridge";
 import { privateNoStoreHeaders } from "../../_lib/performance";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
+import { formatPublicServerName } from "../../../lib/public-display-text";
 
 type PlayerHubCommunityRow = {
   id: string;
@@ -701,7 +702,7 @@ function uniqueCommunityServers(rows: PlayerHubCommunityServerRow[]) {
     unique.push({
       linked_server_id: row.linked_server_id,
       public_slug: row.public_slug,
-      server_name: row.server_name || "DZN Server",
+      server_name: formatPublicServerName(row.server_name),
       server_type: row.server_type || "DayZ",
       platform: row.platform,
       map_name: row.map_name,

@@ -72,5 +72,6 @@ assert.match(playerApi, /decidePlayerCommunityDirectoryInvite/, "Players must ow
 assert.match(playerApi, /getSessionUser/, "Player decisions must be bound to the signed-in account.");
 assert.match(playerConsent, /remains hidden.*until you approve it here/, "The player UI must explain the two-party publication boundary.");
 assert.match(playerConsent, /Revoke/, "Players must be able to withdraw directory approval.");
+assert.match(playerConsent, /formatPublicServerName\(item\.server_name\)/, "Player consent cards must use the shared public server-name formatter.");
 
 console.log("Server community directory checks passed.");
