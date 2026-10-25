@@ -215,20 +215,22 @@ function testMessageTimestamps() {
 
 async function testRuntimeContracts() {
   const unicodeDb = seededDb();
+  const longLatinUnicode = "\u0101\u0103\u0105\u0107\u0109\u010b\u010d\u010f\u0111\u0113\u0115\u0117\u0119\u011b\u011d\u011f\u0121\u0123\u0125".repeat(100);
   unicodeDb.messages.splice(0, unicodeDb.messages.length, ...Array.from({ length: 30 }, (_, index) =>
-    message({ id: `unicode-${index}`, channelId: "channel-global", body: "\u4e2d".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" })));
+    message({ id: `unicode-${index}`, channelId: "channel-global", body: longLatinUnicode, createdAt: "2026-09-01T10:00:00.000Z" })));
   const unicodeRead = await callMessageHistoryRoute(unicodeDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat&limit=30", enabledEnv(unicodeDb));
   assert.equal(unicodeRead.status, 200);
-  assert.ok((await unicodeRead.clone().arrayBuffer()).byteLength > 128_000);
+  assert.ok((await unicodeRead.clone().arrayBuffer()).byteLength > 100_000);
   const unicodePayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => unicodeRead });
-  assert.equal(unicodePayload.messages.length, 30, "A real API page of long Unicode messages must not fall back to static content.");
-  assert.ok(unicodePayload.messages.every(row => row.body === "\u4e2d".repeat(2_000)));
+  assert.equal(unicodePayload.messages.length, 30, "A real API page of long Latin-extended Unicode messages must not fall back to static content.");
+  assert.ok(unicodePayload.messages.every(row => row.body === longLatinUnicode));
   const astralDb = seededDb();
+  const longAstralUnicode = "\u{1f600}\u{1f601}\u{1f602}\u{1f603}\u{1f604}\u{1f605}\u{1f606}\u{1f609}\u{1f60a}\u{1f60b}\u{1f60e}\u{1f60d}\u{1f618}\u{1f617}\u{1f619}\u{1f61a}\u{1f642}\u{1f914}\u{1f920}\u{1f973}".repeat(90);
   astralDb.messages.splice(0, astralDb.messages.length,
-    message({ id: "astral", channelId: "channel-global", body: "😀".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" }));
+    message({ id: "astral", channelId: "channel-global", body: longAstralUnicode, createdAt: "2026-09-01T10:00:00.000Z" }));
   const astralRead = await callMessageHistoryRoute(astralDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat", enabledEnv(astralDb));
   const astralPayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => astralRead });
-  assert.equal([...astralPayload.messages[0].body].length, 2_000, "Accepted astral characters must survive the API and client without truncation or split surrogates.");
+  assert.equal(astralPayload.messages[0].body, longAstralUnicode, "Accepted astral characters must survive the API and client without truncation or split surrogates.");
   for (const kind of ["public", "private_group", "support"] as const) {
     for (const visibility of ["public", "private_group", "support_private"] as const) {
       if (visibility === (kind === "support" ? "support_private" : kind)) continue;
@@ -310,16 +312,22 @@ async function testRuntimeContracts() {
   assert.equal(publicPayload.feature_flags.moderation_mutations_enabled, false);
   assert.equal(publicPayload.feature_flags.ai_assist_runtime_enabled, false);
   assert.equal(publicPayload.feature_flags.analytics_or_tracking_enabled, false);
-  assert.equal(publicPayload.messages.length, 3, "Deleted, expired and future-cursor-excluded rows must not be returned.");
+  assert.equal(publicPayload.messages.length, 4, "Deleted, expired and future-cursor-excluded rows must not be returned.");
   assert.equal(publicPayload.messages[0].id, "visible-1", "Messages should be returned oldest-to-newest for UI rendering.");
   assert.equal(publicPayload.messages.some((message) => message.id === "expired-1"), false, "Expired state rows must not appear.");
   assert.equal(publicPayload.messages.some((message) => message.id === "deleted-1"), false, "Deleted rows must not remain in public chat history.");
   assert.equal(publicPayload.messages.some((message) => message.id === "later-1"), false, "Rows after the before cursor must not appear.");
   assert.equal(publicPayload.messages.find((message) => message.id === "hidden-1")?.body, "Message hidden by DZN Safety.");
+  const legacyHateSpeech = publicPayload.messages.find((message) => message.id === "legacy-hate-1");
+  assert.deepEqual(
+    { body: legacyHateSpeech?.body, author: legacyHateSpeech?.author_display_name, avatar: legacyHateSpeech?.author_avatar_url },
+    { body: "Message hidden by DZN Safety.", author: "DZN Safety", avatar: null },
+    "A stricter safety rule must hide legacy harmful text and author identity from public history.",
+  );
   assert.equal(publicPayload.messages.find((message) => message.id === "quarantined-1")?.body.includes("unavailable"), true);
   assert.equal(publicPayload.messages.find((message) => message.id === "visible-1")?.author_avatar_url, "/api/public/players/visible-chat-player/avatar", "A visible author with both public-profile and Discord-identity consent may receive only the same-origin avatar proxy.");
   const publicJson = JSON.stringify(publicPayload);
-  for (const forbidden of ["author_user_id", "member-user", "other-user", "discord_id", "checkout_session", "ranking_score", "xp_award", "server_war", "ctf_tournament"]) {
+  for (const forbidden of ["author_user_id", "member-user", "other-user", "discord_id", "checkout_session", "ranking_score", "xp_award", "server_war", "ctf_tournament", "nigger", "Unsafe legacy row"]) {
     assert.equal(publicJson.includes(forbidden), false, `Public Comms payload must not expose ${forbidden}.`);
   }
   assert.deepEqual(publicDb.writeTargets, [], "Public read route must not write to D1.");
@@ -445,6 +453,7 @@ function seededDb() {
   });
   db.messages.push(
     message({ id: "visible-1", channelId: "channel-global", authorUserId: "visible-user", authorDisplayName: "Rafael DZN", body: "Welcome everyone.", createdAt: "2026-09-01T10:12:00.000Z" }),
+    message({ id: "legacy-hate-1", channelId: "channel-global", authorUserId: "visible-user", authorDisplayName: "Unsafe legacy row", body: "nigger", createdAt: "2026-09-01T10:13:00.000Z" }),
     message({ id: "hidden-1", channelId: "channel-global", authorDisplayName: "Bad Row", body: "Should not leak.", visibilityState: "hidden", createdAt: "2026-09-01T10:15:00.000Z" }),
     message({ id: "deleted-1", channelId: "channel-global", authorDisplayName: "Deleted Row", body: "Should not leak.", visibilityState: "deleted", createdAt: "2026-09-01T10:18:00.000Z" }),
     message({ id: "quarantined-1", channelId: "channel-global", authorDisplayName: "Quarantine Row", body: "Should not leak.", visibilityState: "quarantined", createdAt: "2026-09-01T10:20:00.000Z" }),

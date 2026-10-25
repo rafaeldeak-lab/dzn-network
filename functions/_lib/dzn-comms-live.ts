@@ -69,6 +69,10 @@ const localEnglishTranslations = new Map<string, string>([
 const profanityPattern = /\b(?:arsehole|asshole|bastard|bellend|bitch|bloody|bollocks|bullshit|bugger|crap|cunt|damn|dickhead|douche(?:bag)?|fuck(?:er|ing|ed|s)?|knobhead|motherfucker|piss(?:ed|ing|off)?|prick|shit(?:ty|head)?|slut|sod(?:\s+off)?|tosser|twat|wanker|whore)\b/i;
 const targetedProfanityPattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?dick|what\s+a\s+dick|(?:that(?:s|\s+s|\s+is|\s+was)|such)\s+(?:a\s+)?dick\s+move)\b/i;
 const identitySlurPattern = /\b(?:fag(?:got)?|retard(?:ed)?|spastic|trann(?:y|ie))\b/i;
+// High-severity racial slurs are blocked independently from contextual abuse
+// rules. They are never acceptable in public Comms, including reclaimed or
+// obfuscated uses, so they do not receive a contextual allow-list.
+const severeHateSpeechPattern = /\b(?:n[i1!][gq]{2}[e3]r|n[i1!][gq]{2}[a@])s?\b/i;
 const targetedIdentityAbusePattern = /\b(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)\s+(?:a\s+)?(?:gay|fag(?:got)?|homo|retard(?:ed)?)\b/i;
 const contextualAmbiguousAbusePattern = /\b(?:(?:you(?:\s+)?re|you\s+are|ur|u\s+r(?:e)?)(?:\s+such)?\s+(?:a\s+)?|what\s+a\s+|such\s+a\s+)(?:homo|pussy)\b/i;
 const possessiveIdentityInsultPattern = /\b(?:your|ur)\s+(?:a\s+)?(?:g(?:ay|[4@]y)?|ay|fag(?:got)?|homo|retard(?:ed)?)\s*[.!?]*\s*$/i;
@@ -83,6 +87,8 @@ const severeAbusePattern = /\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape thre
 // text such as "Scunthorpe" remains safe from false matches.
 const obfuscatedProfanityPattern =
   /(?<![a-z0-9])(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|a[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*l[\W_]*[i1!][\W_]*t|c[\W_]+o[\W_]*c[\W_]*k|c[\W_]*o[\W_]+c[\W_]*k|c[\W_]*o[\W_]*c[\W_]+k|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*a[\W_]*g(?:[\W_]*g[\W_]*o[\W_]*t)?|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|h(?:[\W_]+o[\W_]*m[\W_]*o|[\W_]*o[\W_]+m[\W_]*o|[\W_]*o[\W_]*m[\W_]+o)|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|r[\W_]*e[\W_]*t[\W_]*a[\W_]*r[\W_]*d(?:[\W_]*e[\W_]*d)?|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|t[\W_]*r[\W_]*a[\W_]*n[\W_]*n(?:[\W_]*y|[\W_]*i[\W_]*e)|t[\W_]*w[\W_]*a[\W_]*t|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)(?![a-z0-9])/i;
+const obfuscatedSevereHateSpeechPattern =
+  /(?<![a-z0-9])n[\W_]*[i1!][\W_]*[gq][\W_]*[gq][\W_]*(?:[e3][\W_]*r|[a@])s?(?![a-z0-9])/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -152,6 +158,7 @@ export function moderateDznCommsBody(value: unknown) {
   if (
     profanityPattern.test(compact)
     || identitySlurPattern.test(compact)
+    || severeHateSpeechPattern.test(compact)
     || targetedProfanityPattern.test(compact)
     || targetedIdentityAbusePattern.test(compact)
     || contextualAmbiguousAbusePattern.test(compact)
@@ -159,6 +166,7 @@ export function moderateDznCommsBody(value: unknown) {
     || sexualHarassmentPattern.test(compact)
     || multilingualAbusePattern.test(compact)
     || obfuscatedProfanityPattern.test(folded)
+    || obfuscatedSevereHateSpeechPattern.test(folded)
   ) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
