@@ -342,7 +342,7 @@ function normalizeReactionInput(value: unknown, customEmojiEnabled: boolean): Re
   const legacyKey = clean(value, 24).toLowerCase();
   if (allowedReactionKeys.has(legacyKey as ReactionKey)) return catalogEntry(legacyKey);
   if (!customEmojiEnabled) return null;
-  return normalizeStoredReactionKey(value, true) ?? customEmojiEntry(clean(value, 32));
+  return normalizeStoredReactionKey(value, true) ?? customEmojiEntry(literalEmoji(value));
 }
 
 function normalizeStoredReactionKey(value: unknown, customEmojiEnabled: boolean): ReactionEntry | null {
@@ -377,6 +377,7 @@ function customEmojiEntry(value: string): ReactionEntry | null {
   const key = `emoji:${codePoints.map((part) => part.codePointAt(0)!.toString(16)).join("-")}`;
   return key.length <= 64 ? { key, emoji, label: "Emoji" } : null;
 }
+function literalEmoji(value: unknown) { return typeof value === "string" ? value.normalize("NFC").trim() : ""; }
 function safeId(value: unknown) { const id = clean(value, 80); return /^[a-zA-Z0-9_-]{1,80}$/.test(id) ? id : ""; }
 function mutationId(value: unknown) { const id = clean(value, 80); return /^[a-zA-Z0-9_-]{16,80}$/.test(id) ? id : ""; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }

@@ -229,6 +229,13 @@ async function testPublicReactionLifecycle() {
     }), f.env, "public-message");
     assert.equal(existingCustom.status, 200);
     assert.equal((await payload(existingCustom)).result, "already_present");
+    for (const [index, emoji] of ["‼️", "ℹ️", "™️"].entries()) {
+      const compatibilityEmoji = await handleDznCommsReactions(request("POST", path, "other-token", {
+        clientMutationId: `reaction-custom-compatibility-000${index}`, reactionKey: emoji,
+      }), f.env, "public-message");
+      assert.equal(compatibilityEmoji.status, 201);
+      assert.equal((await payload(compatibilityEmoji)).reaction?.emoji, emoji);
+    }
     const customDisabled = { ...f.env, DZN_COMMS_CUSTOM_EMOJI_REACTIONS_ENABLED: "false" } as Env;
     assert.equal((await handleDznCommsReactions(request("POST", path, "other-token", {
       clientMutationId: "reaction-custom-0002", reactionKey: "👍🏽",
