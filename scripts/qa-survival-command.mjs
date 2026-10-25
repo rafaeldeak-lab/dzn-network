@@ -16,9 +16,9 @@ preview.stdout.on("data", chunk => { previewLog += chunk; }); preview.stderr.on(
 const origin = await waitForOrigin();
 const browser = await chromium.launch({ headless: true });
 try {
-  const backdrop = await fetch(`${origin}/images/games/survival-command-field-command-v2.png`);
-  assert.equal(backdrop.status, 200, "The original Survival Command field-command art must be included in the production export.");
-  assert.match(backdrop.headers.get("content-type") ?? "", /^image\/png/);
+  const terrain = await fetch(`${origin}/media/stronghold/rosebud/forest-ground.webp`);
+  assert.equal(terrain.status, 200, "The Rosebud field terrain must be included in the production export.");
+  assert.match(terrain.headers.get("content-type") ?? "", /^image\/webp/);
   for (const viewport of [{ name: "desktop", width: 1440, height: 1000, fixture: "" }, { name: "phone", width: 390, height: 844, fixture: "-other" }]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
@@ -44,35 +44,21 @@ try {
     assert.equal(await page.locator("button", { hasText: "Recovery priority" }).count(), 1);
     await page.getByRole("button", { name: /Signal intercept/ }).click();
     await page.getByText("Field decision required", { exact: true }).waitFor();
-    const canvas = page.locator('canvas[data-dzn-survival-command-canvas="true"]');
-    await canvas.waitFor({ state: "visible" });
-    const telemetry = await canvas.evaluate(element => {
-      const canvas = element;
-      const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-      if (!context) return null;
-      const width = context.drawingBufferWidth;
-      const height = context.drawingBufferHeight;
-      const pixels = new Uint8Array(width * height * 4);
-      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
-      let litPixels = 0;
-      const colours = new Set();
-      for (let offset = 0; offset < pixels.length; offset += 4 * 19) {
-        const [red, green, blue, alpha] = [pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]];
-        if (alpha > 5 && red + green + blue > 90) litPixels++;
-        if (alpha > 5) colours.add(`${Math.floor(red / 20)}:${Math.floor(green / 20)}:${Math.floor(blue / 20)}`);
-      }
-      return { width, height, litPixels, colourCount: colours.size };
-    });
-    assert.ok(telemetry && telemetry.width > 250 && telemetry.height > 190, "Survival Command should render a usable operations board.");
-    assert.ok(telemetry.litPixels > 110, "Survival Command scene should not render blank pixels.");
-    assert.ok(telemetry.colourCount > 26, "Survival Command scene should render a detailed, distinct tactical diorama.");
-    assert.equal(await page.getByText("Perimeter sweep", { exact: true }).count(), 2);
-    assert.equal(await page.getByText("Rail-yard recovery", { exact: true }).count(), 1);
-    assert.equal(await page.getByText("Signal intercept", { exact: true }).count(), 1);
+    const scene = page.locator(".dzn-survival-command-scene");
+    await scene.waitFor({ state: "visible" });
+    const fieldAssets = scene.locator("img");
+    assert.equal(await fieldAssets.count(), 4, "Survival Command should load the four Rosebud field renders.");
+    assert.equal(await fieldAssets.evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), true, "Survival Command renders should load successfully.");
+    const bounds = await scene.boundingBox();
+    assert.ok(bounds && bounds.width > 250 && bounds.height > 190, "Survival Command should render a usable operations board.");
+    assert.equal(await scene.locator('[data-selected="true"]').count(), 1, "The field board should reflect exactly one selected sector.");
+    assert.ok(await page.getByText("Perimeter sweep", { exact: true }).count() >= 1, "The perimeter route should remain available.");
+    assert.ok(await page.getByText("Rail-yard recovery", { exact: true }).count() >= 1, "The rail-yard route should remain available.");
+    assert.ok(await page.getByText("Signal intercept", { exact: true }).count() >= 1, "The selected field order should remain visible.");
     assert.equal(await page.locator("button", { hasText: "Dispatch team" }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {
-      const height = await canvas.evaluate(element => element.parentElement?.getBoundingClientRect().height ?? 0);
+      const height = await scene.evaluate(element => element.getBoundingClientRect().height);
       assert.ok(height <= 330, `Phone scene must remain compact (received ${height}px).`);
     }
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });

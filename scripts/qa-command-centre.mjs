@@ -26,28 +26,13 @@ try {
     const establish = page.getByRole("button", { name: "Establish Command Centre" });
     if (await establish.count()) await establish.click();
     await page.getByRole("heading", { name: "Ruined Camp" }).waitFor();
-    const canvas = page.locator('canvas[data-dzn-command-centre-canvas="true"]');
-    await canvas.waitFor({ state: "visible" });
-    const telemetry = await canvas.evaluate(element => {
-      const canvas = element;
-      const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-      if (!context) return null;
-      const width = context.drawingBufferWidth;
-      const height = context.drawingBufferHeight;
-      const pixels = new Uint8Array(width * height * 4);
-      context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
-      let litPixels = 0;
-      const colours = new Set();
-      for (let offset = 0; offset < pixels.length; offset += 4 * 17) {
-        const [red, green, blue, alpha] = [pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]];
-        if (alpha > 5 && red + green + blue > 95) litPixels++;
-        if (alpha > 5) colours.add(`${Math.floor(red / 20)}:${Math.floor(green / 20)}:${Math.floor(blue / 20)}`);
-      }
-      return { width, height, litPixels, colourCount: colours.size };
-    });
-    assert.ok(telemetry && telemetry.width > 240 && telemetry.height > 160, "Command Centre should render a usable 3D settlement.");
-    assert.ok(telemetry.litPixels > 80, "Command Centre scene should not render blank pixels.");
-    assert.ok(telemetry.colourCount > 18, "Command Centre scene should retain distinct building lighting.");
+    const scene = page.locator(".dzn-command-centre-3d");
+    await scene.waitFor({ state: "visible" });
+    const settlementAssets = scene.locator("img");
+    assert.equal(await settlementAssets.count(), 4, "Command Centre should load the four Rosebud settlement renders.");
+    assert.equal(await settlementAssets.evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), true, "Command Centre renders should load successfully.");
+    const bounds = await scene.boundingBox();
+    assert.ok(bounds && bounds.width > 240 && bounds.height > 160, "Command Centre should render a usable settlement board.");
     assert.equal(await page.getByText("Headquarters", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Workshop", { exact: true }).count(), 1);
     assert.equal(await page.getByText("Watchtower", { exact: true }).count(), 1);
@@ -55,7 +40,7 @@ try {
     assert.equal(await page.locator("button", { hasText: "Begin construction" }).count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (viewport.name === "phone") {
-      const sceneHeight = await canvas.evaluate(element => element.parentElement?.getBoundingClientRect().height ?? 0);
+      const sceneHeight = await scene.evaluate(element => element.getBoundingClientRect().height);
       assert.ok(sceneHeight <= 300, `Command Centre phone scene should remain compact (received ${sceneHeight}px).`);
     }
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
