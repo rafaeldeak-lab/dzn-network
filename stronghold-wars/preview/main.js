@@ -2102,6 +2102,28 @@ function showChroniclePanel() {
   $('closeBtn').onclick = closePanel;
 }
 
+function showFieldOrdersPanel(message = '') {
+  const board = service.getFieldOrders();
+  if (!board.ok) {
+    openPanel(`<h2>DZN Field Orders</h2><p class="notice warn">${escapeHTML(board.error)}</p><p>Orders require a verified member of an eligible Pro community in this local preview.</p><button id="closeBtn">Close</button>`);
+    $('closeBtn').onclick = closePanel;
+    return;
+  }
+  const finished = board.orders.filter(order => order.completed).length;
+  const resetMinutes = Math.max(0, Math.ceil((board.resetsAt - Date.now()) / 60_000));
+  const resetLabel = `${Math.floor(resetMinutes / 60)}h ${resetMinutes % 60}m`;
+  const cards = board.orders.map(order => `<article class="project-card"><strong>${escapeHTML(order.name)}</strong><p>${escapeHTML(order.objective)}</p><p class="help">⚙ ${order.rewardParts} personal Parts · ${order.claimed ? 'Reward claimed' : order.completed ? 'Ready to claim' : 'Awaiting action'}</p>${order.completed && !order.claimed ? `<button data-claim-order="${escapeHTML(order.id)}">Claim reward</button>` : ''}</article>`).join('');
+  openPanel(`<h2>DZN Field Orders</h2><p>Complete real actions in your Stronghold. Orders refresh at 00:00 UTC; rewards stay in your personal inventory.</p><p class="notice">${finished}/${board.orders.length} complete · resets in ${resetLabel}</p>${message ? `<p class="notice">${escapeHTML(message)}</p>` : ''}${cards}<div class="row"><button id="ordersForgeBtn">Open Forge</button><button id="ordersWarBtn">Open War Table</button><button id="closeBtn">Close</button></div><p class="help">Local preview progress only. Field Orders do not affect DZN server rankings or war scores.</p>`);
+  panel.querySelectorAll('[data-claim-order]').forEach(button => button.onclick = () => {
+    const result = service.claimFieldOrder(service.state.currentIdentityId, button.dataset.claimOrder);
+    if (result.ok) { beep(940); updateHud(); }
+    showFieldOrdersPanel(result.ok ? `+${result.amount} personal Parts secured.` : result.error);
+  });
+  $('ordersForgeBtn').onclick = showForgePanel;
+  $('ordersWarBtn').onclick = () => showWarTable();
+  $('closeBtn').onclick = closePanel;
+}
+
 function showLandPanel(focusPlotId = null) {
   const access = service.getAccess();
   if (!access.allowed) {
@@ -2413,6 +2435,7 @@ $('editBaseBtn').onclick = () => {
   showLayoutPanel();
 };
 $('chronicleBtn').onclick = showChroniclePanel;
+$('fieldOrdersBtn').onclick = () => showFieldOrdersPanel();
 $('proToggleBtn').onclick = () => {
   const community = service.getCommunityInfo();
   const result = service.setOwnerProActive(service.state.currentIdentityId, !community.proActive);

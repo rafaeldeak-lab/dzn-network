@@ -16,6 +16,11 @@ export const LEGACY_STORAGE_KEY = 'dzn-stronghold-save-v1';
 export const LEGACY_BACKUP_KEY = 'dzn-stronghold-save-v1-backup';
 export const CORRUPT_BACKUP_PREFIX = `${SERVICE_STORAGE_KEY}-corrupt-backup-v1-`;
 export const DAY_MS = 24 * 60 * 60 * 1000;
+export const FIELD_ORDERS = Object.freeze([
+  Object.freeze({ id: 'parts', name: 'Supply Pickup', objective: 'Collect produced Parts from your Workshop / Forge.', rewardParts: 40 }),
+  Object.freeze({ id: 'forge', name: 'Field Fabrication', objective: 'Claim a completed Forge job.', rewardParts: 50 }),
+  Object.freeze({ id: 'drill', name: 'Outpost Drill', objective: 'Win a practice raid with your training squad.', rewardParts: 60 }),
+]);
 export const WAR_RULES = Object.freeze({
   challengeLifetimeMs: 24 * 60 * 60 * 1000,
   preparationReadyMs: 30 * 1000,
@@ -166,7 +171,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, muted: false };
+  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -437,6 +442,11 @@ function normalizeLoadedState(raw) {
       actionRecords: Array.isArray(saved.actionRecords) ? saved.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [],
       trainingLoadout: saved.trainingLoadout && typeof saved.trainingLoadout === 'object' && !Array.isArray(saved.trainingLoadout)
         ? clone(saved.trainingLoadout) : null,
+      fieldOrders: {
+        day: typeof saved.fieldOrders?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.fieldOrders.day) ? saved.fieldOrders.day : '',
+        completed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.completed.includes(id)),
+        claimed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.claimed) && Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.claimed.includes(id) && saved.fieldOrders.completed.includes(id)),
+      },
       muted: Boolean(saved.muted),
     };
   }
@@ -1192,6 +1202,45 @@ export class LocalGameService {
     return records.find(record => record.id === id) || null;
   }
 
+  _fieldOrderState(member) {
+    const day = new Date(this.now()).toISOString().slice(0, 10);
+    if (member.fieldOrders?.day !== day) member.fieldOrders = { day, completed: [], claimed: [] };
+    return member.fieldOrders;
+  }
+
+  _completeFieldOrder(member, orderId) {
+    const orders = this._fieldOrderState(member);
+    if (!orders.completed.includes(orderId)) orders.completed.push(orderId);
+  }
+
+  getFieldOrders(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError, orders: [] };
+    const member = this.member(identityId);
+    if (!member) return { ok: false, error: 'Member inventory unavailable.', orders: [] };
+    const day = new Date(this.now()).toISOString().slice(0, 10);
+    const current = member.fieldOrders?.day === day ? member.fieldOrders : { completed: [], claimed: [] };
+    return {
+      ok: true, day, resetsAt: Date.parse(`${day}T00:00:00.000Z`) + DAY_MS,
+      orders: FIELD_ORDERS.map(order => ({ ...order, completed: current.completed.includes(order.id), claimed: current.claimed.includes(order.id) })),
+    };
+  }
+
+  claimFieldOrder(identityId, orderId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const order = FIELD_ORDERS.find(item => item.id === orderId);
+    if (!order) return { ok: false, error: 'Unknown Field Order.' };
+    const member = this.member(identityId);
+    const progress = this._fieldOrderState(member);
+    if (!progress.completed.includes(orderId)) return { ok: false, error: 'Complete this Field Order before claiming its reward.' };
+    if (progress.claimed.includes(orderId)) return { ok: false, error: 'This Field Order reward was already claimed today.' };
+    progress.claimed.push(orderId);
+    member.parts += order.rewardParts;
+    this.save();
+    return { ok: true, orderId, amount: order.rewardParts };
+  }
+
   getDefenderRequirement(identityId, role) {
     const config = DEFENDER_CONCEPTS[role];
     const entry = this.community(identityId);
@@ -1719,6 +1768,7 @@ export class LocalGameService {
     if (!Number.isSafeInteger(amount) || amount < 1) return { ok: false, error: 'No whole Parts are ready to collect yet.' };
     member.parts += amount;
     member.stored -= amount;
+    this._completeFieldOrder(member, 'parts');
     this.save();
     return { ok: true, amount };
   }
@@ -1841,6 +1891,7 @@ export class LocalGameService {
     member.parts += job.output;
     job.status = 'claimed';
     job.claimedAt = this.now();
+    this._completeFieldOrder(member, 'forge');
     const result = { ok: true, amount: job.output, jobId };
     this._recordAction(member.actionRecords, actionId, result, 'forge-claim');
     this.save();
@@ -1887,6 +1938,7 @@ export class LocalGameService {
     base.lastRaidClaimed = id;
     base.raidCount = Math.max(base.raidCount, id);
     member.parts += safeInt(reward);
+    this._completeFieldOrder(member, 'drill');
     this.save();
     return { ok: true, reward: safeInt(reward) };
   }

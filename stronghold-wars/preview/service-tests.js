@@ -296,6 +296,33 @@ export function runServiceTests() {
   assert(!trainingService.recordTrainingVictory('iron-owner', 1, 300).ok && trainingService.snapshot('iron-owner').member.parts === afterTrainingReward, 'repeated raid victory cannot claim twice');
   checks.push('recorded AI training attempt, member reward and duplicate-victory protection');
 
+  let orderClock = 1_900_000_000_000;
+  const orderStorage = new MemoryStorage();
+  let orderService = new LocalGameService({ storage: orderStorage, now: () => orderClock });
+  assert(orderService.getFieldOrders('iron-owner').orders.every(order => !order.completed), 'fresh Field Orders start without earned progress');
+  assert(!orderService.getFieldOrders('iron-unverified').ok && !orderService.claimFieldOrder('free-owner', 'parts').ok, 'Field Orders obey member verification and owner Pro gates');
+  assert(!orderService.claimFieldOrder('iron-owner', 'parts').ok && !orderService.claimFieldOrder('iron-owner', 'unknown').ok, 'unearned and unknown orders cannot be claimed');
+  orderService.setMemberValue('iron-owner', 'stored', 3);
+  assert(orderService.collectParts('iron-owner').amount === 3, 'collecting real produced Parts completes its Field Order');
+  assert(orderService.getFieldOrders('iron-owner').orders.find(order => order.id === 'parts').completed, 'supply pickup completion appears on the board');
+  const orderParts = orderService.snapshot('iron-owner').member.parts;
+  assert(orderService.claimFieldOrder('iron-owner', 'parts').amount === 40, 'supply order pays the stated personal Parts');
+  assert(!orderService.claimFieldOrder('iron-owner', 'parts').ok && orderService.snapshot('iron-owner').member.parts === orderParts + 40, 'repeat claim cannot pay twice');
+  assert(!orderService.getFieldOrders('iron-member').orders.find(order => order.id === 'parts').completed, 'another member has independent Field Orders');
+  const orderForge = orderService.startForgeJob('iron-owner', 'field-parts', 'field-order-forge-start');
+  assert(orderForge.ok, 'owner starts a real Forge job for the order');
+  orderClock += 16_000;
+  assert(orderService.claimForgeJob('iron-owner', orderForge.jobId).ok, 'claiming completed Forge output earns its Field Order');
+  assert(orderService.claimFieldOrder('iron-owner', 'forge').amount === 50, 'Forge order pays once');
+  assert(orderService.recordTrainingAttempt(1).ok && orderService.recordTrainingVictory('iron-owner', 1, 300).ok, 'a real training victory earns its Field Order');
+  assert(orderService.claimFieldOrder('iron-owner', 'drill').amount === 60, 'drill order pays once');
+  orderService = new LocalGameService({ storage: orderStorage, now: () => orderClock });
+  assert(orderService.getFieldOrders('iron-owner').orders.every(order => order.claimed), 'all three claims survive a save reload');
+  orderClock += 24 * 60 * 60 * 1000;
+  assert(orderService.getFieldOrders('iron-owner').orders.every(order => !order.completed && !order.claimed), 'Field Orders reset at the next UTC day');
+  assert(!orderService.claimFieldOrder('iron-owner', 'drill').ok, 'yesterday’s completed drill cannot pay today');
+  checks.push('daily Field Orders from real actions, access gates, independent rewards, reload and UTC rollover');
+
   const salvageClaim = service.claimDailySalvage('iron-owner');
   assert(salvageClaim.ok && salvageClaim.amount === GAME_CONFIG.dailySalvage, 'daily resupply is claimed by stable member identity');
   const firstNextClaim = salvageClaim.nextClaimAt;
