@@ -438,12 +438,12 @@ for (const oldLogoPath of [
 const publicDiscordConfig = source("lib/public-discord.ts");
 includesAll(publicDiscordConfig, [
   "DZN_PUBLIC_DISCORD_INVITE_URL",
-  "https://discord.gg/XPaycZqchQ",
+  "https://discord.gg/5kTwpVQn8a",
 ]);
 
 const landingPage = source("components/dzn/dzn-landing-page.tsx");
 const dashboardSource = source("components/onboarding/dashboard.tsx");
-const expiredDznInviteCode = ["T2cgc", "TYPFV"].join("");
+const expiredDznInviteCode = "XPaycZqchQ";
 for (const [label, file] of [
   ["public Discord config", publicDiscordConfig],
   ["site header", siteHeader],
