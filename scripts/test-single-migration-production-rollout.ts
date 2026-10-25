@@ -22,6 +22,7 @@ const migrations = [
   "0111_games_hub_circuit_forge_grid_control.sql",
   "0112_dzn_survival_command_field_orders.sql",
   "0113_dzn_server_status_evidence.sql",
+  "0114_dzn_comms_chat_interactions.sql",
 ];
 
 assert.match(workflow, /name: DZN Single Migration Production Rollout/);
@@ -179,6 +180,8 @@ const survivalFieldOrdersIndex = migrationNames.indexOf("0112_dzn_survival_comma
 assert.equal(migrationNames[survivalFieldOrdersIndex - 1], "0111_games_hub_circuit_forge_grid_control.sql");
 const serverStatusEvidenceIndex = migrationNames.indexOf("0113_dzn_server_status_evidence.sql");
 assert.equal(serverStatusEvidenceIndex, survivalFieldOrdersIndex + 1, "Per-server status evidence must follow the field-order migration.");
+const commsChatInteractionsIndex = migrationNames.indexOf("0114_dzn_comms_chat_interactions.sql");
+assert.equal(commsChatInteractionsIndex, serverStatusEvidenceIndex + 1, "DZN Comms interactions must follow the server-status evidence migration.");
 
 function verifyLedger(names: string[]) {
   const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));

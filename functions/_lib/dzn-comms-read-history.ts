@@ -3,6 +3,7 @@ import { json, methodNotAllowed } from "./http";
 import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
 import { readDznCommsReactionFlags, readDznCommsReactionSummaries } from "./dzn-comms-reactions";
 import { moderateDznCommsBody, readDznCommsOwnerArchiveFlags, readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
+import { readDznCommsTypingFlags } from "./dzn-comms-typing";
 import type { Env, SessionUser } from "./types";
 
 type DznCommsChannelRow = {
@@ -159,8 +160,9 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   const lastRow = pageRows.at(-1) ?? null;
   const nextCursor = rows.length > limit && lastRow ? encodeHistoryCursor(lastRow) : null;
   const reactionFlags = readDznCommsReactionFlags(env, request);
+  const typingFlags = readDznCommsTypingFlags(env, request);
   const reactionSummaries = reactionFlags.readEnabled
-    ? await readDznCommsReactionSummaries(db, pageRows.map((row) => row.id), user?.id ?? null)
+    ? await readDznCommsReactionSummaries(db, pageRows.map((row) => row.id), user?.id ?? null, reactionFlags.customEmojiReadEnabled)
     : new Map<string, DznCommsReactionSummary>();
   const selfDeleteEnabled = flags.writeFeaturesEnabled && readDznCommsOwnerArchiveFlags(env, request).enabled;
   const messages = pageRows
@@ -204,6 +206,10 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
         private_groups_enabled: privateGroupFlags.enabled,
         reactions_enabled: reactionFlags.readEnabled,
         reactions_write_enabled: reactionFlags.writeEnabled,
+        reactions_custom_emoji_enabled: reactionFlags.customEmojiReadEnabled,
+        reactions_custom_emoji_write_enabled: reactionFlags.customEmojiWriteEnabled,
+        typing_enabled: typingFlags.readEnabled,
+        typing_write_enabled: typingFlags.writeEnabled,
         report_actions_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
         moderation_mutations_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
         self_delete_enabled: selfDeleteEnabled,

@@ -26,6 +26,7 @@ on:
           - 0111_games_hub_circuit_forge_grid_control.sql
           - 0112_dzn_survival_command_field_orders.sql
           - 0113_dzn_server_status_evidence.sql
+          - 0114_dzn_comms_chat_interactions.sql
       confirm_production_migration:
         description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
         required: true
@@ -86,7 +87,7 @@ jobs:
             exit 1
           fi
           case "${MIGRATION_NAME_INPUT}" in
-            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql|0110_games_hub_night_run_route_control.sql|0111_games_hub_circuit_forge_grid_control.sql|0112_dzn_survival_command_field_orders.sql|0113_dzn_server_status_evidence.sql) ;;
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql|0105_games_hub_night_run_recon.sql|0107_dzn_command_centre.sql|0108_dzn_survival_command_expeditions.sql|0109_dzn_survival_command_loadouts.sql|0110_games_hub_night_run_route_control.sql|0111_games_hub_circuit_forge_grid_control.sql|0112_dzn_survival_command_field_orders.sql|0113_dzn_server_status_evidence.sql|0114_dzn_comms_chat_interactions.sql) ;;
             *)
               echo "::error::migration_name is not an approved single-migration target."
               exit 1
@@ -123,6 +124,7 @@ jobs:
           npm run test:survival-command-loadout-migration-maintenance
           npm run test:survival-command-field-orders-migration-maintenance
           npm run test:server-status-evidence-migration
+          npm run test:dzn-comms-chat-interactions-migration
           npm run test:night-run-route-control-migration-maintenance
           npm run test:circuit-forge-grid-control-migration-maintenance
           npm run test:games-hub

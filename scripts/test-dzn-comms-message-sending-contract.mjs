@@ -117,6 +117,9 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /sendAttemptRef/);
   assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel, draft, pendingAttempt\.requestId\)/, "The composer target must match the channel represented by the visible validated payload.");
   assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "A stale mutation refresh must not replace a newer channel selection.");
+  assert.match(shell, /function applyReactionMutation\(messageId: string, mutation: CommsReactionMutation\)[\s\S]*messages: current\.payload\.messages\.map/, "Reaction updates must patch only the affected visible message.");
+  assert.doesNotMatch(shell, /async function refreshReactions\(/, "A reaction click must not replace paginated history with the newest page.");
+  assert.match(shell, /reaction\.key\.startsWith\("emoji:"\) \? reaction\.emoji : reaction\.key/, "Legacy reaction joins must retain their catalog keys while custom reactions submit validated emoji.");
   assert.match(shell, /const historyRequestGenerationRef = useRef\(0\)/, "History reads must share a monotonic request generation.");
   assert.match(shell, /const privateAccessRequestGenerationRef = useRef\(0\)/, "Private capability checks need an independent generation while an earlier page is loading.");
   assert.ok((shell.match(/const requestGeneration = \+\+historyRequestGenerationRef\.current/g) ?? []).length >= 2, "Send refreshes and earlier-history reads must both advance the shared request generation.");
@@ -125,7 +128,13 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /if \(selectedChannel !== "global-chat"\) \{\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "Private access recovery must reset pagination before loading Global Chat.");
   assert.match(shell, /await sendCommsMessage[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful message send must release an earlier-history loading state only for its original channel.");
-  assert.doesNotMatch(shell, /reactionAttemptRef|addCommsReaction|removeCommsReaction/, "The compact Global Chat UI must not retain the fixed reaction mutation path.");
+  assert.doesNotMatch(shell, /reactionAttemptRef|\bheart\b|\bboost\b|\blaugh\b|\bsalute\b|\bskull\b/, "The compact Global Chat UI must not retain a fixed reaction catalog.");
+  assert.match(shell, /Add an emoji reaction/, "The compact Global Chat UI must expose only an on-demand emoji reaction control.");
+  assert.match(shell, /is typing\.\.\./, "The chat shell must provide an ephemeral Discord-style typing indicator.");
+  assert.match(shell, /const TYPING_IDLE_TIMEOUT_MS = 5_000/, "Typing must stop after a short idle interval.");
+  assert.match(shell, /typingLastInputAtRef\.current = Date\.now\(\)/, "Only actual composer input may refresh typing activity.");
+  assert.match(shell, /const stop = \(\) => \{[\s\S]*void setCommsTyping\(channel, false\)/, "Typing cleanup must remove the server-side typing state.");
+  assert.match(shell, /now - typingLastInputAtRef\.current > TYPING_IDLE_TIMEOUT_MS[\s\S]*stop\(\);/, "An idle draft must clear its typing state instead of renewing indefinitely.");
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");

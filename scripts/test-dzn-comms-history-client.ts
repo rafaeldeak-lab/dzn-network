@@ -209,10 +209,27 @@ test("accepts, bounds and projects reaction-enabled history", async () => {
 
 test("rejects malformed or misplaced reaction projections", () => {
   const malformed = commsHistoryFixture(); malformed.feature_flags.reactions_enabled = true;
-  Object.assign(malformed.messages[0], { reactions: { revision: "empty", available_reactions: [], counts: [] } });
+  Object.assign(malformed.messages[0], { reactions: { revision: "emoji-reaction", available_reactions: [], counts: [{ key: "emoji:1f44d", emoji: "not-an-emoji", label: "Emoji", count: 1, current_user_reacted: false }] } });
   assert.throws(() => parseCommsHistory(malformed));
   const disabled = commsHistoryFixture(); Object.assign(disabled.messages[0], { reactions: {} });
   assert.throws(() => parseCommsHistory(disabled));
+});
+
+test("accepts a server-validated custom emoji only when the capability is enabled", () => {
+  const input = commsHistoryFixture();
+  input.feature_flags.reactions_enabled = true;
+  input.feature_flags.reactions_write_enabled = true;
+  input.feature_flags.reactions_custom_emoji_enabled = true;
+  input.feature_flags.reactions_custom_emoji_write_enabled = true;
+  Object.assign(input.messages[0], { reactions: {
+    revision: "emoji-reaction", available_reactions: [],
+    counts: [{ key: "emoji:1f44d-1f3fd", emoji: "👍🏽", label: "Emoji", count: 1, current_user_reacted: true }],
+  } });
+  assert.deepEqual(parseCommsHistory(input).messages[0].reactions?.counts, [
+    { key: "emoji:1f44d-1f3fd", emoji: "👍🏽", label: "Emoji", count: 1, current_user_reacted: true },
+  ]);
+  input.feature_flags.reactions_custom_emoji_enabled = false;
+  assert.throws(() => parseCommsHistory(input));
 });
 
 test("sends bounded own-reaction add and remove requests", async () => {
@@ -221,11 +238,20 @@ test("sends bounded own-reaction add and remove requests", async () => {
   globalThis.fetch = (async (url, options) => {
     requests.push({ url: String(url), method: String(options?.method), body: JSON.parse(String(options?.body)) });
     assert.equal(options?.credentials, "include"); assert.equal(options?.redirect, "error");
-    return jsonResponse({ ok: true });
+    const isAdd = options?.method === "POST";
+    return jsonResponse({
+      ok: true,
+      revision: isAdd ? "reaction-revision-add" : "reaction-revision-remove",
+      reaction: { key: "heart", emoji: "\u{1F49C}", label: "Heart", count: isAdd ? 1 : 0, current_user_reacted: isAdd },
+    });
   }) as typeof fetch;
   try {
-    await addCommsReaction("message/one", "heart", "reaction-client-0001");
-    await removeCommsReaction("message/one", "heart", "reaction-client-0002");
+    const added = await addCommsReaction("message/one", "heart", "reaction-client-0001");
+    const removed = await removeCommsReaction("message/one", "heart", "reaction-client-0002");
+    assert.equal(added.reaction.count, 1);
+    assert.equal(added.reaction.current_user_reacted, true);
+    assert.equal(removed.reaction.count, 0);
+    assert.equal(removed.reaction.current_user_reacted, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

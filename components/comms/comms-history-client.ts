@@ -1,9 +1,14 @@
-export type CommsReactionKey = "heart" | "boost" | "laugh" | "salute" | "fire" | "skull";
+export type CommsReactionKey = string;
 
 export type CommsReactionSummary = {
   revision: string;
   available_reactions: { key: CommsReactionKey; emoji: string; label: string }[];
   counts: { key: CommsReactionKey; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
+};
+
+export type CommsReactionMutation = {
+  revision: string;
+  reaction: CommsReactionSummary["counts"][number];
 };
 
 export type CommsHistoryMessage = {
@@ -50,11 +55,23 @@ export type CommsHistoryPayload = {
     private_groups_enabled: boolean;
     reactions_enabled: boolean;
     reactions_write_enabled: boolean;
+    reactions_custom_emoji_enabled: boolean;
+    reactions_custom_emoji_write_enabled: boolean;
+    typing_enabled: boolean;
+    typing_write_enabled: boolean;
     report_actions_enabled: boolean;
     moderation_mutations_enabled: boolean;
     self_delete_enabled: boolean;
   } & Record<(typeof disabledFeatures)[number], false>;
   fairness_boundary: string[];
+};
+
+export type CommsTypingPayload = {
+  ok: true;
+  channel_slug: string;
+  typers: { display_name: string; expires_at: string }[];
+  ttl_seconds: number;
+  generated_at: string;
 };
 
 const disabledFeatures = ["ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
@@ -67,7 +84,7 @@ const reactionCatalog = [
   { key: "fire", emoji: "\u{1F525}", label: "Fire" },
   { key: "skull", emoji: "\u{1F480}", label: "Skull" },
 ] as const;
-const reactionByKey = new Map(reactionCatalog.map((reaction) => [reaction.key, reaction]));
+const reactionByKey = new Map<string, { key: CommsReactionKey; emoji: string; label: string }>(reactionCatalog.map((reaction) => [reaction.key, reaction]));
 // Thirty 2,000-code-unit bodies plus bounded metadata must fit even with six-byte JSON escapes.
 export const COMMS_HISTORY_MAX_BYTES = 512 * 1_024;
 export const COMMS_HISTORY_TIMEOUT_MS = 5_000;
@@ -122,26 +139,50 @@ function projectChannel(value: unknown): CommsChannel {
   };
 }
 
-function reactionSummary(value: unknown): CommsReactionSummary {
+function reactionSummary(value: unknown, customEmojiEnabled: boolean): CommsReactionSummary {
   const input = record(value);
   const revision = text(input.revision, 40);
-  if (!Array.isArray(input.available_reactions) || input.available_reactions.length !== reactionCatalog.length
-    || !Array.isArray(input.counts) || input.counts.length > reactionCatalog.length) throw unavailable();
+  if (!Array.isArray(input.available_reactions) || input.available_reactions.length > reactionCatalog.length
+    || !Array.isArray(input.counts) || input.counts.length > 24) throw unavailable();
   const available = input.available_reactions.map((value) => {
-    const row = record(value), key = text(row.key, 24) as CommsReactionKey, expected = reactionByKey.get(key);
-    if (!expected || row.emoji !== expected.emoji || row.label !== expected.label) throw unavailable();
-    return { ...expected };
+    return reactionEntry(value, customEmojiEnabled);
   });
-  if (new Set(available.map((reaction) => reaction.key)).size !== reactionCatalog.length) throw unavailable();
+  if (new Set(available.map((reaction) => reaction.key)).size !== available.length) throw unavailable();
   const keys = new Set<CommsReactionKey>();
   const counts = input.counts.map((value) => {
-    const row = record(value), key = text(row.key, 24) as CommsReactionKey, expected = reactionByKey.get(key);
-    if (!expected || keys.has(key) || row.emoji !== expected.emoji || row.label !== expected.label
+    const row = record(value), reaction = reactionEntry(row, customEmojiEnabled), key = reaction.key;
+    if (keys.has(key)
       || !Number.isSafeInteger(row.count) || Number(row.count) < 1 || row.current_user_reacted !== Boolean(row.current_user_reacted)) throw unavailable();
     keys.add(key);
-    return { ...expected, count: Number(row.count), current_user_reacted: row.current_user_reacted as boolean };
+    return { ...reaction, count: Number(row.count), current_user_reacted: row.current_user_reacted as boolean };
   });
   return { revision, available_reactions: available, counts };
+}
+
+function reactionEntry(value: unknown, customEmojiEnabled: boolean): { key: CommsReactionKey; emoji: string; label: string } {
+  const row = record(value), key = text(row.key, 64) as CommsReactionKey, emoji = text(row.emoji, 32), label = text(row.label, 24);
+  const legacy = reactionByKey.get(key);
+  if (legacy) {
+    if (emoji !== legacy.emoji || label !== legacy.label) throw unavailable();
+    return { ...legacy };
+  }
+  if (!customEmojiEnabled || !isCustomEmojiKey(key, emoji) || label !== "Emoji") throw unavailable();
+  return { key, emoji, label };
+}
+
+function isCustomEmojiKey(key: string, emoji: string) {
+  if (!/^emoji:[0-9a-f]{1,6}(?:-[0-9a-f]{1,6}){0,15}$/.test(key)) return false;
+  try {
+    const normalized = emoji.normalize("NFC");
+    const codePoints = [...normalized];
+    const isKeycap = /^[0-9#*]\uFE0F?\u20E3$/u.test(normalized);
+    const isEmojiSequence = /^[\p{Extended_Pictographic}\p{Emoji_Component}\p{Regional_Indicator}\u200D\uFE0E\uFE0F\u20E3]+$/u.test(normalized);
+    const hasVisibleEmoji = /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(normalized) || isKeycap;
+    return codePoints.length > 0 && codePoints.length <= 16 && isEmojiSequence && hasVisibleEmoji
+      && `emoji:${codePoints.map((part) => part.codePointAt(0)!.toString(16)).join("-")}` === key;
+  } catch {
+    return false;
+  }
 }
 
 // Project only public Global Chat or an explicitly membership-scoped private group.
@@ -158,8 +199,13 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || flags.route_enabled !== true || typeof flags.private_groups_enabled !== "boolean"
     || typeof flags.sending_enabled !== "boolean" || typeof flags.report_actions_enabled !== "boolean"
     || typeof flags.reactions_enabled !== "boolean" || typeof flags.reactions_write_enabled !== "boolean"
+    || typeof flags.reactions_custom_emoji_enabled !== "boolean" || typeof flags.reactions_custom_emoji_write_enabled !== "boolean"
+    || typeof flags.typing_enabled !== "boolean" || typeof flags.typing_write_enabled !== "boolean"
     || typeof flags.moderation_mutations_enabled !== "boolean" || typeof flags.self_delete_enabled !== "boolean"
     || (flags.reactions_write_enabled === true && flags.reactions_enabled !== true)
+    || (flags.reactions_custom_emoji_enabled === true && flags.reactions_enabled !== true)
+    || (flags.reactions_custom_emoji_write_enabled === true && (flags.reactions_custom_emoji_enabled !== true || flags.reactions_write_enabled !== true))
+    || (flags.typing_write_enabled === true && flags.typing_enabled !== true)
     || flags.report_actions_enabled !== flags.sending_enabled
     || flags.moderation_mutations_enabled !== flags.sending_enabled
     || (isPrivate && flags.private_groups_enabled !== true)
@@ -188,7 +234,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     const placeholder = state === "deleted" ? "Message deleted." : state === "quarantined"
       ? "Message unavailable while DZN Safety reviews it." : "Message hidden by DZN Safety.";
     const reactions = flags.reactions_enabled === true && state === "visible"
-      ? reactionSummary(row.reactions)
+      ? reactionSummary(row.reactions, flags.reactions_custom_emoji_enabled === true)
       : undefined;
     if (reactions === undefined && row.reactions !== undefined) throw unavailable();
     const authorAvatarUrl = state === "visible" ? discordAvatarUrl(row.author_avatar_url) : null;
@@ -215,6 +261,9 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     feature_flags: {
       route_enabled: true, sending_enabled: flags.sending_enabled, private_groups_enabled: flags.private_groups_enabled,
       reactions_enabled: flags.reactions_enabled, reactions_write_enabled: flags.reactions_write_enabled,
+      reactions_custom_emoji_enabled: flags.reactions_custom_emoji_enabled,
+      reactions_custom_emoji_write_enabled: flags.reactions_custom_emoji_write_enabled,
+      typing_enabled: flags.typing_enabled, typing_write_enabled: flags.typing_write_enabled,
       report_actions_enabled: flags.report_actions_enabled, moderation_mutations_enabled: flags.moderation_mutations_enabled,
       self_delete_enabled: flags.self_delete_enabled,
       ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
@@ -298,20 +347,22 @@ async function requestCommsMutation(method: "POST" | "DELETE", path: string, bod
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMS_HISTORY_TIMEOUT_MS);
   let response: Response;
-  let payload: { ok?: boolean; message?: string } | null;
+  let payload: Record<string, unknown> | null;
   try {
     response = await fetch(path, {
       method, credentials: "include", redirect: "error",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(body), signal: controller.signal,
     });
-    payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+    const parsed = await response.json().catch(() => null);
+    payload = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
   } catch {
     throw new Error(fallbackMessage);
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok || !payload?.ok) throw new Error(payload?.message || fallbackMessage);
+  if (!response.ok || payload?.ok !== true) throw new Error(typeof payload?.message === "string" ? payload.message : fallbackMessage);
+  return payload;
 }
 
 async function postCommsMutation(path: string, body: unknown, fallbackMessage: string) {
@@ -331,11 +382,65 @@ export async function deleteCommsMessage(messageId: string) {
 }
 
 export async function addCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
-  await requestCommsMutation("POST", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions`,
-    { reactionKey, clientMutationId }, "Reaction could not be saved.");
+  return parseCommsReactionMutation(await requestCommsMutation("POST", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions`,
+    { reactionKey, clientMutationId }, "Reaction could not be saved."));
 }
 
 export async function removeCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
-  await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionKey)}`,
-    { clientMutationId }, "Reaction could not be removed.");
+  return parseCommsReactionMutation(await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionKey)}`,
+    { clientMutationId }, "Reaction could not be removed."));
+}
+
+function parseCommsReactionMutation(value: unknown): CommsReactionMutation {
+  const input = record(value);
+  const revision = text(input.revision, 40);
+  const reactionInput = record(input.reaction);
+  const reaction = reactionEntry(reactionInput, true);
+  const count = reactionInput.count;
+  const currentUserReacted = reactionInput.current_user_reacted;
+  if (!Number.isSafeInteger(count) || Number(count) < 0 || currentUserReacted !== Boolean(currentUserReacted)) throw unavailable();
+  return { revision, reaction: { ...reaction, count: Number(count), current_user_reacted: currentUserReacted as boolean } };
+}
+
+export async function setCommsTyping(channel: string, typing: boolean) {
+  await postCommsMutation("/api/comms/typing", { channelSlug: channelSlug(channel), typing }, "Typing status could not be updated.");
+}
+
+export async function loadCommsTyping(signal: AbortSignal, channel = "global-chat", fetcher: typeof fetch = fetch): Promise<CommsTypingPayload> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, COMMS_HISTORY_TIMEOUT_MS);
+  try {
+    const response = await fetcher(`/api/comms/typing?${new URLSearchParams({ channel: channelSlug(channel) }).toString()}`, {
+      method: "GET", cache: "no-store", credentials: "include", redirect: "error", headers: { accept: "application/json" }, signal: controller.signal,
+    });
+    const length = response.headers.get("content-length");
+    if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get("content-type") ?? "")
+      || (length !== null && (!/^\d+$/.test(length) || Number(length) > 8_192))) throw unavailable();
+    return parseCommsTyping(await response.json());
+  } catch {
+    throw unavailable();
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+function parseCommsTyping(value: unknown): CommsTypingPayload {
+  const input = record(value);
+  const channel = channelSlug(input.channel_slug);
+  if (input.ok !== true || channel !== "global-chat" || !Array.isArray(input.typers)
+    || input.typers.length > 5 || !Number.isSafeInteger(input.ttl_seconds)
+    || Number(input.ttl_seconds) < 3 || Number(input.ttl_seconds) > 30) throw unavailable();
+  const names = new Set<string>();
+  const typers = input.typers.map((value) => {
+    const row = record(value), displayName = text(row.display_name, 60), expiresAt = timestamp(row.expires_at);
+    if (!expiresAt || names.has(displayName)) throw unavailable();
+    names.add(displayName);
+    return { display_name: displayName, expires_at: expiresAt };
+  });
+  const generatedAt = timestamp(input.generated_at);
+  if (!generatedAt) throw unavailable();
+  return { ok: true, channel_slug: channel, typers, ttl_seconds: Number(input.ttl_seconds), generated_at: generatedAt };
 }

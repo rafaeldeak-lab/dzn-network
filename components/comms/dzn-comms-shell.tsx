@@ -10,6 +10,7 @@ import {
   LockKeyhole,
   Megaphone,
   MessageCircle,
+  Plus,
   Send,
   ShieldCheck,
   Trash2,
@@ -22,12 +23,17 @@ import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import { mergeDeletionNotices, type DeletionNotice } from "./deletion-notices";
 import {
+  addCommsReaction,
   deleteCommsMessage,
   loadCommsHistory,
+  loadCommsTyping,
+  removeCommsReaction,
   reportCommsMessage,
   sendCommsMessage,
+  setCommsTyping,
   type CommsHistoryMessage,
   type CommsHistoryPayload,
+  type CommsReactionMutation,
 } from "./comms-history-client";
 
 type CommsHistoryState =
@@ -49,6 +55,8 @@ const DELETED_MESSAGE_NOTICE_MS = 2_000;
 const CAPABILITY_PROBE_RETRY_DELAY_MS = 5_000;
 const CAPABILITY_PROBE_RETRY_LIMIT = 3;
 const MESSAGE_RAIL_BOTTOM_TOLERANCE_PX = 32;
+const TYPING_IDLE_TIMEOUT_MS = 5_000;
+const TYPING_REFRESH_INTERVAL_MS = 4_000;
 
 type MessageRailMetrics = Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">;
 type MessageRailTimelineItem = Pick<CommsHistoryMessage, "created_at" | "id">;
@@ -130,6 +138,10 @@ const staticPayload: CommsHistoryPayload = {
     private_groups_enabled: false,
     reactions_enabled: false,
     reactions_write_enabled: false,
+    reactions_custom_emoji_enabled: false,
+    reactions_custom_emoji_write_enabled: false,
+    typing_enabled: false,
+    typing_write_enabled: false,
     report_actions_enabled: false,
     moderation_mutations_enabled: false,
     self_delete_enabled: false,
@@ -161,7 +173,10 @@ export function DznCommsShell() {
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
   const [historyPageMode, setHistoryPageMode] = useState<"latest" | "earlier">("latest");
   const [unseenMessageCount, setUnseenMessageCount] = useState(0);
+  const [typingNames, setTypingNames] = useState<string[]>([]);
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
+  const typingSessionChannelRef = useRef<string | null>(null);
+  const typingLastInputAtRef = useRef(0);
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyProbeEnabled ? "loading" : "static",
     payload: staticPayload,
@@ -296,7 +311,72 @@ export function DznCommsShell() {
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
   const selfDeleteUiEnabled = historyReady && payload.feature_flags.self_delete_enabled;
+  const reactionsEnabled = historyReady && payload.feature_flags.reactions_enabled;
+  const reactionsWriteEnabled = historyReady && payload.feature_flags.reactions_write_enabled;
+  const customEmojiReactionsEnabled = historyReady && payload.feature_flags.reactions_custom_emoji_enabled;
+  const customEmojiReactionsWriteEnabled = historyReady && payload.feature_flags.reactions_custom_emoji_write_enabled;
+  const typingReadEnabled = historyReady && payload.feature_flags.typing_enabled && payload.channel.slug === "global-chat";
+  const typingWriteEnabled = historyReady && payload.feature_flags.typing_write_enabled && payload.channel.slug === "global-chat";
   const statusLabel = useMemo(() => statusCopy(history.status, sendingEnabled), [history.status, sendingEnabled]);
+
+  useEffect(() => {
+    if (!typingReadEnabled) return;
+    const controller = new AbortController();
+    const refresh = () => {
+      void loadCommsTyping(controller.signal, payload.channel.slug)
+        .then((response) => {
+          if (!controller.signal.aborted && selectedChannelRef.current === response.channel_slug) {
+            setTypingNames(response.typers.map((typer) => typer.display_name));
+          }
+        })
+        .catch(() => { if (!controller.signal.aborted) setTypingNames([]); });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 3_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [payload.channel.slug, typingReadEnabled]);
+
+  const hasDraft = draft.trim().length > 0;
+  useEffect(() => {
+    const activeChannel = typingSessionChannelRef.current;
+    if (!typingWriteEnabled || !hasDraft || sending) {
+      if (activeChannel) {
+        typingSessionChannelRef.current = null;
+        void setCommsTyping(activeChannel, false).catch(() => undefined);
+      }
+      return;
+    }
+    const channel = payload.channel.slug;
+    let cancelled = false;
+    let lastRefreshAt = 0;
+    const stop = () => {
+      if (typingSessionChannelRef.current !== channel) return;
+      typingSessionChannelRef.current = null;
+      void setCommsTyping(channel, false).catch(() => undefined);
+    };
+    const refresh = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      if (now - typingLastInputAtRef.current > TYPING_IDLE_TIMEOUT_MS) {
+        stop();
+        return;
+      }
+      if (typingSessionChannelRef.current === channel && now - lastRefreshAt < TYPING_REFRESH_INTERVAL_MS) return;
+      lastRefreshAt = now;
+      typingSessionChannelRef.current = channel;
+      void setCommsTyping(channel, true).catch(() => undefined);
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      stop();
+    };
+  }, [hasDraft, payload.channel.slug, sending, typingWriteEnabled]);
 
   useEffect(() => {
     if (!historyReady || isUpdatesChannel) return;
@@ -393,6 +473,27 @@ export function DznCommsShell() {
     } finally {
       setSending(false);
     }
+  }
+
+  function applyReactionMutation(messageId: string, mutation: CommsReactionMutation) {
+    const targetChannel = payload.channel.slug;
+    if (!historyReady || selectedChannelRef.current !== targetChannel) return;
+    setHistory((current) => {
+      if (current.status !== "ready" || current.payload.channel.slug !== targetChannel) return current;
+      return {
+        ...current,
+        payload: {
+          ...current.payload,
+          messages: current.payload.messages.map((message) => {
+            if (message.id !== messageId) return message;
+            const reactions = message.reactions ?? { revision: mutation.revision, available_reactions: [], counts: [] };
+            const counts = reactions.counts.filter((reaction) => reaction.key !== mutation.reaction.key);
+            if (mutation.reaction.count > 0) counts.push(mutation.reaction);
+            return { ...message, reactions: { ...reactions, revision: mutation.revision, counts } };
+          }),
+        },
+      };
+    });
   }
 
   async function loadEarlierMessages() {
@@ -672,6 +773,11 @@ export function DznCommsShell() {
                     message={message}
                     reportEnabled={reportActionsEnabled}
                     deleteEnabled={selfDeleteUiEnabled}
+                    reactionsEnabled={reactionsEnabled}
+                    reactionsWriteEnabled={reactionsWriteEnabled}
+                    customEmojiReactionsEnabled={customEmojiReactionsEnabled}
+                    customEmojiReactionsWriteEnabled={customEmojiReactionsWriteEnabled}
+                    onReactionChanged={(mutation) => applyReactionMutation(message.id, mutation)}
                     onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
                   />
                 )) : (
@@ -697,11 +803,18 @@ export function DznCommsShell() {
                 </div> : null}
               </div>
 
+              {typingReadEnabled && typingNames.length > 0 ? <p role="status" aria-live="polite" className="mt-2 min-h-5 px-1 text-xs font-semibold text-zinc-400">
+                {typingCopy(typingNames)}
+              </p> : <div className="mt-2 min-h-5" aria-hidden="true" />}
+
               <form onSubmit={handleSend} className="mt-3 flex items-end gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
                 <textarea
                   disabled={!sendingEnabled || sending}
                   value={draft}
-                  onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
+                  onChange={(event) => {
+                    typingLastInputAtRef.current = Date.now();
+                    setDraft([...event.target.value].slice(0, 2_000).join(""));
+                  }}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || !canSend) return;
                     event.preventDefault();
@@ -773,16 +886,24 @@ export function recentVisibleSpeakers(messages: readonly CommsHistoryMessage[]) 
   return newestDistinct.reverse();
 }
 
-function MessageRow({ message, reportEnabled, deleteEnabled, onMessageDeleted }: {
+function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, reactionsWriteEnabled, customEmojiReactionsEnabled, customEmojiReactionsWriteEnabled, onReactionChanged, onMessageDeleted }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
   deleteEnabled: boolean;
+  reactionsEnabled: boolean;
+  reactionsWriteEnabled: boolean;
+  customEmojiReactionsEnabled: boolean;
+  customEmojiReactionsWriteEnabled: boolean;
+  onReactionChanged: (mutation: CommsReactionMutation) => void;
   onMessageDeleted: (messageId: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
   const canDelete = deleteEnabled && message.can_delete;
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [deleteState, setDeleteState] = useState<"idle" | "deleting" | "error">("idle");
+  const [reactionInputOpen, setReactionInputOpen] = useState(false);
+  const [reactionEmoji, setReactionEmoji] = useState("");
+  const [reactionState, setReactionState] = useState<"idle" | "saving" | "error">("idle");
 
   async function submitReport() {
     if (reportState === "sending" || reportState === "sent") return;
@@ -806,6 +927,28 @@ function MessageRow({ message, reportEnabled, deleteEnabled, onMessageDeleted }:
     }
   }
 
+  async function changeReaction(reactionKey: string, reacted: boolean, addReactionKey = reactionKey) {
+    if (!reactionsWriteEnabled || reactionState === "saving") return;
+    setReactionState("saving");
+    try {
+      const mutation = reacted
+        ? await removeCommsReaction(message.id, reactionKey, crypto.randomUUID())
+        : await addCommsReaction(message.id, addReactionKey, crypto.randomUUID());
+      setReactionEmoji("");
+      setReactionInputOpen(false);
+      setReactionState("idle");
+      onReactionChanged(mutation);
+    } catch {
+      setReactionState("error");
+    }
+  }
+
+  function submitCustomReaction(event: FormEvent) {
+    event.preventDefault();
+    if (!reactionEmoji.trim()) return;
+    void changeReaction(reactionEmoji, false);
+  }
+
   return (
     <article className={`group py-2.5 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
       <div className="flex items-start gap-2.5">
@@ -823,6 +966,31 @@ function MessageRow({ message, reportEnabled, deleteEnabled, onMessageDeleted }:
             </div> : null}
           </div>
           <p className={`mt-0.5 text-sm font-semibold leading-5 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          {reactionsEnabled && !muted ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {message.reactions?.counts.map((reaction) => (
+              <button
+                key={reaction.key}
+                type="button"
+                disabled={!reactionsWriteEnabled || reactionState === "saving"}
+                onClick={() => void changeReaction(
+                  reaction.key,
+                  reaction.current_user_reacted,
+                  reaction.key.startsWith("emoji:") ? reaction.emoji : reaction.key,
+                )}
+                className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 text-xs font-bold transition disabled:cursor-default disabled:opacity-75 ${reaction.current_user_reacted ? "border-cyan-200/60 bg-cyan-300/15 text-cyan-50" : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-cyan-300/40 hover:bg-cyan-300/10"}`}
+                aria-label={`${reaction.current_user_reacted ? "Remove" : "Add"} ${reaction.emoji} reaction`}
+                title={reaction.current_user_reacted ? "Remove your reaction" : "Add this reaction"}
+              >
+                <span aria-hidden="true">{reaction.emoji}</span><span>{reaction.count}</span>
+              </button>
+            ))}
+            {customEmojiReactionsEnabled && customEmojiReactionsWriteEnabled ? <button type="button" onClick={() => setReactionInputOpen((open) => !open)} disabled={reactionState === "saving"} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 bg-white/[0.02] text-zinc-400 transition hover:border-cyan-300/40 hover:bg-cyan-300/10 hover:text-cyan-100 disabled:opacity-60" aria-label="Add an emoji reaction" title="Add an emoji reaction"><Plus className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
+            {reactionInputOpen ? <form onSubmit={submitCustomReaction} className="flex items-center gap-1" aria-label="Choose an emoji reaction">
+              <input value={reactionEmoji} onChange={(event) => setReactionEmoji([...event.target.value].slice(0, 16).join(""))} className="h-7 w-14 rounded-md border border-cyan-300/30 bg-[#060b14] px-1 text-center text-sm text-white outline-none focus:border-cyan-200" inputMode="text" maxLength={32} aria-label="Emoji" autoFocus />
+              <button type="submit" disabled={!reactionEmoji.trim() || reactionState === "saving"} className="h-7 rounded-md border border-cyan-300/30 px-2 text-[10px] font-black uppercase text-cyan-100 disabled:opacity-50">Add</button>
+            </form> : null}
+          </div> : null}
+          {reactionState === "error" ? <p role="alert" className="mt-1 text-xs font-bold text-amber-200">Reaction could not be saved. Try one emoji.</p> : null}
           {deleteState === "error" ? <p role="alert" className="mt-1 text-xs font-bold text-amber-200">Message could not be deleted. Try again.</p> : null}
           {reportState === "sent" ? <p role="status" className="mt-1 text-xs font-bold text-cyan-200">Report received.</p> : null}
           {reportState === "error" ? <p role="alert" className="mt-1 text-xs font-bold text-amber-200">Report failed. Try again.</p> : null}
@@ -903,6 +1071,12 @@ function statusCopy(status: CommsHistoryState["status"], sendingEnabled: boolean
   if (status === "ready") return sendingEnabled ? "Live" : "History";
   if (status === "loading") return "Checking";
   return "Unavailable";
+}
+
+function typingCopy(names: readonly string[]) {
+  if (names.length === 1) return `${names[0]} is typing...`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
+  return `${names.slice(0, 2).join(", ")} and others are typing...`;
 }
 
 function initials(value: string) {

@@ -17,9 +17,10 @@ const reactionCatalog = [
   { key: "fire", emoji: "\u{1F525}", label: "Fire" },
   { key: "skull", emoji: "\u{1F480}", label: "Skull" },
 ] as const;
-const allowedReactionKeys = new Set(reactionCatalog.map((reaction) => reaction.key));
+const allowedReactionKeys = new Set<string>(reactionCatalog.map((reaction) => reaction.key));
 
-type ReactionKey = (typeof reactionCatalog)[number]["key"];
+type ReactionKey = string;
+type ReactionEntry = { key: ReactionKey; emoji: string; label: string };
 type AddInput = { clientMutationId?: unknown; reactionKey?: unknown };
 type RemoveInput = { clientMutationId?: unknown };
 type MessageAccessRow = {
@@ -42,8 +43,8 @@ type ReactionCountRow = { message_id: string; reaction_key: string; reaction_cou
 type CurrentReactionRow = { message_id: string; reaction_key: string };
 type ReactionSummary = {
   revision: string;
-  available_reactions: typeof reactionCatalog;
-  counts: { key: ReactionKey; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
+  available_reactions: ReactionEntry[];
+  counts: (ReactionEntry & { count: number; current_user_reacted: boolean })[];
 };
 
 export function readDznCommsReactionFlags(env: Env, request?: Request) {
@@ -53,7 +54,9 @@ export function readDznCommsReactionFlags(env: Env, request?: Request) {
   const scoped = scope === "production" || (scope === "local_test" && localRequest);
   const readEnabled = live.enabled && scoped && booleanFlag(env.DZN_COMMS_REACTIONS_READ_ENABLED);
   const writeEnabled = readEnabled && booleanFlag(env.DZN_COMMS_REACTIONS_WRITE_ENABLED);
-  return { readEnabled, writeEnabled, scope, localRequest, liveEnabled: live.enabled };
+  const customEmojiReadEnabled = readEnabled && booleanFlag(env.DZN_COMMS_CUSTOM_EMOJI_REACTIONS_ENABLED);
+  const customEmojiWriteEnabled = writeEnabled && customEmojiReadEnabled && booleanFlag(env.DZN_COMMS_CUSTOM_EMOJI_REACTIONS_WRITE_ENABLED);
+  return { readEnabled, writeEnabled, customEmojiReadEnabled, customEmojiWriteEnabled, scope, localRequest, liveEnabled: live.enabled };
 }
 
 export async function handleDznCommsReactions(request: Request, env: Env, rawMessageId: unknown) {
@@ -70,14 +73,14 @@ export async function handleDznCommsReactionRemoval(request: Request, env: Env, 
   const user = await getSessionUser(env, request);
   if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to remove a reaction.");
   const messageId = safeId(rawMessageId);
-  const reactionKey = normalizeReactionKey(rawReactionKey);
-  if (!messageId || !reactionKey) return error(422, "INVALID_REACTION", "Choose an available DZN reaction.");
+  const reaction = normalizeStoredReactionKey(rawReactionKey, flags.customEmojiWriteEnabled);
+  if (!messageId || !reaction) return error(422, "INVALID_REACTION", "Choose one supported emoji reaction.");
   const parsed = await readBoundedJson<RemoveInput>(request, MAX_REQUEST_BYTES);
   if (!parsed.ok) return error(parsed.status, parsed.error, parsed.message);
   if (!exactKeys(parsed.value, ["clientMutationId"])) return error(400, "INVALID_REQUEST", "Reaction request fields are invalid.");
   const clientMutationId = mutationId(parsed.value.clientMutationId);
   if (!clientMutationId) return error(400, "INVALID_REQUEST", "Create a new reaction retry ID and try again.");
-  return mutateReaction(request, env, user, messageId, reactionKey, clientMutationId, "remove");
+  return mutateReaction(request, env, user, messageId, reaction, clientMutationId, "remove", flags.customEmojiReadEnabled);
 }
 
 async function readReactions(request: Request, env: Env, rawMessageId: unknown) {
@@ -92,7 +95,7 @@ async function readReactions(request: Request, env: Env, rawMessageId: unknown) 
     return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   }
   if (!access || !(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
-  const summary = await readReactionSummary(db, messageId, user?.id ?? null);
+  const summary = await readReactionSummary(db, messageId, user?.id ?? null, flags.customEmojiReadEnabled);
   if (!(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   return json({ ok: true, message_id: messageId, ...summary }, { headers: privateNoStoreHeaders() });
 }
@@ -109,10 +112,10 @@ async function addReaction(request: Request, env: Env, rawMessageId: unknown) {
   if (!parsed.ok) return error(parsed.status, parsed.error, parsed.message);
   if (!exactKeys(parsed.value, ["clientMutationId", "reactionKey"])) return error(400, "INVALID_REQUEST", "Reaction request fields are invalid.");
   const clientMutationId = mutationId(parsed.value.clientMutationId);
-  const reactionKey = normalizeReactionKey(parsed.value.reactionKey);
+  const reaction = normalizeReactionInput(parsed.value.reactionKey, flags.customEmojiWriteEnabled);
   if (!clientMutationId) return error(400, "INVALID_REQUEST", "Create a new reaction retry ID and try again.");
-  if (!reactionKey) return error(422, "INVALID_REACTION", "Choose an available DZN reaction.");
-  return mutateReaction(request, env, user, messageId, reactionKey, clientMutationId, "add");
+  if (!reaction) return error(422, "INVALID_REACTION", "Choose one supported emoji reaction.");
+  return mutateReaction(request, env, user, messageId, reaction, clientMutationId, "add", flags.customEmojiReadEnabled);
 }
 
 async function mutateReaction(
@@ -120,10 +123,13 @@ async function mutateReaction(
   env: Env,
   user: SessionUser,
   messageId: string,
-  reactionKey: ReactionKey,
+  reaction: ReactionEntry,
   clientMutationId: string,
   action: "add" | "remove",
+  includeCustomReactions: boolean,
 ) {
+  const reactionKey = reaction.key;
+  const table = reactionTable(reaction);
   const db = requireDb(env);
   const access = await readMessageAccess(db, messageId);
   if (access?.channel_visibility === "private_group" && !readDznCommsPrivateGroupFlags(env, request).enabled) {
@@ -133,7 +139,7 @@ async function mutateReaction(
   if (!readable) {
     return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   }
-  const existing = await readOwnReaction(db, messageId, user.id, reactionKey);
+  const existing = await readOwnReaction(db, messageId, user.id, reaction);
 
   const secret = env.DZN_COMMS_LEDGER_SECRET!;
   const actorMutationKey = await digest(`mutation:${user.id}\n${clientMutationId}`, secret);
@@ -143,7 +149,7 @@ async function mutateReaction(
   const replay = await readMutationReceipt(db, actorMutationKey);
   if (replay) {
     if (replay.request_hash !== requestHash) return error(409, "MUTATION_ID_CONFLICT", "This reaction retry ID was already used for another change.");
-    return mutationResponse(db, access!, user, messageId, reactionKey, replay.result, replay.response_status, true);
+    return mutationResponse(db, access!, user, messageId, reaction, replay.result, replay.response_status, true, includeCustomReactions);
   }
 
   const active = existing?.active === 1;
@@ -156,7 +162,7 @@ async function mutateReaction(
       db.prepare("DELETE FROM dzn_comms_reaction_mutations WHERE actor_mutation_key = ? AND julianday(expires_at) <= julianday('now')").bind(actorMutationKey),
       allocateReactionSlot(db, actorRateKey, now.toISOString().slice(0, 16)),
       action === "add"
-        ? db.prepare(`INSERT INTO dzn_comms_message_reactions
+        ? db.prepare(`INSERT INTO ${table}
             (id, message_id, actor_user_id, reaction_key, active, removed_at)
           SELECT ?, ?, ?, ?, 1, NULL
           WHERE ? IS NULL OR EXISTS (
@@ -168,7 +174,7 @@ async function mutateReaction(
               crypto.randomUUID(), messageId, user.id, reactionKey,
               privateChannelId, privateChannelId, user.id,
             )
-        : db.prepare(`UPDATE dzn_comms_message_reactions
+        : db.prepare(`UPDATE ${table}
           SET active = 0, updated_at = CURRENT_TIMESTAMP, removed_at = CURRENT_TIMESTAMP
           WHERE message_id = ? AND actor_user_id = ? AND reaction_key = ? AND active = 1
             AND (? IS NULL OR EXISTS (
@@ -189,13 +195,14 @@ async function mutateReaction(
   } catch (cause) {
     const concurrentReplay = await readMutationReceipt(db, actorMutationKey);
     if (concurrentReplay?.request_hash === requestHash) {
-      return mutationResponse(db, access!, user, messageId, reactionKey, concurrentReplay.result, concurrentReplay.response_status, true);
+      return mutationResponse(db, access!, user, messageId, reaction, concurrentReplay.result, concurrentReplay.response_status, true, includeCustomReactions);
     }
     if (concurrentReplay) return error(409, "MUTATION_ID_CONFLICT", "This reaction retry ID was already used for another change.");
     if (isReactionQuotaError(cause)) return error(429, "REACTION_RATE_LIMITED", "Too many reactions were changed. Wait a moment and retry.");
+    if (isReactionLimitError(cause)) return error(429, "REACTION_LIMIT_REACHED", "This message already has enough emoji reactions.");
     return error(503, "REACTION_STORAGE_UNAVAILABLE", "That reaction could not be saved. Retry shortly.");
   }
-  return mutationResponse(db, access!, user, messageId, reactionKey, result, status, false);
+  return mutationResponse(db, access!, user, messageId, reaction, result, status, false, includeCustomReactions);
 }
 
 async function mutationResponse(
@@ -203,12 +210,14 @@ async function mutationResponse(
   access: MessageAccessRow,
   user: SessionUser,
   messageId: string,
-  reactionKey: ReactionKey,
+  reaction: ReactionEntry,
   result: MutationReceipt["result"],
   status: number,
   replayed: boolean,
+  includeCustomReactions: boolean,
 ) {
-  const summary = await readReactionSummary(db, messageId, user.id);
+  const reactionKey = reaction.key;
+  const summary = await readReactionSummary(db, messageId, user.id, includeCustomReactions);
   if (!(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   const selected = summary.counts.find((reaction) => reaction.key === reactionKey);
   return json({
@@ -217,7 +226,7 @@ async function mutationResponse(
     result,
     replayed,
     message_id: messageId,
-    reaction: selected ?? { ...catalogEntry(reactionKey), count: 0, current_user_reacted: false },
+    reaction: selected ?? { ...reaction, count: 0, current_user_reacted: false },
     revision: summary.revision,
   }, { status, headers: privateNoStoreHeaders() });
 }
@@ -239,9 +248,9 @@ async function canReadMessage(db: D1Database, access: MessageAccessRow, user: Se
   return membership?.allowed === 1;
 }
 
-async function readOwnReaction(db: D1Database, messageId: string, userId: string, reactionKey: ReactionKey) {
-  return db.prepare(`SELECT active FROM dzn_comms_message_reactions
-    WHERE message_id = ? AND actor_user_id = ? AND reaction_key = ? LIMIT 1`).bind(messageId, userId, reactionKey).first<{ active: number }>();
+async function readOwnReaction(db: D1Database, messageId: string, userId: string, reaction: ReactionEntry) {
+  return db.prepare(`SELECT active FROM ${reactionTable(reaction)}
+    WHERE message_id = ? AND actor_user_id = ? AND reaction_key = ? LIMIT 1`).bind(messageId, userId, reaction.key).first<{ active: number }>();
 }
 
 async function readMutationReceipt(db: D1Database, actorMutationKey: string) {
@@ -250,20 +259,28 @@ async function readMutationReceipt(db: D1Database, actorMutationKey: string) {
     WHERE actor_mutation_key = ? AND julianday(expires_at) > julianday('now') LIMIT 1`).bind(actorMutationKey).first<MutationReceipt>();
 }
 
-export async function readDznCommsReactionSummaries(db: D1Database, messageIds: string[], userId: string | null) {
+export async function readDznCommsReactionSummaries(db: D1Database, messageIds: string[], userId: string | null, includeCustomReactions = false) {
   const safeMessageIds = [...new Set(messageIds.map(safeId).filter(Boolean))] as string[];
   const result = new Map<string, ReactionSummary>();
   if (safeMessageIds.length === 0) return result;
   const placeholders = safeMessageIds.map(() => "?").join(", ");
+  const reactionRows = includeCustomReactions
+    ? `SELECT message_id, reaction_key, actor_user_id, updated_at FROM dzn_comms_message_reactions
+        WHERE message_id IN (${placeholders}) AND active = 1
+      UNION ALL
+      SELECT message_id, reaction_key, actor_user_id, updated_at FROM dzn_comms_custom_emoji_reactions
+        WHERE message_id IN (${placeholders}) AND active = 1`
+    : `SELECT message_id, reaction_key, actor_user_id, updated_at FROM dzn_comms_message_reactions
+        WHERE message_id IN (${placeholders}) AND active = 1`;
+  const reactionBindings = includeCustomReactions ? [...safeMessageIds, ...safeMessageIds] : safeMessageIds;
   const counts = await db.prepare(`SELECT message_id, reaction_key, COUNT(*) AS reaction_count,
       MAX(updated_at) AS latest_update
-    FROM dzn_comms_message_reactions
-    WHERE message_id IN (${placeholders}) AND active = 1
-    GROUP BY message_id, reaction_key ORDER BY message_id, reaction_key`).bind(...safeMessageIds).all<ReactionCountRow>();
+    FROM (${reactionRows}) AS reactions
+    GROUP BY message_id, reaction_key ORDER BY message_id, reaction_key`).bind(...reactionBindings).all<ReactionCountRow>();
   const current = userId
-    ? await db.prepare(`SELECT message_id, reaction_key FROM dzn_comms_message_reactions
-        WHERE message_id IN (${placeholders}) AND actor_user_id = ? AND active = 1`)
-      .bind(...safeMessageIds, userId).all<CurrentReactionRow>()
+    ? await db.prepare(`SELECT message_id, reaction_key FROM (${reactionRows}) AS reactions
+        WHERE actor_user_id = ?`)
+      .bind(...reactionBindings, userId).all<CurrentReactionRow>()
     : { results: [] as CurrentReactionRow[] };
   const countsByMessage = new Map<string, ReactionCountRow[]>();
   const currentByMessage = new Map<string, Set<string>>();
@@ -278,22 +295,29 @@ export async function readDznCommsReactionSummaries(db: D1Database, messageIds: 
     currentByMessage.set(row.message_id, keys);
   }
   for (const messageId of safeMessageIds) {
-    result.set(messageId, buildReactionSummary(countsByMessage.get(messageId) ?? [], currentByMessage.get(messageId) ?? new Set()));
+    result.set(messageId, buildReactionSummary(countsByMessage.get(messageId) ?? [], currentByMessage.get(messageId) ?? new Set(), includeCustomReactions));
   }
   return result;
 }
 
-async function readReactionSummary(db: D1Database, messageId: string, userId: string | null) {
-  return (await readDznCommsReactionSummaries(db, [messageId], userId)).get(messageId) ?? buildReactionSummary([], new Set());
+async function readReactionSummary(db: D1Database, messageId: string, userId: string | null, includeCustomReactions: boolean) {
+  return (await readDznCommsReactionSummaries(db, [messageId], userId, includeCustomReactions)).get(messageId) ?? buildReactionSummary([], new Set(), includeCustomReactions);
 }
 
-function buildReactionSummary(counts: ReactionCountRow[], currentKeys: Set<string>): ReactionSummary {
-  const countMap = new Map(counts.map((row) => [row.reaction_key, Number(row.reaction_count ?? 0)]));
-  const latest = counts.map((row) => row.latest_update ?? "").sort().at(-1) ?? "";
+function buildReactionSummary(counts: ReactionCountRow[], currentKeys: Set<string>, includeCustomReactions: boolean): ReactionSummary {
+  const validCounts = counts
+    .map((row) => ({ row, reaction: normalizeStoredReactionKey(row.reaction_key, includeCustomReactions) }))
+    .filter((item): item is { row: ReactionCountRow; reaction: ReactionEntry } => item.reaction !== null);
+  const countMap = new Map(validCounts.map(({ row }) => [row.reaction_key, Number(row.reaction_count ?? 0)]));
+  const latest = validCounts.map(({ row }) => row.latest_update ?? "").sort().at(-1) ?? "";
   return {
     revision: latest || "empty",
-    available_reactions: reactionCatalog,
-    counts: reactionCatalog
+    // The client uses the operating-system emoji keyboard. It must not render a
+    // permanent canned-reaction strip that competes with the message content.
+    available_reactions: [],
+    counts: validCounts
+      .map(({ reaction }) => reaction)
+      .filter((reaction, index, all) => all.findIndex((candidate) => candidate.key === reaction.key) === index)
       .filter((reaction) => (countMap.get(reaction.key) ?? 0) > 0 || currentKeys.has(reaction.key))
       .map((reaction) => ({ ...reaction, count: countMap.get(reaction.key) ?? 0, current_user_reacted: currentKeys.has(reaction.key) })),
   };
@@ -314,8 +338,46 @@ function allocateReactionSlot(db: D1Database, actorRateKey: string, minuteBucket
     ))`).bind(actorRateKey, minuteBucket, actorRateKey, minuteBucket);
 }
 
-function catalogEntry(key: ReactionKey) { return reactionCatalog.find((reaction) => reaction.key === key)!; }
-function normalizeReactionKey(value: unknown): ReactionKey | null { const key = clean(value, 24).toLowerCase(); return allowedReactionKeys.has(key as ReactionKey) ? key as ReactionKey : null; }
+function normalizeReactionInput(value: unknown, customEmojiEnabled: boolean): ReactionEntry | null {
+  const legacyKey = clean(value, 24).toLowerCase();
+  if (allowedReactionKeys.has(legacyKey as ReactionKey)) return catalogEntry(legacyKey);
+  if (!customEmojiEnabled) return null;
+  return normalizeStoredReactionKey(value, true) ?? customEmojiEntry(literalEmoji(value));
+}
+
+function normalizeStoredReactionKey(value: unknown, customEmojiEnabled: boolean): ReactionEntry | null {
+  const legacyKey = clean(value, 64).toLowerCase();
+  if (allowedReactionKeys.has(legacyKey as ReactionKey)) return catalogEntry(legacyKey);
+  if (!customEmojiEnabled || !legacyKey.startsWith("emoji:")) return null;
+  const encoded = legacyKey.slice("emoji:".length);
+  if (!/^[0-9a-f]{1,6}(?:-[0-9a-f]{1,6}){0,15}$/.test(encoded)) return null;
+  try {
+    const emoji = String.fromCodePoint(...encoded.split("-").map((part) => Number.parseInt(part, 16)));
+    const custom = customEmojiEntry(emoji);
+    return custom?.key === legacyKey ? custom : null;
+  } catch {
+    return null;
+  }
+}
+
+function catalogEntry(key: string): ReactionEntry { return reactionCatalog.find((reaction) => reaction.key === key)!; }
+
+function reactionTable(reaction: ReactionEntry) {
+  return reaction.key.startsWith("emoji:") ? "dzn_comms_custom_emoji_reactions" : "dzn_comms_message_reactions";
+}
+
+function customEmojiEntry(value: string): ReactionEntry | null {
+  const emoji = value.normalize("NFC");
+  const codePoints = [...emoji];
+  if (codePoints.length === 0 || codePoints.length > 16) return null;
+  const isKeycap = /^[0-9#*]\uFE0F?\u20E3$/u.test(emoji);
+  const isEmojiSequence = /^[\p{Extended_Pictographic}\p{Emoji_Component}\p{Regional_Indicator}\u200D\uFE0E\uFE0F\u20E3]+$/u.test(emoji);
+  const hasVisibleEmoji = /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(emoji) || isKeycap;
+  if (!isEmojiSequence || !hasVisibleEmoji) return null;
+  const key = `emoji:${codePoints.map((part) => part.codePointAt(0)!.toString(16)).join("-")}`;
+  return key.length <= 64 ? { key, emoji, label: "Emoji" } : null;
+}
+function literalEmoji(value: unknown) { return typeof value === "string" ? value.normalize("NFC").trim() : ""; }
 function safeId(value: unknown) { const id = clean(value, 80); return /^[a-zA-Z0-9_-]{1,80}$/.test(id) ? id : ""; }
 function mutationId(value: unknown) { const id = clean(value, 80); return /^[a-zA-Z0-9_-]{16,80}$/.test(id) ? id : ""; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
@@ -327,6 +389,7 @@ function isLocalRequest(request: Request) { try { const host = new URL(request.u
 function unavailable() { return error(404, "DZN_COMMS_REACTIONS_DISABLED", "DZN Comms reactions are not enabled in this environment."); }
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function isReactionQuotaError(cause: unknown) { const message = cause instanceof Error ? cause.message : String(cause ?? ""); return /(?:constraint failed|constraint_error|not null constraint|unique constraint)/i.test(message) && /dzn_comms_reaction_rate_slots/i.test(message); }
+function isReactionLimitError(cause: unknown) { return /reaction (?:actor|message) cap reached/i.test(cause instanceof Error ? cause.message : String(cause ?? "")); }
 async function digest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-reactions:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
 export const dznCommsReactionRetention = {
