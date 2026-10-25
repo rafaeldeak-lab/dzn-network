@@ -777,7 +777,7 @@ export function normalizePublicLeaderboardOptions(options: PublicLeaderboardsOpt
     : 10;
   return {
     full,
-    directory,
+    ...(directory ? { directory } : {}),
     metric: normalizeLeaderboardMetric(options.metric),
     mode: normalizePublicLeaderboardMode(options.mode),
     page,
@@ -1208,10 +1208,14 @@ export function emptyPublicLeaderboards(options: PublicLeaderboardsOptions = {})
   return {
     ok: true,
     full: requestOptions.full,
-    directory: requestOptions.directory,
-    directory_cap: requestOptions.directory ? PUBLIC_LEADERBOARD_DIRECTORY_CAP : null,
-    directory_total: 0,
-    directory_capped: false,
+    ...(requestOptions.directory
+      ? {
+        directory: requestOptions.directory,
+        directory_cap: PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+        directory_total: 0,
+        directory_capped: false,
+      }
+      : {}),
     leaderboard_limit: limit,
     page: requestOptions.full ? requestOptions.page : 1,
     page_size: limit,

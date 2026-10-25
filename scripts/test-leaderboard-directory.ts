@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  normalizePublicLeaderboardDirectory,
   normalizePublicLeaderboardOptions,
   PUBLIC_LEADERBOARD_DIRECTORY_CAP,
 } from "../functions/_lib/public-leaderboards";
@@ -16,7 +17,7 @@ assert.equal(directoryOptions.full, true, "Directory requests must use the compl
 assert.equal(directoryOptions.directory, "players");
 assert.equal(directoryOptions.page, 1, "Directory results are a single stable ranking snapshot.");
 assert.equal(directoryOptions.pageSize, 250, "The directory should return the full bounded ranking in one request.");
-assert.equal(normalizePublicLeaderboardOptions({ directory: "unknown" }).directory, null, "Unknown directory scopes must fail closed.");
+assert.equal(normalizePublicLeaderboardDirectory("unknown"), null, "Unknown directory scopes must fail closed.");
 
 const apiRoute = readFileSync("functions/api/public/leaderboards.ts", "utf8");
 const library = readFileSync("functions/_lib/public-leaderboards.ts", "utf8");
