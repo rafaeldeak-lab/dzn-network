@@ -13,6 +13,28 @@ export const WAR_FIELD_ORDERS = Object.freeze({
   contact: Object.freeze({ focus: 'Focus fire', smoke: 'Smoke advance' }),
   withdrawal: Object.freeze({ pursue: 'Press the target', cover: 'Cover withdrawal' }),
 });
+export const WAR_DEFENCE_ORDERS = Object.freeze({
+  balanced: Object.freeze({ name: 'Standard watch', detail: 'No specialist counter. The existing base and defender posts hold their ground.' }),
+  perimeter: Object.freeze({ name: 'Hold the perimeter', detail: 'Wall guards punish a cut-through assault.' }),
+  battery: Object.freeze({ name: 'Guard the Arc Battery', detail: 'Concentrated fire protects the Arc Battery objective.' }),
+  signals: Object.freeze({ name: 'Protect the relay', detail: 'Signal jammers disrupt reconnaissance and Communications strikes.' }),
+  reserve: Object.freeze({ name: 'Keep a home reserve', detail: 'A ready squad reduces the opening left by away scouts and attackers.' }),
+});
+
+export function evaluateWarDefenceOrder(order, tactic, plan, awaySquads = 0) {
+  if (!Object.hasOwn(WAR_DEFENCE_ORDERS, order) || !['assault', 'recon'].includes(tactic))
+    return { ok: false, error: 'Choose a valid war defence order.' };
+  const active = order === 'perimeter' && plan?.method === 'breach'
+    || order === 'battery' && plan?.objective === 'tower'
+    || order === 'signals' && (tactic === 'recon' || plan?.objective === 'comms')
+    || order === 'reserve' && awaySquads > 0;
+  return {
+    ok: true, order, name: WAR_DEFENCE_ORDERS[order].name, active: Boolean(active),
+    scorePenalty: active && order !== 'reserve' ? order === 'battery' ? 5 : 4 : 0,
+    casualtyPressure: active && order !== 'reserve' ? 1 : 0,
+    exposureShield: active && order === 'reserve' ? 6 : 0,
+  };
+}
 
 export function evaluateWarFieldOrder(tactic, phase, command) {
   if (!['assault', 'recon'].includes(tactic) || !WAR_FIELD_ORDERS[phase]?.[command])

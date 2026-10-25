@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -521,10 +521,30 @@ export function runServiceTests() {
   warService.state.communities['violet-ridge'].base.landPlots[1].barricades = 0;
   assert(warService.getWar(challenge.warId).snapshots.defender.base.levels.tower === 2, 'later base changes cannot mutate the immutable captured battle stats');
   assert(warService.getWar(challenge.warId).snapshots.defender.stats.fortification === 1, 'later demolition cannot alter locked defensive fortification');
+  assert(!warService.setWarDefenceOrder('violet-member', challenge.warId, 'signals', 'defence-member').ok
+    && !warService.setWarDefenceOrder('free-owner', challenge.warId, 'signals', 'defence-free').ok
+    && !warService.setWarDefenceOrder('violet-owner', challenge.warId, '__proto__', 'defence-invalid').ok,
+    'only participating eligible leadership can assign a defined defence order');
+  const signalOrder = warService.setWarDefenceOrder('violet-owner', challenge.warId, 'signals', 'defence-violet-signals');
+  const reserveOrder = warService.setWarDefenceOrder('iron-owner', challenge.warId, 'reserve', 'defence-iron-reserve');
+  assert(signalOrder.ok && reserveOrder.ok && warService.setWarDefenceOrder('violet-owner', challenge.warId, 'battery', 'defence-violet-signals').replay,
+    'defence orders are idempotent, and a repeated action cannot silently change a choice');
+  assert(new LocalGameService({ storage: warStorage, now: () => warClock }).getWar(challenge.warId).defenceOrders['violet-ridge'].order === 'signals',
+    'both preparation orders survive a browser reload');
   assert(!warService.startWar('violet-owner', challenge.warId, 'war-start-too-early').ok, 'war cannot start before the preparation countdown');
   warClock += WAR_RULES.preparationReadyMs;
   const started = warService.startWar('violet-admin', challenge.warId, 'war-start-once');
   assert(started.ok && started.state === 'active' && started.attackEndsAt === warClock + WAR_RULES.attackWindowMs, 'an opposing owner/admin starts a bounded attack window after preparation');
+  assert(!warService.setWarDefenceOrder('violet-owner', challenge.warId, 'battery', 'defence-after-start').ok
+    && warService.getWar(challenge.warId).defenceOrders['violet-ridge'].order === 'signals', 'war launch locks both sides’ preparation orders');
+  const perimeterEffect = evaluateWarDefenceOrder('perimeter', 'assault', { method: 'breach', objective: 'hq' });
+  const batteryEffect = evaluateWarDefenceOrder('battery', 'assault', { method: 'flank', objective: 'tower' });
+  const signalEffect = evaluateWarDefenceOrder('signals', 'recon', { method: 'flank', objective: 'comms' });
+  const reserveEffect = evaluateWarDefenceOrder('reserve', 'assault', null, 2);
+  assert(perimeterEffect.scorePenalty === 4 && batteryEffect.scorePenalty === 5 && signalEffect.casualtyPressure === 1
+    && reserveEffect.exposureShield === 6 && !evaluateWarDefenceOrder('reserve', 'assault', null, 0).active
+    && !evaluateWarDefenceOrder('perimeter', 'assault', { method: 'flank', objective: 'hq' }).active,
+    'specialist defences counter only their chosen threat and home reserve protects an exposed base');
   checks.push('challenge inbox lifecycle, opposing acceptance, immutable snapshots, prep timer and attack-window start');
 
   const lockedWar = warService.getWar(challenge.warId);
@@ -577,13 +597,29 @@ export function runServiceTests() {
   assert(!warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-assault').ok, 'action IDs cannot be reused by another identity');
   assert(!warService.submitWarAttack('iron-owner', challenge.warId, 'recon', 'war-iron-second-identity').ok, 'one roster member cannot attack twice under new action IDs');
   assert(!warService.resolveWar('iron-owner', challenge.warId, 'war-resolve-early').ok, 'leadership cannot resolve while attack slots and time remain');
+  const openHomeStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const openHomeService = new LocalGameService({ storage: openHomeStorage, now: () => warClock });
+  openHomeService.state.wars.find(item => item.id === challenge.warId).defenceOrders['iron-pines'].order = 'balanced';
+  const openHomeRecon = openHomeService.submitWarAttack('violet-owner', challenge.warId, 'recon', 'counterfactual-open-home');
   const violetRecon = warService.submitWarAttack('violet-owner', challenge.warId, 'recon', 'war-violet-recon');
+  assert(openHomeRecon.ok && violetRecon.exposureBonus <= openHomeRecon.exposureBonus
+    && openHomeRecon.exposureBonus - violetRecon.exposureBonus === Math.min(6, openHomeRecon.exposureBonus),
+    'home reserve subtracts a bounded exposure advantage while the rival squad is away');
   const reconCapacity = lockedWar.snapshots.challenger.stats.squadSize;
   const ironReconPlan = { lane: 'south', objective: 'comms', method: 'flank', squad: { recon: reconCapacity - 2, engineer: 2 } };
+  const unguardedRelayStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const unguardedRelay = new LocalGameService({ storage: unguardedRelayStorage, now: () => warClock });
+  unguardedRelay.state.wars.find(item => item.id === challenge.warId).defenceOrders['violet-ridge'].order = 'balanced';
+  const unguardedRecon = unguardedRelay.submitWarAttack('iron-admin', challenge.warId, 'recon', 'counterfactual-unguarded-relay', ironReconPlan);
   const ironRecon = warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', ironReconPlan);
   const violetAssault = warService.submitWarAttack('violet-admin', challenge.warId, 'assault', 'war-violet-assault');
   assert(violetRecon.ok && ironRecon.ok && violetAssault.ok, 'both communities can deploy distinct permitted roster members');
   assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition points'), 'a committed route, objective and chosen squad change the actual score and explanation');
+  assert(ironRecon.defenceOrder === 'signals' && ironRecon.defenceOrderActive && ironRecon.defenceOrderPenalty === 4
+    && ironRecon.feedback.includes('Protect the relay') && violetRecon.defenceOrder === 'reserve' && violetRecon.defenceOrderActive
+    && violetRecon.defenceExposureShield === 6, 'locked defensive orders affect the appropriate incoming attacks and exposed home');
+  assert(unguardedRecon.ok && unguardedRecon.score - ironRecon.score === 4 && ironRecon.casualties - unguardedRecon.casualties === 1,
+    'a prepared relay defence removes exactly four attack points and adds one casualty against the same frozen route');
   assert(warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', { lane: 'east', objective: 'hq', method: 'breach' }).replay && warService.getWar(challenge.warId).attacks.length === 4, 'replaying an attack action cannot choose a new route or earn a second score');
   assert(new Set(warService.getWar(challenge.warId).attackIds).size === 4, 'all generated attack IDs are unique and persisted');
   assert(!warService.submitWarAttack('iron-member', challenge.warId, 'assault', 'war-iron-over-cap').ok, 'community attack cap is enforced at two deployments');
