@@ -341,7 +341,8 @@ function allocateReactionSlot(db: D1Database, actorRateKey: string, minuteBucket
 function normalizeReactionInput(value: unknown, customEmojiEnabled: boolean): ReactionEntry | null {
   const legacyKey = clean(value, 24).toLowerCase();
   if (allowedReactionKeys.has(legacyKey as ReactionKey)) return catalogEntry(legacyKey);
-  return customEmojiEnabled ? customEmojiEntry(clean(value, 32)) : null;
+  if (!customEmojiEnabled) return null;
+  return normalizeStoredReactionKey(value, true) ?? customEmojiEntry(clean(value, 32));
 }
 
 function normalizeStoredReactionKey(value: unknown, customEmojiEnabled: boolean): ReactionEntry | null {

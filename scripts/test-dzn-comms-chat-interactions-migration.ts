@@ -20,6 +20,10 @@ const triggers = [
   "dzn_comms_custom_emoji_reaction_message_cap_insert",
   "dzn_comms_custom_emoji_reaction_message_cap_reactivate",
   "dzn_comms_custom_emoji_reactions_message_unavailable",
+  "dzn_comms_legacy_reaction_actor_cap_insert",
+  "dzn_comms_legacy_reaction_actor_cap_reactivate",
+  "dzn_comms_legacy_reaction_message_cap_insert",
+  "dzn_comms_legacy_reaction_message_cap_reactivate",
 ];
 
 assert.match(source, /^CREATE TABLE IF NOT EXISTS dzn_comms_custom_emoji_reactions \(/m);
@@ -69,6 +73,10 @@ try {
     "dzn_comms_custom_emoji_reaction_visible_reactivate",
     "dzn_comms_custom_emoji_reactions",
     "dzn_comms_custom_emoji_reactions_message_unavailable",
+    "dzn_comms_legacy_reaction_actor_cap_insert",
+    "dzn_comms_legacy_reaction_actor_cap_reactivate",
+    "dzn_comms_legacy_reaction_message_cap_insert",
+    "dzn_comms_legacy_reaction_message_cap_reactivate",
     "dzn_comms_typing_sessions",
     "idx_dzn_comms_custom_emoji_reactions_message_active",
     "idx_dzn_comms_typing_channel_expiry",

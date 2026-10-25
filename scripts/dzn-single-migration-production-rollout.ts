@@ -310,6 +310,10 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       "dzn_comms_custom_emoji_reaction_message_cap_insert",
       "dzn_comms_custom_emoji_reaction_message_cap_reactivate",
       "dzn_comms_custom_emoji_reactions_message_unavailable",
+      "dzn_comms_legacy_reaction_actor_cap_insert",
+      "dzn_comms_legacy_reaction_actor_cap_reactivate",
+      "dzn_comms_legacy_reaction_message_cap_insert",
+      "dzn_comms_legacy_reaction_message_cap_reactivate",
     ],
   },
 };

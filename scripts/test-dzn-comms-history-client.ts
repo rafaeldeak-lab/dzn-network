@@ -238,11 +238,20 @@ test("sends bounded own-reaction add and remove requests", async () => {
   globalThis.fetch = (async (url, options) => {
     requests.push({ url: String(url), method: String(options?.method), body: JSON.parse(String(options?.body)) });
     assert.equal(options?.credentials, "include"); assert.equal(options?.redirect, "error");
-    return jsonResponse({ ok: true });
+    const isAdd = options?.method === "POST";
+    return jsonResponse({
+      ok: true,
+      revision: isAdd ? "reaction-revision-add" : "reaction-revision-remove",
+      reaction: { key: "heart", emoji: "\u{1F49C}", label: "Heart", count: isAdd ? 1 : 0, current_user_reacted: isAdd },
+    });
   }) as typeof fetch;
   try {
-    await addCommsReaction("message/one", "heart", "reaction-client-0001");
-    await removeCommsReaction("message/one", "heart", "reaction-client-0002");
+    const added = await addCommsReaction("message/one", "heart", "reaction-client-0001");
+    const removed = await removeCommsReaction("message/one", "heart", "reaction-client-0002");
+    assert.equal(added.reaction.count, 1);
+    assert.equal(added.reaction.current_user_reacted, true);
+    assert.equal(removed.reaction.count, 0);
+    assert.equal(removed.reaction.current_user_reacted, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

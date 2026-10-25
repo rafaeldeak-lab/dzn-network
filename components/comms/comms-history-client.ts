@@ -6,6 +6,11 @@ export type CommsReactionSummary = {
   counts: { key: CommsReactionKey; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
 };
 
+export type CommsReactionMutation = {
+  revision: string;
+  reaction: CommsReactionSummary["counts"][number];
+};
+
 export type CommsHistoryMessage = {
   id: string;
   author_display_name: string;
@@ -342,20 +347,22 @@ async function requestCommsMutation(method: "POST" | "DELETE", path: string, bod
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMS_HISTORY_TIMEOUT_MS);
   let response: Response;
-  let payload: { ok?: boolean; message?: string } | null;
+  let payload: Record<string, unknown> | null;
   try {
     response = await fetch(path, {
       method, credentials: "include", redirect: "error",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(body), signal: controller.signal,
     });
-    payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+    const parsed = await response.json().catch(() => null);
+    payload = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
   } catch {
     throw new Error(fallbackMessage);
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok || !payload?.ok) throw new Error(payload?.message || fallbackMessage);
+  if (!response.ok || payload?.ok !== true) throw new Error(typeof payload?.message === "string" ? payload.message : fallbackMessage);
+  return payload;
 }
 
 async function postCommsMutation(path: string, body: unknown, fallbackMessage: string) {
@@ -375,13 +382,24 @@ export async function deleteCommsMessage(messageId: string) {
 }
 
 export async function addCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
-  await requestCommsMutation("POST", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions`,
-    { reactionKey, clientMutationId }, "Reaction could not be saved.");
+  return parseCommsReactionMutation(await requestCommsMutation("POST", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions`,
+    { reactionKey, clientMutationId }, "Reaction could not be saved."));
 }
 
 export async function removeCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
-  await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionKey)}`,
-    { clientMutationId }, "Reaction could not be removed.");
+  return parseCommsReactionMutation(await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionKey)}`,
+    { clientMutationId }, "Reaction could not be removed."));
+}
+
+function parseCommsReactionMutation(value: unknown): CommsReactionMutation {
+  const input = record(value);
+  const revision = text(input.revision, 40);
+  const reactionInput = record(input.reaction);
+  const reaction = reactionEntry(reactionInput, true);
+  const count = reactionInput.count;
+  const currentUserReacted = reactionInput.current_user_reacted;
+  if (!Number.isSafeInteger(count) || Number(count) < 0 || currentUserReacted !== Boolean(currentUserReacted)) throw unavailable();
+  return { revision, reaction: { ...reaction, count: Number(count), current_user_reacted: currentUserReacted as boolean } };
 }
 
 export async function setCommsTyping(channel: string, typing: boolean) {

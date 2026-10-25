@@ -33,6 +33,7 @@ import {
   setCommsTyping,
   type CommsHistoryMessage,
   type CommsHistoryPayload,
+  type CommsReactionMutation,
 } from "./comms-history-client";
 
 type CommsHistoryState =
@@ -316,12 +317,8 @@ export function DznCommsShell() {
   const statusLabel = useMemo(() => statusCopy(history.status, sendingEnabled), [history.status, sendingEnabled]);
 
   useEffect(() => {
-    if (!typingReadEnabled) {
-      setTypingNames([]);
-      return;
-    }
+    if (!typingReadEnabled) return;
     const controller = new AbortController();
-    let interval: number | undefined;
     const refresh = () => {
       void loadCommsTyping(controller.signal, payload.channel.slug)
         .then((response) => {
@@ -332,10 +329,10 @@ export function DznCommsShell() {
         .catch(() => { if (!controller.signal.aborted) setTypingNames([]); });
     };
     refresh();
-    interval = window.setInterval(refresh, 3_000);
+    const interval = window.setInterval(refresh, 3_000);
     return () => {
       controller.abort();
-      if (interval !== undefined) window.clearInterval(interval);
+      window.clearInterval(interval);
     };
   }, [payload.channel.slug, typingReadEnabled]);
 
@@ -465,24 +462,25 @@ export function DznCommsShell() {
     }
   }
 
-  async function refreshReactions() {
+  function applyReactionMutation(messageId: string, mutation: CommsReactionMutation) {
     const targetChannel = payload.channel.slug;
     if (!historyReady || selectedChannelRef.current !== targetChannel) return;
-    const requestGeneration = ++historyRequestGenerationRef.current;
-    try {
-      const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
-      if (
-        historyRequestGenerationRef.current === requestGeneration
-        && selectedChannelRef.current === targetChannel
-        && refreshed.channel.slug === targetChannel
-      ) {
-        setHistory((current) => current.status === "ready" && current.payload.channel.slug === targetChannel
-          ? { ...current, payload: refreshed }
-          : current);
-      }
-    } catch {
-      // The regular history poll preserves the last safe response on a transient reaction refresh failure.
-    }
+    setHistory((current) => {
+      if (current.status !== "ready" || current.payload.channel.slug !== targetChannel) return current;
+      return {
+        ...current,
+        payload: {
+          ...current.payload,
+          messages: current.payload.messages.map((message) => {
+            if (message.id !== messageId) return message;
+            const reactions = message.reactions ?? { revision: mutation.revision, available_reactions: [], counts: [] };
+            const counts = reactions.counts.filter((reaction) => reaction.key !== mutation.reaction.key);
+            if (mutation.reaction.count > 0) counts.push(mutation.reaction);
+            return { ...message, reactions: { ...reactions, revision: mutation.revision, counts } };
+          }),
+        },
+      };
+    });
   }
 
   async function loadEarlierMessages() {
@@ -766,7 +764,7 @@ export function DznCommsShell() {
                     reactionsWriteEnabled={reactionsWriteEnabled}
                     customEmojiReactionsEnabled={customEmojiReactionsEnabled}
                     customEmojiReactionsWriteEnabled={customEmojiReactionsWriteEnabled}
-                    onReactionChanged={() => void refreshReactions()}
+                    onReactionChanged={(mutation) => applyReactionMutation(message.id, mutation)}
                     onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
                   />
                 )) : (
@@ -792,7 +790,7 @@ export function DznCommsShell() {
                 </div> : null}
               </div>
 
-              {typingNames.length > 0 ? <p role="status" aria-live="polite" className="mt-2 min-h-5 px-1 text-xs font-semibold text-zinc-400">
+              {typingReadEnabled && typingNames.length > 0 ? <p role="status" aria-live="polite" className="mt-2 min-h-5 px-1 text-xs font-semibold text-zinc-400">
                 {typingCopy(typingNames)}
               </p> : <div className="mt-2 min-h-5" aria-hidden="true" />}
 
@@ -880,7 +878,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
   reactionsWriteEnabled: boolean;
   customEmojiReactionsEnabled: boolean;
   customEmojiReactionsWriteEnabled: boolean;
-  onReactionChanged: () => void;
+  onReactionChanged: (mutation: CommsReactionMutation) => void;
   onMessageDeleted: (messageId: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
@@ -913,16 +911,17 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
     }
   }
 
-  async function changeReaction(reactionKey: string, reacted: boolean) {
+  async function changeReaction(reactionKey: string, reacted: boolean, addReactionKey = reactionKey) {
     if (!reactionsWriteEnabled || reactionState === "saving") return;
     setReactionState("saving");
     try {
-      if (reacted) await removeCommsReaction(message.id, reactionKey, crypto.randomUUID());
-      else await addCommsReaction(message.id, reactionKey, crypto.randomUUID());
+      const mutation = reacted
+        ? await removeCommsReaction(message.id, reactionKey, crypto.randomUUID())
+        : await addCommsReaction(message.id, addReactionKey, crypto.randomUUID());
       setReactionEmoji("");
       setReactionInputOpen(false);
       setReactionState("idle");
-      onReactionChanged();
+      onReactionChanged(mutation);
     } catch {
       setReactionState("error");
     }
@@ -957,7 +956,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
                 key={reaction.key}
                 type="button"
                 disabled={!reactionsWriteEnabled || reactionState === "saving"}
-                onClick={() => void changeReaction(reaction.key, reaction.current_user_reacted)}
+                onClick={() => void changeReaction(reaction.key, reaction.current_user_reacted, reaction.emoji)}
                 className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 text-xs font-bold transition disabled:cursor-default disabled:opacity-75 ${reaction.current_user_reacted ? "border-cyan-200/60 bg-cyan-300/15 text-cyan-50" : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-cyan-300/40 hover:bg-cyan-300/10"}`}
                 aria-label={`${reaction.current_user_reacted ? "Remove" : "Add"} ${reaction.emoji} reaction`}
                 title={reaction.current_user_reacted ? "Remove your reaction" : "Add this reaction"}

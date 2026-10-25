@@ -222,6 +222,13 @@ async function testPublicReactionLifecycle() {
     const customPayload = await payload(custom);
     assert.equal(customPayload.reaction?.emoji, "👍🏽");
     assert.match(String(customPayload.reaction?.key), /^emoji:/);
+    const storedCustomKey = customPayload.reaction?.key;
+    assert.ok(storedCustomKey, "A persisted custom reaction must return its reusable storage key.");
+    const existingCustom = await handleDznCommsReactions(request("POST", path, "player-token", {
+      clientMutationId: "reaction-custom-0001-key", reactionKey: storedCustomKey,
+    }), f.env, "public-message");
+    assert.equal(existingCustom.status, 200);
+    assert.equal((await payload(existingCustom)).result, "already_present");
     const customDisabled = { ...f.env, DZN_COMMS_CUSTOM_EMOJI_REACTIONS_ENABLED: "false" } as Env;
     assert.equal((await handleDznCommsReactions(request("POST", path, "other-token", {
       clientMutationId: "reaction-custom-0002", reactionKey: "👍🏽",
@@ -231,6 +238,37 @@ async function testPublicReactionLifecycle() {
     }), f.env, "public-message", "heart");
     assert.equal((await payload(absent)).result, "already_absent");
   } finally { f.close(); }
+}
+
+async function testCombinedReactionCaps() {
+  const actorLimited = await fixture();
+  try {
+    for (let index = 0; index < 8; index += 1) {
+      actorLimited.sqlite.prepare(`INSERT INTO dzn_comms_custom_emoji_reactions
+        (id, message_id, actor_user_id, reaction_key) VALUES (?, 'public-message', 'player', ?)`)
+        .run(`actor-custom-${index}`, `emoji:1f${String(index).padStart(3, "0")}`);
+    }
+    assert.throws(() => actorLimited.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('actor-legacy-insert', 'public-message', 'player', 'heart', 1)`).run());
+    actorLimited.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('actor-legacy-reactivate', 'public-message', 'player', 'fire', 0)`).run();
+    assert.throws(() => actorLimited.sqlite.prepare("UPDATE dzn_comms_message_reactions SET active = 1 WHERE id = 'actor-legacy-reactivate'").run());
+  } finally { actorLimited.close(); }
+
+  const messageLimited = await fixture();
+  try {
+    const actors = ["player", "other", "outsider", "owner"];
+    for (let index = 0; index < 24; index += 1) {
+      messageLimited.sqlite.prepare(`INSERT INTO dzn_comms_custom_emoji_reactions
+        (id, message_id, actor_user_id, reaction_key) VALUES (?, 'public-message', ?, ?)`)
+        .run(`message-custom-${index}`, actors[Math.floor(index / 6)], `emoji:1f${String(index).padStart(3, "0")}`);
+    }
+    assert.throws(() => messageLimited.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('message-legacy-insert', 'public-message', 'player', 'heart', 1)`).run());
+    messageLimited.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('message-legacy-reactivate', 'public-message', 'player', 'fire', 0)`).run();
+    assert.throws(() => messageLimited.sqlite.prepare("UPDATE dzn_comms_message_reactions SET active = 1 WHERE id = 'message-legacy-reactivate'").run());
+  } finally { messageLimited.close(); }
 }
 
 async function testPrivateScopeAndModerationRemoval() {
@@ -361,6 +399,7 @@ async function testPrivateRevocationRaces() {
 async function main() {
   await testMigrationAndFlags();
   await testPublicReactionLifecycle();
+  await testCombinedReactionCaps();
   await testPrivateScopeAndModerationRemoval();
   await testPrivateRevocationRaces();
   await testRateLimitAndRetentionCompatibility();

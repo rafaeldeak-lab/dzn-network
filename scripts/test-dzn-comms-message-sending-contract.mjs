@@ -117,6 +117,8 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /sendAttemptRef/);
   assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel, draft, pendingAttempt\.requestId\)/, "The composer target must match the channel represented by the visible validated payload.");
   assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "A stale mutation refresh must not replace a newer channel selection.");
+  assert.match(shell, /function applyReactionMutation\(messageId: string, mutation: CommsReactionMutation\)[\s\S]*messages: current\.payload\.messages\.map/, "Reaction updates must patch only the affected visible message.");
+  assert.doesNotMatch(shell, /async function refreshReactions\(/, "A reaction click must not replace paginated history with the newest page.");
   assert.match(shell, /const historyRequestGenerationRef = useRef\(0\)/, "History reads must share a monotonic request generation.");
   assert.match(shell, /const privateAccessRequestGenerationRef = useRef\(0\)/, "Private capability checks need an independent generation while an earlier page is loading.");
   assert.ok((shell.match(/const requestGeneration = \+\+historyRequestGenerationRef\.current/g) ?? []).length >= 2, "Send refreshes and earlier-history reads must both advance the shared request generation.");

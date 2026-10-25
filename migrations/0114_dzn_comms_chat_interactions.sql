@@ -122,6 +122,77 @@ BEGIN
   WHERE message_id = NEW.id AND active = 1;
 END;
 
+CREATE TRIGGER IF NOT EXISTS dzn_comms_legacy_reaction_actor_cap_insert
+BEFORE INSERT ON dzn_comms_message_reactions
+WHEN NEW.active = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM dzn_comms_message_reactions
+    WHERE message_id = NEW.message_id AND actor_user_id = NEW.actor_user_id
+      AND reaction_key = NEW.reaction_key AND active = 1
+  )
+  AND (
+    SELECT COUNT(*) FROM (
+      SELECT id FROM dzn_comms_message_reactions
+      WHERE message_id = NEW.message_id AND actor_user_id = NEW.actor_user_id AND active = 1
+      UNION ALL
+      SELECT id FROM dzn_comms_custom_emoji_reactions
+      WHERE message_id = NEW.message_id AND actor_user_id = NEW.actor_user_id AND active = 1
+    )
+  ) >= 8
+BEGIN
+  SELECT RAISE(ABORT, 'reaction actor cap reached');
+END;
+
+CREATE TRIGGER IF NOT EXISTS dzn_comms_legacy_reaction_actor_cap_reactivate
+BEFORE UPDATE OF active ON dzn_comms_message_reactions
+WHEN NEW.active = 1 AND OLD.active = 0 AND (
+  SELECT COUNT(*) FROM (
+    SELECT id FROM dzn_comms_message_reactions
+    WHERE message_id = NEW.message_id AND actor_user_id = NEW.actor_user_id AND active = 1
+    UNION ALL
+    SELECT id FROM dzn_comms_custom_emoji_reactions
+    WHERE message_id = NEW.message_id AND actor_user_id = NEW.actor_user_id AND active = 1
+  )
+) >= 8
+BEGIN
+  SELECT RAISE(ABORT, 'reaction actor cap reached');
+END;
+
+CREATE TRIGGER IF NOT EXISTS dzn_comms_legacy_reaction_message_cap_insert
+BEFORE INSERT ON dzn_comms_message_reactions
+WHEN NEW.active = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM dzn_comms_message_reactions
+    WHERE message_id = NEW.message_id AND reaction_key = NEW.reaction_key AND active = 1
+  )
+  AND (
+    SELECT COUNT(DISTINCT reaction_key) FROM (
+      SELECT reaction_key FROM dzn_comms_message_reactions
+      WHERE message_id = NEW.message_id AND active = 1
+      UNION
+      SELECT reaction_key FROM dzn_comms_custom_emoji_reactions
+      WHERE message_id = NEW.message_id AND active = 1
+    )
+  ) >= 24
+BEGIN
+  SELECT RAISE(ABORT, 'reaction message cap reached');
+END;
+
+CREATE TRIGGER IF NOT EXISTS dzn_comms_legacy_reaction_message_cap_reactivate
+BEFORE UPDATE OF active ON dzn_comms_message_reactions
+WHEN NEW.active = 1 AND OLD.active = 0 AND (
+  SELECT COUNT(DISTINCT reaction_key) FROM (
+    SELECT reaction_key FROM dzn_comms_message_reactions
+    WHERE message_id = NEW.message_id AND active = 1
+    UNION
+    SELECT reaction_key FROM dzn_comms_custom_emoji_reactions
+    WHERE message_id = NEW.message_id AND active = 1
+  )
+) >= 24
+BEGIN
+  SELECT RAISE(ABORT, 'reaction message cap reached');
+END;
+
 CREATE TABLE IF NOT EXISTS dzn_comms_typing_sessions (
   channel_id TEXT NOT NULL,
   actor_user_id TEXT NOT NULL,
