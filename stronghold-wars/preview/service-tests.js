@@ -1,4 +1,4 @@
-import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY, LEGACY_STORAGE_KEY, SERVICE_STORAGE_KEY, V2_BACKUP_KEY, V2_STORAGE_KEY, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
+import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY, LEGACY_STORAGE_KEY, SERVICE_STORAGE_KEY, V2_BACKUP_KEY, V2_STORAGE_KEY, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES } from './game-service.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
@@ -496,6 +496,13 @@ export function runServiceTests() {
   assert(warService.approveLandClaim('violet-owner', 'timberline-depot', 'war-defence-approve').ok, 'defending owner approves land');
   assert(warService.contributeTimber('violet-member', 'timberline-depot', 60, 'war-defence-fund').ok, 'defending member funds land');
   assert(warService.buildBarricade('violet-member', 'timberline-depot', 'war-defence-barricade').ok, 'defending member builds barricade');
+  // The war fixture has real built districts so attacks can leave visible, repairable wear.
+  warService.state.communities['violet-ridge'].base.landPlots.find(plot => plot.id === 'timberline-depot').facilityLevel = 1;
+  const violetRidgewatch = warService.state.communities['violet-ridge'].base.landPlots.find(plot => plot.id === 'ridgewatch-range');
+  Object.assign(violetRidgewatch, { status: 'claimed', treesRemaining: 0, facilityLevel: 1 });
+  const ironTimberline = warService.state.communities['iron-pines'].base.landPlots.find(plot => plot.id === 'timberline-depot');
+  Object.assign(ironTimberline, { status: 'claimed', treesRemaining: 0, facilityLevel: 1 });
+  warService.save();
   checks.push('war eligibility gates for owner Pro, Free tier, verification, Hall/support levels and leadership-only challenges');
 
   const challenge = warService.challengeWar('iron-owner', 'violet-ridge', 'war-challenge-once');
@@ -542,12 +549,14 @@ export function runServiceTests() {
   warClock = started.attackEndsAt;
   const resolved = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
   assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === assault.score + ironRecon.score, 'war resolves once with deterministic score totals after the timed stages close');
+  assert(resolved.wear.length === 4 && violetRidgewatch.wear === 1 && warService.state.communities['violet-ridge'].base.landPlots[1].wear === 1 && ironTimberline.wear === 2, 'incoming attacks mark only claimed built districts with bounded visual wear');
+  assert(warService.getWorldMap().find(node => node.id === 'violet-ridge').districts.find(plot => plot.id === 'ridgewatch-range').wear === 1, 'public world preview shows district wear without exposing private inventory');
   const winnerRewards = resolved.rewards.filter(reward => warService.profile(reward.identityId).communityId === resolved.winnerCommunityId);
   const otherRewards = resolved.rewards.filter(reward => warService.profile(reward.identityId).communityId !== resolved.winnerCommunityId);
   assert(resolved.rewards.length === 4 && winnerRewards.length === 2 && winnerRewards.every(reward => reward.amount > WAR_RULES.localRewardParts && reward.amount <= Math.round(WAR_RULES.localRewardParts * 1.6)) && otherRewards.every(reward => reward.amount === WAR_RULES.localRewardParts) && resolved.rewards.every(reward => reward.ledgerId.startsWith(`war-reward:${challenge.warId}:`)), 'frozen high-risk victory pays bounded extra local Parts without changing scores or ledger IDs');
   assert(warService.snapshot('iron-owner').member.parts === ironStartParts + resolved.rewards.find(reward => reward.identityId === 'iron-owner').amount, 'war reward credits only local preview inventory');
   const repeatedResolve = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
-  assert(repeatedResolve.ok && repeatedResolve.replay && warService.state.warRewardLedger.length === 4, 'same resolve action replays without a second reward ledger credit');
+  assert(repeatedResolve.ok && repeatedResolve.replay && warService.state.warRewardLedger.length === 4 && violetRidgewatch.wear === 1, 'same resolve action replays without a second reward or damage');
   assert(warService.getChronicle('iron-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1 && warService.getChronicle('violet-owner').entries.filter(item => item.id === `war:${challenge.warId}`).length === 1, 'both war participants receive exactly one cosmetic Chronicle result');
   assert(!warService.resolveWar('iron-owner', challenge.warId, 'war-resolve-again').ok && warService.state.warRewardLedger.length === 4, 'a different action cannot resolve or reward an already resolved war');
   const persistedWarService = new LocalGameService({ storage: warStorage, now: () => warClock });
@@ -555,6 +564,31 @@ export function runServiceTests() {
   assert(persistedWar.state === 'resolved' && persistedWar.replay.attackIds.length === 4 && persistedWarService.state.warRewardLedger.length === 4, 'refresh/reload preserves the replay, score, resolution and once-only reward ledger');
   assert(persistedWarService.getChronicle('iron-owner').entries.some(item => item.id === `war:${challenge.warId}`), 'war Chronicle survives reload');
   checks.push('tactical scoring, attack roster/caps, duplicate IDs, cross-community shared state, deterministic resolution, local rewards and reload');
+
+  assert(!warService.setRepairPriority('violet-member', 'timberline-depot', 'wear-member-priority').ok, 'ordinary members cannot set repair priority');
+  assert(!warService.setRepairPriority('violet-owner', 'signal-marsh', 'wear-undamaged-priority').ok, 'leadership cannot prioritise a district without wear');
+  assert(!warService.repairDistrict('violet-member', 'timberline-depot', 'wear-out-of-order').ok, 'member repair respects leadership priority');
+  assert(!warService.repairDistrict('violet-unverified', 'ridgewatch-range', 'wear-unverified').ok, 'unverified identities cannot repair');
+  assert(!warService.repairDistrict('free-owner', 'ridgewatch-range', 'wear-free').ok, 'Free communities cannot repair another community');
+  const priority = warService.setRepairPriority('violet-owner', 'timberline-depot', 'wear-owner-priority');
+  assert(priority.ok && warService.state.communities['violet-ridge'].base.repairPriority === 'timberline-depot', 'owner can redirect the shared repair priority');
+  assert(warService.setRepairPriority('violet-owner', 'timberline-depot', 'wear-owner-priority').replay, 'priority action is idempotent');
+  const repairMember = warService.member('violet-member');
+  repairMember.parts = BATTLE_WEAR_RULES.repairParts;
+  repairMember.timber = BATTLE_WEAR_RULES.repairTimber;
+  const scoreBeforeRepair = JSON.stringify(warService.getWar(challenge.warId).score);
+  const repaired = warService.repairDistrict('violet-member', 'timberline-depot', 'wear-member-repair');
+  assert(repaired.ok && repaired.completed && repairMember.parts === 0 && repairMember.timber === 0 && warService.state.communities['violet-ridge'].base.landPlots[1].wear === 0, 'verified member funds and completes one repair stage with personal resources');
+  assert(warService.repairDistrict('violet-member', 'timberline-depot', 'wear-member-repair').replay && repairMember.parts === 0, 'repair replay cannot charge or repair twice');
+  assert(warService.state.communities['violet-ridge'].base.repairPriority === 'ridgewatch-range' && violetRidgewatch.facilityLevel === 1 && JSON.stringify(warService.getWar(challenge.warId).score) === scoreBeforeRepair, 'next damaged district becomes priority while levels and settled battle score stay fixed');
+  const repairReload = new LocalGameService({ storage: warStorage, now: () => warClock });
+  assert(repairReload.state.communities['violet-ridge'].base.landPlots[1].wear === 0 && repairReload.state.communities['violet-ridge'].base.repairPriority === 'ridgewatch-range', 'repair state and priority survive reload');
+  repairReload.state.communities['iron-pines'].base.landPlots[1].wear = 999;
+  repairReload.state.communities['iron-pines'].base.repairPriority = 'missing-plot';
+  repairReload.save();
+  const sanitizedWear = new LocalGameService({ storage: warStorage, now: () => warClock }).state.communities['iron-pines'].base;
+  assert(sanitizedWear.landPlots[1].wear === BATTLE_WEAR_RULES.maxSeverity && sanitizedWear.repairPriority === 'timberline-depot', 'loaded cosmetic wear is capped and stale priority is repaired');
+  checks.push('battle wear, public preview, owner priority, member-funded repair, replay, score stability and reload');
 
   let worldClock = clock + 70_000;
   const worldStorage = new MemoryStorage();

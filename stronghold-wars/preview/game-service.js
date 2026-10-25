@@ -33,6 +33,7 @@ export const WAR_RULES = Object.freeze({
   squadReturnMs: 90 * 1000,
   maxScoutsPerSide: 2,
 });
+export const BATTLE_WEAR_RULES = Object.freeze({ maxSeverity: 3, repairParts: 25, repairTimber: 1 });
 export const WAR_STAGE_DEFS = Object.freeze([
   Object.freeze({ id: 'forge-convoy', name: 'Forge Convoy', building: 'Workshop / Forge', key: 'workshop', parts: 30, timber: 10, objective: 'Dispatch repair kits and Timber to the front.' }),
   Object.freeze({ id: 'relay-capture', name: 'Relay Capture', building: 'Communications', key: 'comms', parts: 40, timber: 0, objective: 'Secure the DZN signal link before the rival side.' }),
@@ -164,10 +165,11 @@ function emptyBase(treasury = 200) {
     legacyJobs: [], completedLegacyJobIds: [],
     layout: defaultLayout(),
     patrolOrders: Object.fromEntries(Object.keys(SQUAD_ROLES).map(role => [role, 'standard'])),
+    repairPriority: null,
     defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
-      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null,
+      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null, wear: 0,
     })),
   };
 }
@@ -385,6 +387,7 @@ function normalizeLoadedState(raw) {
       if (plot.status === 'claimed') plot.timberFunded = config.timberCost;
       if (plot.status !== 'claimed') plot.barricades = 0;
       plot.facilityLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.facilityLevel)) : 0;
+      plot.wear = plot.facilityLevel ? Math.min(BATTLE_WEAR_RULES.maxSeverity, safeInt(savedPlot.wear)) : 0;
       plot.routeLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.routeLevel)) : 0;
       const project = savedPlot.facilityProject;
       const targetLevel = plot.facilityLevel + 1;
@@ -409,6 +412,8 @@ function normalizeLoadedState(raw) {
         };
       }
     }
+    normalized.repairPriority = normalized.landPlots.some(plot => plot.id === base.repairPriority && plot.wear > 0)
+      ? base.repairPriority : normalized.landPlots.find(plot => plot.wear > 0)?.id || null;
     const claimed = new Set(normalized.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
     const savedLayout = base.layout && typeof base.layout === 'object' ? base.layout : {};
     for (const key of Object.keys(normalized.layout.structures)) {
@@ -628,7 +633,7 @@ export class LocalGameService {
         buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
         defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
         districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
-          facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades })),
+          facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades, wear: plot.wear })),
         construction: base.projects.filter(project => project.status === 'approved').map(project => ({
           kind: 'building', name: GAME_CONFIG.buildings[project.key].name, key: project.key, targetLevel: project.targetLevel,
           percent: project.targetAmount > 0 ? Math.floor(project.funded / project.targetAmount * 100) : 0,
@@ -1056,6 +1061,21 @@ export class LocalGameService {
     war.tie = challengerScore === defenderScore;
     war.winnerCommunityId = war.tie ? null : challengerScore > defenderScore ? war.challengerCommunityId : war.defenderCommunityId;
     war.state = 'resolved'; war.resolvedAt = now;
+    const wear = [];
+    for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
+      const base = this.state.communities[communityId].base;
+      for (const attack of war.attacks.filter(item => item.communityId !== communityId)) {
+        const preference = attack.tactic === 'recon'
+          ? ['signal-marsh', 'timberline-depot', 'ridgewatch-range', 'highland-works']
+          : ['ridgewatch-range', 'highland-works', 'timberline-depot', 'signal-marsh'];
+        const plot = preference.map(id => base.landPlots.find(item => item.id === id))
+          .find(item => item?.status === 'claimed' && item.facilityLevel > 0 && item.wear < BATTLE_WEAR_RULES.maxSeverity);
+        if (!plot) continue;
+        plot.wear++;
+        if (!base.repairPriority) base.repairPriority = plot.id;
+        wear.push({ communityId, plotId: plot.id, severity: plot.wear, attackId: attack.attackId });
+      }
+    }
     const winnerSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const loserSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
     const winnerRegion = COMMUNITIES.find(item => item.id === war.winnerCommunityId);
@@ -1079,14 +1099,14 @@ export class LocalGameService {
     }
     war.replay = { version: 2, attackIds: [...war.attackIds], attacks: clone(war.attacks), stages: clone(war.stages || []), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;
-    war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards) } });
+    war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards), wear: clone(wear) } });
     for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
       const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
       const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
       const outcome = war.tie ? 'draw' : war.winnerCommunityId === communityId ? 'victory' : 'defeat';
       this._recordChronicle(this.state.communities[communityId].base, `war:${war.id}`, 'war', `War against ${opponent}: ${outcome}. ${war.score[communityId]}–${war.score[opponentId]}.`, now);
     }
-    const result = { ok: true, warId, state: war.state, winnerCommunityId: war.winnerCommunityId, tie: war.tie, score: clone(war.score), rewards };
+    const result = { ok: true, warId, state: war.state, winnerCommunityId: war.winnerCommunityId, tie: war.tie, score: clone(war.score), rewards, wear };
     this._recordWarAction(identityId, actionId, 'resolve', result);
     this.save();
     return result;
@@ -1353,6 +1373,55 @@ export class LocalGameService {
     entry.saved.base.patrolOrders[role] = order;
     const result = { ok: true, role, order };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  setRepairPriority(identityId, plotId, actionId = this.newActionId('repair-priority')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Community unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    const kind = `repair-priority-${identityId}`;
+    if (prior) return prior.kind === kind && prior.result.plotId === plotId
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const plot = entry.saved.base.landPlots.find(item => item.id === plotId && item.wear > 0);
+    if (!plot) return { ok: false, error: 'Choose a damaged district for repair priority.' };
+    entry.saved.base.repairPriority = plotId;
+    const result = { ok: true, plotId };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  repairDistrict(identityId, plotId, actionId = this.newActionId('district-repair')) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return { ok: false, error: 'Community or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    const kind = `district-repair-${identityId}`;
+    if (prior) return prior.kind === kind && prior.result.plotId === plotId
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const base = entry.saved.base;
+    const plot = base.landPlots.find(item => item.id === plotId && item.wear > 0);
+    if (!plot) return { ok: false, error: 'This district has no battle wear to repair.' };
+    if (base.repairPriority !== plotId) return { ok: false, error: 'Leadership must prioritise this district first.' };
+    if (member.parts < BATTLE_WEAR_RULES.repairParts || member.timber < BATTLE_WEAR_RULES.repairTimber)
+      return { ok: false, error: `Repair needs ${BATTLE_WEAR_RULES.repairParts} Parts and ${BATTLE_WEAR_RULES.repairTimber} Timber.` };
+    member.parts -= BATTLE_WEAR_RULES.repairParts;
+    member.timber -= BATTLE_WEAR_RULES.repairTimber;
+    member.lifetimeContributed += BATTLE_WEAR_RULES.repairParts;
+    plot.wear--;
+    if (!plot.wear) base.repairPriority = base.landPlots.find(item => item.wear > 0)?.id || null;
+    const result = { ok: true, plotId, remaining: plot.wear, completed: plot.wear === 0, nextPriority: base.repairPriority };
+    this._recordAction(base.actionRecords, actionId, result, kind);
     this.save();
     return result;
   }

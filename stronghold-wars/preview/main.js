@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
-import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
+import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
 import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
@@ -258,6 +258,11 @@ function drawCompatibilityScene() {
         ctx.fillStyle = '#6a7b55'; ctx.beginPath(); ctx.moveTo(center.x - size * .6, center.y - size * .75); ctx.lineTo(center.x, center.y - size * 1.15); ctx.lineTo(center.x + size * .6, center.y - size * .75); ctx.closePath(); ctx.fill();
         ctx.fillStyle = '#c084fc'; ctx.fillRect(center.x - size * .37, center.y - size * .45, size * .74, Math.max(3, size * .1));
         ctx.fillStyle = '#edfaf0'; ctx.font = '700 10px Orbitron, sans-serif'; ctx.fillText(`L${plot.facilityLevel}`, center.x, center.y - size * .5);
+        if (plot.wear) {
+          ctx.strokeStyle = '#ff9b54'; ctx.lineWidth = 2 + plot.wear;
+          ctx.beginPath(); ctx.ellipse(center.x, center.y, size * .7, size * .36, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = '#ffd2ad'; ctx.fillText(`REPAIR ${plot.wear}/${BATTLE_WEAR_RULES.maxSeverity}`, center.x, center.y + 12);
+        }
       } else { ctx.fillStyle = '#70e59a'; ctx.fillRect(label.x - 3, label.y - 18, 6, 10); }
       ctx.font = '700 9px Inter, sans-serif';
       ctx.fillText(`${plot.barricades} barricades`, label.x, label.y + 11);
@@ -860,6 +865,24 @@ async function reconcileLandScenery() {
           const marker = models.claim_marker.clone();
           marker.position.set(x, 0.09, z);
           landScenery.add(marker);
+        }
+        if (plot.wear) {
+          const point = base.layout.structures[config.id];
+          const cx = point?.x ?? x, cz = point?.z ?? z;
+          const ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.35 + plot.wear * .18, 36),
+            new THREE.MeshBasicMaterial({ color: 0xff8c4d, transparent: true, opacity: .5, side: THREE.DoubleSide, depthWrite: false }));
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.set(cx, .14, cz);
+          ring.userData.ownedTerrain = true;
+          landScenery.add(ring);
+          for (let i = 0; i < plot.wear; i++) {
+            const scorch = new THREE.Mesh(new THREE.CircleGeometry(.45 + i * .12, 12),
+              new THREE.MeshBasicMaterial({ color: 0x211e1c, transparent: true, opacity: .7, depthWrite: false, side: THREE.DoubleSide }));
+            scorch.rotation.x = -Math.PI / 2;
+            scorch.position.set(cx + Math.cos(i * 2.35) * 3.7, .13, cz + Math.sin(i * 2.35) * 3.7);
+            scorch.userData.ownedTerrain = true;
+            landScenery.add(scorch);
+          }
         }
         for (let i = 0; i < plot.barricades; i++) {
           const logs = models.pine_log_stack.clone();
@@ -2159,6 +2182,7 @@ function showLandPanel(focusPlotId = null) {
   }
   const snapshot = service.snapshot();
   const hall = snapshot.base.levels.hq;
+  const repairPriority = snapshot.base.repairPriority;
   const cards = GAME_CONFIG.landPlots.slice(1).map(config => {
     const plot = snapshot.base.landPlots.find(item => item.id === config.id);
     const locked = hall < config.hall;
@@ -2207,9 +2231,10 @@ function showLandPanel(focusPlotId = null) {
     }
     const yardGuide = config.id === 'timberline-depot' && plot.facilityLevel === 0
       ? '<p class="help">Lumber Yard path: Hall L2 → clear 3 trees → owner approves the land → members fund the claim and Level 1 yard.</p>' : '';
-    return `<article class="district-card ${focusPlotId === config.id ? 'focused' : ''}" data-plot-card="${config.id}"><strong>${escapeHTML(config.id === 'timberline-depot' ? 'Timberline Lumber Yard site' : config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p>${yardGuide}<div class="row">${button}</div>${facilityHtml}${routeHtml}</article>`;
+    const repairHtml = plot.wear ? `<p class="notice warn">Battle wear ${plot.wear}/${BATTLE_WEAR_RULES.maxSeverity} · cosmetic damage; production and battle stats are unchanged.</p><div class="row">${isLeadership() && repairPriority !== config.id ? `<button data-repair-priority="${config.id}">Prioritise repair</button>` : ''}${repairPriority === config.id ? `<button data-repair-district="${config.id}" ${snapshot.member.parts < BATTLE_WEAR_RULES.repairParts || snapshot.member.timber < BATTLE_WEAR_RULES.repairTimber ? 'disabled' : ''}>Repair one stage · ${BATTLE_WEAR_RULES.repairParts} Parts + ${BATTLE_WEAR_RULES.repairTimber} Timber</button>` : '<span class="help">Awaiting leadership priority</span>'}</div>` : '';
+    return `<article class="district-card ${focusPlotId === config.id ? 'focused' : ''}" data-plot-card="${config.id}"><strong>${escapeHTML(config.id === 'timberline-depot' ? 'Timberline Lumber Yard site' : config.name)} · Hall L${config.hall}</strong><p>${escapeHTML(status)}</p>${yardGuide}<div class="row">${button}</div>${repairHtml}${facilityHtml}${routeHtml}</article>`;
   }).join('');
-  openPanel(`<h2>Land & Forest</h2><p>Chop trees for Timber. The owner approves each cleared district; members fund its buildings together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed land: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5</p>${focusPlotId ? '<div class="row"><button id="returnBaseBtn">Return camera to base</button></div>' : ''}<div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div>${cards}<details class="technical-details"><summary>Routes, defence and renewable Timber</summary><p class="help">Daily Salvage keeps Timber renewable. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim. Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades freeze during an accepted local war; routes do not change war scoring.</p></details><div class="row"><button id="closeBtn">Close</button></div>`);
+  openPanel(`<h2>Land & Forest</h2><p>Chop trees for Timber. The owner approves each cleared district; members fund its buildings together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed land: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5${repairPriority ? ` · Repair priority: ${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === repairPriority)?.name || repairPriority)}` : ''}</p>${focusPlotId ? '<div class="row"><button id="returnBaseBtn">Return camera to base</button></div>' : ''}<div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div>${cards}<details class="technical-details"><summary>Routes, defence and renewable Timber</summary><p class="help">Daily Salvage keeps Timber renewable. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim. Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades freeze during an accepted local war; routes do not change war scoring.</p></details><div class="row"><button id="closeBtn">Close</button></div>`);
   // Timberline is the first card, so retain the short explanation and return
   // control at the top instead of scrolling them off screen.
   if ($('returnBaseBtn')) $('returnBaseBtn').onclick = () => { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); closePanel(); };
@@ -2237,6 +2262,21 @@ function showLandPanel(focusPlotId = null) {
     const result = service.buildBarricade(service.state.currentIdentityId, button.dataset.barricade);
     if (!result.ok) toast(result.error); else { toast('Barricade built by a community member.'); reconcileLandScenery(); updateHud(); }
     showLandPanel();
+  });
+  panel.querySelectorAll('[data-repair-priority]').forEach(button => button.onclick = () => {
+    const result = service.setRepairPriority(service.state.currentIdentityId, button.dataset.repairPriority);
+    toast(result.ok ? 'District repair priority updated.' : result.error);
+    showLandPanel(focusPlotId);
+  });
+  panel.querySelectorAll('[data-repair-district]').forEach(button => button.onclick = () => {
+    const plotId = button.dataset.repairDistrict;
+    const result = service.repairDistrict(service.state.currentIdentityId, plotId);
+    toast(result.ok ? result.completed ? 'District repairs complete.' : `${result.remaining} battle wear stages remain.` : result.error);
+    if (result.ok) { reconcileLandScenery(); updateHud(); if (result.completed) {
+      const [x, z] = GAME_CONFIG.landPlots.find(plot => plot.id === plotId).position;
+      celebrateUpgrade(x, z, 'District restored', 1);
+    } }
+    showLandPanel(focusPlotId);
   });
   panel.querySelectorAll('[data-approve-facility]').forEach(button => button.onclick = () => {
     const result = service.approveFacility(service.state.currentIdentityId, button.dataset.approveFacility);
@@ -2823,7 +2863,7 @@ function showWorldMap() {
     return `<div class="world-building ${construction ? 'constructing' : ''}"><img src="${escapeHTML(asset.png)}" alt="${escapeHTML(GAME_CONFIG.buildings[key].name)} Level ${level}${construction ? ', under construction' : ''}"><strong>${escapeHTML(GAME_CONFIG.buildings[key].name)} · L${level}${construction ? ' · ⚒' : ''}</strong></div>`;
   }).join('');
   const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
-  const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}` : ''}`).join('<br>');
+  const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}${district.wear ? ` · battle wear ${district.wear}/${BATTLE_WEAR_RULES.maxSeverity}` : ''}` : ''}`).join('<br>');
   const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${squadUnlocked(role, selected.buildings) ? `gear L${squadTier(role, selected.buildings)}` : `locked · Hall L${definition.unlockHall} / ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}`}</span>`).join('');
   const visibleDefenders = Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
     const unit = selected.defenders?.[role];
