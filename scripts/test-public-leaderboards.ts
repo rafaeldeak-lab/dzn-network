@@ -299,6 +299,11 @@ async function testLeaderboardStatParity() {
       { kills: fullLeader?.kills, deaths: fullLeader?.deaths, kd: fullLeader?.kd_label },
       "Compact and full server leaderboards must expose identical stats for their shared players.",
     );
+    const zeroDeathAttackers = fullPlayers
+      .filter((player) => player.player_name.startsWith("Attacker "))
+      .sort((left, right) => left.player_name.localeCompare(right.player_name));
+    assert.equal(zeroDeathAttackers.length, 62, "Multiple killers without deaths must remain distinct leaderboard rows.");
+    assert.ok(zeroDeathAttackers.every((player) => player.kills === 1 && player.deaths === 0 && player.kd_label === "Flawless"));
   } finally {
     leaderboardStatParityFixture.close();
   }

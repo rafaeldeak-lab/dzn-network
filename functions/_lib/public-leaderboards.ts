@@ -449,7 +449,7 @@ async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, o
            AND kill_events.killer_name IS NOT NULL
            AND ${mockNameFilterSql("kill_events.killer_name")}
            ${serverFilter}
-         GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
+         GROUP BY kill_events.linked_server_id, COALESCE(kill_events.killer_id, lower(kill_events.killer_name)), linked_servers.public_slug
          ORDER BY kills DESC, longest_kill DESC, last_seen DESC
          LIMIT ? OFFSET ?`,
     );
