@@ -1,10 +1,15 @@
 import { reconcileBillingWebhook } from "../../_lib/billing-webhook";
 import { json, methodNotAllowed } from "../../_lib/http";
-import { verifyStripeWebhook } from "../../_lib/stripe";
+import { isTestStripeModeOnProductionHost, verifyStripeWebhook } from "../../_lib/stripe";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
+  if (isTestStripeModeOnProductionHost(env, request)) {
+    return json({ error: "Stripe webhook is unavailable in this environment." }, {
+      status: 403, headers: { "Cache-Control": "private, no-store" },
+    });
+  }
   if (!env.STRIPE_WEBHOOK_SECRET) return json({ error: "Stripe webhook is not configured." }, { status: 503 });
   let event;
   try { event = await verifyStripeWebhook(request, env.STRIPE_WEBHOOK_SECRET); }

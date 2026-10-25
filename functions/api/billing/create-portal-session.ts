@@ -2,11 +2,16 @@ import { ensureMockUser, getSessionUser, requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import { ensureBillingSchema } from "../../_lib/plans";
-import { getAppUrl, stripeFormRequest, type StripePortalSession } from "../../_lib/stripe";
+import { getAppUrl, isTestStripeModeOnProductionHost, stripeFormRequest, type StripePortalSession } from "../../_lib/stripe";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
+  if (isTestStripeModeOnProductionHost(env, request)) {
+    return json({ error: "Billing management is temporarily unavailable in this environment." }, {
+      status: 403, headers: { "Cache-Control": "private, no-store", Vary: "Cookie" },
+    });
+  }
 
   const user = await resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
