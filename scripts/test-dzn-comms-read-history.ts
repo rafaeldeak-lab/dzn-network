@@ -84,6 +84,8 @@ assert.match(helper, /const selfDeleteEnabled = flags\.writeFeaturesEnabled && r
 assert.match(helper, /self_delete_enabled: selfDeleteEnabled/, "History feature flags must report the same availability used for delete controls.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
+assert.match(helper, /typing_enabled: typingFlags\.readEnabled/, "Route payload must derive typing reads from their separate server flag.");
+assert.match(helper, /typing_write_enabled: typingFlags\.writeEnabled/, "Route payload must derive typing writes from their separate server flag.");
 assert.match(helper, /player_public_profiles AS public_profile[\s\S]*public_profile\.status = 'active'/, "Avatar projection must require an active public profile.");
 assert.match(helper, /player_profile_privacy_preferences AS profile_privacy[\s\S]*profile_privacy\.public_profile_enabled = 1/, "Avatar projection must require a public-profile preference.");
 assert.match(helper, /player_public_discord_identity_preferences AS discord_identity[\s\S]*discord_identity\.enabled = 1/, "Avatar projection must require explicit Discord identity consent.");
@@ -112,7 +114,8 @@ assert.match(shell, /poller === undefined && capabilityProbeRetries < CAPABILITY
 assert.match(shell, /if \(retryTimer !== undefined\) window\.clearTimeout\(retryTimer\)/, "Channel changes and unmounts must cancel a pending capability retry.");
 assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel/, "The composer must send only to the channel represented by the visible validated payload.");
 assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "Mutation refreshes must not overwrite a newer channel selection.");
-assert.doesNotMatch(shell, /addCommsReaction|removeCommsReaction|available_reactions\.map|Log in to react/, "Global Chat must not render or invoke the fixed reaction catalog.");
+assert.doesNotMatch(shell, /available_reactions\.map|\bheart\b|\bboost\b|\blaugh\b|\bsalute\b|\bskull\b/, "Global Chat must not render a fixed reaction catalog.");
+assert.match(shell, /Add an emoji reaction/, "Global Chat may expose a compact on-demand custom emoji control.");
 assert.match(shell, /<textarea[\s\S]*event\.nativeEvent\.isComposing[\s\S]*event\.currentTarget\.form\?\.requestSubmit\(\)/, "The compact composer must allow native keyboard emoji and preserve IME composition while Enter sends a message.");
 assert.match(shell, /event\.key !== "Enter" \|\| event\.shiftKey/, "Shift+Enter must remain available for a composer line break.");
 assert.match(historyClient, /new URLSearchParams\(\{ channel: selectedChannel, limit: "30" \}\)/, "The client should fetch only the selected read-only history route with a bounded page size.");

@@ -37,7 +37,10 @@ async function fixture(includeReactionMigration = true) {
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
-  if (includeReactionMigration) sqlite.exec(readFileSync("migrations/0078_dzn_comms_reactions.sql", "utf8"));
+  if (includeReactionMigration) {
+    sqlite.exec(readFileSync("migrations/0078_dzn_comms_reactions.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0114_dzn_comms_chat_interactions.sql", "utf8"));
+  }
   sqlite.exec(`
     INSERT INTO dzn_comms_channels (id, slug, kind, name, visibility, is_readable)
       VALUES ('private-channel', 'squad-room', 'private_group', 'Squad Room', 'private_group', 1);
@@ -103,6 +106,8 @@ async function fixture(includeReactionMigration = true) {
     DZN_COMMS_REACTIONS_READ_ENABLED: "true",
     DZN_COMMS_REACTIONS_WRITE_ENABLED: "true",
     DZN_COMMS_REACTIONS_SCOPE: "local_test",
+    DZN_COMMS_CUSTOM_EMOJI_REACTIONS_ENABLED: "true",
+    DZN_COMMS_CUSTOM_EMOJI_REACTIONS_WRITE_ENABLED: "true",
     DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
   } as unknown as Env;
   return {
@@ -135,6 +140,7 @@ async function payload(response: Response) {
     code?: string;
     result?: string;
     replayed?: boolean;
+    reaction?: { key: string; emoji: string; label: string; count: number; current_user_reacted: boolean };
     counts?: { key: string; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
     messages?: { id: string; reactions?: { counts: { count: number; current_user_reacted: boolean }[] } }[];
   };
@@ -143,12 +149,14 @@ async function payload(response: Response) {
 async function testMigrationAndFlags() {
   const f = await fixture();
   try {
-    const required = ["dzn_comms_message_reactions", "dzn_comms_reaction_mutations", "dzn_comms_reaction_rate_slots"];
+    const required = ["dzn_comms_message_reactions", "dzn_comms_custom_emoji_reactions", "dzn_comms_reaction_mutations", "dzn_comms_reaction_rate_slots"];
     const tables = new Set(f.sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => String(row.name)));
     assert.deepEqual(required.filter((table) => !tables.has(table)), []);
     assert.equal(f.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
     assert.throws(() => f.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
       (id,message_id,actor_user_id,reaction_key) VALUES ('bad','public-message','player','client-supplied')`).run());
+    const customSchema = String(f.sqlite.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dzn_comms_custom_emoji_reactions'").get()?.sql ?? "");
+    assert.doesNotMatch(customSchema, /reaction_key IN/i, "Custom emoji storage must not use the fixed legacy catalog.");
     const disabled = { ...f.env, DZN_COMMS_REACTIONS_READ_ENABLED: "false", DZN_COMMS_REACTIONS_WRITE_ENABLED: "false" } as Env;
     assert.equal((await handleDznCommsReactions(request("GET", "/api/comms/messages/public-message/reactions", null), disabled, "public-message")).status, 404);
     const noSecret = { ...f.env, DZN_COMMS_LEDGER_SECRET: undefined } as Env;
@@ -207,6 +215,17 @@ async function testPublicReactionLifecycle() {
     }), f.env, "public-message", "heart");
     assert.equal((await payload(removed)).result, "removed");
     assert.equal((await payload(await handleDznCommsReactions(request("GET", path, null), f.env, "public-message"))).counts?.[0]?.count, 1);
+    const custom = await handleDznCommsReactions(request("POST", path, "player-token", {
+      clientMutationId: "reaction-custom-0001", reactionKey: "👍🏽",
+    }), f.env, "public-message");
+    assert.equal(custom.status, 201);
+    const customPayload = await payload(custom);
+    assert.equal(customPayload.reaction?.emoji, "👍🏽");
+    assert.match(String(customPayload.reaction?.key), /^emoji:/);
+    const customDisabled = { ...f.env, DZN_COMMS_CUSTOM_EMOJI_REACTIONS_ENABLED: "false" } as Env;
+    assert.equal((await handleDznCommsReactions(request("POST", path, "other-token", {
+      clientMutationId: "reaction-custom-0002", reactionKey: "👍🏽",
+    }), customDisabled, "public-message")).status, 422);
     const absent = await handleDznCommsReactionRemoval(request("DELETE", removePath, "player-token", {
       clientMutationId: "reaction-request-0006",
     }), f.env, "public-message", "heart");

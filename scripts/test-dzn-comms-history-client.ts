@@ -209,10 +209,27 @@ test("accepts, bounds and projects reaction-enabled history", async () => {
 
 test("rejects malformed or misplaced reaction projections", () => {
   const malformed = commsHistoryFixture(); malformed.feature_flags.reactions_enabled = true;
-  Object.assign(malformed.messages[0], { reactions: { revision: "empty", available_reactions: [], counts: [] } });
+  Object.assign(malformed.messages[0], { reactions: { revision: "emoji-reaction", available_reactions: [], counts: [{ key: "emoji:1f44d", emoji: "not-an-emoji", label: "Emoji", count: 1, current_user_reacted: false }] } });
   assert.throws(() => parseCommsHistory(malformed));
   const disabled = commsHistoryFixture(); Object.assign(disabled.messages[0], { reactions: {} });
   assert.throws(() => parseCommsHistory(disabled));
+});
+
+test("accepts a server-validated custom emoji only when the capability is enabled", () => {
+  const input = commsHistoryFixture();
+  input.feature_flags.reactions_enabled = true;
+  input.feature_flags.reactions_write_enabled = true;
+  input.feature_flags.reactions_custom_emoji_enabled = true;
+  input.feature_flags.reactions_custom_emoji_write_enabled = true;
+  Object.assign(input.messages[0], { reactions: {
+    revision: "emoji-reaction", available_reactions: [],
+    counts: [{ key: "emoji:1f44d-1f3fd", emoji: "👍🏽", label: "Emoji", count: 1, current_user_reacted: true }],
+  } });
+  assert.deepEqual(parseCommsHistory(input).messages[0].reactions?.counts, [
+    { key: "emoji:1f44d-1f3fd", emoji: "👍🏽", label: "Emoji", count: 1, current_user_reacted: true },
+  ]);
+  input.feature_flags.reactions_custom_emoji_enabled = false;
+  assert.throws(() => parseCommsHistory(input));
 });
 
 test("sends bounded own-reaction add and remove requests", async () => {

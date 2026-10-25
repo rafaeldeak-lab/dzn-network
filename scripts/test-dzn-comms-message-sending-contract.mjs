@@ -125,7 +125,9 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /if \(selectedChannel !== "global-chat"\) \{\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "Private access recovery must reset pagination before loading Global Chat.");
   assert.match(shell, /await sendCommsMessage[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful message send must release an earlier-history loading state only for its original channel.");
-  assert.doesNotMatch(shell, /reactionAttemptRef|addCommsReaction|removeCommsReaction/, "The compact Global Chat UI must not retain the fixed reaction mutation path.");
+  assert.doesNotMatch(shell, /reactionAttemptRef|\bheart\b|\bboost\b|\blaugh\b|\bsalute\b|\bskull\b/, "The compact Global Chat UI must not retain a fixed reaction catalog.");
+  assert.match(shell, /Add an emoji reaction/, "The compact Global Chat UI must expose only an on-demand emoji reaction control.");
+  assert.match(shell, /is typing\.\.\./, "The chat shell must provide an ephemeral Discord-style typing indicator.");
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");

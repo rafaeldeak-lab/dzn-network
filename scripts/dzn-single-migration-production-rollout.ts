@@ -40,6 +40,7 @@ type MigrationPlan = {
   predecessor: string;
   tables: TablePlan[];
   indexes: string[];
+  triggers?: string[];
   statePreservation?: StatePreservationPlan;
 };
 
@@ -279,6 +280,38 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
     ],
     indexes: [],
   },
+  "0114_dzn_comms_chat_interactions.sql": {
+    migration: "0114_dzn_comms_chat_interactions.sql",
+    predecessor: "0113_dzn_server_status_evidence.sql",
+    tables: [
+      {
+        name: "dzn_comms_custom_emoji_reactions",
+        columns: ["id", "message_id", "actor_user_id", "reaction_key", "active", "created_at", "updated_at", "removed_at"],
+        foreignKeys: [
+          { from: "message_id", table: "dzn_comms_messages", to: "id", onDelete: "CASCADE" },
+          { from: "actor_user_id", table: "users", to: "id", onDelete: "CASCADE" },
+        ],
+      },
+      {
+        name: "dzn_comms_typing_sessions",
+        columns: ["channel_id", "actor_user_id", "display_name", "updated_at", "expires_at"],
+        foreignKeys: [
+          { from: "channel_id", table: "dzn_comms_channels", to: "id", onDelete: "CASCADE" },
+          { from: "actor_user_id", table: "users", to: "id", onDelete: "CASCADE" },
+        ],
+      },
+    ],
+    indexes: ["idx_dzn_comms_custom_emoji_reactions_message_active", "idx_dzn_comms_typing_channel_expiry"],
+    triggers: [
+      "dzn_comms_custom_emoji_reaction_visible_insert",
+      "dzn_comms_custom_emoji_reaction_visible_reactivate",
+      "dzn_comms_custom_emoji_reaction_actor_cap_insert",
+      "dzn_comms_custom_emoji_reaction_actor_cap_reactivate",
+      "dzn_comms_custom_emoji_reaction_message_cap_insert",
+      "dzn_comms_custom_emoji_reaction_message_cap_reactivate",
+      "dzn_comms_custom_emoji_reactions_message_unavailable",
+    ],
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
@@ -401,7 +434,8 @@ function normalizeSql(source: string) {
     .trim()
     .replace(/;$/, "")
     .replace(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+/i, "CREATE TABLE ")
-    .replace(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+/i, "CREATE INDEX ");
+    .replace(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+/i, "CREATE INDEX ")
+    .replace(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+/i, "CREATE TRIGGER ");
 }
 
 function sourceStatements(plan: MigrationPlan) {
@@ -416,13 +450,18 @@ function sourceStatements(plan: MigrationPlan) {
     .split(/\r?\n/)
     .filter((line) => !line.trim().startsWith("--"))
     .join("\n");
-  if (/\b(DROP|TRUNCATE|INSERT|UPDATE|REPLACE|VACUUM|ATTACH|DETACH|PRAGMA)\b/i.test(withoutComments)) {
-    throw new Error("Single-migration rollout targets must be additive schema-only SQL.");
+  const statementPattern = /CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[A-Za-z_][A-Za-z0-9_]*\s+[\s\S]*?\bEND\s*;|(?:CREATE\s+TABLE|CREATE\s+(?:UNIQUE\s+)?INDEX|ALTER\s+TABLE)\b[\s\S]*?;/gi;
+  const statements: string[] = [];
+  let cursor = 0;
+  for (const match of withoutComments.matchAll(statementPattern)) {
+    const leading = withoutComments.slice(cursor, match.index).trim();
+    if (leading) throw new Error("Single-migration rollout targets must contain only approved additive schema objects.");
+    statements.push(match[0].trim().replace(/;$/, ""));
+    cursor = (match.index ?? 0) + match[0].length;
   }
-  const statements = withoutComments
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
+  if (withoutComments.slice(cursor).trim()) {
+    throw new Error("Single-migration rollout targets must contain only approved additive schema objects.");
+  }
   const alterStatements = statements.filter((statement) => /^ALTER\s+TABLE\b/i.test(statement));
   if (alterStatements.length > 0 && !plan.statePreservation) {
     throw new Error("Single-migration rollout targets must be additive schema-only SQL.");
@@ -446,6 +485,7 @@ function expectedObjectSql(plan: MigrationPlan) {
   const expectedTableNames = new Set(plan.tables.map((table) => table.name));
   const permittedIndexTableNames = new Set([...expectedTableNames, ...(plan.statePreservation ? [plan.statePreservation.table.name] : [])]);
   const expectedIndexNames = new Set(plan.indexes);
+  const expectedTriggerNames = new Set(plan.triggers ?? []);
   const objects: Record<string, string> = {};
 
   for (const statement of statements) {
@@ -474,15 +514,29 @@ function expectedObjectSql(plan: MigrationPlan) {
       continue;
     }
 
+    const triggerMatch = statement.match(/^CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\b/i);
+    if (triggerMatch) {
+      const name = triggerMatch[1];
+      if (!expectedTriggerNames.has(name) || objects[name]) {
+        throw new Error(`Migration ${plan.migration} contains an unsupported trigger statement for ${name}.`);
+      }
+      objects[name] = normalizeSql(statement);
+      continue;
+    }
+
     throw new Error(`Migration ${plan.migration} contains an unsupported statement: ${statement.slice(0, 160)}.`);
   }
 
-  const expectedNames = [...expectedTableNames, ...expectedIndexNames].sort();
+  const expectedNames = [...expectedTableNames, ...expectedIndexNames, ...expectedTriggerNames].sort();
   const actualNames = Object.keys(objects).sort();
   if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
     throw new Error(`Migration ${plan.migration} object set mismatch. Expected ${expectedNames.join(", ")}; received ${actualNames.join(", ")}.`);
   }
   return objects;
+}
+
+function migrationObjectNames(plan: MigrationPlan) {
+  return [...plan.tables.map((table) => table.name), ...plan.indexes, ...(plan.triggers ?? [])];
 }
 
 function resolveInsideRepository(value: string) {
@@ -583,7 +637,7 @@ function verifyLedger(migrationName: string, ledgerPath: string, phase: string) 
 
 function verifyBaseline(migrationName: string, objectsPath: string, foreignKeyCheckPath: string) {
   const plan = planFor(migrationName);
-  const expectedNames = new Set([...plan.tables.map((table) => table.name), ...plan.indexes]);
+  const expectedNames = new Set(migrationObjectNames(plan));
   const objects = readRows(objectsPath);
   const unexpectedExisting = objects.filter((row) => expectedNames.has(String(row.name ?? "")));
   if (unexpectedExisting.length > 0) {
@@ -610,7 +664,7 @@ function readPreparedPlan(stageInput: string) {
 
 function verifySchema(stageInput: string, objectsPath: string, foreignKeyCheckPath: string) {
   const { stageDirectory, prepared, plan } = readPreparedPlan(stageInput);
-  const expectedNames = new Set([...plan.tables.map((table) => table.name), ...plan.indexes]);
+  const expectedNames = new Set(migrationObjectNames(plan));
   const actualObjects = readRows(objectsPath);
   if (actualObjects.length !== expectedNames.size) {
     throw new Error(`Expected ${expectedNames.size} target schema objects, found ${actualObjects.length}.`);
@@ -795,7 +849,7 @@ function quoteSql(value: string) {
 
 function printObjectsQuery(migrationName: string) {
   const plan = planFor(migrationName);
-  const names = [...plan.tables.map((table) => table.name), ...plan.indexes].map(quoteSql).join(", ");
+  const names = migrationObjectNames(plan).map(quoteSql).join(", ");
   console.log(`SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (${names}) ORDER BY type, name;`);
 }
 
