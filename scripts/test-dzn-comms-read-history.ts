@@ -112,14 +112,9 @@ assert.match(shell, /poller === undefined && capabilityProbeRetries < CAPABILITY
 assert.match(shell, /if \(retryTimer !== undefined\) window\.clearTimeout\(retryTimer\)/, "Channel changes and unmounts must cancel a pending capability retry.");
 assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel/, "The composer must send only to the channel represented by the visible validated payload.");
 assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "Mutation refreshes must not overwrite a newer channel selection.");
-assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials: "include"/, "Reaction writes must use the current authenticated-session probe.");
-assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED/, "Reaction controls must have a dedicated public activation switch.");
-assert.match(shell, /reactionUiEnabled = historyReady && reactionUiFlagEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must require a live history response, the dedicated reaction UI switch and server read switch.");
-assert.match(shell, /reactionWritesAvailable && authStatus === "authenticated"/, "Reaction mutations must remain disabled until authentication is confirmed.");
-assert.match(shell, /Log in to react/, "Signed-out users must receive a direct login action instead of enabled mutation controls.");
-assert.match(shell, /if \(!reactionWritesAvailable\) return;/, "The auth probe must remain dormant until reaction writes are available.");
-assert.match(shell, /\}, \[reactionWritesAvailable\]\);/, "The auth probe must follow the authoritative reaction-write availability state.");
-assert.match(shell, /reactionAttemptRef\.current\.delete\(addAttemptKey\)[\s\S]*reactionAttemptRef\.current\.delete\(removeAttemptKey\)/, "A successful reaction mutation must clear stale retry IDs for both action directions.");
+assert.doesNotMatch(shell, /addCommsReaction|removeCommsReaction|available_reactions\.map|Log in to react/, "Global Chat must not render or invoke the fixed reaction catalog.");
+assert.match(shell, /<textarea[\s\S]*event\.nativeEvent\.isComposing[\s\S]*event\.currentTarget\.form\?\.requestSubmit\(\)/, "The compact composer must allow native keyboard emoji and preserve IME composition while Enter sends a message.");
+assert.match(shell, /event\.key !== "Enter" \|\| event\.shiftKey/, "Shift+Enter must remain available for a composer line break.");
 assert.match(historyClient, /new URLSearchParams\(\{ channel: selectedChannel, limit: "30" \}\)/, "The client should fetch only the selected read-only history route with a bounded page size.");
 assert.match(historyClient, /if \(cursor\) query\.set\("cursor", cursor\)/, "The client may request an earlier page only through its validated opaque cursor.");
 assert.match(shell, /payload:\s*{\s*\.\.\.earlier,\s*messages:\s*\[\.\.\.unseenEarlier, \.\.\.current\.payload\.messages\]/, "Earlier history must adopt the refreshed channel permissions and flags while retaining accumulated messages.");
@@ -130,7 +125,7 @@ assert.match(historyClient, /credentials: "include"/, "The client should preserv
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must retain an explicit public UI switch for development and controlled previews.");
 assert.match(shell, /selfDeleteUiEnabled = historyReady && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require the verified server archive safeguard.");
 assert.match(shell, /const canDelete = deleteEnabled && message\.can_delete/, "Message rows must not expose or invoke self-delete outside the server-confirmed capability state.");
-assert.match(shell, /role="log"[\s\S]*max-h-\[50svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
+assert.match(shell, /role="log"[\s\S]*max-h-\[46svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The compact message rail must scroll internally so long chat history does not continuously expand the Community page.");
 assert.match(shell, /onScroll=\{handleMessageLogScroll\}/, "The message rail must notice when a reader leaves or returns to the latest message.");
 assert.match(shell, /scrollTo\(\{ top: currentLog\.scrollHeight, behavior: "auto" \}\)/, "A newly opened channel or an active reader must be placed on the most recent message.");
 assert.match(shell, /unseenMessageCount > 0[\s\S]*Jump to the latest message/, "Readers who scroll away from the newest messages must receive an explicit catch-up control.");
