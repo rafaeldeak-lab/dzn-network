@@ -372,6 +372,28 @@
             transform: scale(1.05);
         }
     }
+      body.field-mode #hud, body.field-mode .preview-card, body.field-mode .building-nav, body.field-mode #panel { display: none !important; }
+      #fieldHud[hidden] { display: none; }
+      #fieldHud { position: fixed; z-index: 11; left: 14px; top: 14px; width: min(390px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #77ce9b; border-radius: 15px; background: linear-gradient(145deg, #0b1717f2, #111d1bee); box-shadow: 0 17px 50px #000b; color: #ecf7ee; font: 11px Inter, system-ui, sans-serif; }
+      .field-title { color: #9bf0b4; font: 800 13px Orbitron, sans-serif; letter-spacing: .07em; }
+      .field-stage { margin-top: 5px; color: #d7b7ff; font: 700 11px Orbitron, sans-serif; }
+      .field-stats { margin-top: 11px; padding: 9px; border: 1px solid #4b7362; border-radius: 8px; background: #1b3028; color: #e9ffec; font-weight: 800; line-height: 1.5; }
+      .field-clock { margin: 8px 0 11px; color: #bbd4c3; line-height: 1.45; }
+      .field-message { padding: 7px 9px; border-left: 3px solid #dda85c; background: #3a2a1c; line-height: 1.45; }
+      .field-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+      .field-actions button { min-height: 43px; border-color: #85d9a0; background: #214332; text-align: left; font-weight: 800; }
+      .field-abilities { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; padding-top: 9px; border-top: 1px solid #71877566; }
+      .field-abilities button, .field-abilities select { max-width: 100%; font-size: 10px; }
+      .field-abilities select { flex: 1 1 170px; background: #17271e; color: #eef8ef; border: 1px solid #699273; border-radius: 8px; padding: 6px; }
+      .field-footer { display: flex; gap: 7px; justify-content: space-between; margin-top: 12px; }
+      .field-footer button { font-size: 10px; }
+      @media (max-width: 700px) {
+        #fieldHud { top: auto; bottom: 8px; left: 8px; width: calc(100vw - 16px); max-height: min(42dvh, 330px); padding: 9px; }
+        .field-title { font-size: 11px; }
+        .field-stats { margin-top: 6px; padding: 5px; font-size: 10px; }
+        .field-clock { margin: 5px 0; font-size: 10px; }
+        .field-actions button { min-height: 36px; }
+      }
 </style></head>
   <body>
 <div id="rosebud-exported-splash" aria-live="polite">

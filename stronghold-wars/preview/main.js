@@ -11,7 +11,7 @@ import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
-import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
+import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
 
@@ -1692,6 +1692,7 @@ warOrders.setAttribute('aria-label', 'Battle field orders');
 warOrders.style.cssText = 'position:fixed;z-index:9;right:12px;top:154px;width:min(360px,calc(100vw - 24px));padding:11px;border:1px solid #c084fc88;border-radius:10px;background:#101421f2;color:#edf4ee;font:12px Inter,system-ui,sans-serif;box-shadow:0 8px 25px #0009';
 document.body.append(warOrders);
 let warBattle = null;
+let fieldSession = null;
 let toastTimer = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 function toast(text) {
@@ -1799,6 +1800,7 @@ function updateHud() {
   if (focusedPatrolRole && !focusedPatrol()?.mesh.visible) stopPatrolFocus(true);
   for (const patrol of defenderPatrols.values()) patrol.mesh.visible = access.allowed;
   syncOperativePatrol();
+  if (fieldSession) for (const object of fieldSession.hiddenObjects) object.visible = false;
   $('parts').textContent = access.allowed ? `⚙ ${Math.floor(state.parts)} Parts` : '⚙ Locked';
   $('salvage').textContent = access.allowed ? `♻ ${Math.floor(state.salvage)} Salvage` : '♻ Locked';
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
@@ -2777,6 +2779,481 @@ function showWarTable(errorMessage = '') {
 }
 $('warBtn').onclick = () => showWarTable();
 
+// ---------- Playable Outpost Ember field ----------
+// Mission rewards and hazards still come only from OperationsController.
+// This view makes those choices physical: move around cover, reach a marked
+// objective and issue the existing mission action there.
+const FIELD_ORIGIN = new THREE.Vector3(38, 0, 27);
+const fieldGroup = new THREE.Group();
+fieldGroup.position.copy(FIELD_ORIGIN);
+fieldGroup.visible = false;
+scene.add(fieldGroup);
+const fieldFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 36),
+  new THREE.MeshStandardMaterial({ map: tiledTexture('assets/concrete-pad.webp', 5), roughness: 0.92 }));
+fieldFloor.rotation.x = -Math.PI / 2;
+fieldFloor.position.y = 0.07;
+fieldFloor.receiveShadow = true;
+fieldGroup.add(fieldFloor);
+const fieldMarkers = new THREE.Group();
+fieldGroup.add(fieldMarkers);
+const fieldGate = new THREE.Group();
+fieldGate.position.set(0, 0, -1);
+fieldGroup.add(fieldGate);
+const fieldTurret = new THREE.Group();
+fieldTurret.position.set(16, 0, 3);
+fieldGroup.add(fieldTurret);
+const fieldCache = new THREE.Group();
+fieldGroup.add(fieldCache);
+const fieldBeaconMat = new THREE.MeshStandardMaterial({ color: 0x79d997, emissive: 0x2d9254, emissiveIntensity: 1.4 });
+for (const [x, z] of [[-9, 8], [9, 8], [-9, 15], [9, 15]]) {
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.42, 36),
+    new THREE.MeshBasicMaterial({ color: z === 15 ? 0x8ed0ff : 0xc084fc, transparent: true, opacity: 0.45, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(x, 0.11, z);
+  fieldGroup.add(ring);
+}
+for (const [x, z] of [[-14, -16], [14, -16], [-14, 16], [14, 16]]) {
+  cyl(fieldGroup, 0.14, 0.23, 2.2, MAT.dark, x, 0, z);
+  box(fieldGroup, 0.36, 0.15, 0.36, fieldBeaconMat, x, 2.15, z);
+}
+for (const [x, z] of [[-9, 8], [9, 8]]) {
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.65, 0.35, 20), MAT.metal);
+  base.position.set(x, 0.24, z);
+  fieldCache.add(base);
+  const canister = new THREE.Group();
+  canister.position.set(x, 0.42, z);
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.63, 0.7, 1.28, 16),
+    new THREE.MeshStandardMaterial({ color: 0x283936, metalness: 0.72, roughness: 0.33 }));
+  shell.position.y = 0.66;
+  canister.add(shell);
+  for (const height of [0.13, 0.72, 1.27]) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.69, 0.075, 8, 24),
+      new THREE.MeshStandardMaterial({ color: 0x9a79bd, emissive: 0x4c1c81, emissiveIntensity: 0.8, metalness: 0.5 }));
+    band.rotation.x = Math.PI / 2;
+    band.position.y = height;
+    canister.add(band);
+  }
+  const strip = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.84, 12),
+    new THREE.MeshStandardMaterial({ color: 0x8efa89, emissive: 0x36e35b, emissiveIntensity: 1.5 }));
+  strip.position.y = 0.72;
+  canister.add(strip);
+  fieldCache.add(canister);
+  const glow = new THREE.PointLight(0x78fa9a, 5, 5);
+  glow.position.set(x, 1.55, z);
+  fieldCache.add(glow);
+}
+let fieldTurretRig = null;
+let fieldBuildRequested = false;
+function buildFieldSet() {
+  if (fieldBuildRequested) return;
+  fieldBuildRequested = true;
+  const addAsset = (path, key, level, x, z) => loadBuildingTemplate(path).then(template => {
+    const model = key ? normalizeBuildingClone(template, key, level) : template.clone(true);
+    model.position.set(x, 0.09, z);
+    model.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+    fieldGroup.add(model);
+    return model;
+  }).catch(error => console.warn('Outpost Ember detail kept its simple fallback.', error));
+  addAsset(getBuildingAsset('comms', 2).glb, 'comms', 2, -17, -4);
+  addAsset(getBuildingAsset('workshop', 2).glb, 'workshop', 2, 17, 12);
+  loadBuildingTemplate(getBuildingAsset('tower', 2).glb).then(template => {
+    const model = normalizeBuildingClone(template, 'tower', 2);
+    fieldTurret.add(model);
+    fieldTurretRig = model.userData.turretRig;
+  }).catch(error => console.warn('Outpost Ember battery detail unavailable.', error));
+  wallModel(2).then(template => {
+    if (!template) return;
+    for (const x of [-2, 0, 2]) {
+      const segment = template.clone(true);
+      segment.position.set(x, 0.1, 0);
+      fieldGate.add(segment);
+    }
+  }).catch(error => console.warn('Outpost Ember barrier detail unavailable.', error));
+  Promise.all([sceneryModel('fallen_trunk'), sceneryModel('lumber_pallet')]).then(([trunk, pallet]) => {
+    for (const cover of EXPEDITION_FIELD.cover) {
+      const source = trunk.clone(true);
+      source.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(source);
+      const size = bounds.getSize(new THREE.Vector3());
+      if (size.x <= 0 || size.z <= 0) continue;
+      const scale = Math.min(2.1, Math.max(0.65, (cover.maxX - cover.minX + 1) / Math.max(size.x, size.z)));
+      for (const offset of [-0.22, 0.22]) {
+        const log = trunk.clone(true);
+        log.scale.setScalar(scale);
+        log.position.set((cover.minX + cover.maxX) / 2 + offset, 0.08,
+          (cover.minZ + cover.maxZ) / 2 - offset * 0.45);
+        log.rotation.y = offset < 0 ? 0.1 : 0.32;
+        fieldGroup.add(log);
+      }
+    }
+    for (const x of [-9, 9]) {
+      const stack = pallet.clone(true);
+      stack.position.set(x + 2.25, 0.08, 8);
+      fieldGroup.add(stack);
+    }
+  }).catch(error => console.warn('Outpost Ember cover detail unavailable.', error));
+}
+const fieldHud = document.createElement('section');
+fieldHud.id = 'fieldHud';
+fieldHud.hidden = true;
+fieldHud.setAttribute('aria-label', 'Outpost Ember field command');
+document.body.append(fieldHud);
+function fieldLabel(text, colour) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 384; canvas.height = 76;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#091510ee'; ctx.fillRect(4, 5, 376, 66);
+  ctx.strokeStyle = '#' + colour.toString(16).padStart(6, '0');
+  ctx.lineWidth = 3; ctx.strokeRect(4, 5, 376, 66);
+  ctx.fillStyle = '#f2fff2'; ctx.font = '700 27px Inter, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(text, 192, 47);
+  const texture = new THREE.CanvasTexture(canvas);
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  label.scale.set(3.6, 0.72, 1);
+  return label;
+}
+function clearFieldMarkers() {
+  for (const marker of [...fieldMarkers.children]) {
+    marker.traverse(object => {
+      if (object.isSprite) { object.material.map.dispose(); object.material.dispose(); }
+      else if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); }
+    });
+    fieldMarkers.remove(marker);
+  }
+}
+function refreshFieldMarkers(attempt) {
+  clearFieldMarkers();
+  if (attempt.status !== 'active') return;
+  const choices = EXPEDITION_FIELD.choices[attempt.phase] || [];
+  choices.forEach((choice, index) => {
+    const disabled = choice.id === 'cut' && !attempt.roster.engineer;
+    const colour = disabled ? 0x737a72 : choice.colour;
+    const marker = new THREE.Group();
+    marker.position.set(choice.x, 0, choice.z);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.48, 36),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.88, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.15; marker.add(ring);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.3, 2.15, 12),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.38, depthWrite: false }));
+    column.position.y = 1.15; marker.add(column);
+    const label = fieldLabel((index + 1) + '  ' + choice.label.toUpperCase(), colour);
+    label.position.y = 3; marker.add(label);
+    const pick = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 8),
+      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }));
+    pick.position.y = 1.2;
+    pick.userData.fieldChoice = choice.id;
+    marker.add(pick);
+    marker.userData.ring = ring;
+    marker.userData.choice = choice.id;
+    marker.userData.disabled = disabled;
+    fieldMarkers.add(marker);
+  });
+  fieldGate.position.y = attempt.breached ? -1.7 : 0;
+}
+let fieldLoadToken = 0;
+function renderFieldHud(message = '') {
+  if (!fieldSession) return;
+  const attempt = operations.current(fieldSession.identityId);
+  if (!attempt) { leaveExpeditionField(); return; }
+  fieldHud.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'field-title';
+  title.textContent = 'OUTPOST EMBER  /  ' + OPERATIVES[attempt.operativeId].name.toUpperCase();
+  fieldHud.append(title);
+  const stage = document.createElement('div');
+  stage.className = 'field-stage';
+  stage.textContent = attempt.status === 'active'
+    ? attempt.phase.toUpperCase() + '  •  Choose a marked field objective'
+    : attempt.status === 'extracted' ? 'EXTRACTION COMPLETE' : 'MISSION ' + attempt.status.toUpperCase();
+  fieldHud.append(stage);
+  const stats = document.createElement('div');
+  stats.className = 'field-stats';
+  stats.textContent = 'HEALTH ' + attempt.health + '   SHIELD ' + attempt.shield
+    + '   DOWN ' + attempt.casualties + '   CARGO ' + attempt.cargo + ' PARTS';
+  fieldHud.append(stats);
+  const clock = document.createElement('div');
+  clock.id = 'fieldClock';
+  clock.className = 'field-clock';
+  clock.textContent = attempt.status === 'active'
+    ? 'Window ' + formatRemaining(attempt.deadlineAt) + '  ·  tap ground to move, tap a beacon or press 1/2'
+    : 'Saved result · ' + attempt.reward + ' Parts delivered once';
+  fieldHud.append(clock);
+  if (message) {
+    const note = document.createElement('p');
+    note.className = 'field-message';
+    note.textContent = message;
+    fieldHud.append(note);
+  }
+  if (attempt.status === 'active') {
+    const actions = document.createElement('div');
+    actions.className = 'field-actions';
+    for (const [index, choice] of EXPEDITION_FIELD.choices[attempt.phase].entries()) {
+      const button = document.createElement('button');
+      button.textContent = (index + 1) + ' · ' + choice.label;
+      button.disabled = choice.id === 'cut' && !attempt.roster.engineer;
+      if (button.disabled) button.title = 'Needs a Fixer combat engineer';
+      button.onclick = () => orderFieldChoice(choice.id);
+      actions.append(button);
+    }
+    fieldHud.append(actions);
+    const abilities = document.createElement('div');
+    abilities.className = 'field-abilities';
+    const tactical = document.createElement('button');
+    tactical.textContent = 'Tactical · ' + OPERATIVES[attempt.operativeId].tactical;
+    const abilityTargetReady = attempt.operativeId === 'rivet' ? attempt.phase === 'barrier'
+      : attempt.operativeId === 'signal' ? ['approach', 'barrier'].includes(attempt.phase)
+        : attempt.casualties > 0 || attempt.health < 100;
+    tactical.disabled = !abilityTargetReady || attempt.turn < attempt.tacticalReadyTurn;
+    tactical.onclick = () => useFieldAbility('tactical');
+    abilities.append(tactical);
+    const ultimate = document.createElement('button');
+    ultimate.textContent = 'Ultimate · ' + OPERATIVES[attempt.operativeId].ultimate;
+    ultimate.disabled = !abilityTargetReady || attempt.ultimateUsed;
+    ultimate.onclick = () => useFieldAbility('ultimate');
+    abilities.append(ultimate);
+    if (!attempt.fieldUpgrade && attempt.phase !== 'extraction') {
+      const upgrade = document.createElement('select');
+      upgrade.setAttribute('aria-label', 'Temporary field upgrade');
+      for (const [id, label] of Object.entries(FIELD_UPGRADES)) {
+        const option = document.createElement('option');
+        option.value = id; option.textContent = label;
+        upgrade.append(option);
+      }
+      const install = document.createElement('button');
+      install.textContent = 'Install upgrade';
+      install.onclick = () => {
+        const result = operations.chooseFieldUpgrade(fieldSession.identityId, upgrade.value);
+        renderFieldHud(result.ok ? 'Temporary field kit installed.' : result.error);
+      };
+      abilities.append(upgrade, install);
+    }
+    fieldHud.append(abilities);
+  }
+  const footer = document.createElement('div');
+  footer.className = 'field-footer';
+  const back = document.createElement('button');
+  back.textContent = '← Back to base';
+  back.onclick = leaveExpeditionField;
+  footer.append(back);
+  if (attempt.status === 'active') {
+    const withdraw = document.createElement('button');
+    withdraw.textContent = 'Withdraw squad';
+    withdraw.onclick = () => {
+      const result = operations.withdraw(fieldSession.identityId);
+      if (result.ok) { refreshFieldMarkers(operations.current(fieldSession.identityId)); renderFieldHud('Squad withdrawn. No cargo awarded.'); updateHud(); }
+      else renderFieldHud(result.error);
+    };
+    footer.append(withdraw);
+  }
+  fieldHud.append(footer);
+}
+function enterExpeditionField() {
+  const identityId = service.state.currentIdentityId;
+  const attempt = operations.current(identityId);
+  if (!attempt || attempt.status !== 'active') { showOperationsBoard('Start a salvage run first.'); return; }
+  if (fallback2D) { showOperationsBoard('The field needs WebGL; the accessible Operations Board remains playable.'); return; }
+  if (raid || warBattle) { toast('Finish the current battle first.'); return; }
+  if (fieldSession) leaveExpeditionField();
+  stopPatrolFocus();
+  buildFieldSet();
+  const point = attempt.fieldPosition || EXPEDITION_FIELD.start;
+  const hiddenObjects = [
+    ...Object.values(buildings).map(building => building.group), ...patrols.map(patrol => patrol.mesh),
+    ...defenderPatrols.values().map(patrol => patrol.mesh), operativeMesh, landScenery, ...outpostBlocks,
+  ];
+  const previousVisibility = new Map(hiddenObjects.map(object => [object, object.visible]));
+  const leader = new THREE.Group();
+  leader.position.set(point.x, 0, point.z);
+  fieldGroup.add(leader);
+  const followers = [];
+  for (const [role, count] of Object.entries(attempt.roster)) for (let i = 0; i < count; i++) {
+    const mesh = makeSoldier(role, state.levels);
+    mesh.position.set(point.x + (followers.length % 2 ? -0.6 : 0.6), 0, point.z - 0.8 - Math.floor(followers.length / 2) * 0.5);
+    fieldGroup.add(mesh);
+    followers.push(mesh);
+  }
+  const token = ++fieldLoadToken;
+  fieldSession = {
+    identityId, attemptId: attempt.id, leader, followers, route: [], pendingChoice: null,
+    trail: [], hiddenObjects, previousVisibility, previousTarget: camTarget.clone(),
+    previousZoom: zoom, previousOffset: cameraOffset.clone(), time: 0, fireFor: 0, mixer: null,
+    activeAction: null, actions: null, lastStatus: attempt.status,
+  };
+  loadAnimatedSquad(operativeAsset(attempt.operativeId)).then(asset => {
+    if (token !== fieldLoadToken || !fieldSession || fieldSession.leader !== leader) return;
+    const model = cloneSkeleton(asset.scene);
+    model.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+    leader.add(model);
+    const mixer = new THREE.AnimationMixer(model);
+    const walk = asset.animations.find(clip => clip.name === 'DZN_Operative_Walk') || asset.animations[0];
+    const idle = asset.animations.find(clip => clip.name === 'DZN_Operative_Idle');
+    if (walk) {
+      const actions = { walk: mixer.clipAction(walk), idle: mixer.clipAction(idle || walk) };
+      actions.idle.play();
+      fieldSession.mixer = mixer;
+      fieldSession.actions = actions;
+      fieldSession.activeAction = actions.idle;
+    }
+  }).catch(error => {
+    if (token !== fieldLoadToken || !fieldSession || fieldSession.leader !== leader) return;
+    console.warn('Outpost Ember commander model unavailable; using squad rig.', error);
+    leader.add(makeSoldier(OPERATIVES[attempt.operativeId].role, state.levels));
+  });
+  for (const object of hiddenObjects) object.visible = false;
+  fieldGroup.visible = true;
+  refreshFieldMarkers(attempt);
+  document.body.classList.add('field-mode');
+  fieldHud.hidden = false;
+  closePanel();
+  camTarget.copy(FIELD_ORIGIN).add(new THREE.Vector3(point.x * 0.6, 0, point.z * 0.6));
+  cameraOffset.set(35, 43, 36);
+  zoom = 34;
+  updateCamera();
+  renderFieldHud();
+  toast('Outpost Ember deployed. Move to a glowing objective.');
+}
+function leaveExpeditionField() {
+  if (!fieldSession) return;
+  fieldLoadToken++;
+  fieldSession.mixer?.stopAllAction();
+  for (const follower of fieldSession.followers) follower.userData.loadToken = (follower.userData.loadToken || 0) + 1;
+  fieldGroup.remove(fieldSession.leader, ...fieldSession.followers);
+  fieldGroup.visible = false;
+  clearFieldMarkers();
+  for (const [object, visible] of fieldSession.previousVisibility) object.visible = visible;
+  camTarget.copy(fieldSession.previousTarget);
+  cameraOffset.copy(fieldSession.previousOffset);
+  zoom = fieldSession.previousZoom;
+  fieldSession = null;
+  fieldHud.hidden = true;
+  document.body.classList.remove('field-mode');
+  updateCamera();
+  updateHud();
+}
+function setFieldDestination(point, choiceId = null) {
+  if (!fieldSession) return false;
+  const local = fieldSession.leader.position;
+  const route = expeditionFieldPath({ x: local.x, z: local.z }, point);
+  if (!route) { renderFieldHud('That ground is blocked by cover. Choose a clear path.'); return false; }
+  fieldSession.route = route.slice(1).map(step => new THREE.Vector3(step.x, 0, step.z));
+  fieldSession.pendingChoice = choiceId ? { id: choiceId, phase: operations.current(fieldSession.identityId)?.phase } : null;
+  if (!fieldSession.route.length && fieldSession.pendingChoice) resolveFieldChoice();
+  return true;
+}
+function orderFieldChoice(choiceId) {
+  if (!fieldSession) return;
+  const attempt = operations.current(fieldSession.identityId);
+  const point = EXPEDITION_FIELD.choices[attempt?.phase]?.find(choice => choice.id === choiceId);
+  if (!point || (choiceId === 'cut' && !attempt.roster.engineer)) { renderFieldHud('That objective is not available to this squad.'); return; }
+  setFieldDestination(point, choiceId);
+}
+function resolveFieldChoice() {
+  if (!fieldSession?.pendingChoice) return;
+  const { id, phase } = fieldSession.pendingChoice;
+  fieldSession.pendingChoice = null;
+  const before = operations.current(fieldSession.identityId);
+  if (!before || before.phase !== phase || before.status !== 'active') { renderFieldHud('The objective changed. Choose the current beacon.'); return; }
+  const result = operations.advance(fieldSession.identityId, id);
+  if (!result.ok) { renderFieldHud(result.error); return; }
+  const after = operations.current(fieldSession.identityId);
+  fieldSession.lastStatus = after.status;
+  if (after.shield < before.shield || after.health < before.health) {
+    fieldSession.fireFor = 0.7;
+    for (let i = 0; i < 3; i++) spawnSmoke(FIELD_ORIGIN.clone().add(fieldSession.leader.position).add(new THREE.Vector3(Math.sin(i * 2), 1, Math.cos(i * 2))));
+  }
+  if (after.status === 'extracted') { beep(840, 0.16); toast('Convoy extracted · +' + after.reward + ' personal Parts'); }
+  else if (after.status !== 'active') toast('Outpost Ember mission ' + after.status + '.');
+  else beep(620, 0.1);
+  refreshFieldMarkers(after);
+  renderFieldHud(after.events.at(-1)?.text || 'Objective resolved.');
+  updateHud();
+}
+function useFieldAbility(kind) {
+  if (!fieldSession) return;
+  const result = operations.useAbility(fieldSession.identityId, kind);
+  if (result.ok) {
+    const attempt = operations.current(fieldSession.identityId);
+    refreshFieldMarkers(attempt);
+    spawnSmoke(FIELD_ORIGIN.clone().add(fieldSession.leader.position).add(new THREE.Vector3(0, 1, 0)));
+    renderFieldHud(OPERATIVES[attempt.operativeId][kind] + ' activated.');
+  } else renderFieldHud(result.error);
+}
+function updateExpeditionField(dt) {
+  if (!fieldSession) return;
+  const session = fieldSession;
+  const attempt = operations.current(session.identityId);
+  if (!attempt || attempt.id !== session.attemptId) { leaveExpeditionField(); return; }
+  if (attempt.status !== session.lastStatus) {
+    session.lastStatus = attempt.status;
+    session.route.length = 0;
+    session.pendingChoice = null;
+    refreshFieldMarkers(attempt);
+    renderFieldHud(attempt.status === 'expired' ? 'The mission window closed before extraction.' : 'Mission status changed.');
+  }
+  session.time += dt;
+  camTarget.lerp(FIELD_ORIGIN.clone().add(new THREE.Vector3(session.leader.position.x * 0.6, 0, session.leader.position.z * 0.6)),
+    Math.min(1, dt * 4));
+  updateCameraPosition();
+  let moving = false;
+  if (session.route.length) {
+    const target = session.route[0];
+    const delta = target.clone().sub(session.leader.position);
+    const distance = delta.length();
+    const step = Math.min(distance, dt * 5.2);
+    if (distance > 0.001) {
+      session.leader.position.addScaledVector(delta, step / distance);
+      session.leader.rotation.y = Math.atan2(delta.x, delta.z);
+      moving = true;
+    }
+    if (distance <= step + 0.02) {
+      session.leader.position.copy(target);
+      session.route.shift();
+      if (!session.route.length && session.pendingChoice) resolveFieldChoice();
+    }
+  }
+  session.trail.unshift(session.leader.position.clone());
+  if (session.trail.length > 90) session.trail.length = 90;
+  for (const [index, follower] of session.followers.entries()) {
+    const sample = session.trail[Math.min(session.trail.length - 1, 10 + index * 9)] || session.leader.position;
+    const offset = index % 2 ? -0.45 : 0.45;
+    const target = sample.clone().add(new THREE.Vector3(offset, 0, -0.45 - Math.floor(index / 2) * 0.28));
+    const was = follower.position.clone();
+    follower.position.lerp(target, Math.min(1, dt * 5));
+    const direction = follower.position.clone().sub(was);
+    if (direction.lengthSq() > 0.0002) follower.rotation.y = Math.atan2(direction.x, direction.z);
+    animateSoldier(follower, session.time * 9 + index, direction.lengthSq() > 0.0002 ? 1 : 0, null, dt);
+  }
+  if (session.actions && session.mixer) {
+    const next = moving ? session.actions.walk : session.actions.idle;
+    if (next !== session.activeAction) {
+      next.reset().fadeIn(0.15).play();
+      session.activeAction?.fadeOut(0.15);
+      session.activeAction = next;
+    }
+    session.mixer.update(dt);
+  }
+  if (fieldTurretRig) {
+    const target = FIELD_ORIGIN.clone().add(session.leader.position).add(new THREE.Vector3(0, 1.3, 0));
+    stepArcBattery(fieldTurretRig, dt, session.time, target, session.fireFor > 0);
+  }
+  session.fireFor = Math.max(0, session.fireFor - dt);
+  for (const marker of fieldMarkers.children) {
+    const ring = marker.userData.ring;
+    ring.material.opacity = marker.userData.disabled ? 0.25 : 0.6 + Math.sin(session.time * 4) * 0.25;
+  }
+  const clock = document.getElementById('fieldClock');
+  if (clock && operations.current(session.identityId)?.status === 'active') clock.textContent =
+    'Window ' + formatRemaining(attempt.deadlineAt) + '  ·  tap ground to move, tap a beacon or press 1/2';
+}
+window.addEventListener('keydown', event => {
+  if (!fieldSession || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  if (event.key === 'Escape') { leaveExpeditionField(); event.preventDefault(); }
+  if (event.key === '1' || event.key === '2') {
+    const phase = operations.current(fieldSession.identityId)?.phase;
+    const choice = EXPEDITION_FIELD.choices[phase]?.[Number(event.key) - 1];
+    if (choice) { orderFieldChoice(choice.id); event.preventDefault(); }
+  }
+});
 function showOperationsBoard(message = '') {
   const identityId = service.state.currentIdentityId;
   const board = operations.getBoard(identityId);
@@ -2818,10 +3295,12 @@ function showOperationsBoard(message = '') {
     const actions = active ? `<div class="operation-orders">${choices[attempt.phase].map(([id, label]) => `<button data-op-step="${id}" ${id === 'cut' && !attempt.roster.engineer ? 'disabled title="Needs a Combat Engineer"' : ''}>${label}</button>`).join('')}</div><div class="operation-orders"><button id="opsTactical" ${attempt.turn < attempt.tacticalReadyTurn || !abilityTargetReady ? 'disabled' : ''}>Tactical · ${escapeHTML(OPERATIVES[attempt.operativeId].tactical)}</button><button id="opsUltimate" ${attempt.ultimateUsed || !abilityTargetReady ? 'disabled' : ''}>Ultimate · ${escapeHTML(OPERATIVES[attempt.operativeId].ultimate)}</button></div><p class="help">${escapeHTML(OPERATIVES[attempt.operativeId].tacticalText)} Tactical ready at turn ${attempt.tacticalReadyTurn}; Ultimate once per attempt. All effects are bounded.</p>${fieldChoice}<div class="row"><button id="opsWithdraw">Withdraw · lose cargo</button></div>` : `<p class="notice">${attempt.status === 'extracted' ? `Extraction complete · ${attempt.reward} of ${attempt.cargo} collected Parts delivered to personal inventory.` : `Expedition ${escapeHTML(attempt.status)} · no Parts awarded.`} Start a new run when ready.</p><div class="row"><button id="opsNew">Prepare another run</button></div>`;
     missionHTML = `<div class="war-card ready"><h3>Outpost Ember · ${escapeHTML(OPERATIVES[attempt.operativeId].name)}</h3><p>Attempt ${escapeHTML(attempt.id)} · ${active ? `window closes in <b id="opsCountdown">${formatRemaining(attempt.deadlineAt)}</b>` : escapeHTML(attempt.status)}</p>${track}<div class="operation-statline"><b>Health ${attempt.health}/100</b><b>Shield ${attempt.shield}</b><b>Incapacitated ${attempt.casualties}</b><b>Recovered ${attempt.recovered}</b><b>Recovery charges ${attempt.recoveriesLeft}</b><b>Cargo ${attempt.cargo} Parts</b></div>${actions}<div class="operation-log"><strong>Field record</strong>${attempt.events.slice().reverse().map(event => `<p>${escapeHTML(event.text)}</p>`).join('')}</div></div>`;
   }
+  if (active && !fallback2D) missionHTML += '<div class="row"><button id="opsEnterField">Enter 3D field</button><span class="help">Move through Outpost Ember and select objectives in the world.</span></div>';
   const pings = board.pings.slice().reverse().map(ping => `<div class="operation-ping"><strong>${escapeHTML(PING_TYPES[ping.type])} · ${escapeHTML(ping.target)}</strong><span>${escapeHTML(ping.author)} · expires in ${formatRemaining(ping.expiresAt)} · ${ping.acknowledgedBy.length} acknowledged · suggestion</span>${!ping.acknowledgedBy.includes(identityId) ? `<button data-ack-ping="${escapeHTML(ping.id)}">Acknowledge</button>` : ''}</div>`).join('');
   const reports = board.history.slice(-3).reverse().map(record => `<details class="operation-log"><summary>${escapeHTML(record.id)} · ${escapeHTML(record.status)} · ${record.reward} Parts</summary><p>${escapeHTML(OPERATIVES[record.operativeId].name)} · ${record.extractionMode === 'held' ? 'held beacon' : record.extractionMode === 'rapid' ? 'rapid pickup' : 'legacy mission'} · cargo ${record.cargo} · recovered ${record.recovered}</p>${record.events.map(event => `<p>${escapeHTML(event.text)}</p>`).join('') || '<p>Earlier mission; detailed field record unavailable.</p>'}</details>`).join('');
   openPanel(`<h2>DZN Operations Board</h2><p>One operative commands the ordinary army. The selected commander is a textured, animated 3D character at the bivouac while home and leaves the base during an expedition. Shared construction and local wars keep their existing rules. <span class="sim">[LOCAL PREVIEW]</span></p>${message ? `<p class="notice" role="status">${escapeHTML(message)}</p>` : ''}<div class="operations-layout"><div><h3>Operative Bay</h3><div class="operative-roster">${roster}</div>${missionHTML}${reports ? `<h3>After-action reports</h3>${reports}` : ''}</div><aside class="operations-side"><h3>Community signals</h3><p class="help">Suggestions are visible only to this eligible preview community. They expire after 15 minutes; acknowledgement is not owner approval.</p><label class="field-label" for="opsPingType">Signal</label><select id="opsPingType">${Object.entries(PING_TYPES).map(([id, name]) => `<option value="${id}">${escapeHTML(name)}</option>`).join('')}</select><label class="field-label" for="opsPingTarget">Target or objective</label><input id="opsPingTarget" maxlength="70" placeholder="e.g. west shutter"><div class="row"><button id="opsPostPing">Place signal</button></div>${pings || '<p class="help">No active signals.</p>'}<h3>Personal showcase</h3><p>${profile.completed} extracted mission${profile.completed === 1 ? '' : 's'} · ${mastery}</p>${badges}<p class="help">These are local PvE achievements with attempt evidence. Calling cards are cosmetic and never grant combat power.</p></aside></div><div class="row"><button id="closeBtn">Return to base</button></div>`);
   $('closeBtn').onclick = closePanel;
+  if ($('opsEnterField')) $('opsEnterField').onclick = enterExpeditionField;
   panel.querySelectorAll('[data-select-operative]').forEach(button => button.onclick = () => { const result = operations.selectOperative(identityId, button.dataset.selectOperative); showOperationsBoard(result.ok ? `${OPERATIVES[result.operativeId].name} assigned to your command slot.` : result.error); });
   const troopFields = [...panel.querySelectorAll('[data-ops-troop]')];
   if (troopFields.length) {
@@ -2835,7 +3314,8 @@ function showOperationsBoard(message = '') {
       const troops = Object.fromEntries(troopFields.map(field => [field.dataset.opsTroop, Number(field.value)]));
       const result = operations.startExpedition(identityId, troops);
       if (result.ok) { toast('Salvage convoy deployed.'); updateHud(); }
-      showOperationsBoard(result.ok ? 'Outpost Ember mission started. Choose your first route.' : result.error);
+      if (result.ok && !fallback2D) enterExpeditionField();
+      else showOperationsBoard(result.ok ? 'Outpost Ember mission started. Choose your first route.' : result.error);
     };
   }
   panel.querySelectorAll('[data-op-step]').forEach(button => button.onclick = () => {
@@ -3854,6 +4334,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   const dx = e.clientX - prev.x;
   const dy = e.clientY - prev.y;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (fieldSession) { dragDistance += Math.abs(dx) + Math.abs(dy); return; }
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -3872,6 +4353,24 @@ renderer.domElement.addEventListener('pointermove', e => {
 });
 renderer.domElement.addEventListener('pointerup', e => {
   pointers.delete(e.pointerId);
+  if (fieldSession) {
+    if (dragDistance < 6) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      raycaster.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+      const pickers = fieldMarkers.children.map(marker => marker.children.find(child => child.userData.fieldChoice)).filter(Boolean);
+      const marker = raycaster.intersectObjects(pickers, false)[0]?.object;
+      if (marker) orderFieldChoice(marker.userData.fieldChoice);
+      else {
+        const groundHit = raycaster.intersectObject(fieldFloor, false)[0];
+        if (groundHit) {
+          const point = fieldGroup.worldToLocal(groundHit.point.clone());
+          setFieldDestination({ x: point.x, z: point.z });
+        }
+      }
+    }
+    return;
+  }
   if (dragDistance < 6 && !raid && !warBattle) {
     const key = pickBuildingAtClient(e.clientX, e.clientY);
     if (key && buildings[key]) {
@@ -3890,6 +4389,7 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 renderer.domElement.addEventListener('pointercancel', e => pointers.delete(e.pointerId));
 renderer.domElement.addEventListener('wheel', e => {
+  if (fieldSession) { zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.08 : 0.92), 25, 44); updateCamera(); return; }
   if (focusedPatrolRole) stopPatrolFocus();
   zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 12, 60);
   updateCamera();
@@ -4005,6 +4505,7 @@ renderer.setAnimationLoop(time => {
     updateRaid(dt);
   }
   if (warBattle) updateWarBattle(dt);
+  if (fieldSession) updateExpeditionField(dt);
   applyScaffoldState();
   panelTimer += dt;
   if (panelTimer > 0.5) {

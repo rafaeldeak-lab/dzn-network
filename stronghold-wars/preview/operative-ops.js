@@ -24,6 +24,78 @@ export const PING_TYPES = Object.freeze({
   hold: 'Hold position', extract: 'Extraction ready',
 });
 
+// Physical checkpoints for the browser-local Outpost Ember field. The two
+// locations at each stage correspond to the existing bounded mission choices.
+export const EXPEDITION_FIELD = Object.freeze({
+  start: Object.freeze({ x: 0, z: -15 }),
+  bounds: Object.freeze({ minX: -13, maxX: 13, minZ: -17, maxZ: 17 }),
+  cover: Object.freeze([
+    Object.freeze({ minX: -5, maxX: -3, minZ: -10, maxZ: -8 }),
+    Object.freeze({ minX: 3, maxX: 5, minZ: -9, maxZ: -7 }),
+    Object.freeze({ minX: -2, maxX: 2, minZ: -2, maxZ: 0 }),
+    Object.freeze({ minX: -4, maxX: -2, minZ: 4, maxZ: 6 }),
+    Object.freeze({ minX: 2, maxX: 4, minZ: 5, maxZ: 7 }),
+  ]),
+  choices: Object.freeze({
+    approach: Object.freeze([
+      Object.freeze({ id: 'scout', label: 'Scout ridge', x: -9, z: -11, colour: 0x8ed0ff }),
+      Object.freeze({ id: 'push', label: 'Rush route', x: 9, z: -11, colour: 0xffad70 }),
+    ]),
+    barrier: Object.freeze([
+      Object.freeze({ id: 'cut', label: 'Engineer cut', x: -9, z: -1, colour: 0x8ff0a7 }),
+      Object.freeze({ id: 'force', label: 'Force gate', x: 9, z: -1, colour: 0xffad70 }),
+    ]),
+    cache: Object.freeze([
+      Object.freeze({ id: 'secure', label: 'Core cache', x: -9, z: 8, colour: 0x8ff0a7 }),
+      Object.freeze({ id: 'extra', label: 'Risk cache', x: 9, z: 8, colour: 0xffad70 }),
+    ]),
+    extraction: Object.freeze([
+      Object.freeze({ id: 'extract', label: 'Rapid pickup', x: -9, z: 15, colour: 0x8ed0ff }),
+      Object.freeze({ id: 'hold', label: 'Hold beacon', x: 9, z: 15, colour: 0xffad70 }),
+    ]),
+  }),
+});
+
+export function expeditionFieldWalkable(x, z) {
+  const { bounds, cover } = EXPEDITION_FIELD;
+  return Number.isInteger(x) && Number.isInteger(z) && x >= bounds.minX && x <= bounds.maxX
+    && z >= bounds.minZ && z <= bounds.maxZ
+    && !cover.some(block => x >= block.minX && x <= block.maxX && z >= block.minZ && z <= block.maxZ);
+}
+
+// Small deterministic grid route so troops travel around solid cover instead
+// of gliding through it. No mission action or reward is issued by movement.
+export function expeditionFieldPath(from, to) {
+  const start = { x: Math.round(Number(from?.x)), z: Math.round(Number(from?.z)) };
+  const goal = { x: Math.round(Number(to?.x)), z: Math.round(Number(to?.z)) };
+  if (!expeditionFieldWalkable(start.x, start.z) || !expeditionFieldWalkable(goal.x, goal.z)) return null;
+  const key = point => `${point.x},${point.z}`;
+  const distance = point => Math.abs(point.x - goal.x) + Math.abs(point.z - goal.z);
+  const open = [{ ...start, cost: 0, estimate: distance(start) }];
+  const best = new Map([[key(start), 0]]);
+  const parent = new Map();
+  const steps = [[0, -1], [-1, 0], [1, 0], [0, 1]];
+  while (open.length) {
+    open.sort((a, b) => a.estimate - b.estimate || a.cost - b.cost || a.z - b.z || a.x - b.x);
+    const current = open.shift();
+    if (current.cost !== best.get(key(current))) continue;
+    if (current.x === goal.x && current.z === goal.z) {
+      const route = [goal];
+      while (key(route[0]) !== key(start)) route.unshift(parent.get(key(route[0])));
+      return route;
+    }
+    for (const [dx, dz] of steps) {
+      const x = current.x + dx, z = current.z + dz, cost = current.cost + 1;
+      if (!expeditionFieldWalkable(x, z) || cost >= (best.get(`${x},${z}`) ?? Infinity)) continue;
+      const point = { x, z };
+      best.set(key(point), cost);
+      parent.set(key(point), { x: current.x, z: current.z });
+      open.push({ ...point, cost, estimate: cost + distance(point) });
+    }
+  }
+  return null;
+}
+
 const safeInt = (value, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Math.min(Number(value), max) : 0;
 const copy = value => JSON.parse(JSON.stringify(value));
 const validId = value => typeof value === 'string' && value.length > 0 && value.length <= 160;
@@ -57,6 +129,8 @@ export function normalizeOperationsState(raw, identities) {
       extractionMode: ['rapid', 'held'].includes(source.extractionMode) ? source.extractionMode : '',
       reward: safeInt(source.reward ?? (source.status === 'extracted' ? source.cargo : 0), EXPEDITION_RULES.maxCargoParts),
       routeProtection: safeInt(source.routeProtection, 24), signalProtection: safeInt(source.signalProtection, 24),
+      fieldPosition: expeditionFieldWalkable(source.fieldPosition?.x, source.fieldPosition?.z)
+        ? { x: source.fieldPosition.x, z: source.fieldPosition.z } : { ...EXPEDITION_FIELD.start },
       events: Array.isArray(source.events) ? source.events.filter(event => event && typeof event.text === 'string').slice(-16).map(event => ({ text: event.text.slice(0, 180), at: safeInt(event.at) })) : [],
     };
   }
@@ -168,6 +242,7 @@ export class OperationsController {
       health: 100, shield: 40, casualties: 0, recovered: 0, recoveriesLeft: 1, scanned: false, breached: false, cargo: 0,
       tacticalReadyTurn: 0, tacticalUses: 0, ultimateUsed: false, fieldUpgrade: '', extractionMode: '', reward: 0,
       routeProtection: 0, signalProtection: 0, events: [] };
+    attempt.fieldPosition = { ...EXPEDITION_FIELD.start };
     member.salvage -= EXPEDITION_RULES.launchSalvage;
     this._event(attempt, `${OPERATIVES[attempt.operativeId].name} deployed with ${count} ordinary troops; 2 command slots reserved.`);
     this.state.attempts[identityId] = attempt;
@@ -227,6 +302,8 @@ export class OperationsController {
     const valid = { approach: ['scout', 'push'], barrier: ['cut', 'force'], cache: ['secure', 'extra'], extraction: ['extract', 'hold'] };
     if (!valid[target.phase].includes(choice)) return { ok: false, error: 'That action is not available at this objective.' };
     if (target.phase === 'barrier' && choice === 'cut' && !target.roster.engineer) return { ok: false, error: 'A Combat Engineer or Rivet ability is needed to cut the barrier.' };
+    const checkpoint = EXPEDITION_FIELD.choices[target.phase].find(point => point.id === choice);
+    target.fieldPosition = { x: checkpoint.x, z: checkpoint.z };
     target.turn++;
     if (target.phase === 'approach') {
       if (choice === 'scout') { target.scanned = true; this._damage(target, 5); target.phase = 'barrier'; this._event(target, 'Route scouted. Barrier and cache locations revealed.'); }

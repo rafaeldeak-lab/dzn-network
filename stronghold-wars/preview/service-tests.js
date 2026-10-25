@@ -2,7 +2,7 @@ import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
-import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
+import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
 import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat } from './war-tactics.js';
 
@@ -858,6 +858,18 @@ export function runServiceTests() {
   checks.push('V2-to-V3 exact raw backup, no-loss migration, refresh stability and preserved V1 migration behavior');
 
   let missionClock = clock + 300_000;
+  const fieldStops = Object.values(EXPEDITION_FIELD.choices).flat();
+  assert(fieldStops.every(stop => expeditionFieldWalkable(stop.x, stop.z)), 'every expedition decision has a reachable physical checkpoint');
+  for (const from of [EXPEDITION_FIELD.start, ...fieldStops]) for (const to of fieldStops) {
+    const path = expeditionFieldPath(from, to);
+    assert(path?.length && path.every(point => expeditionFieldWalkable(point.x, point.z))
+      && path[0].x === from.x && path[0].z === from.z && path.at(-1).x === to.x && path.at(-1).z === to.z,
+    'Outpost Ember routes avoid solid cover between every pair of checkpoints');
+  }
+  assert(expeditionFieldPath(EXPEDITION_FIELD.start, { x: 0, z: -1 }) === null
+    && expeditionFieldPath({ x: 500, z: 500 }, fieldStops[0]) === null,
+  'the field never routes through cover or outside its boundary');
+  checks.push('spatial Outpost Ember routes and checkpoint bounds');
   const missionStorage = new MemoryStorage();
   let missionGame = new LocalGameService({ storage: missionStorage, now: () => missionClock });
   let ops = new OperationsController(missionGame);
@@ -868,10 +880,14 @@ export function runServiceTests() {
   assert(!ops.startExpedition('iron-member', { medic: 1 }, 'mission-locked-medic').ok, 'ordinary specialist troops still follow their existing building unlocks');
   const rivetStart = ops.startExpedition('iron-member', { assault: 1, engineer: 1 }, 'mission-rivet-start');
   assert(rivetStart.ok && missionGame.member('iron-member').salvage === startingSalvage - EXPEDITION_RULES.launchSalvage, 'mission launch spends personal Salvage exactly once');
+  assert(ops.current('iron-member').fieldPosition.x === EXPEDITION_FIELD.start.x
+    && ops.current('iron-member').fieldPosition.z === EXPEDITION_FIELD.start.z, 'new expeditions start at the field entry checkpoint');
   assert(ops.startExpedition('iron-member', { assault: 1, engineer: 1 }, 'mission-rivet-start').replay && missionGame.member('iron-member').salvage === startingSalvage - EXPEDITION_RULES.launchSalvage, 'replay does not create a second attempt or spend again');
   assert(!ops.startExpedition('iron-owner', { assault: 1 }, 'mission-rivet-start').ok, 'another member cannot reuse the same action ID');
   assert(!ops.useAbility('iron-member', 'tactical', 'rivet-too-early').ok, 'breach charge has a visible valid-target gate');
   assert(ops.advance('iron-member', 'scout', 'rivet-scout').ok && ops.current('iron-member').scanned, 'approach scouting records useful route intelligence');
+  assert(ops.current('iron-member').fieldPosition.x === -9 && ops.current('iron-member').fieldPosition.z === -11,
+    'selected 3D field checkpoint is saved with the mission action');
   assert(ops.chooseFieldUpgrade('iron-member', 'cover', 'rivet-cover').ok && !ops.chooseFieldUpgrade('iron-member', 'route', 'rivet-cover-twice').ok, 'temporary Field Upgrade is a single bounded choice');
   assert(ops.useAbility('iron-member', 'tactical', 'rivet-breach').ok && ops.current('iron-member').phase === 'cache', 'Rivet opens a barrier without replacing ordinary troops');
   assert(ops.advance('iron-member', 'secure', 'rivet-cache').ok && ops.advance('iron-member', 'extract', 'rivet-extract').status === 'extracted', 'safer cache reaches an actual extraction outcome');
@@ -881,6 +897,8 @@ export function runServiceTests() {
   assert(ops.showcase('iron-member').earned.firstThrough && ops.showcase('iron-member').earned.eyesOnTarget && ops.showcase('iron-member').mastery.rivet === 1, 'earned PvE badges and mastery follow the recorded completed attempt');
   missionGame = new LocalGameService({ storage: missionStorage, now: () => missionClock }); ops = new OperationsController(missionGame);
   assert(ops.current('iron-member').status === 'extracted' && missionGame.member('iron-member').parts === partsAfterExtraction && ops.showcase('iron-member').completed === 1, 'mission, reward ledger and evidence survive reload without another grant');
+  assert(ops.current('iron-member').fieldPosition.x === -9 && ops.current('iron-member').fieldPosition.z === 15,
+    'extraction checkpoint survives reload for deterministic field reconstruction');
   assert(ops.getBoard('iron-member').history[0].extractionMode === 'rapid' && ops.getBoard('iron-member').history[0].events.some(event => event.text.includes('Rapid convoy')) && ops.getBoard('iron-member').history[0].events.at(-1).text.includes('30 Parts'), 'after-action evidence preserves the pickup choice and actual once-only payout');
   assert(ops.prepareNext('iron-member', 'mission-next').ok && ops.showcase('iron-member').completed === 1, 'next-run preparation retains permanent mastery and reward evidence');
   assert(ops.getBoard('iron-member').history[0].events.length > 1, 'preparing a new attempt does not erase the earlier field record');
