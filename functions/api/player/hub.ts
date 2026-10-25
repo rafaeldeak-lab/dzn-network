@@ -2,6 +2,11 @@ import { ensureMockUser, getSessionUser, requireDb } from "../../_lib/db";
 import { canManageDiscordGuild } from "../../_lib/discord";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
+import {
+  PUBLIC_CURRENT_PLAYERS_SQL,
+  PUBLIC_MAX_PLAYERS_SQL,
+  PUBLIC_PLAYER_COUNT_STATUS_SQL,
+} from "../../_lib/player-counts";
 import { readPlayerSavedServersForUser } from "../../_lib/player-saved-servers";
 import { publicProfileHref } from "../../_lib/player-public-profiles";
 import {
@@ -68,6 +73,7 @@ type PlayerHubCommunityServerRow = {
   map_name: string | null;
   current_players: number | null;
   max_players: number | null;
+  player_count_status: string | null;
 };
 
 type PlayerHubEventRow = {
@@ -511,9 +517,11 @@ async function readMatchedCommunities(env: Env, userId: string): Promise<PlayerH
               COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
               linked_servers.platform,
               linked_servers.map_name,
-              linked_servers.current_players,
-              linked_servers.max_players
+              ${PUBLIC_CURRENT_PLAYERS_SQL} AS current_players,
+              COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS max_players,
+              ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status
              FROM linked_servers
+             LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
              WHERE (${matchClauses.join(" OR ")})
                AND ${publicServerWhere}
              ORDER BY linked_servers.updated_at DESC, linked_servers.created_at DESC
@@ -708,6 +716,7 @@ function uniqueCommunityServers(rows: PlayerHubCommunityServerRow[]) {
       map_name: row.map_name,
       current_players: normalizeNullableNumber(row.current_players),
       max_players: normalizeNullableNumber(row.max_players),
+      player_count_status: normalizePlayerCountStatus(row.player_count_status),
     });
   }
   return unique;
@@ -873,6 +882,11 @@ function suggestedEventRelevancePriority(value: PlayerHubSuggestedEventRelevance
 function normalizeNullableNumber(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function normalizePlayerCountStatus(value: unknown) {
+  const status = typeof value === "string" ? value.toLowerCase() : "";
+  return status === "fresh" || status === "stale" || status === "unavailable" ? status : "stale";
 }
 
 function labelFromToken(value: string) {

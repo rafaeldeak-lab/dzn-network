@@ -57,6 +57,16 @@ export type PublicOwnerReply = {
   updated_at: string;
 };
 
+export type PublicReviewAggregateRow = {
+  average_rating: number | null;
+  review_count: number | null;
+  rating_1_count: number | null;
+  rating_2_count: number | null;
+  rating_3_count: number | null;
+  rating_4_count: number | null;
+  rating_5_count: number | null;
+};
+
 export function isServerReviewOwnerRepliesEnabled(env: Env) {
   return env.DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED?.trim().toLowerCase() === "true";
 }
@@ -121,9 +131,10 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
   const ownerReplyColumns = selectOwnerReplyColumns(env);
-  const result = await db
-    .prepare(
-      `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
+  const [result, aggregate] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
               title, body, status, moderation_reason, report_count, moderation_version,
               ${ownerReplyColumns},
               created_at, updated_at, last_edited_at
@@ -131,14 +142,49 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
        WHERE linked_server_id = ?
          AND status = 'approved'
        ORDER BY created_at DESC
-      LIMIT 50`,
-    )
-    .bind(linkedServerId)
-    .all<ServerReviewRow>();
+       LIMIT 50`,
+      )
+      .bind(linkedServerId)
+      .all<ServerReviewRow>(),
+    db
+      .prepare(
+        `SELECT
+          ROUND(AVG(rating), 1) AS average_rating,
+          COUNT(*) AS review_count,
+          COALESCE(SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END), 0) AS rating_1_count,
+          COALESCE(SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END), 0) AS rating_2_count,
+          COALESCE(SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END), 0) AS rating_3_count,
+          COALESCE(SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END), 0) AS rating_4_count,
+          COALESCE(SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END), 0) AS rating_5_count
+         FROM server_reviews
+         WHERE linked_server_id = ?
+           AND status = 'approved'`,
+      )
+      .bind(linkedServerId)
+      .first<PublicReviewAggregateRow>(),
+  ]);
 
   const rows = result.results ?? [];
   const publicProfileLinksByDiscordId = await readPublicProfileLinksByDiscordIds(env, rows.map((row) => row.reviewer_discord_id));
-  return buildPublicReviewSummary(rows, viewer?.discord_id ?? null, publicProfileLinksByDiscordId);
+  return {
+    ...buildPublicReviewSummary(rows, viewer?.discord_id ?? null, publicProfileLinksByDiscordId),
+    ...buildPublicReviewAggregateSummary(aggregate),
+  };
+}
+
+export function buildPublicReviewAggregateSummary(aggregate?: PublicReviewAggregateRow | null): Omit<PublicReviewSummary, "reviews"> {
+  const reviewCount = nonNegativeInteger(aggregate?.review_count);
+  return {
+    average_rating: reviewCount ? roundToSingleDecimal(aggregate?.average_rating) : 0,
+    review_count: reviewCount,
+    rating_breakdown: {
+      1: nonNegativeInteger(aggregate?.rating_1_count),
+      2: nonNegativeInteger(aggregate?.rating_2_count),
+      3: nonNegativeInteger(aggregate?.rating_3_count),
+      4: nonNegativeInteger(aggregate?.rating_4_count),
+      5: nonNegativeInteger(aggregate?.rating_5_count),
+    },
+  };
 }
 
 export function buildPublicReviewSummary(
@@ -240,4 +286,14 @@ export function viewerReviewState(options: {
 
 function clampRating(value: number): 1 | 2 | 3 | 4 | 5 {
   return Math.min(5, Math.max(1, Math.round(Number(value) || 1))) as 1 | 2 | 3 | 4 | 5;
+}
+
+function nonNegativeInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
+function roundToSingleDecimal(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed * 10) / 10 : 0;
 }

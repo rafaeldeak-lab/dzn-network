@@ -45,6 +45,10 @@ assert.match(helper, /lower\(COALESCE\(linked_servers\.listing_visibility, 'publ
 assert.match(helper, /linked_servers\.public_slug IS NOT NULL/i, "Players should save only servers with public profile routes.");
 assert.match(helper, /formatPublicServerName\(row\.server_name\)/, "Saved-server summaries must use the same public server-name formatter as discovery surfaces.");
 assert.match(helper, /COALESCE\(NULLIF\(linked_servers\.display_name, ''\), NULLIF\(linked_servers\.hostname, ''\), linked_servers\.server_name, linked_servers\.nitrado_service_name\) AS server_name/, "Saved-server summaries must use the canonical server-name source order.");
+assert.match(helper, /PUBLIC_CURRENT_PLAYERS_SQL/, "Saved-server summaries must use the canonical fresh player-count resolver.");
+assert.match(helper, /PUBLIC_MAX_PLAYERS_SQL/, "Saved-server summaries must use the canonical fresh capacity resolver.");
+assert.match(helper, /PUBLIC_PLAYER_COUNT_STATUS_SQL/, "Saved-server summaries must surface count freshness instead of stale raw values.");
+assert.match(helper, /LEFT JOIN server_public_cache ON server_public_cache\.guild_id = linked_servers\.guild_id/, "Saved-server summaries must share the public cache fallback used by discovery.");
 assert.doesNotMatch(helper, forbiddenSideEffectTokens, "Saved-server helper must stay out of monetisation and competitive systems.");
 
 assert.doesNotMatch(publicServersApi, /player_saved_servers|saved_server|viewer_saved/i, "Public server payload/cache must not include private saved-state data.");
