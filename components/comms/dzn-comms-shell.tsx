@@ -3,6 +3,7 @@
 import Image from "next/image";
 import {
   AlertTriangle,
+  ArrowDown,
   Bot,
   Flag,
   Hash,
@@ -51,6 +52,54 @@ const historyProbeEnabled = historyUiEnabled || liveUiEnabled || productionRunti
 const DELETED_MESSAGE_NOTICE_MS = 2_000;
 const CAPABILITY_PROBE_RETRY_DELAY_MS = 5_000;
 const CAPABILITY_PROBE_RETRY_LIMIT = 3;
+const MESSAGE_RAIL_BOTTOM_TOLERANCE_PX = 32;
+
+type MessageRailMetrics = Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">;
+type MessageRailTimelineItem = Pick<CommsHistoryMessage, "created_at" | "id">;
+export type DznCommsMessageRailBoundary = Readonly<{ createdAt: string; messageId: string }>;
+
+export function isDznCommsMessageRailAtBottom({ clientHeight, scrollHeight, scrollTop }: MessageRailMetrics) {
+  return scrollHeight - scrollTop - clientHeight <= MESSAGE_RAIL_BOTTOM_TOLERANCE_PX;
+}
+
+function compareUtf8Text(left: string, right: string) {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] < rightBytes[index] ? -1 : 1;
+  }
+  return leftBytes.length === rightBytes.length ? 0 : leftBytes.length < rightBytes.length ? -1 : 1;
+}
+
+function compareDznCommsMessageRailBoundary(left: DznCommsMessageRailBoundary, right: DznCommsMessageRailBoundary) {
+  const timestampOrder = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+  return timestampOrder === 0 ? compareUtf8Text(left.messageId, right.messageId) : timestampOrder;
+}
+
+export function latestDznCommsMessageRailBoundary(messages: readonly MessageRailTimelineItem[]) {
+  let latest: DznCommsMessageRailBoundary | null = null;
+  for (const message of messages) {
+    if (!message.created_at || !Number.isFinite(Date.parse(message.created_at))) continue;
+    const candidate = { createdAt: message.created_at, messageId: message.id };
+    if (!latest || compareDznCommsMessageRailBoundary(candidate, latest) > 0) latest = candidate;
+  }
+  return latest;
+}
+
+export function countDznCommsMessagesNewerThanBoundary(
+  previousBoundary: DznCommsMessageRailBoundary | null,
+  messages: readonly MessageRailTimelineItem[],
+) {
+  if (!previousBoundary) return 0;
+  return messages.filter((message) => {
+    if (!message.created_at || !Number.isFinite(Date.parse(message.created_at))) return false;
+    return compareDznCommsMessageRailBoundary(
+      { createdAt: message.created_at, messageId: message.id },
+      previousBoundary,
+    ) > 0;
+  }).length;
+}
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -104,6 +153,9 @@ export function DznCommsShell() {
   const historyRequestGenerationRef = useRef(0);
   const privateAccessRequestGenerationRef = useRef(0);
   const messageLogRef = useRef<HTMLDivElement | null>(null);
+  const messageLogChannelRef = useRef<string | null>(null);
+  const messageLogBoundaryRef = useRef<DznCommsMessageRailBoundary | null>(null);
+  const followLatestMessagesRef = useRef(true);
   const deletionNoticeTimeoutsRef = useRef(new Map<string, number>());
   const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
   const [deletedMessageIds, setDeletedMessageIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -112,6 +164,7 @@ export function DznCommsShell() {
   const [composerMessage, setComposerMessage] = useState("");
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
   const [historyPageMode, setHistoryPageMode] = useState<"latest" | "earlier">("latest");
+  const [unseenMessageCount, setUnseenMessageCount] = useState(0);
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "signed-out">("checking");
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
   const reactionAttemptRef = useRef(new Map<string, string>());
@@ -213,6 +266,7 @@ export function DznCommsShell() {
       setComposerMessage("");
       setLoadingEarlierMessages(false);
       setHistoryPageMode("latest");
+      prepareMessageRailForChannelChange();
       selectedChannelRef.current = nextChannel;
       if (nextChannel === "global-chat") {
         setHistory({
@@ -253,6 +307,30 @@ export function DznCommsShell() {
   const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
 
   useEffect(() => {
+    if (!historyReady || isUpdatesChannel) return;
+    const log = messageLogRef.current;
+    if (!log) return;
+
+    const channelChanged = messageLogChannelRef.current !== payload.channel.slug;
+    const previousBoundary = messageLogBoundaryRef.current;
+    messageLogChannelRef.current = payload.channel.slug;
+    messageLogBoundaryRef.current = latestDznCommsMessageRailBoundary(visibleMessages);
+
+    if (channelChanged || followLatestMessagesRef.current) {
+      window.requestAnimationFrame(() => {
+        const currentLog = messageLogRef.current;
+        if (currentLog) currentLog.scrollTo({ top: currentLog.scrollHeight, behavior: "auto" });
+      });
+      setUnseenMessageCount((count) => count === 0 ? count : 0);
+      return;
+    }
+
+    if (historyPageMode === "earlier") return;
+    const newlyLoadedMessageCount = countDznCommsMessagesNewerThanBoundary(previousBoundary, visibleMessages);
+    if (newlyLoadedMessageCount > 0) setUnseenMessageCount((count) => count + newlyLoadedMessageCount);
+  }, [historyReady, historyPageMode, isUpdatesChannel, payload.channel.slug, visibleMessages]);
+
+  useEffect(() => {
     if (!reactionWritesAvailable) return;
 
     const controller = new AbortController();
@@ -291,6 +369,7 @@ export function DznCommsShell() {
     setComposerMessage("");
     setLoadingEarlierMessages(false);
     setHistoryPageMode("latest");
+    prepareMessageRailForChannelChange();
     selectedChannelRef.current = "dzn-updates";
     setSelectedChannel("dzn-updates");
     if (window.location.hash !== "#dzn-updates") window.history.replaceState(null, "", "#dzn-updates");
@@ -320,6 +399,7 @@ export function DznCommsShell() {
       if (selectedChannelRef.current !== targetChannel) return;
       setLoadingEarlierMessages(false);
       setHistoryPageMode("latest");
+      scrollMessageRailToLatest();
       const requestGeneration = ++historyRequestGenerationRef.current;
       try {
         const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
@@ -390,6 +470,8 @@ export function DznCommsShell() {
       ? { height: messageLogRef.current.scrollHeight, top: messageLogRef.current.scrollTop }
       : null;
     const requestGeneration = ++historyRequestGenerationRef.current;
+    followLatestMessagesRef.current = false;
+    setUnseenMessageCount(0);
     setLoadingEarlierMessages(true);
     setHistoryPageMode("earlier");
     try {
@@ -435,7 +517,32 @@ export function DznCommsShell() {
     historyRequestGenerationRef.current += 1;
     setLoadingEarlierMessages(false);
     setHistoryPageMode("latest");
+    scrollMessageRailToLatest();
     setHistory((current) => ({ ...current, message: `Returning to the latest ${current.payload.channel.name} messages.` }));
+  }
+
+  function prepareMessageRailForChannelChange() {
+    messageLogChannelRef.current = null;
+    messageLogBoundaryRef.current = null;
+    followLatestMessagesRef.current = true;
+    setUnseenMessageCount(0);
+  }
+
+  function scrollMessageRailToLatest() {
+    followLatestMessagesRef.current = true;
+    setUnseenMessageCount(0);
+    window.requestAnimationFrame(() => {
+      const log = messageLogRef.current;
+      if (log) log.scrollTo({ top: log.scrollHeight, behavior: "auto" });
+    });
+  }
+
+  function handleMessageLogScroll() {
+    const log = messageLogRef.current;
+    if (!log) return;
+    const atBottom = isDznCommsMessageRailAtBottom(log);
+    followLatestMessagesRef.current = atBottom;
+    if (atBottom) setUnseenMessageCount(0);
   }
 
   function handleMessageDeleted(messageId: string, deletedChannelSlug: string) {
@@ -500,6 +607,7 @@ export function DznCommsShell() {
             setComposerMessage("");
             setLoadingEarlierMessages(false);
             setHistoryPageMode("latest");
+            prepareMessageRailForChannelChange();
             selectedChannelRef.current = "global-chat";
             setHistory({ status: "loading", payload: staticPayload, message: "Opening Global Chat." });
             setSelectedChannel("global-chat");
@@ -572,6 +680,7 @@ export function DznCommsShell() {
                         setComposerMessage("");
                         setLoadingEarlierMessages(false);
                         setHistoryPageMode("latest");
+                        prepareMessageRailForChannelChange();
                         selectedChannelRef.current = channel.slug;
                         setHistory({ status: "loading", payload: staticPayload, message: "Opening the selected DZN Comms channel." });
                         setSelectedChannel(channel.slug);
@@ -610,13 +719,15 @@ export function DznCommsShell() {
                 <p className="text-xs font-bold leading-5 text-cyan-50">{history.message}</p>
               </div>
 
-              <div
-                ref={messageLogRef}
-                role="log"
-                aria-live="polite"
-                aria-relevant="additions text"
-                className="mt-3 h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
-              >
+              <div className="relative mt-3">
+                <div
+                  ref={messageLogRef}
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions text"
+                  onScroll={handleMessageLogScroll}
+                  className="h-[min(42rem,calc(100svh-14rem))] min-h-72 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-color:rgba(103,232,249,0.45)_rgba(255,255,255,0.03)] [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/45 [&::-webkit-scrollbar-track]:bg-[#060a12] [&::-webkit-scrollbar]:w-2 lg:max-h-[32rem]"
+                >
                 {historyReady && (payload.page.has_more || historyPageMode === "earlier") ? <div className="flex items-center justify-center gap-2 border-b border-white/8 py-3">
                   {historyPageMode === "earlier" ? <button type="button" onClick={returnToLatestMessages} className="min-h-8 border border-white/12 bg-white/[0.035] px-3 text-xs font-bold text-zinc-300 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white">Latest messages</button> : null}
                   {payload.page.has_more ? <button type="button" onClick={() => void loadEarlierMessages()} disabled={loadingEarlierMessages} className="min-h-8 border border-cyan-300/25 bg-cyan-300/8 px-3 text-xs font-bold text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/15 disabled:cursor-wait disabled:opacity-60">{loadingEarlierMessages ? "Loading history..." : "Load earlier messages"}</button> : null}
@@ -647,6 +758,13 @@ export function DznCommsShell() {
                     </div>
                   </div>
                 )}
+                </div>
+                {unseenMessageCount > 0 ? <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3" aria-live="polite">
+                  <button type="button" onClick={scrollMessageRailToLatest} className="pointer-events-auto inline-flex min-h-9 items-center gap-2 rounded-md border border-cyan-200/55 bg-[#071421]/95 px-3 text-xs font-black text-cyan-50 shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition hover:border-cyan-100 hover:bg-cyan-300/15" aria-label={`Jump to the latest message. ${unseenMessageCount} unread ${unseenMessageCount === 1 ? "message" : "messages"}.`}>
+                    <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                    {unseenMessageCount === 1 ? "1 new message" : `${unseenMessageCount} new messages`}
+                  </button>
+                </div> : null}
               </div>
 
               <form onSubmit={handleSend} className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
