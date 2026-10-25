@@ -26,7 +26,27 @@ export const PATROL_STOPS = Object.freeze({
   sentinel: ['camp', 'tower', 'hall', 'camp'],
   medic: ['camp', 'workshop', 'camp'],
 });
+export const PATROL_ORDERS = Object.freeze({
+  standard: 'Role route', camp: 'Hold at camp', hall: 'Command Hall',
+  workshop: 'Workshop / Forge', tower: 'Arc Battery', comms: 'Communications',
+});
 export const DEFENDER_POST_NODES = Object.freeze({ gate: 'southLane', hall: 'hall', tower: 'tower', comms: 'comms', workshop: 'workshop' });
+
+export function setPatrolOrder(motion, order) {
+  if (!Object.hasOwn(PATROL_ORDERS, order) || !PATROL_STOPS[motion.role]) throw new Error('Unknown patrol order');
+  if (motion.order === order) return motion;
+  motion.order = order;
+  motion.stops = order === 'standard' ? PATROL_STOPS[motion.role]
+    : order === 'camp' ? ['camp'] : ['camp', order, 'camp'];
+  motion.stopIndex = motion.stops.indexOf(motion.node);
+  if (motion.stopIndex < 0 && order !== 'standard' && order !== 'camp') motion.stopIndex = 0;
+  motion.route = [];
+  motion.routeIndex = 0;
+  motion.waypoints = null;
+  motion.waypointNode = null;
+  motion.wait = 0;
+  return motion;
+}
 
 export function patrolNodesForLayout(layout) {
   const nodes = Object.fromEntries(Object.entries(PATROL_NODES).map(([key, point]) => [key, [...point]]));
@@ -65,6 +85,7 @@ export function createPatrolMotion(role, index = 0) {
   if (!stops) throw new Error(`Unknown patrol role: ${role}`);
   const stop = stops[index % stops.length];
   return { role, stops, stopIndex: index % stops.length, node: stop,
+    order: 'standard',
     route: [], routeIndex: 0, x: PATROL_NODES[stop][0], z: PATROL_NODES[stop][1],
     yaw: Math.PI, stride: index * 0.9, wait: 2 + index * 0.75, moving: false,
     speed: role === 'sentinel' ? 1.35 : role === 'engineer' ? 1.55 : 1.7 };

@@ -4,7 +4,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
-import { PATROL_NODES, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
+import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
 import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
@@ -1361,6 +1361,10 @@ for (let i = 0; i < 5; i++) {
   patrols.push({ mesh: soldier, role, motion });
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
+function syncPatrolOrders() {
+  const orders = service.community()?.saved.base.patrolOrders || {};
+  for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard');
+}
 // One chosen commander is physically present at the bivouac while at home.
 // Its existing role route leads to a useful building and back, with the same
 // wall/building avoidance as the ordinary patrols.
@@ -1683,6 +1687,7 @@ function renderIdentityOptions() {
     reconcileBasePresentation();
     reconcileLandScenery();
     syncPatrolKits();
+    syncPatrolOrders();
     syncDefenderPatrols();
     updateHud();
     updateBuildingList();
@@ -1946,6 +1951,27 @@ function defenderCardsHTML() {
     const assignment = defender.level ? `<div class="row"><select data-defender-post="${role}" aria-label="${escapeHTML(definition.name)} defensive post" ${leadership && access ? '' : 'disabled'}><option value="">Reserve at camp</option>${Object.entries(DEFENDER_POSTS).map(([key, label]) => `<option value="${key}" ${defender.post === key ? 'selected' : ''}>${escapeHTML(label)}</option>`).join('')}</select><button data-defender-assign="${role}" ${leadership && access ? '' : 'disabled'}>Assign post</button></div>` : '';
     return `<article class="squad-card defender-card"><div class="squad-card-head"><span class="squad-emblem" aria-hidden="true">◆</span><div><strong>${escapeHTML(definition.name)}</strong><small>${escapeHTML(definition.role)}</small></div><b>${defender.level ? `L${defender.level}` : 'LOCKED'}</b></div><img class="squad-portrait" src="${defenderPortrait(role)}" alt="${escapeHTML(definition.name)} supplied design"><p>${escapeHTML(definition.detail)}</p><p><b>Ability:</b> ${escapeHTML(definition.ability)}<br><b>Post:</b> ${escapeHTML(post)}</p>${approval}${progress}${assignment}${defender.level && defender.post ? `<button type="button" data-watch-defender="${role}">Watch defender in 3D</button>` : ''}<p class="help">Inspect any 3D appearance at camp without unlocking or equipping it:</p><div class="squad-tier-strip">${[1, 2, 3, 4, 5].map(level => `<button type="button" data-defender-preview="${role}" data-level="${level}" aria-label="Place ${escapeHTML(definition.name)} Level ${level} 3D preview">L${level}</button>`).join('')}</div></article>`;
   }).join('');
+}
+
+function showPatrolOrdersPanel() {
+  const access = service.getAccess();
+  const leadership = isLeadership();
+  const base = service.community().saved.base;
+  const rows = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
+    const unlocked = squadUnlocked(role, base.levels);
+    const current = base.patrolOrders[role] || 'standard';
+    return `<article class="squad-card"><div class="squad-card-head"><strong>${escapeHTML(definition.name)}</strong><b>${unlocked ? `L${squadTier(role, base.levels)}` : 'LOCKED'}</b></div><p class="help">${unlocked ? `Current order: ${escapeHTML(PATROL_ORDERS[current])}` : `Unlock at Command Hall L${definition.unlockHall} and ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}.`}</p><div class="row"><select data-patrol-order="${role}" aria-label="${escapeHTML(definition.name)} patrol destination" ${!access.allowed || !leadership || !unlocked ? 'disabled' : ''}>${Object.entries(PATROL_ORDERS).map(([key, label]) => `<option value="${key}" ${key === current ? 'selected' : ''}>${escapeHTML(label)}</option>`).join('')}</select><button data-assign-patrol="${role}" ${!access.allowed || !leadership || !unlocked ? 'disabled' : ''}>Assign</button></div></article>`;
+  }).join('');
+  openPanel(`<h2>Patrol Orders</h2><p>Send unlocked squads between camp and a chosen building, or hold them at camp. They follow clear paths around moved buildings and walls.</p>${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : !leadership ? '<p class="help">The owner or an authorised admin assigns routes for this shared base.</p>' : ''}<div class="squad-grid">${rows}</div><p class="help">These local-preview orders change where soldiers walk at home. War scores and saved battle snapshots stay unchanged.</p><div class="row"><button id="closeBtn">Close</button></div>`);
+  panel.querySelectorAll('[data-assign-patrol]').forEach(button => button.addEventListener('click', () => {
+    const role = button.dataset.assignPatrol;
+    const order = panel.querySelector(`[data-patrol-order="${role}"]`)?.value;
+    const result = service.assignPatrolOrder(service.state.currentIdentityId, role, order);
+    if (result.ok) syncPatrolOrders();
+    toast(result.ok ? `${SQUAD_ROLES[role].name}: ${PATROL_ORDERS[order]}` : result.error);
+    showPatrolOrdersPanel();
+  }));
+  $('closeBtn').onclick = closePanel;
 }
 
 function showSquadPanel() {
@@ -2281,6 +2307,7 @@ $('collectBtn').onclick = () => {
 $('projectsBtn').onclick = showProjectsPanel;
 $('forgeBtn').onclick = showForgePanel;
 $('squadsBtn').onclick = showSquadPanel;
+$('patrolOrdersBtn').onclick = showPatrolOrdersPanel;
 $('progressionBtn').onclick = showProgressionPanel;
 $('landBtn').onclick = () => showLandPanel();
 $('yardBtn').onclick = () => {
@@ -2452,6 +2479,7 @@ $('muteBtn').onclick = () => {
 renderIdentityOptions();
 renderAppearanceGallery();
 reconcileLandScenery();
+syncPatrolOrders();
 updateHud();
 
 // ---------- War Table & raid ----------

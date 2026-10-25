@@ -9,6 +9,7 @@ import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect
 import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
 import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
+import { PATROL_ORDERS } from './patrol-routes.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -162,6 +163,7 @@ function emptyBase(treasury = 200) {
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
     layout: defaultLayout(),
+    patrolOrders: Object.fromEntries(Object.keys(SQUAD_ROLES).map(role => [role, 'standard'])),
     defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
@@ -335,6 +337,10 @@ function normalizeLoadedState(raw) {
     const base = savedCommunity.base || {};
     const normalized = emptyBase(safeInt(base.treasury));
     for (const key of Object.keys(GAME_CONFIG.buildings)) normalized.levels[key] = normalizeLevel(base.levels?.[key], 1);
+    for (const role of Object.keys(SQUAD_ROLES)) {
+      const order = base.patrolOrders?.[role];
+      if (Object.hasOwn(PATROL_ORDERS, order)) normalized.patrolOrders[role] = order;
+    }
     for (const role of Object.keys(DEFENDER_CONCEPTS)) {
       const saved = base.defenders?.[role];
       const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
@@ -1325,6 +1331,28 @@ export class LocalGameService {
     context.defender.post = post;
     const result = { ok: true, role, post, level: context.defender.level };
     this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  assignPatrolOrder(identityId, role, order, actionId = this.newActionId('patrol-order')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Community unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `patrol-order-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind && prior.result.role === role && prior.result.order === order
+      ? { ...clone(prior.result), replay: true }
+      : { ok: false, error: 'This action ID was already used for another order or identity.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (!Object.hasOwn(SQUAD_ROLES, role) || !Object.hasOwn(PATROL_ORDERS, order)) return { ok: false, error: 'Choose a valid squad and patrol destination.' };
+    if (!squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'Unlock this squad before assigning its patrol.' };
+    entry.saved.base.patrolOrders[role] = order;
+    const result = { ok: true, role, order };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
     return result;
   }

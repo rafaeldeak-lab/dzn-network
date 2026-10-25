@@ -3,6 +3,7 @@ import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime
 import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
+import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -102,6 +103,35 @@ export function runServiceTests() {
   service.setOwnerProActive('violet-owner', true);
   assert(service.getAccess('violet-member').allowed, 'reactivating owner Pro restores access to the preserved base');
   checks.push('member sharing, community isolation, verification, Free tier and inactive owner Pro entitlement');
+
+  const patrolStorage = new MemoryStorage();
+  let patrolService = new LocalGameService({ storage: patrolStorage, now: () => clock });
+  assert(patrolService.snapshot('iron-owner').base.patrolOrders.assault === 'standard', 'older and fresh bases use the original role route by default');
+  assert(!patrolService.assignPatrolOrder('iron-member', 'assault', 'tower', 'patrol-member').ok && !patrolService.assignPatrolOrder('iron-unverified', 'assault', 'tower', 'patrol-unverified').ok && !patrolService.assignPatrolOrder('free-owner', 'assault', 'tower', 'patrol-free').ok, 'only eligible verified leadership can change patrols');
+  assert(!patrolService.assignPatrolOrder('iron-owner', 'sentinel', 'tower', 'patrol-locked').ok, 'a locked squad cannot be assigned a route');
+  assert(!patrolService.assignPatrolOrder('iron-owner', 'assault', 'invalid', 'patrol-invalid').ok, 'unknown destinations are rejected');
+  const routeOrder = patrolService.assignPatrolOrder('iron-owner', 'assault', 'tower', 'patrol-tower');
+  assert(routeOrder.ok && patrolService.snapshot('iron-member').base.patrolOrders.assault === 'tower' && patrolService.snapshot('violet-owner').base.patrolOrders.assault === 'standard', 'owner order is shared with connected members and isolated from rival bases');
+  assert(patrolService.assignPatrolOrder('iron-owner', 'assault', 'tower', 'patrol-tower').replay && !patrolService.assignPatrolOrder('iron-owner', 'assault', 'camp', 'patrol-tower').ok, 'order action IDs replay only the same order');
+  const motion = setPatrolOrder(createPatrolMotion('assault'), 'tower');
+  const layout = patrolService.snapshot('iron-owner').base.layout;
+  const nodes = patrolNodesForLayout(layout);
+  let reachedTower = false;
+  for (let i = 0; i < 500; i++) {
+    stepPatrolMotion(motion, 0.1, nodes, layout);
+    if (motion.node === 'tower') { reachedTower = true; break; }
+  }
+  assert(reachedTower, 'the assigned soldier walks from camp to the selected building');
+  setPatrolOrder(motion, 'camp');
+  let returnedToCamp = false;
+  for (let i = 0; i < 500; i++) {
+    stepPatrolMotion(motion, 0.1, nodes, layout);
+    if (motion.node === 'camp') { returnedToCamp = true; break; }
+  }
+  assert(returnedToCamp, 'a new hold order turns the same soldier back toward camp');
+  patrolService = new LocalGameService({ storage: patrolStorage, now: () => clock });
+  assert(patrolService.snapshot('iron-admin').base.patrolOrders.assault === 'tower', 'patrol orders survive reload without resetting the shared base');
+  checks.push('leadership patrol assignments, access and unlock gates, replay safety, obstacle-aware movement and reload');
 
   let defenderClock = clock + 12_000;
   const defenderStorage = new MemoryStorage();
