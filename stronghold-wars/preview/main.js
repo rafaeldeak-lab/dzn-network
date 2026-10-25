@@ -2410,6 +2410,9 @@ let layoutStructure = 'hq';
 let layoutStart = null;
 let layoutWallId = null;
 let layoutPending = null;
+let layoutBlueprintPending = null;
+let layoutDrillReport = null;
+let layoutBlueprintOpen = false;
 const layoutModes = {
   'move-building': 'Move building', 'build-wall': 'Build one wall', 'build-row': 'Build wall row',
   'upgrade-wall': 'Upgrade one wall', 'upgrade-row': 'Upgrade wall row', 'move-wall': 'Move wall',
@@ -2475,10 +2478,15 @@ function showLayoutPanel(errorMessage = '') {
   const stageHint = layoutPending ? 'Check the highlighted cells and confirm below.' : layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the grid.';
   const zoneOptions = GAME_CONFIG.landPlots.filter(plot => claimed.has(plot.id)).map(plot => `<option value="${plot.id}">${escapeHTML(plot.name)}</option>`).join('');
   const quote = layoutPending ? quoteLayoutAction(base, snapshot.member, claimed, layoutPending) : null;
+  const blueprints = service.getBlueprints(snapshot.profile.id);
+  const blueprintCards = blueprints.map(item => `<div class="layout-blueprint"><div class="layout-blueprint-heading"><b>Slot ${item.slot}</b><input data-blueprint-name="${item.slot}" maxlength="32" aria-label="Slot ${item.slot} name" value="${escapeHTML(item.name)}" ${owner ? '' : 'disabled'}><span class="help">${item.savedAt ? `${item.walls} walls · ${item.ready ? 'ready' : escapeHTML(item.reason)}` : 'empty'}</span></div><div class="layout-blueprint-actions"><button data-blueprint-save="${item.slot}" ${owner ? '' : 'disabled'}>${item.savedAt ? 'Overwrite' : 'Save current'}</button><button data-blueprint-activate="${item.slot}" ${owner && item.ready ? '' : 'disabled'}>Deploy</button><button data-blueprint-drill="${item.slot}" ${item.ready && snapshot.access.allowed ? '' : 'disabled'}>Test</button></div></div>`).join('');
+  const blueprintNotice = layoutBlueprintPending ? `<div class="layout-preview" role="status"><strong>Deploy ${escapeHTML(blueprints.find(item => item.slot === layoutBlueprintPending)?.name || 'blueprint')}?</strong><p>All buildings and owned wall segments move together. Wall levels, resources and locked war snapshots stay intact.</p><div class="row"><button id="blueprintConfirm">Confirm deployment</button><button id="blueprintCancel">Cancel</button></div></div>` : '';
+  const drillNotice = layoutDrillReport ? `<div class="layout-preview" role="status"><strong>${escapeHTML(layoutDrillReport.name)} · friendly defence test</strong><p>Three equal-tier DZN training squads attacked your Command Hall. Highest attacker score: ${layoutDrillReport.worst.score}/100 from ${escapeHTML(layoutDrillReport.worst.name)}.</p><p>${layoutDrillReport.lanes.map(lane => `${escapeHTML(lane.name)} ${lane.score}/100 · ${lane.breached}/${lane.wallCount} route walls breached · ${lane.casualties} attackers withdrawn`).join('<br>')}</p><p class="help">Practice only. No score, damage, resources or rewards are saved.</p></div>` : '';
   openPanel(`<h2>Edit base</h2><p class="help">Place each wall, draw a straight row, or reposition a building. Select cells, review the cost, then confirm.</p>
     ${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}
     ${!owner ? `<p class="notice warn">${escapeHTML(snapshot.access.allowed ? 'Only the server owner can edit this shared base.' : snapshot.access.reason)}</p>` : ''}
     <p class="notice">${snapshot.member.parts} Parts · ${snapshot.member.timber} Timber · ${base.layout.walls.length}/${MAX_WALLS_PER_HALL[base.levels.hq]} walls · Hall L${base.levels.hq}</p>
+    <details class="war-card" id="blueprintDetails" ${layoutBlueprintOpen || layoutBlueprintPending || layoutDrillReport ? 'open' : ''}><summary><b>Defence blueprints</b> · save, deploy and test</summary><p class="help">The owner can keep three arrangements of the buildings and walls already bought. A new wall makes an older plan stale until it is saved again. Deployments pause during a pending war.</p>${blueprintCards}${blueprintNotice}${drillNotice}</details>
     <div class="layout-actions" role="group" aria-label="Base edit actions">${Object.entries(layoutModes).map(([id, label]) => `<button type="button" data-layout-mode="${id}" class="${layoutMode === id ? 'active' : ''}" aria-pressed="${layoutMode === id}">${label}</button>`).join('')}</div>
     <div class="layout-toolbar"><label>Area<select id="layoutZone">${zoneOptions}</select></label><label>Building<select id="layoutStructure" ${layoutMode === 'move-building' ? '' : 'disabled'}>${keys.map(key => `<option value="${key}">${escapeHTML(GAME_CONFIG.buildings[key]?.name || GAME_CONFIG.facilities[key]?.name || key)}</option>`).join('')}</select></label></div>
     <p class="help" role="status">${stageHint}</p>
@@ -2500,6 +2508,34 @@ function showLayoutPanel(errorMessage = '') {
   $('layoutStructure').onchange = e => { layoutStructure = e.target.value; layoutPending = null; showLayoutPanel(); };
   $('layoutCancelStart').onclick = () => { layoutStart = null; layoutWallId = null; layoutPending = null; showLayoutPanel(); };
   $('closeBtn').onclick = closePanel;
+  $('blueprintDetails').ontoggle = event => { layoutBlueprintOpen = event.target.open; };
+  panel.querySelectorAll('[data-blueprint-save]').forEach(button => button.onclick = () => {
+    const slot = Number(button.dataset.blueprintSave);
+    const name = panel.querySelector(`[data-blueprint-name="${slot}"]`).value;
+    const result = service.saveBlueprint(snapshot.profile.id, slot, name);
+    if (!result.ok) { showLayoutPanel(result.error); return; }
+    layoutBlueprintPending = null; layoutDrillReport = null;
+    toast(`Saved ${result.name}.`); showLayoutPanel();
+  });
+  panel.querySelectorAll('[data-blueprint-activate]').forEach(button => button.onclick = () => {
+    layoutBlueprintPending = Number(button.dataset.blueprintActivate);
+    layoutDrillReport = null; showLayoutPanel();
+  });
+  panel.querySelectorAll('[data-blueprint-drill]').forEach(button => button.onclick = () => {
+    const result = service.drillBlueprint(snapshot.profile.id, Number(button.dataset.blueprintDrill));
+    if (!result.ok) { showLayoutPanel(result.error); return; }
+    layoutBlueprintPending = null; layoutDrillReport = result; showLayoutPanel();
+  });
+  if (layoutBlueprintPending) {
+    $('blueprintCancel').onclick = () => { layoutBlueprintPending = null; showLayoutPanel(); };
+    $('blueprintConfirm').onclick = () => {
+      const result = service.applyBlueprint(snapshot.profile.id, layoutBlueprintPending);
+      if (!result.ok) { layoutBlueprintPending = null; showLayoutPanel(result.error); return; }
+      layoutBlueprintPending = null; layoutDrillReport = null; layoutStart = null; layoutWallId = null; layoutPending = null;
+      syncLayoutPositions(); reconcileLandScenery(); updateHud(); playClank();
+      toast(`${result.name} deployed.`); showLayoutPanel();
+    };
+  }
   if (layoutPending) {
     $('layoutDiscard').onclick = () => { layoutPending = null; showLayoutPanel(); };
     $('layoutConfirm').onclick = () => {
@@ -2533,7 +2569,7 @@ function showLayoutPanel(errorMessage = '') {
   });
 }
 $('editBaseBtn').onclick = () => {
-  layoutStart = null; layoutWallId = null; layoutPending = null;
+  layoutStart = null; layoutWallId = null; layoutPending = null; layoutBlueprintPending = null; layoutDrillReport = null; layoutBlueprintOpen = false;
   showLayoutPanel();
 };
 $('chronicleBtn').onclick = showChroniclePanel;

@@ -164,7 +164,7 @@ function emptyBase(treasury = 200) {
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     legacyJobs: [], completedLegacyJobIds: [],
-    layout: defaultLayout(),
+    layout: defaultLayout(), blueprints: [],
     patrolOrders: Object.fromEntries(Object.keys(SQUAD_ROLES).map(role => [role, 'standard'])),
     repairPriority: null,
     defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
@@ -456,6 +456,20 @@ function normalizeLoadedState(raw) {
       wallIds.add(wall.id);
     }
     normalized.layout.nextWallNumber = Math.max(1, safeInt(savedLayout.nextWallNumber, 1), ...normalized.layout.walls.map(wall => Number(wall.id.slice(5)) + 1));
+    const blueprintSlots = new Set();
+    normalized.blueprints = (Array.isArray(base.blueprints) ? base.blueprints : []).filter(item => {
+      if (!Number.isInteger(item?.slot) || item.slot < 1 || item.slot > 3 || blueprintSlots.has(item.slot)) return false;
+      blueprintSlots.add(item.slot);
+      return true;
+    }).map(item => ({
+      slot: item.slot, name: String(item.name || `Plan ${item.slot}`).slice(0, 32), savedAt: safeInt(item.savedAt),
+      structures: Object.fromEntries(Object.keys(normalized.layout.structures).map(key => {
+        const point = item.structures?.[key];
+        return [key, isGridCell(point?.x, point?.z) ? { x: point.x, z: point.z } : null];
+      })),
+      walls: (Array.isArray(item.walls) ? item.walls : []).slice(0, 72).filter(wall => wall && /^wall-\d+$/.test(wall.id) && isGridCell(wall.x, wall.z))
+        .map(wall => ({ id: wall.id, x: wall.x, z: wall.z })),
+    }));
     normalized.legacyJobs = Array.isArray(base.legacyJobs) ? base.legacyJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.buildings[j.key] && Number.isFinite(Number(j.end))).map(j => ({ id: j.id, key: j.key, targetLevel: normalizeLevel(j.targetLevel, 1), end: Number(j.end), migratedPaid: true })) : [];
     fresh.communities[community.id] = { proActive: community.eligible ? Boolean(savedCommunity.proActive) : false, base: normalized };
   }
@@ -1638,6 +1652,106 @@ export class LocalGameService {
     const roleError = this._roleError(identityId, ['owner']);
     if (roleError) return { error: roleError };
     return { entry, member, base: entry.saved.base, kind, request };
+  }
+
+  _blueprintCandidate(base, blueprint) {
+    if (!blueprint) return { error: 'This blueprint slot is empty.' };
+    const current = base.layout;
+    const expected = new Set(current.walls.map(wall => wall.id));
+    if (!Array.isArray(blueprint.walls) || blueprint.walls.length !== expected.size
+      || blueprint.walls.some(wall => !expected.has(wall.id))
+      || new Set(blueprint.walls.map(wall => wall.id)).size !== expected.size)
+      return { error: 'Wall inventory changed. Save this slot again before deploying it.' };
+    const positions = new Map(blueprint.walls.map(wall => [wall.id, wall]));
+    const structures = {};
+    for (const key of Object.keys(current.structures)) {
+      const point = blueprint.structures?.[key];
+      if (!isGridCell(point?.x, point?.z)) return { error: 'This blueprint has an invalid building position.' };
+      structures[key] = { x: point.x, z: point.z };
+    }
+    const candidate = { structures, walls: current.walls.map(wall => ({ ...wall, x: positions.get(wall.id).x, z: positions.get(wall.id).z })), nextWallNumber: current.nextWallNumber };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    for (const [key, point] of Object.entries(structures)) {
+      if (key in DISTRICT_DEFAULTS && !claimed.has(key)) continue;
+      const error = validateLayoutPosition(candidate, claimed, key, point.x, point.z);
+      if (error) return { error: `${key}: ${error}` };
+    }
+    for (const wall of candidate.walls) {
+      const error = validateWallPosition(candidate, claimed, wall.x, wall.z, wall.id);
+      if (error) return { error: `${wall.id}: ${error}` };
+    }
+    return { layout: candidate };
+  }
+
+  getBlueprints(identityId = this.state.currentIdentityId) {
+    const base = this.community(identityId)?.saved.base;
+    if (!base) return [];
+    return [1, 2, 3].map(slot => {
+      const blueprint = base.blueprints.find(item => item.slot === slot);
+      const candidate = this._blueprintCandidate(base, blueprint);
+      return { slot, name: blueprint?.name || `Plan ${slot}`, savedAt: blueprint?.savedAt || 0,
+        walls: blueprint?.walls.length || 0, ready: Boolean(candidate.layout), reason: candidate.error || '' };
+    });
+  }
+
+  saveBlueprint(identityId, slot, name, actionId = this.newActionId('save-blueprint')) {
+    const label = String(name || '').trim().slice(0, 32);
+    const context = this._layoutContext(identityId, actionId, 'save-blueprint', `${slot}:${label}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    if (!Number.isInteger(slot) || slot < 1 || slot > 3 || !label) return { ok: false, error: 'Choose a slot and a short blueprint name.' };
+    const { base } = context;
+    const blueprint = { slot, name: label, savedAt: this.now(), structures: clone(base.layout.structures),
+      walls: base.layout.walls.map(({ id, x, z }) => ({ id, x, z })) };
+    base.blueprints = base.blueprints.filter(item => item.slot !== slot).concat(blueprint).sort((a, b) => a.slot - b.slot);
+    const result = { ok: true, slot, name: label, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  applyBlueprint(identityId, slot, actionId = this.newActionId('apply-blueprint')) {
+    const context = this._layoutContext(identityId, actionId, 'apply-blueprint', String(slot));
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, entry } = context;
+    if (this.state.wars.some(war => ['challenged', 'preparation', 'active'].includes(war.state)
+      && [war.challengerCommunityId, war.defenderCommunityId].includes(entry.definition.id)))
+      return { ok: false, error: 'A war is pending or active. Deploy saved layouts after it closes.' };
+    const blueprint = base.blueprints.find(item => item.slot === slot);
+    const candidate = this._blueprintCandidate(base, blueprint);
+    if (candidate.error) return { ok: false, error: candidate.error };
+    base.layout = candidate.layout;
+    const result = { ok: true, slot, name: blueprint.name, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  drillBlueprint(identityId, slot) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const entry = this.community(identityId);
+    const blueprint = entry.saved.base.blueprints.find(item => item.slot === slot);
+    const candidate = this._blueprintCandidate(entry.saved.base, blueprint);
+    if (candidate.error) return { ok: false, error: candidate.error };
+    const defender = this._warSideSnapshot(entry.definition.id);
+    defender.base.layout = clone(candidate.layout);
+    const attacker = clone(defender);
+    attacker.name = 'DZN training squad';
+    const lanes = ['west', 'south', 'east'].map(lane => {
+      const tactics = evaluateWarPlan(defender, 'assault', { lane, objective: 'hq', method: 'breach' });
+      const combat = tactics.ok ? simulateWarCombat(attacker, defender, {
+        tactic: 'assault', tactics, combatBaseScore: Math.max(0, Math.min(100, 44 + tactics.scoreDelta)), orders: [],
+      }) : tactics;
+      return { lane, name: tactics.laneName || lane, score: combat.score ?? 0,
+        casualties: combat.casualties ?? 0, wallCount: tactics.wallCount || 0,
+        breached: combat.walls?.filter(wall => wall.remainingHealth === 0).length || 0,
+        objectiveDamage: combat.objective ? combat.objective.maxHealth - combat.objective.remainingHealth : 0,
+        error: combat.error || '' };
+    });
+    return { ok: true, slot, name: blueprint.name, lanes, worst: lanes.reduce((a, b) => b.score > a.score ? b : a),
+      simulated: true, reward: 0 };
   }
 
   moveStructure(identityId, key, x, z, actionId = this.newActionId('move-structure')) {

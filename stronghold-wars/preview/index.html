@@ -235,6 +235,10 @@
       .panel:has(.collectible-grid) { width: min(950px, calc(100vw - 28px)); }
       .panel:has(.layout-grid) { width: min(870px, calc(100vw - 28px)); max-height: min(82vh, calc(100dvh - 94px)); left: 50%; right: auto; bottom: 12px; transform: translateX(-50%); }
       .layout-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+      .layout-blueprint { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; padding: 7px 0; border-top: 1px solid #344138; }
+      .layout-blueprint-heading, .layout-blueprint-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+      .layout-blueprint-heading input { width: 130px; min-width: 0; }
+      .layout-blueprint .help { margin: 0; }
       .layout-actions button.active { border-color: var(--green); background: #27432e; color: #b5ffcb; }
       .layout-preview { padding: 10px 12px; margin: 9px 0; border: 1px solid #799e72; border-radius: 10px; background: #1d3124; }
       .layout-preview strong { color: #b5ffcb; }
