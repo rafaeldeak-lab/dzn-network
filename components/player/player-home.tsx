@@ -131,6 +131,7 @@ type PlayerHubSavedServer = {
   public_short_description: string | null;
   current_players: number | null;
   max_players: number | null;
+  player_count_status: string;
   saved_at: string;
 };
 
@@ -143,6 +144,7 @@ type PlayerHubCommunityServer = {
   map_name: string | null;
   current_players: number | null;
   max_players: number | null;
+  player_count_status: string;
 };
 
 type PlayerHubCommunity = {
@@ -1040,7 +1042,7 @@ function FollowedServersPanel({ servers, source }: { servers: PlayerHubSavedServ
                 <span className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase text-slate-300">
                   <span>{server.platform ?? "Platform TBA"}</span>
                   <span>{server.map_name ?? "Map TBA"}</span>
-                  <span>{formatPlayers(server.current_players, server.max_players)}</span>
+                  <span>{formatPlayers(server.current_players, server.max_players, server.player_count_status)}</span>
                 </span>
                 {server.public_short_description ? (
                   <span className="mt-2 line-clamp-2 block text-sm font-semibold leading-6 text-slate-300">{server.public_short_description}</span>
@@ -1606,7 +1608,9 @@ function hubMetric(value: number | undefined, state: PlayerHubState) {
   return "0";
 }
 
-function formatPlayers(current: number | null, max: number | null) {
+function formatPlayers(current: number | null, max: number | null, status?: string) {
+  if (status === "unavailable") return "Players unavailable";
+  if (status && status !== "fresh") return "Players syncing";
   if (current === null && max === null) return "Players TBA";
   if (current !== null && max !== null) return `${current}/${max} players`;
   if (current !== null) return `${current} online`;

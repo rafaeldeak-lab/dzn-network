@@ -9,7 +9,7 @@ import {
   validatePublicListingInput,
   validateReviewInput,
 } from "../functions/_lib/review-moderation";
-import { buildPublicReviewSummary, viewerReviewState, type ServerReviewRow } from "../functions/_lib/server-reviews";
+import { buildPublicReviewAggregateSummary, buildPublicReviewSummary, viewerReviewState, type ServerReviewRow } from "../functions/_lib/server-reviews";
 import { buildPublicServerRatingSummaries, emptyPublicServerRatingSummary, type ReviewAggregateRow } from "../functions/api/public/servers";
 
 const listing = validatePublicListingInput({
@@ -56,6 +56,9 @@ assert.equal(validateOwnerReplyInput({ body: "<script>alert(1)</script> This can
 const reviewReplyRuntime = readFileSync("functions/_lib/server-reviews.ts", "utf8");
 assert.match(reviewReplyRuntime, /DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED/);
 assert.match(reviewReplyRuntime, /NULL AS owner_reply_body/);
+assert.match(reviewReplyRuntime, /COUNT\(\*\) AS review_count/, "Review details must aggregate all approved reviews independently from the bounded comment list.");
+assert.match(reviewReplyRuntime, /SUM\(CASE WHEN rating = 5 THEN 1 ELSE 0 END\)/, "Review details must aggregate the full rating breakdown.");
+assert.match(reviewReplyRuntime, /ORDER BY created_at DESC\s+LIMIT 50/, "Review details may cap displayed comments while retaining a full aggregate.");
 const publicReviewRoute = readFileSync("functions/api/public/server-reviews.ts", "utf8");
 assert.match(publicReviewRoute, /can_reply: isServerReviewOwnerRepliesEnabled/);
 assert.match(publicReviewRoute, /publicAccessCacheHeaders/);
@@ -101,6 +104,19 @@ assert.equal(pandoraSummary.reviews[0].owner_reply?.author_name, "Pandora Staff"
 assert.equal(pandoraSummary.reviews[0].owner_reply?.body.includes("detailed review"), true);
 assert.equal(JSON.stringify(pandoraSummary).includes("reviewer_discord_id"), false);
 assert.equal(pandoraSummary.reviews.some((review) => review.id === "nuketown-approved"), false);
+
+const allApprovedReviewAggregate = buildPublicReviewAggregateSummary({
+  average_rating: 4.8,
+  review_count: 51,
+  rating_1_count: 0,
+  rating_2_count: 1,
+  rating_3_count: 2,
+  rating_4_count: 4,
+  rating_5_count: 44,
+});
+assert.equal(allApprovedReviewAggregate.review_count, 51, "Review totals must not inherit the 50-comment display cap.");
+assert.equal(allApprovedReviewAggregate.average_rating, 4.8);
+assert.deepEqual(allApprovedReviewAggregate.rating_breakdown, { 1: 0, 2: 1, 3: 2, 4: 4, 5: 44 });
 
 const listingRatingRows: ReviewAggregateRow[] = [
   { linked_server_id: "pandora", rating: 5, review_count: 2 },

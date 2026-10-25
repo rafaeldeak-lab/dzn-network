@@ -1,4 +1,9 @@
 import { requireDb } from "./db";
+import {
+  PUBLIC_CURRENT_PLAYERS_SQL,
+  PUBLIC_MAX_PLAYERS_SQL,
+  PUBLIC_PLAYER_COUNT_STATUS_SQL,
+} from "./player-counts";
 import type { Env } from "./types";
 import { formatPublicServerName } from "../../lib/public-display-text";
 
@@ -14,6 +19,7 @@ export type PlayerSavedServerSummary = {
   public_short_description: string | null;
   current_players: number | null;
   max_players: number | null;
+  player_count_status: string | null;
   saved_at: string;
 };
 
@@ -67,12 +73,14 @@ export async function readPlayerSavedServersForUser(env: Env, userId: string, li
         linked_servers.platform,
         linked_servers.map_name,
         linked_servers.public_short_description,
-        linked_servers.current_players,
-        linked_servers.max_players,
+        ${PUBLIC_CURRENT_PLAYERS_SQL} AS current_players,
+        COALESCE(${PUBLIC_MAX_PLAYERS_SQL}, linked_servers.max_players, linked_servers.player_slots) AS max_players,
+        ${PUBLIC_PLAYER_COUNT_STATUS_SQL} AS player_count_status,
         player_saved_servers.created_at AS saved_at
        FROM player_saved_servers
        INNER JOIN linked_servers ON linked_servers.id = player_saved_servers.linked_server_id
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
        WHERE ${filters.join("\n         AND ")}
        ORDER BY player_saved_servers.created_at DESC
        LIMIT ?`,
@@ -92,6 +100,7 @@ export async function readPlayerSavedServersForUser(env: Env, userId: string, li
     public_short_description: row.public_short_description,
     current_players: normalizeNullableNumber(row.current_players),
     max_players: normalizeNullableNumber(row.max_players),
+    player_count_status: normalizePlayerCountStatus(row.player_count_status),
     saved_at: row.saved_at,
   }));
 
@@ -146,4 +155,9 @@ export async function deletePlayerSavedServer(env: Env, userId: string, linkedSe
 function normalizeNullableNumber(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function normalizePlayerCountStatus(value: unknown) {
+  const status = typeof value === "string" ? value.toLowerCase() : "";
+  return status === "fresh" || status === "stale" || status === "unavailable" ? status : "stale";
 }
