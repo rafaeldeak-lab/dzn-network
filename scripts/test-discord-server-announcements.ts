@@ -20,20 +20,20 @@ for (const value of ["", "0", "1", "no", "yes", "on", "TRUE", " true ", true, fa
 }
 
 for (const invite of [
-  "https://discord.gg/XPaycZqchQ",
-  "https://www.discord.gg/XPaycZqchQ",
-  "https://discord.com/invite/XPaycZqchQ",
-  "https://www.discord.com/invite/XPaycZqchQ",
+  "https://discord.gg/5kTwpVQn8a",
+  "https://www.discord.gg/5kTwpVQn8a",
+  "https://discord.com/invite/5kTwpVQn8a",
+  "https://www.discord.com/invite/5kTwpVQn8a",
 ]) {
   assert.equal(validateDiscordInviteUrl(invite)?.startsWith("https://"), true, `${invite} should be accepted`);
   assert.equal(validatePublicListingInput({ public_discord_invite: invite }).ok, true, `${invite} should be accepted by public listing validation`);
 }
 
 for (const invite of [
-  "discord.gg/XPaycZqchQ",
-  "http://discord.gg/XPaycZqchQ",
-  "https://discordapp.com/invite/XPaycZqchQ",
-  "https://example.com/invite/XPaycZqchQ",
+  "discord.gg/5kTwpVQn8a",
+  "http://discord.gg/5kTwpVQn8a",
+  "https://discordapp.com/invite/5kTwpVQn8a",
+  "https://example.com/invite/5kTwpVQn8a",
 ]) {
   assert.equal(validateDiscordInviteUrl(invite), null, `${invite} should be rejected`);
   assert.equal(validatePublicListingInput({ public_discord_invite: invite }).ok, false, `${invite} should be rejected by public listing validation`);
@@ -47,7 +47,7 @@ const safeServer = {
   public_slug: "nuketown",
   public_short_description: "Fast PvP without mass mentions.",
   public_description: "Stored server profile data only.",
-  public_discord_invite: "https://discord.gg/XPaycZqchQ",
+  public_discord_invite: "https://discord.gg/5kTwpVQn8a",
   current_player_count: 4,
   max_player_count: 10,
   network_rank: 1,
