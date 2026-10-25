@@ -49,6 +49,20 @@ record retains the choice across save reloads; old attacks without an order
 keep their original score and replay compatibility. This remains deterministic
 browser-local scoring, not a live player-controlled combat server.
 
+During the replay, the deployed member can issue one contact order and one
+withdrawal order. Focus fire and pressing the target earn bounded points with
+extra squad risk; smoke and covered withdrawal protect troops at a score
+tradeoff. Orders visibly change counterfire, smoke, casualties and the final
+attack score. The service allows only the deployed squad owner to issue each
+phase once, records action IDs for safe retries, and persists both orders in
+the war timeline, save and resolved replay. The command window closes after
+the fight; older attacks remain readable. These commands are still local
+preview mechanics and do not grant real DZN server access.
+If the page reloads during a recent deployment, War Table offers Resume
+attack for up to 45 seconds while either field order remains unused. The
+recorded orders and result remain intact, and the resumed fight cannot spend
+a second deployment.
+
 The active war's ten-minute attack period has three one-time objectives:
 Forge Convoy, Relay Capture, and Tower Stand. Each opens in a timed stage,
 requires the corresponding support building and personal resources, and can be

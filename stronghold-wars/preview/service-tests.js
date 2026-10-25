@@ -543,6 +543,18 @@ export function runServiceTests() {
   const ironStartParts = warService.snapshot('iron-owner').member.parts;
   const assault = warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'war-iron-assault');
   assert(assault.ok && assault.score === expectedAssault && assault.attackId && assault.feedback.includes('counterfire'), 'Assault score and visible defence feedback derive from locked snapshots');
+  assert(!warService.issueWarFieldOrder('violet-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'foreign-order').ok, 'opposing roster members cannot command another squad');
+  assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'pursue', 'out-of-sequence').ok, 'withdrawal requires a contact order');
+  assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'teleport', 'invalid-order').ok, 'unknown battle commands are rejected');
+  const contactOrder = warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'smoke', 'contact-smoke');
+  assert(contactOrder.ok && contactOrder.score === assault.score && contactOrder.casualties <= assault.casualties, 'smoke protects the squad without inflating an assault score');
+  assert(warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'contact-smoke').replay, 'the same field-order action replays without changing its command');
+  assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'contact-again').ok, 'a second contact command cannot score twice');
+  const withdrawalOrder = warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'pursue', 'withdrawal-pursue');
+  assert(withdrawalOrder.ok && withdrawalOrder.score === assault.score + 5 && withdrawalOrder.totalScore === assault.score + 5, 'pressing the target updates the shared war score once');
+  const orderedReload = new LocalGameService({ storage: warStorage, now: () => warClock });
+  const persistedAttack = orderedReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === assault.attackId);
+  assert(persistedAttack.orders.length === 2 && persistedAttack.score === withdrawalOrder.score && persistedAttack.casualties === withdrawalOrder.casualties, 'both battle orders and their adjusted outcome survive a save reload');
   const duplicateAssault = warService.submitWarAttack('iron-owner', challenge.warId, 'recon', 'war-iron-assault');
   assert(duplicateAssault.ok && duplicateAssault.replay && duplicateAssault.attackId === assault.attackId && warService.getWar(challenge.warId).attacks.length === 1, 'a repeated action ID is replay-safe and cannot deploy a second attack');
   assert(!warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-assault').ok, 'action IDs cannot be reused by another identity');
@@ -561,7 +573,8 @@ export function runServiceTests() {
   assert(!warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-before-stages-close').ok, 'timed build stages keep war open even after both attack caps');
   warClock = started.attackEndsAt;
   const resolved = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
-  assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === assault.score + ironRecon.score, 'war resolves once with deterministic score totals after the timed stages close');
+  assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === withdrawalOrder.score + ironRecon.score, 'war resolves once with recorded field-order score totals after the timed stages close');
+  assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'cover', 'post-resolution').ok, 'battle commands close after war resolution');
   const tacticalReload = new LocalGameService({ storage: warStorage, now: () => warClock });
   const persistedTactics = tacticalReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === ironRecon.attackId)?.tactics;
   assert(persistedTactics?.plan.lane === 'south' && persistedTactics.route.length === 4 && persistedTactics.scoreDelta === ironRecon.tactics.scoreDelta, 'the frozen tactical order and path survive save reload');
@@ -579,7 +592,7 @@ export function runServiceTests() {
   const persistedWar = persistedWarService.getWar(challenge.warId);
   assert(persistedWar.state === 'resolved' && persistedWar.replay.attackIds.length === 4 && persistedWarService.state.warRewardLedger.length === 4, 'refresh/reload preserves the replay, score, resolution and once-only reward ledger');
   assert(persistedWarService.getChronicle('iron-owner').entries.some(item => item.id === `war:${challenge.warId}`), 'war Chronicle survives reload');
-  checks.push('tactical scoring, attack roster/caps, duplicate IDs, cross-community shared state, deterministic resolution, local rewards and reload');
+  checks.push('tactical scoring, live field orders, attack roster/caps, duplicate IDs, cross-community shared state, deterministic resolution, local rewards and reload');
 
   assert(!warService.setRepairPriority('violet-member', 'timberline-depot', 'wear-member-priority').ok, 'ordinary members cannot set repair priority');
   assert(!warService.setRepairPriority('violet-owner', 'signal-marsh', 'wear-undamaged-priority').ok, 'leadership cannot prioritise a district without wear');

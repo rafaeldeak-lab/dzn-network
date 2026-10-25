@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, evaluateWarPlan } from './war-tactics.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, evaluateWarPlan } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -1682,6 +1682,11 @@ warHud.hidden = true;
 warHud.setAttribute('role', 'status');
 warHud.style.cssText = trainingHud.style.cssText.replace('#70e59a88', '#c084fc88');
 document.body.append(warHud);
+const warOrders = document.createElement('div');
+warOrders.hidden = true;
+warOrders.setAttribute('aria-label', 'Battle field orders');
+warOrders.style.cssText = 'position:fixed;z-index:9;right:12px;top:154px;width:min(360px,calc(100vw - 24px));padding:11px;border:1px solid #c084fc88;border-radius:10px;background:#101421f2;color:#edf4ee;font:12px Inter,system-ui,sans-serif;box-shadow:0 8px 25px #0009';
+document.body.append(warOrders);
 let warBattle = null;
 let toastTimer = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -2583,7 +2588,7 @@ function warCommunityName(communityId) {
 
 function warTimelineHTML(war) {
   const events = (war.events || []).slice(-10);
-  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts${event.details.tactics?.plan ? ` · ${escapeHTML(event.details.tactics.laneName)} → ${escapeHTML(event.details.tactics.objectiveName)} · ${escapeHTML(event.details.tactics.methodName)}` : ''}</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
+  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.type === 'attack' && event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts${event.details.tactics?.plan ? ` · ${escapeHTML(event.details.tactics.laneName)} → ${escapeHTML(event.details.tactics.objectiveName)} · ${escapeHTML(event.details.tactics.methodName)}` : ''}${event.details.orders?.length ? ` · ${event.details.orders.map(order => escapeHTML(order.name)).join(' → ')}` : ''}</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
 }
 
 function warSnapshotLine(side) {
@@ -2621,11 +2626,14 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   } else if (war.state === 'active') {
     const myCap = myAttacks.length >= WAR_RULES.maxAttacksPerSide;
     const canAttack = isParticipant && readiness.eligible && hasRoster && !alreadyAttacked && !myCap && Date.now() <= war.attackEndsAt;
+    const resumableAttack = war.attacks.find(attack => attack.identityId === currentIdentity.id && attack.tactics?.plan
+      && (attack.orders?.length || 0) < 2 && !attack.returnedAt && Date.now() <= Math.min(war.attackEndsAt, attack.at + 45_000));
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
       <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit adds +${currentSide.stats.assaultKit.scoreBonus} score and shields ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with Sentinel reinforcement' : ''}${currentSide.stats.assaultKit.supportRole ? ' and Lifeline support' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit adds +${currentSide.stats.reconKit.scoreBonus} score and shields ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with Lifeline support' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
       ${canAttack ? `<p class="help">Choose a route, target and approach before committing your one attack. The locked wall layout changes the risk and score.</p><div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Plan Assault</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Plan Recon</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
+      ${resumableAttack && readiness.eligible ? `<div class="row"><button data-war-resume="${escapeHTML(resumableAttack.attackId)}" data-war-id="${escapeHTML(war.id)}">Resume attack · ${resumableAttack.orders?.length || 0}/2 field orders</button></div>` : ''}
       ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve after all timed stages close'}</button></div>` : ''}`;
     if (war.stages?.length) actions += `<h3>Timed build challenges</h3><p class="help">One verified roster member per server completes each stage from the locked building tier. Stages open in sequence; first completion earns +2. Costs use personal DZN Parts and Timber, and points stay in this local war.</p>${war.stages.map(stage => {
       const definition = WAR_STAGE_DEFS.find(item => item.id === stage.id);
@@ -2718,6 +2726,7 @@ function showWarTable(errorMessage = '') {
     toast('War active · two deployments per side.'); showWarTable();
   });
   panel.querySelectorAll('[data-war-attack]').forEach(button => button.onclick = () => showWarPlanner(button.dataset.warId, button.dataset.warAttack));
+  panel.querySelectorAll('[data-war-resume]').forEach(button => button.onclick = () => resumeWarAttack(button.dataset.warId, button.dataset.warResume));
   panel.querySelectorAll('[data-war-stage]').forEach(button => button.onclick = () => {
     const result = service.completeWarStage(profile.id, button.dataset.warId, button.dataset.warStage);
     if (!result.ok) { showWarTable(result.error); return; }
@@ -3155,6 +3164,24 @@ function launchWarAttack(warId, tactic, plan) {
   const profile = service.profile();
   const result = service.submitWarAttack(profile.id, warId, tactic, service.newActionId('war-attack'), plan);
   if (!result.ok) { showWarTable(result.error); return; }
+  playWarAttack(warId, tactic, result);
+}
+
+function resumeWarAttack(warId, attackId) {
+  if (raid || warBattle) return;
+  const profile = service.profile();
+  const war = service.getWar(warId);
+  const attack = war?.attacks.find(item => item.attackId === attackId && item.identityId === profile.id);
+  if (!attack || war.state !== 'active' || !service.getAccess(profile.id).allowed || !attack.tactics?.plan
+    || (attack.orders?.length || 0) >= 2 || attack.returnedAt || Date.now() > Math.min(war.attackEndsAt, attack.at + 45_000)) {
+    showWarTable('This deployment can no longer resume. Its completed orders and score remain in the timeline.');
+    return;
+  }
+  playWarAttack(warId, attack.tactic, attack, true);
+}
+
+function playWarAttack(warId, tactic, result, resumed = false) {
+  const profile = service.profile();
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
   const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
@@ -3187,14 +3214,58 @@ function launchWarAttack(warId, tactic, plan) {
     warTroopMeshes.push(troop);
     troops.push({ mesh: troop, path, phase: i * 0.45, withdrawn: i >= squadSize - result.casualties });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], breachShown: false };
+  warBattle = { warId, tactic, result, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], breachShown: false, orders: [...(result.orders || [])], orderView: '', coverUntil: 0 };
   warHud.hidden = false;
+  warOrders.hidden = false;
+  warOrders.innerHTML = '<b>FIELD COMMAND</b><p>Approaching the defended base. Contact orders unlock shortly.</p>';
   camTarget.copy(OUTPOST);
   zoom = 32;
   updateCamera();
   panel.style.display = 'none';
-  toast(`${tactic === 'assault' ? 'Assault' : 'Recon'} deployed via ${result.tactics.laneName} · ${result.score} points · ${result.casualties} withdrawn.`);
+  toast(resumed ? `Resumed ${tactic} attack · ${warBattle.orders.length}/2 field orders recorded.` : `${tactic === 'assault' ? 'Assault' : 'Recon'} deployed via ${result.tactics.laneName}. Direct the squad when contact begins.`);
   playClank();
+}
+
+warOrders.onclick = event => {
+  const button = event.target.closest('button[data-field-order]');
+  if (!button || !warBattle) return;
+  const phase = button.dataset.phase;
+  const command = button.dataset.fieldOrder;
+  const result = service.issueWarFieldOrder(service.profile().id, warBattle.warId, warBattle.result.attackId, phase, command);
+  if (!result.ok) { toast(result.error); return; }
+  warBattle.orders.push(result.order);
+  warBattle.result.score = result.score;
+  warBattle.result.casualties = result.casualties;
+  warBattle.result.feedback = result.feedback;
+  warBattle.troops.forEach((troop, index) => { troop.withdrawn = index >= warBattle.squadSize - result.casualties; });
+  if (command === 'smoke' || command === 'cover') {
+    warBattle.coverUntil = warBattle.time + 2.2;
+    for (let i = 0; i < 5; i++) spawnSmoke(warBattle.troops[i % warBattle.troops.length].mesh.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
+  } else {
+    warBattle.objectiveMarker.material.color.setHex(0xffb45e);
+    const target = warBattle.objectiveMarker.position;
+    spawnSmoke(new THREE.Vector3(OUTPOST.x + target.x, 1, OUTPOST.z + target.z));
+  }
+  warBattle.orderView = '';
+  toast(`${result.order.name} · ${result.score} attack points · ${result.casualties} withdrawn.`);
+  playClank();
+};
+
+function updateWarOrders(progress) {
+  if (!warBattle) return;
+  const contact = warBattle.orders.find(order => order.phase === 'contact');
+  const withdrawal = warBattle.orders.find(order => order.phase === 'withdrawal');
+  const phase = progress < 0.22 ? 'approach' : !contact ? 'contact' : progress < 0.6 ? 'advance' : !withdrawal ? 'withdrawal' : 'complete';
+  if (phase === warBattle.orderView) return;
+  warBattle.orderView = phase;
+  if (phase === 'approach') warOrders.innerHTML = '<b>FIELD COMMAND</b><p>Approaching the defended base. Contact orders unlock shortly.</p>';
+  else if (phase === 'advance') warOrders.innerHTML = `<b>CONTACT ORDER · ${escapeHTML(contact.name)}</b><p>Squad is advancing. Withdrawal orders unlock at the target.</p>`;
+  else if (phase === 'complete') warOrders.innerHTML = `<b>ORDERS EXECUTED</b><p>${escapeHTML(contact.name)} → ${escapeHTML(withdrawal.name)} · ${warBattle.result.score} points · ${warBattle.result.casualties} withdrawn.</p>`;
+  else {
+    const choices = WAR_FIELD_ORDERS[phase];
+    const detail = phase === 'contact' ? 'Focus fire adds points but risks a troop. Smoke protects a troop.' : 'Press the target for points and extra risk, or cover withdrawal to protect up to two troops at a score cost.';
+    warOrders.innerHTML = `<b>${phase === 'contact' ? 'CONTACT' : 'WITHDRAWAL'} · ISSUE ONE ORDER</b><p>${detail}</p><div class="row">${Object.entries(choices).map(([id, label]) => `<button type="button" data-phase="${phase}" data-field-order="${id}">${escapeHTML(label)}</button>`).join('')}</div>`;
+  }
 }
 
 function warPathPosition(path, fraction, destination) {
@@ -3215,6 +3286,7 @@ function updateWarBattle(dt) {
   if (!warBattle) return;
   warBattle.time += dt;
   const progress = THREE.MathUtils.clamp(warBattle.time / warBattle.duration, 0, 1);
+  updateWarOrders(progress);
   const tactics = warBattle.result.tactics;
   warBattle.objectiveMarker.scale.setScalar(1 + Math.sin(warBattle.time * 6) * 0.12);
   warHud.textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.86 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${warBattle.squadSize - warBattle.result.casualties}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
@@ -3264,7 +3336,7 @@ function updateWarBattle(dt) {
     return !nearest || distance < nearest.distance ? { mesh: troop.mesh, distance } : nearest;
   }, null)?.mesh;
   warBattle.shotClock = Math.min(1.2, warBattle.shotClock + dt);
-  const fire = Boolean(target && progress < 0.94 && warBattle.shotClock >= 0.8);
+  const fire = Boolean(target && progress < 0.94 && warBattle.time >= warBattle.coverUntil && warBattle.shotClock >= 0.8);
   const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
   if (stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire)) {
     warBattle.shotClock = 0;
@@ -3286,6 +3358,7 @@ function updateWarBattle(dt) {
   const completed = warBattle;
   warBattle = null;
   warHud.hidden = true;
+  warOrders.hidden = true;
   camTarget.set(0, 0, 0);
   zoom = 28;
   updateCamera();

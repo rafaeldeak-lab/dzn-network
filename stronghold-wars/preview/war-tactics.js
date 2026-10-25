@@ -9,6 +9,20 @@ export const WAR_OBJECTIVES = Object.freeze({
   hq: 'Command Hall', tower: 'Arc Battery', comms: 'Communications',
 });
 export const WAR_METHODS = Object.freeze({ breach: 'Cut through', flank: 'Flank under cover' });
+export const WAR_FIELD_ORDERS = Object.freeze({
+  contact: Object.freeze({ focus: 'Focus fire', smoke: 'Smoke advance' }),
+  withdrawal: Object.freeze({ pursue: 'Press the target', cover: 'Cover withdrawal' }),
+});
+
+export function evaluateWarFieldOrder(tactic, phase, command) {
+  if (!['assault', 'recon'].includes(tactic) || !WAR_FIELD_ORDERS[phase]?.[command])
+    return { ok: false, error: 'Choose a valid field order for this battle phase.' };
+  const effects = {
+    contact: { focus: { scoreDelta: tactic === 'assault' ? 6 : 4, casualtyDelta: 1 }, smoke: { scoreDelta: tactic === 'recon' ? 2 : 0, casualtyDelta: -1 } },
+    withdrawal: { pursue: { scoreDelta: tactic === 'assault' ? 5 : 3, casualtyDelta: 1 }, cover: { scoreDelta: -3, casualtyDelta: -2 } },
+  };
+  return { ok: true, phase, command, name: WAR_FIELD_ORDERS[phase][command], ...effects[phase][command] };
+}
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const point = pair => ({ x: pair[0], z: pair[1] });
