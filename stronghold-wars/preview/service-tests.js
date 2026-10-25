@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -570,6 +570,37 @@ export function runServiceTests() {
     && !evaluateWarSquad(advancedLevels, 'assault', { assault: 9, medic: 0.5 }, 10, breachPlan).ok
     && !evaluateWarSquad(advancedLevels, 'assault', { assault: 0, medic: 10 }, 10, breachPlan).ok
     && !evaluateWarSquad(advancedLevels, 'recon', { assault: 10 }, 10, breachPlan).ok, 'war roster requires exact capacity, whole counts and the tactic’s lead soldier');
+  const combatAttacker = JSON.parse(JSON.stringify(lockedWar.snapshots.challenger));
+  combatAttacker.base.levels = advancedLevels;
+  combatAttacker.stats.squadSize = 10;
+  const combatInput = { tactic: 'assault', tactics: breachPlan, squad: specialistArmy, combatBaseScore: 45, defenderPenalty: 0, defenceOrderPenalty: 0, orders: [] };
+  const cutCombat = simulateWarCombat(combatAttacker, corridorFixture, combatInput);
+  const flankCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: flankPlan });
+  assert(cutCombat.ok && cutCombat.version === 2 && cutCombat.walls.length === 1 && flankCombat.walls.length === 0
+    && JSON.stringify(cutCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, combatInput))
+    && cutCombat.squad.filter(unit => unit.withdrawn).length === cutCombat.casualties,
+  'accepted snapshots and a selected route resolve the same troop losses, wall health and score every time');
+  assert(cutCombat.squad.every(unit => unit.remainingHealth >= 0 && unit.remainingHealth <= unit.maxHealth
+    && unit.hits.reduce((total, hit) => total + hit.damage, unit.remainingHealth) === unit.maxHealth)
+    && [...cutCombat.walls, cutCombat.objective].every(target => target.remainingHealth >= 0 && target.remainingHealth <= target.maxHealth
+      && target.hits.reduce((total, hit) => total + hit.damage, target.remainingHealth) === target.maxHealth),
+  'individual incoming and outgoing hits account for every bounded health change, including medic recovery');
+  assert(flankCombat.objective.hits.filter(hit => hit.at < 0.6).reduce((sum, hit) => sum + hit.damage, 0)
+    > cutCombat.objective.hits.filter(hit => hit.at < 0.6).reduce((sum, hit) => sum + hit.damage, 0),
+    'a standing wall absorbs the early volleys that a clear flank puts into the selected building');
+  const fortifiedCombat = JSON.parse(JSON.stringify(corridorFixture));
+  fortifiedCombat.base.levels.tower = 5;
+  const hardCombat = simulateWarCombat(combatAttacker, fortifiedCombat, combatInput);
+  assert(hardCombat.casualties >= cutCombat.casualties && hardCombat.score <= cutCombat.score,
+    'a stronger Arc Battery causes at least as much attrition and cannot improve the attacker score');
+  const focusCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput,
+    orders: [{ phase: 'contact', command: 'focus' }, { phase: 'withdrawal', command: 'pursue' }] });
+  const coveredCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput,
+    orders: [{ phase: 'contact', command: 'smoke' }, { phase: 'withdrawal', command: 'cover' }] });
+  assert(focusCombat.objective.remainingHealth <= coveredCombat.objective.remainingHealth
+    && coveredCombat.casualties <= focusCombat.casualties,
+  'focus and pursuit push objective damage while smoke and cover protect the deployed squad');
+  checks.push('snapshot-driven spatial combat, wall absorption, upgraded turret attrition, medic healing and field-order tradeoffs');
   const attackerStats = lockedWar.snapshots.challenger.base.levels;
   const defenderStats = lockedWar.snapshots.defender.base.levels;
   const expectedAssault = Math.max(0, Math.min(100, Math.round(20 + attackerStats.hq * 12 + attackerStats.tower * 16 + attackerStats.comms * 4 - defenderStats.hq * 4 - defenderStats.tower * 10 - 3)));
@@ -633,12 +664,24 @@ export function runServiceTests() {
   const ironRecon = warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', ironReconPlan);
   const violetAssault = warService.submitWarAttack('violet-admin', challenge.warId, 'assault', 'war-violet-assault');
   assert(violetRecon.ok && ironRecon.ok && violetAssault.ok, 'both communities can deploy distinct permitted roster members');
-  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition points'), 'a committed route, objective and chosen squad change the actual score and explanation');
+  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical planning points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition planning points') && ironRecon.damage.version === 2,
+    'a committed route, objective and chosen squad change the actual battle score and explanation');
   assert(ironRecon.defenceOrder === 'signals' && ironRecon.defenceOrderActive && ironRecon.defenceOrderPenalty === 4
     && ironRecon.feedback.includes('Protect the relay') && violetRecon.defenceOrder === 'reserve' && violetRecon.defenceOrderActive
     && violetRecon.defenceExposureShield === 6, 'locked defensive orders affect the appropriate incoming attacks and exposed home');
-  assert(unguardedRecon.ok && unguardedRecon.score - ironRecon.score === 4 && ironRecon.casualties - unguardedRecon.casualties === 1,
-    'a prepared relay defence removes exactly four attack points and adds one casualty against the same frozen route');
+  assert(unguardedRecon.ok && unguardedRecon.score > ironRecon.score && ironRecon.casualties >= unguardedRecon.casualties,
+    `a prepared relay defence reduces the same frozen route's score without improving attacker survival (${unguardedRecon.score}/${ironRecon.score} points, ${unguardedRecon.casualties}/${ironRecon.casualties} losses)`);
+  const liveContact = warService.issueWarFieldOrder('iron-admin', challenge.warId, ironRecon.attackId, 'contact', 'focus', 'v2-contact');
+  const liveWithdrawal = warService.issueWarFieldOrder('iron-admin', challenge.warId, ironRecon.attackId, 'withdrawal', 'cover', 'v2-withdrawal');
+  assert(liveContact.ok && liveWithdrawal.ok && liveWithdrawal.damage.version === 2
+    && liveWithdrawal.totalScore === withdrawalOrder.score + liveWithdrawal.score
+    && liveWithdrawal.damage.score === liveWithdrawal.score && liveWithdrawal.damage.casualties === liveWithdrawal.casualties,
+  'the live field commands rerun hit-based combat and commit only their score difference to the shared war');
+  const v2Reload = new LocalGameService({ storage: warStorage, now: () => warClock }).getWar(challenge.warId);
+  const reloadedV2 = v2Reload.attacks.find(attack => attack.attackId === ironRecon.attackId);
+  assert(reloadedV2.combatVersion === 2 && reloadedV2.orders.length === 2 && reloadedV2.score === liveWithdrawal.score
+    && JSON.stringify(reloadedV2.damage) === JSON.stringify(liveWithdrawal.damage),
+  'a hit-based attack and its two field orders replay exactly after browser reload');
   assert(warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', { lane: 'east', objective: 'hq', method: 'breach' }).replay && warService.getWar(challenge.warId).attacks.length === 4, 'replaying an attack action cannot choose a new route or earn a second score');
   assert(new Set(warService.getWar(challenge.warId).attackIds).size === 4, 'all generated attack IDs are unique and persisted');
   assert(!warService.submitWarAttack('iron-member', challenge.warId, 'assault', 'war-iron-over-cap').ok, 'community attack cap is enforced at two deployments');
@@ -646,7 +689,7 @@ export function runServiceTests() {
   assert(!warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-before-stages-close').ok, 'timed build stages keep war open even after both attack caps');
   warClock = started.attackEndsAt;
   const resolved = warService.resolveWar('violet-owner', challenge.warId, 'war-resolve-once');
-  assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === withdrawalOrder.score + ironRecon.score, 'war resolves once with recorded field-order score totals after the timed stages close');
+  assert(resolved.ok && resolved.state === 'resolved' && resolved.score['iron-pines'] === withdrawalOrder.score + liveWithdrawal.score, 'war resolves once with recorded field-order score totals after the timed stages close');
   assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'cover', 'post-resolution').ok, 'battle commands close after war resolution');
   const tacticalReload = new LocalGameService({ storage: warStorage, now: () => warClock });
   const persistedTactics = tacticalReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === ironRecon.attackId)?.tactics;

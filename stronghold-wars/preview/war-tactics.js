@@ -50,13 +50,7 @@ export function evaluateWarFieldOrder(tactic, phase, command) {
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const whole = (value, maximum) => clamp(Math.floor(Number(value) || 0), 0, maximum);
 
-// This bounded replay record turns an already committed war result into visible
-// health and impact beats. It never awards points or decides a new casualty.
-export function buildWarDamageReport(attacker, defender, attack) {
-  if (!attacker?.base?.levels || !defender?.base?.levels || !attack || !['assault', 'recon'].includes(attack.tactic))
-    return { ok: false, error: 'A locked war attack and both base snapshots are required.' };
-  const capacity = whole(attacker.stats?.squadSize, 12);
-  if (!capacity) return { ok: false, error: 'The locked squad has no deployment slots.' };
+function attackRoles(attacker, attack, capacity) {
   const lead = attack.tactic === 'recon' ? 'recon' : 'assault';
   const roles = Object.keys(SQUAD_ROLES).flatMap(role => Array(whole(attack.squad?.counts?.[role], capacity)).fill(role)).slice(0, capacity);
   while (roles.length < capacity) roles.push(lead);
@@ -64,6 +58,17 @@ export function buildWarDamageReport(attacker, defender, attack) {
     if (slot === capacity - 1 && squadProfile('medic', attacker.base.levels).unlocked) roles[slot] = 'medic';
     else if (attack.tactic === 'assault' && slot % 4 === 3 && squadProfile('sentinel', attacker.base.levels).unlocked) roles[slot] = 'sentinel';
   }
+  return roles;
+}
+
+// This bounded replay record turns an already committed war result into visible
+// health and impact beats. It never awards points or decides a new casualty.
+export function buildWarDamageReport(attacker, defender, attack) {
+  if (!attacker?.base?.levels || !defender?.base?.levels || !attack || !['assault', 'recon'].includes(attack.tactic))
+    return { ok: false, error: 'A locked war attack and both base snapshots are required.' };
+  const capacity = whole(attacker.stats?.squadSize, 12);
+  if (!capacity) return { ok: false, error: 'The locked squad has no deployment slots.' };
+  const roles = attackRoles(attacker, attack, capacity);
   const casualties = whole(attack.casualties, capacity);
   const squad = roles.map((role, slot) => {
     const maxHealth = squadProfile(role, attacker.base.levels).maxHealth;
@@ -97,6 +102,104 @@ export function buildWarDamageReport(attacker, defender, attack) {
         { at: 0.42 + index * 0.012, damage: wallHealth - first - second }] };
   }).filter(Boolean);
   return { ok: true, version: 1, casualties, squad, objective, walls };
+}
+
+// New local-preview attacks resolve from the accepted snapshots. Every hit is
+// applied before the score is committed; re-running with the same orders gives
+// the same result. Legacy attacks continue to use the v1 replay above.
+export function simulateWarCombat(attacker, defender, attack) {
+  if (!attacker?.base?.levels || !defender?.base?.levels || !attack?.tactics?.ok
+    || !['assault', 'recon'].includes(attack.tactic))
+    return { ok: false, error: 'A locked route and both war snapshots are required.' };
+  const capacity = whole(attacker.stats?.squadSize, 12);
+  if (!capacity) return { ok: false, error: 'The locked squad has no deployment slots.' };
+  const route = attack.tactics.route;
+  if (!Array.isArray(route) || route.length !== 4 || route.some(point => !Number.isFinite(point?.x) || !Number.isFinite(point?.z)))
+    return { ok: false, error: 'The locked battle route is invalid.' };
+  const roles = attackRoles(attacker, attack, capacity);
+  const squad = roles.map((role, slot) => {
+    const profile = squadProfile(role, attacker.base.levels);
+    return { slot, role, maxHealth: profile.maxHealth, remainingHealth: profile.maxHealth, withdrawn: false, hits: [] };
+  });
+  const objectiveKey = attack.tactics.plan.objective;
+  if (!Object.hasOwn(WAR_OBJECTIVES, objectiveKey)) return { ok: false, error: 'The locked objective is invalid.' };
+  const level = clamp(whole(defender.base.levels[objectiveKey], 5), 1, 5);
+  const objectiveHealth = 180 + level * 70;
+  const objective = { key: objectiveKey, name: WAR_OBJECTIVES[objectiveKey], maxHealth: objectiveHealth, remainingHealth: objectiveHealth, hits: [] };
+  const wallById = new Map((defender.base.layout?.walls || []).map(wall => [wall.id, wall]));
+  const walls = [...new Set(attack.tactics.breachedWallIds || [])].slice(0, 4).map(id => {
+    const wall = wallById.get(id);
+    if (!wall) return null;
+    const tier = clamp(whole(wall.level, 5), 1, 5);
+    const maxHealth = 55 + tier * 35;
+    return { id, x: wall.x, z: wall.z, tier, maxHealth, remainingHealth: maxHealth, hits: [] };
+  }).filter(Boolean);
+  const orders = Array.isArray(attack.orders) ? attack.orders : [];
+  const contact = orders.find(order => order.phase === 'contact')?.command;
+  const withdrawal = orders.find(order => order.phase === 'withdrawal')?.command;
+  const tower = defender.base.layout?.structures?.tower || { x: 0, z: 0 };
+  const hall = defender.base.layout?.structures?.hq || { x: 0, z: 0 };
+  const targetPosition = (slot, wave) => {
+    const from = wave < 2 ? route[1] : wave < 4 ? route[2] : route[3];
+    const towards = wave < 2 ? route[2] : route[3];
+    const fraction = wave % 2 ? 0.8 : 0.35;
+    const dx = towards.x - from.x, dz = towards.z - from.z;
+    const span = Math.hypot(dx, dz) || 1;
+    const laneOffset = (slot % 2 ? -1 : 1) * Math.ceil(slot / 2) * 0.9;
+    return { x: from.x + dx * fraction - dz / span * laneOffset, z: from.z + dz * fraction + dx / span * laneOffset };
+  };
+  const applyHit = (track, amount, at) => {
+    const applied = clamp(Math.round(amount), -Math.max(0, track.maxHealth - track.remainingHealth), track.remainingHealth);
+    if (applied) { track.remainingHealth -= applied; track.hits.push({ at, damage: applied }); }
+  };
+  const nearest = (point, wave) => squad.filter(unit => unit.remainingHealth > 0).map(unit => {
+    const position = targetPosition(unit.slot, wave);
+    return { unit, distance: (point.x - position.x) ** 2 + (point.z - position.z) ** 2 };
+  }).sort((a, b) => a.distance - b.distance || a.unit.slot - b.unit.slot)[0]?.unit;
+  const d = defender.base.levels;
+  const fortification = whole(defender.stats?.fortification, 50);
+  const defencePower = 19 + d.hq * 5 + d.tower * 8 + fortification * 1.4
+    + whole(attack.defenderPenalty, 40) * 1.6 + whole(attack.defenceOrderPenalty, 20) * 2.2;
+  for (let wave = 0; wave < 6; wave++) {
+    const at = [0.32, 0.42, 0.52, 0.62, 0.72, 0.82][wave];
+    const active = squad.filter(unit => unit.remainingHealth > 0);
+    if (!active.length) break;
+    for (const unit of active) {
+      const profile = squadProfile(unit.role, attacker.base.levels);
+      const wall = walls.find(segment => segment.remainingHealth > 0);
+      let amount = profile.damage * (wall ? unit.role === 'engineer' ? 0.85 : 0.48 : 0.51);
+      if (!wall && attack.tactic === 'recon' && objectiveKey === 'comms' && unit.role === 'recon') amount *= 1.32;
+      if (!wall && attack.tactics.plan.method === 'flank') amount *= 0.82;
+      if (contact === 'focus' && wave >= 2 && !wall) amount *= 1.24;
+      if (withdrawal === 'pursue' && wave >= 4 && !wall) amount *= 1.3;
+      if (withdrawal === 'cover' && wave >= 4) amount *= 0.75;
+      const target = wall || objective;
+      applyHit(target, amount, at + unit.slot * 0.0001);
+    }
+    const cover = contact === 'smoke' && wave >= 2 ? 0.6 : 1;
+    const exitCover = withdrawal === 'cover' && wave >= 4 ? 0.62 : 1;
+    const pressure = withdrawal === 'pursue' && wave >= 4 ? 1.25 : 1;
+    for (const [index, point] of [tower, hall].entries()) {
+      const unit = nearest(point, wave);
+      if (!unit) break;
+      const profile = squadProfile(unit.role, attacker.base.levels);
+      const raw = defencePower * (index ? 0.39 : 0.61) * cover * exitCover * pressure;
+      const armour = profile.armour * (index ? 0.35 : 0.5);
+      applyHit(unit, Math.max(2, raw - armour), at + 0.015 + index * 0.004);
+    }
+    const medic = squad.find(unit => unit.role === 'medic' && unit.remainingHealth > 0);
+    if (medic && wave >= 1) {
+      const wounded = squad.filter(unit => unit.remainingHealth > 0 && unit.remainingHealth < unit.maxHealth)
+        .sort((a, b) => a.remainingHealth / a.maxHealth - b.remainingHealth / b.maxHealth || a.slot - b.slot)[0];
+      if (wounded) applyHit(wounded, -(8 + squadProfile('medic', attacker.base.levels).tier * 3), at + 0.026);
+    }
+  }
+  for (const unit of squad) unit.withdrawn = unit.remainingHealth === 0;
+  const casualties = squad.filter(unit => unit.withdrawn).length;
+  const breached = walls.filter(wall => wall.remainingHealth === 0).length;
+  const damageFraction = (objective.maxHealth - objective.remainingHealth) / objective.maxHealth;
+  const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2), 0, 100);
+  return { ok: true, version: 2, score, casualties, squad, objective, walls };
 }
 
 const point = pair => ({ x: pair[0], z: pair[1] });

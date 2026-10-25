@@ -3182,7 +3182,15 @@ function updateWarDamage(battle, progress) {
     battle.lastObjectiveHitAt = hit.at;
   }
   battle.objectiveHealthBar.position.set(OUTPOST.x + battle.objectiveMarker.position.x, 6, OUTPOST.z + battle.objectiveMarker.position.z);
-  setWarHealthBar(battle.objectiveHealthBar, warHealthAt(objective, progress) / objective.maxHealth);
+  const targetHealth = warHealthAt(objective, progress);
+  setWarHealthBar(battle.objectiveHealthBar, targetHealth / objective.maxHealth);
+  if (targetHealth === 0 && !battle.objectiveDownShown) {
+    battle.objectiveDownShown = true;
+    battle.objectiveMarker.material.color.setHex(0xff7474);
+    const point = battle.objectiveMarker.position;
+    for (let i = 0; i < 5; i++) spawnSmoke(new THREE.Vector3(OUTPOST.x + point.x + Math.sin(i * 1.25) * 1.2, 1.2, OUTPOST.z + point.z + Math.cos(i * 1.25) * 1.2));
+    toast(`${objective.name} neutralized in this local war attack.`);
+  }
   for (const wall of report.walls) {
     for (const hit of wall.hits) if (hit.at <= progress && hit.at > (battle.lastWallHitAt[wall.id] || 0)) {
       spawnWarPulse(battle, new THREE.Vector3(OUTPOST.x + wall.x, 0.13, OUTPOST.z + wall.z), 0xffbc6c, 0.8);
@@ -3227,6 +3235,8 @@ function buildWarBaseVisual(side) {
     segment.position.set(wall.x, .09, wall.z);
     segment.userData.sharedTemplate = true;
     segment.userData.wallId = wall.id;
+    const damageTrack = warBattle?.damage?.walls?.find(track => track.id === wall.id);
+    if (damageTrack && warHealthAt(damageTrack, warBattle.time / warBattle.duration) === 0) segment.visible = false;
     warBaseGroup.add(segment);
     warWallMeshes.push(segment);
   });
@@ -3364,7 +3374,8 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   const dx = second.x - first.x, dz = second.z - first.z;
   const length = Math.hypot(dx, dz) || 1;
   const across = { x: -dz / length, z: dx / length };
-  const walkLayout = { ...defendingSide.base.layout, walls: defendingSide.base.layout.walls.filter(wall => !result.tactics.breachedWallIds.includes(wall.id)) };
+  const cutWallIds = new Set((damage.ok ? damage.walls : []).filter(wall => wall.remainingHealth === 0).map(wall => wall.id));
+  const walkLayout = { ...defendingSide.base.layout, walls: defendingSide.base.layout.walls.filter(wall => !cutWallIds.has(wall.id)) };
   const standKey = result.tactics.plan.objective === 'hq' ? 'hall' : result.tactics.plan.objective;
   const stand = patrolNodesForLayout(walkLayout)[standKey];
   const clearStand = ([x, z]) => x >= -17 && x <= 17 && z >= -15 && z <= 15
@@ -3404,10 +3415,10 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     scene.add(troop);
     warTroopMeshes.push(troop);
     troops.push({ mesh: troop, role, roleRing, healthBar: makeWarHealthBar(), lastDamageAt: 0, path, phase: i * 0.45, lag: role === 'medic' ? 0.08 : role === 'sentinel' ? 0.04 : 0,
-      nextAction: 4.4 + i * 0.11, withdrawn: i >= squadSize - result.casualties });
+      nextAction: 4.4 + i * 0.11, withdrawn: damage.ok ? damage.squad[i]?.withdrawn : i >= squadSize - result.casualties });
   }
   warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, objectiveHealthBar: makeWarHealthBar(1.35),
-    lastObjectiveHitAt: 0, lastWallHitAt: {}, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false,
+    lastObjectiveHitAt: 0, lastWallHitAt: {}, objectiveDownShown: false, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false,
     orders: [...(result.orders || [])], orderView: '', coverUntil: 0, previousCameraOffset: cameraOffset.clone() };
   scene.add(warFillLight, warKeyLight, warKeyLight.target);
   warHud.hidden = false;
@@ -3440,7 +3451,7 @@ warOrders.onclick = event => {
   warBattle.result.feedback = result.feedback;
   warBattle.result.damage = result.damage;
   warBattle.damage = result.damage;
-  warBattle.troops.forEach((troop, index) => { troop.withdrawn = index >= warBattle.squadSize - result.casualties; });
+  warBattle.troops.forEach((troop, index) => { troop.withdrawn = result.damage?.squad?.[index]?.withdrawn ?? index >= warBattle.squadSize - result.casualties; });
   if (command === 'smoke' || command === 'cover') {
     warBattle.coverUntil = warBattle.time + 2.2;
     for (let i = 0; i < 5; i++) spawnSmoke(warBattle.troops[i % warBattle.troops.length].mesh.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
@@ -3518,12 +3529,16 @@ function updateWarBattle(dt) {
     warBattle.defenceBeacon.scale.setScalar(1 + Math.sin(warBattle.time * 4) * 0.09);
     warBattle.defenceBeacon.material.opacity = 0.65 + Math.sin(warBattle.time * 4) * 0.2;
   }
-  warHud.querySelector('.war-progress').textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.7 ? 'ADVANCE' : progress < 0.84 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${warBattle.squadSize - warBattle.result.casualties}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
-  for (const troop of warBattle.troops) {
+  const activeCount = warBattle.damage?.squad?.filter(track => warHealthAt(track, progress) > 0).length ?? warBattle.squadSize - warBattle.result.casualties;
+  warHud.querySelector('.war-progress').textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.7 ? 'ADVANCE' : progress < 0.84 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${activeCount}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
+  for (const [index, troop] of warBattle.troops.entries()) {
     const actionProgress = Math.max(0, progress - troop.lag);
-    const retreating = troop.withdrawn ? actionProgress > 0.74 : actionProgress > 0.84;
+    const track = warBattle.damage?.squad?.[index];
+    const fallenAt = track?.withdrawn ? track.hits.find((hit, position) => track.hits.slice(0, position + 1).reduce((sum, item) => sum + item.damage, 0) >= track.maxHealth)?.at : null;
+    const retreatAt = troop.withdrawn ? Math.min(0.74, fallenAt ?? 0.74) : 0.84;
+    const retreating = actionProgress > retreatAt;
     const travel = retreating
-      ? Math.max(0.16, (troop.withdrawn ? 0.94 - (actionProgress - 0.74) * 2.7 : 1 - (actionProgress - 0.84) * 2.5))
+      ? Math.max(0.16, (troop.withdrawn ? Math.min(0.94, retreatAt / 0.7) - (actionProgress - retreatAt) * 2.7 : 1 - (actionProgress - 0.84) * 2.5))
       : Math.min(1, actionProgress / 0.7);
     const heading = warPathPosition(troop.path, travel, troop.mesh.position);
     const advancing = !retreating && actionProgress < 0.7;
@@ -3531,19 +3546,19 @@ function updateWarBattle(dt) {
     troop.mesh.position.y = advancing || retreating ? Math.abs(Math.sin(warBattle.time * 8 + troop.phase)) * 0.055 : 0;
     troop.roleRing.material.opacity = retreating ? 0.3 : 0.52 + Math.sin(warBattle.time * 3 + troop.phase) * 0.13;
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, advancing || retreating ? 1 : 0, null, dt);
-    if (!retreating && progress > 0.37 && progress < 0.83) animateWarRoleAction(warBattle, troop);
+    if (!retreating && (!track || warHealthAt(track, progress) > 0) && progress > 0.37 && progress < 0.83) animateWarRoleAction(warBattle, troop);
   }
   updateWarDamage(warBattle, progress);
-  if (tactics?.breachedWallIds.length && progress >= 0.42) {
+  if (warBattle.damage?.walls?.some(wall => warHealthAt(wall, progress) === 0)) {
     if (!warBattle.breachShown) {
       warBattle.breachShown = true;
       const breach = tactics.route[2];
       spawnSmoke(new THREE.Vector3(OUTPOST.x + breach.x, 1, OUTPOST.z + breach.z));
-      toast(`${tactics.breachedWallIds.length} locked wall segment${tactics.breachedWallIds.length === 1 ? '' : 's'} breached on the ${tactics.laneName} route.`);
+      toast(`A locked wall segment fell on the ${tactics.laneName} route.`);
     }
   }
   for (const defender of warDefenderMeshes) {
-    const nearest = warBattle.troops.filter(troop => !troop.withdrawn || progress < 0.52).reduce((best, troop) => {
+    const nearest = warBattle.troops.filter((troop, index) => !warBattle.damage?.squad?.[index] || warHealthAt(warBattle.damage.squad[index], progress) > 0).reduce((best, troop) => {
       const distance = troop.mesh.position.distanceTo(defender.home);
       return !best || distance < best.distance ? { mesh: troop.mesh, distance } : best;
     }, null);
@@ -3565,7 +3580,7 @@ function updateWarBattle(dt) {
     animateDefender({ ...defender, motion: { stride: warBattle.time * 8, moving: defender.role === 'hound' && threat > 0.1 } }, warBattle.time, threat);
   }
   const turretPosition = warTurretRig?.yaw.getWorldPosition(new THREE.Vector3());
-  const target = turretPosition && warBattle.troops.filter(troop => !troop.withdrawn || progress < 0.52).reduce((nearest, troop) => {
+  const target = turretPosition && warBattle.troops.filter((troop, index) => !warBattle.damage?.squad?.[index] || warHealthAt(warBattle.damage.squad[index], progress) > 0).reduce((nearest, troop) => {
     const distance = troop.mesh.position.distanceToSquared(turretPosition);
     return !nearest || distance < nearest.distance ? { mesh: troop.mesh, distance } : nearest;
   }, null)?.mesh;

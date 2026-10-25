@@ -10,7 +10,7 @@ import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
 import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
 import { PATROL_ORDERS } from './patrol-routes.js';
-import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport } from './war-tactics.js';
+import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat } from './war-tactics.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -308,6 +308,7 @@ function normalizeWarRecord(war) {
       attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
       tactic, at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
       baseScore: safeInt(a.baseScore ?? a.score), baseCasualties: safeInt(a.baseCasualties ?? a.casualties),
+      combatVersion: a.combatVersion === 2 ? 2 : 1, combatBaseScore: safeInt(a.combatBaseScore),
       orders: Array.isArray(a.orders) ? a.orders.filter(order => evaluateWarFieldOrder(tactic, order?.phase, order?.command).ok)
         .filter((order, index, all) => all.findIndex(item => item.phase === order.phase) === index)
         .slice(0, 2).map(order => ({ ...evaluateWarFieldOrder(tactic, order.phase, order.command), at: safeInt(order.at) })) : [],
@@ -316,7 +317,10 @@ function normalizeWarRecord(war) {
       defenceOrderActive: Boolean(a.defenceOrderActive), defenceOrderPenalty: safeInt(a.defenceOrderPenalty), defenceExposureShield: safeInt(a.defenceExposureShield),
       tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null,
     };
-    normalized.damage = buildWarDamageReport(attacker, a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger, normalized);
+    const defender = a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger;
+    normalized.damage = normalized.combatVersion === 2
+      ? simulateWarCombat(attacker, defender, normalized)
+      : buildWarDamageReport(attacker, defender, normalized);
     return normalized;
   }) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
@@ -1056,15 +1060,22 @@ export class LocalGameService {
     const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure + defenceOrder.casualtyPressure + (tactics?.casualtyDelta || 0) + (squad?.casualtyDelta || 0))));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage${defenceOrder.active ? `; ${defenceOrder.name} cut ${defenceOrder.scorePenalty} points, added ${defenceOrder.casualtyPressure} casualty pressure and shielded ${defenceOrder.exposureShield} exposure` : ''}${tactics ? `; ${tactics.laneName} ${tactics.methodName.toLowerCase()} toward ${tactics.objectiveName}, ${tactics.wallCount} walls in corridor, ${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical points and ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} casualty pressure` : ''}${squad ? `; selected ${Object.entries(squad.counts).filter(([, count]) => count).map(([role, count]) => `${count} ${SQUAD_ROLES[role].name}`).join(', ')}, ${squad.scoreDelta >= 0 ? '+' : ''}${squad.scoreDelta} composition points and ${squad.casualtyDelta >= 0 ? '+' : ''}${squad.casualtyDelta} casualty pressure${squad.specialties.length ? ` (${squad.specialties.join(', ')})` : ''}` : ''}, scoring ${score}.`;
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty}; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage${defenceOrder.active ? `; ${defenceOrder.name} cut ${defenceOrder.scorePenalty} planning points and shielded ${defenceOrder.exposureShield} exposure` : ''}${tactics ? `; ${tactics.laneName} ${tactics.methodName.toLowerCase()} toward ${tactics.objectiveName}, ${tactics.wallCount} walls in corridor, ${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical planning points` : ''}${squad ? `; selected ${Object.entries(squad.counts).filter(([, count]) => count).map(([role, count]) => `${count} ${SQUAD_ROLES[role].name}`).join(', ')}, ${squad.scoreDelta >= 0 ? '+' : ''}${squad.scoreDelta} composition planning points${squad.specialties.length ? ` (${squad.specialties.join(', ')})` : ''}` : ''}.`;
     const returnAt = now + WAR_RULES.squadReturnMs;
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
+      combatVersion: tactics?.ok ? 2 : 1, combatBaseScore: score,
       baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [] };
-    attack.damage = buildWarDamageReport(attacker, defender, attack);
-    war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
-    war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, tactics, squad, damage: attack.damage, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
+    attack.damage = attack.combatVersion === 2 ? simulateWarCombat(attacker, defender, attack) : buildWarDamageReport(attacker, defender, attack);
+    if (!attack.damage.ok) return attack.damage;
+    if (attack.combatVersion === 2) {
+      attack.score = attack.baseScore = attack.damage.score;
+      attack.casualties = attack.baseCasualties = attack.damage.casualties;
+      attack.feedback += ` The locked battle dealt ${attack.damage.objective.maxHealth - attack.damage.objective.remainingHealth}/${attack.damage.objective.maxHealth} objective damage, broke ${attack.damage.walls.filter(wall => !wall.remainingHealth).length}/${attack.damage.walls.length} route walls and withdrew ${attack.casualties}/${attacker.stats.squadSize} troops, scoring ${attack.score}.`;
+    }
+    war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += attack.score;
+    war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${attack.score} points · ${attack.casualties} squad losses.`, details: clone(attack) });
+    const result = { ok: true, warId, attackId, tactic, score: attack.score, casualties: attack.casualties, feedback: attack.feedback, tactics, squad, damage: attack.damage, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
       totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
@@ -1091,12 +1102,19 @@ export class LocalGameService {
     const attacker = attack.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const previousScore = attack.score;
     const previousCasualties = attack.casualties;
-    attack.score = Math.max(0, Math.min(100, attack.score + effect.scoreDelta));
-    attack.casualties = Math.max(0, Math.min(attacker.stats.squadSize, attack.casualties + effect.casualtyDelta));
     const defender = attack.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
-    attack.damage = buildWarDamageReport(attacker, defender, attack);
     const order = { ...effect, at: this.now() };
     attack.orders.push(order);
+    if (attack.combatVersion === 2) {
+      attack.damage = simulateWarCombat(attacker, defender, attack);
+      if (!attack.damage.ok) { attack.orders.pop(); return attack.damage; }
+      attack.score = attack.damage.score;
+      attack.casualties = attack.damage.casualties;
+    } else {
+      attack.score = Math.max(0, Math.min(100, attack.score + effect.scoreDelta));
+      attack.casualties = Math.max(0, Math.min(attacker.stats.squadSize, attack.casualties + effect.casualtyDelta));
+      attack.damage = buildWarDamageReport(attacker, defender, attack);
+    }
     war.score[attack.communityId] += attack.score - previousScore;
     attack.feedback += ` ${order.name} during ${phase}: ${attack.score - previousScore >= 0 ? '+' : ''}${attack.score - previousScore} points, ${attack.casualties - previousCasualties >= 0 ? '+' : ''}${attack.casualties - previousCasualties} squad losses.`;
     const attackEvent = war.events.find(event => event.type === 'attack' && event.details?.attackId === attackId);
