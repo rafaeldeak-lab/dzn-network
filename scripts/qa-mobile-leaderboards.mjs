@@ -14,10 +14,42 @@ const avatarUrl = "/api/public/players/qa-player/avatar";
 const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_Long_Name", server_name: serverName, server_slug: "qa-server", weapon: "Mosin 91/30", distance: 106.7, occurred_at: "2026-09-09T06:00:00Z", player_public_profile_href: "/players/qa-player", player_public_profile_avatar_url: avatarUrl };
 const serverRow = { rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "HARDCORE", category: "pvp", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null };
 const deathmatchRow = { ...serverRow, rank: 11, server_id: "qa-deathmatch", server_name: "QA Deathmatch", slug: "qa-deathmatch", mode: "DEATHMATCH", category: "deathmatch", score: 700, score_label: "700" };
+const directoryServerRows = Array.from({ length: 63 }, (_, index) => ({
+  ...serverRow,
+  rank: index + 1,
+  server_id: `directory-server-${index + 1}`,
+  server_name: `Directory Server ${index + 1}`,
+  slug: `directory-server-${index + 1}`,
+  kills: 600 - index,
+  score: 1400 - index,
+  score_label: String(1400 - index),
+}));
+const directoryPlayerRows = Array.from({ length: 63 }, (_, index) => ({
+  ...boardsPlayerRow(index + 1),
+  player_name: `Directory Player ${index + 1}`,
+  server_name: `Directory Server ${index + 1}`,
+  server_slug: `directory-server-${index + 1}`,
+}));
 const boards = { ok: true, top_servers: [serverRow], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
 const emptyPreviewBoards = { ...boards, top_servers: [], top_players: [], personal_best_kills: [], longest_kills: [], best_overall_kill: null, latest_kill: null, access_level: "preview", is_locked: true };
+function boardsPlayerRow(rank) {
+  return {
+    ...kill,
+    rank,
+    player_id: null,
+    kills: 200 - rank,
+    deaths: rank,
+    kd: (200 - rank) / rank,
+    kd_label: ((200 - rank) / rank).toFixed(2),
+    longest_kill: 100 - rank / 10,
+    public_profile_href: "/players/qa-player",
+    public_profile_avatar_url: avatarUrl,
+  };
+}
 function api(url) {
   if (url.pathname === "/api/public/leaderboards") {
+    if (url.searchParams.get("directory") === "servers") return { ...boards, directory: "servers", directory_total: directoryServerRows.length, directory_cap: 250, directory_capped: false, top_servers: directoryServerRows };
+    if (url.searchParams.get("directory") === "players") return { ...boards, directory: "players", directory_total: directoryPlayerRows.length, directory_cap: 250, directory_capped: false, top_players: directoryPlayerRows };
     if (url.searchParams.get("mode") === "pve") return emptyPreviewBoards;
     return { ...boards, top_servers: url.searchParams.get("mode") === "deathmatch" ? [deathmatchRow] : boards.top_servers };
   }
@@ -73,6 +105,15 @@ if (process.argv.includes("--serve")) {
         await page.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
         await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
         await page.locator('[data-board-view="servers"]').screenshot({ path: path.join(output, `servers-${width}-${reducedMotion}.png`) });
+        await page.getByRole("heading", { name: "Full Server Ranking", exact: true }).waitFor();
+        const fullServerTable = page.getByRole("table", { name: "Full Server Ranking", exact: true });
+        await fullServerTable.locator("tbody tr").first().waitFor();
+        assert.equal(await fullServerTable.locator("tbody tr").count(), 25, "The full server directory should begin with a scannable first page.");
+        await page.getByRole("button", { name: "Show 25 more" }).click();
+        assert.equal(await fullServerTable.locator("tbody tr").count(), 50, "The full server directory should reveal additional ranks without a page reload.");
+        await page.getByRole("searchbox", { name: "Search ranked servers" }).fill("Directory Server 61");
+        await page.getByText("Directory Server 61", { exact: true }).waitFor();
+        assert.equal(await fullServerTable.locator("tbody tr").count(), 1, "Server search should narrow the already-ranked directory.");
         await page.getByRole("button", { name: "PvP", exact: true }).click();
         assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "A selected mode must not render the previous mode's table while loading");
         assert.ok(await page.locator(".dzn-leaderboard-card .animate-pulse").count() > 0, "A delayed successful mode request must show a loading state");
@@ -82,9 +123,16 @@ if (process.argv.includes("--serve")) {
         await page.getByText(serverName, { exact: true }).waitFor();
         await page.getByRole("button", { name: "Deathmatch", exact: true }).click();
         await page.getByText("QA Deathmatch", { exact: true }).waitFor();
-        assert.equal(await page.locator('td[data-label="Rank"]').innerText(), "#11", "Mode views must preserve global ranks outside the overall top ten");
+        assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).locator('td[data-label="Rank"]').innerText(), "#11", "Mode views must preserve global ranks outside the overall top ten");
         await page.getByRole("tab", { name: "Players", exact: true }).click();
         await page.getByRole("table", { name: "Top Players", exact: true }).waitFor();
+        await page.getByRole("heading", { name: "Full Player Ranking", exact: true }).waitFor();
+        const fullPlayerTable = page.getByRole("table", { name: "Full Player Ranking", exact: true });
+        await fullPlayerTable.locator("tbody tr").first().waitFor();
+        assert.equal(await fullPlayerTable.locator("tbody tr").count(), 25, "The full player directory should begin with a scannable first page.");
+        await page.getByRole("searchbox", { name: "Search ranked players" }).fill("Directory Player 61");
+        await page.getByText("Directory Player 61", { exact: true }).waitFor();
+        assert.equal(await fullPlayerTable.locator("tbody tr").count(), 1, "Player search should find entries beyond the visible first page.");
         await page.locator('img[src*="/api/public/players/"]').first().scrollIntoViewIfNeeded();
         await page.waitForFunction(() => [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(image => image.naturalWidth > 0));
         const layout = await page.evaluate(() => ({

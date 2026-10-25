@@ -1,4 +1,11 @@
-import { applyLeaderboardsAccess, emptyPublicLeaderboards, getPublicLeaderboardsPayload, normalizePublicLeaderboardMode } from "../../_lib/public-leaderboards";
+import {
+  applyLeaderboardsAccess,
+  emptyPublicLeaderboards,
+  getPublicLeaderboardsPayload,
+  normalizePublicLeaderboardDirectory,
+  normalizePublicLeaderboardMode,
+  PUBLIC_LEADERBOARD_DIRECTORY_CAP,
+} from "../../_lib/public-leaderboards";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
@@ -23,6 +30,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const requestUrl = new URL(request.url);
   const leaderboardOptions = parseLeaderboardOptions(requestUrl.searchParams);
   const cacheSuffixParts = [
+    ...(leaderboardOptions.directory ? [`directory:${leaderboardOptions.directory}`] : []),
     ...(leaderboardOptions.full ? [`full:${leaderboardOptions.metric}:p${leaderboardOptions.page}:s${leaderboardOptions.pageSize}`] : []),
     ...(leaderboardOptions.mode !== "all" ? [`mode:${leaderboardOptions.mode}`] : []),
   ];
@@ -69,13 +77,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 };
 
 function parseLeaderboardOptions(params: URLSearchParams) {
-  const full = params.get("full")?.trim().toLowerCase() === "true";
+  const directory = normalizePublicLeaderboardDirectory(params.get("directory"));
+  const full = directory !== null || params.get("full")?.trim().toLowerCase() === "true";
   return {
     full,
+    directory,
     metric: params.get("metric"),
     mode: normalizePublicLeaderboardMode(params.get("mode")),
-    page: numberParam(params.get("page"), 1),
-    pageSize: boundedNumberParam(params.get("page_size") ?? params.get("limit"), full ? 100 : 10, 100),
+    page: directory ? 1 : numberParam(params.get("page"), 1),
+    pageSize: directory
+      ? PUBLIC_LEADERBOARD_DIRECTORY_CAP
+      : boundedNumberParam(params.get("page_size") ?? params.get("limit"), full ? 100 : 10, 100),
   };
 }
 

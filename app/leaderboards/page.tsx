@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, Compass, Crosshair, Gamepad2, Hammer, LayoutGrid, Lock, Map, RadioTower, Route, Shield, Skull, Swords, Trees, Trophy, UserRound, Users } from "lucide-react";
+import { Activity, ArrowRight, ChevronDown, Compass, Crosshair, Gamepad2, Hammer, LayoutGrid, Lock, Map, RadioTower, Route, Search, Shield, Skull, Swords, Trees, Trophy, UserRound, Users, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -88,6 +88,10 @@ type LeaderboardsPayload = {
   access_level?: "full" | "preview";
   is_locked?: boolean;
   locked_reason?: string | null;
+  directory?: "servers" | "players" | null;
+  directory_cap?: number | null;
+  directory_total?: number;
+  directory_capped?: boolean;
   error?: string;
 };
 
@@ -148,6 +152,12 @@ const LEADERBOARD_LAST_GOOD_MAX_AGE_MS = 10 * 60 * 1000;
 type LeaderboardLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
 type LeaderboardBoard = "servers" | "players" | "records";
 type LeaderboardMode = "all" | "deathmatch" | "pvp" | "pve" | "survival";
+type LeaderboardDirectory = "servers" | "players";
+type LeaderboardDirectoryState = "idle" | "loading" | "loaded" | "error";
+
+const DIRECTORY_MAX_RANKS = 250;
+const DIRECTORY_INITIAL_VISIBLE = 25;
+const DIRECTORY_VISIBLE_STEP = 25;
 
 export default function LeaderboardsPage() {
   const [payload, setPayload] = useState<{
@@ -177,6 +187,15 @@ export default function LeaderboardsPage() {
   const [activeBoard, setActiveBoard] = useState<LeaderboardBoard>("servers");
   const [activeMode, setActiveMode] = useState<LeaderboardMode>("all");
   const [serverModeError, setServerModeError] = useState("");
+  const [directoryPayload, setDirectoryPayload] = useState<ReturnType<typeof normalizeDirectoryPayload> | null>(null);
+  const [directoryLoadState, setDirectoryLoadState] = useState<LeaderboardDirectoryState>("idle");
+  const [directoryError, setDirectoryError] = useState("");
+  const [directoryReloadNonce, setDirectoryReloadNonce] = useState(0);
+  const [directorySearch, setDirectorySearch] = useState("");
+  const [directoryVisible, setDirectoryVisible] = useState(DIRECTORY_INITIAL_VISIBLE);
+  const directoryRequest = useRef<AbortController | null>(null);
+  const activeDirectory: LeaderboardDirectory | null = activeBoard === "servers" ? "servers" : activeBoard === "players" ? "players" : null;
+  const activeDirectoryMode = activeDirectory === "servers" ? activeMode : "all";
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
@@ -311,6 +330,72 @@ export default function LeaderboardsPage() {
     () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.category, activeMode)),
     [activeMode, payload.top_servers],
   );
+  const directoryServers = useMemo(() => {
+    if (directoryPayload?.directory !== "servers") return [];
+    const term = directorySearch.trim().toLowerCase();
+    return directoryPayload.top_servers.filter((server) => !term || [server.server_name, server.mode, server.category].some((value) => value.toLowerCase().includes(term)));
+  }, [directoryPayload, directorySearch]);
+  const directoryPlayers = useMemo(() => {
+    if (directoryPayload?.directory !== "players") return [];
+    const term = directorySearch.trim().toLowerCase();
+    return directoryPayload.top_players.filter((player) => !term || [player.player_name, player.server_name].some((value) => value.toLowerCase().includes(term)));
+  }, [directoryPayload, directorySearch]);
+
+  useEffect(() => {
+    if (!activeDirectory || loadState === "loading_initial" || initialError || payload.is_locked) {
+      directoryRequest.current?.abort();
+      directoryRequest.current = null;
+      return;
+    }
+
+    const directory = activeDirectory;
+    const directoryMode = activeDirectoryMode;
+    let active = true;
+    const controller = new AbortController();
+    directoryRequest.current?.abort();
+    directoryRequest.current = controller;
+
+    async function loadDirectory() {
+      try {
+        // Keep the effect asynchronous so changing tabs cannot synchronously cascade another render.
+        await Promise.resolve();
+        if (!active) return;
+        setDirectoryPayload(null);
+        setDirectorySearch("");
+        setDirectoryVisible(DIRECTORY_INITIAL_VISIBLE);
+        setDirectoryLoadState("loading");
+        setDirectoryError("");
+        const params = new URLSearchParams({
+          directory,
+          full: "true",
+          page_size: String(DIRECTORY_MAX_RANKS),
+        });
+        if (directory === "servers" && directoryMode !== "all") params.set("mode", directoryMode);
+        const data = await fetchJsonWithRetry<LeaderboardsPayload>(`/api/public/leaderboards?${params.toString()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!active) return;
+        const responsePayload = data.data && !data.top_servers ? data.data : data;
+        if (responsePayload.source === "empty_no_cache") throw new Error("The full ranking is temporarily unavailable.");
+        setDirectoryPayload(normalizeDirectoryPayload(responsePayload, directory));
+        setDirectoryLoadState("loaded");
+      } catch (loadError) {
+        if (!active || controller.signal.aborted) return;
+        setDirectoryError(loadError instanceof Error ? loadError.message : "The full ranking could not be loaded right now.");
+        setDirectoryLoadState("error");
+      }
+    }
+
+    void loadDirectory();
+    return () => {
+      active = false;
+      controller.abort();
+      if (directoryRequest.current === controller) directoryRequest.current = null;
+    };
+  }, [activeDirectory, activeDirectoryMode, directoryReloadNonce, initialError, loadState, payload.is_locked]);
 
   const playerContent = payload.is_locked ? (
     <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />
@@ -319,8 +404,8 @@ export default function LeaderboardsPage() {
       title="Top Players"
       icon={Skull}
       empty="No ranked players yet."
-      actionLabel="View all players"
-      actionHref="/login?returnTo=/leaderboards"
+      actionLabel="Browse full ranking"
+      actionHref="#full-player-ranking-title"
       headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
       rankValues={payload.top_players.map((player) => player.rank)}
       rows={payload.top_players.map((player, index) => [
@@ -402,12 +487,13 @@ export default function LeaderboardsPage() {
                 ) : serverModeError ? (
                   <MessagePanel message={serverModeError} onRetry={() => setReloadNonce((value) => value + 1)} />
                 ) : (
-                  <LeaderboardTable
+                  <>
+                    <LeaderboardTable
                     title="Top Servers"
                     icon={RadioTower}
                     empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
-                    actionLabel="View all servers"
-                    actionHref="/servers"
+                    actionLabel="Browse full ranking"
+                    actionHref="#full-server-ranking-title"
                     headers={["Rank", "Server", "Mode", "Players", "Kills", "Deaths", "K/D", "Score"]}
                     rankValues={filteredServers.map((server) => server.rank)}
                     rows={filteredServers.map((server) => [
@@ -420,7 +506,37 @@ export default function LeaderboardsPage() {
                       formatKd(server),
                       <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
                     ])}
-                  />
+                    />
+                    {!payload.is_locked ? (
+                    <FullLeaderboardDirectory
+                      title="Full Server Ranking"
+                      icon={RadioTower}
+                      searchLabel="Search ranked servers"
+                      searchPlaceholder="Search a server or mode"
+                      headers={["Rank", "Server", "Mode", "Players", "Kills", "K/D", "Score"]}
+                      rows={directoryServers.map((server) => [
+                        `#${server.rank}`,
+                        <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                        <ModeBadge key="mode" mode={server.mode} />,
+                        formatNumber(server.unique_players ?? 0),
+                        formatNumber(server.kills),
+                        formatKd(server),
+                        <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
+                      ])}
+                      rankValues={directoryServers.map((server) => server.rank)}
+                      search={directorySearch}
+                      onSearchChange={setDirectorySearch}
+                      visibleCount={directoryVisible}
+                      onShowMore={() => setDirectoryVisible((count) => count + DIRECTORY_VISIBLE_STEP)}
+                      loading={directoryLoadState === "loading"}
+                      error={directoryError}
+                      onRetry={() => setDirectoryReloadNonce((value) => value + 1)}
+                      total={directoryPayload?.directory === "servers" ? directoryPayload.directory_total : 0}
+                      capped={directoryPayload?.directory === "servers" ? directoryPayload.directory_capped : false}
+                      empty="No ranked servers match this search."
+                    />
+                    ) : null}
+                  </>
                 )}
               </div>
             ) : null}
@@ -428,6 +544,35 @@ export default function LeaderboardsPage() {
             {activeBoard === "players" ? (
               <div id="leaderboard-players-panel" role="tabpanel" className="leaderboard-ref-board-view leaderboard-ref-area--players" data-board-view="players">
                 {playerContent}
+                {!payload.is_locked ? (
+                  <FullLeaderboardDirectory
+                    title="Full Player Ranking"
+                    icon={Users}
+                    searchLabel="Search ranked players"
+                    searchPlaceholder="Search a player or server"
+                    headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+                    rows={directoryPlayers.map((player, index) => [
+                      `#${player.rank}`,
+                      <PlayerName key="player" name={player.player_name} index={index} href={player.public_profile_href} avatarUrl={player.public_profile_avatar_url} />,
+                      <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
+                      formatNumber(player.kills),
+                      formatNumber(player.deaths),
+                      formatKd(player),
+                      formatDistance(player.longest_kill),
+                    ])}
+                    rankValues={directoryPlayers.map((player) => player.rank)}
+                    search={directorySearch}
+                    onSearchChange={setDirectorySearch}
+                    visibleCount={directoryVisible}
+                    onShowMore={() => setDirectoryVisible((count) => count + DIRECTORY_VISIBLE_STEP)}
+                    loading={directoryLoadState === "loading"}
+                    error={directoryError}
+                    onRetry={() => setDirectoryReloadNonce((value) => value + 1)}
+                    total={directoryPayload?.directory === "players" ? directoryPayload.directory_total : 0}
+                    capped={directoryPayload?.directory === "players" ? directoryPayload.directory_capped : false}
+                    empty="No ranked players match this search."
+                  />
+                ) : null}
               </div>
             ) : null}
 
@@ -866,6 +1011,127 @@ function LeaderboardTable({
   );
 }
 
+function FullLeaderboardDirectory({
+  title,
+  icon: Icon,
+  headers,
+  rows,
+  rankValues,
+  search,
+  onSearchChange,
+  searchLabel,
+  searchPlaceholder,
+  visibleCount,
+  onShowMore,
+  loading,
+  error,
+  onRetry,
+  total,
+  capped,
+  empty,
+}: {
+  title: string;
+  icon: typeof Activity;
+  headers: string[];
+  rows: Array<Array<ReactNode>>;
+  rankValues: number[];
+  search: string;
+  onSearchChange: (value: string) => void;
+  searchLabel: string;
+  searchPlaceholder: string;
+  visibleCount: number;
+  onShowMore: () => void;
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+  total: number;
+  capped: boolean;
+  empty: string;
+}) {
+  const shownRows = rows.slice(0, visibleCount);
+  const searching = search.trim().length > 0;
+  const visibleLabel = loading ? "Loading ranked entries..." : `${shownRows.length} of ${rows.length}${searching ? " matching" : " shown"}`;
+  const id = `${title.toLowerCase().replaceAll(" ", "-")}-title`;
+
+  return (
+    <section className="leaderboard-ref-directory leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-4" aria-labelledby={id}>
+      <div className="relative z-10">
+        <div className="leaderboard-reference-panel-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-3">
+            <Icon className="h-5 w-5 text-cyan-200" />
+            <div>
+              <p className="leaderboard-ref-directory-eyebrow">Browse the ranking</p>
+              <h2 id={id} className="text-xl font-black uppercase text-white">{title}</h2>
+            </div>
+          </div>
+          <p className="leaderboard-ref-directory-cap">{capped ? `First ${DIRECTORY_MAX_RANKS} public ranks` : `${total} ranked entries`}</p>
+        </div>
+
+        <div className="leaderboard-ref-directory-toolbar">
+          <label className="leaderboard-ref-directory-search">
+            <Search aria-hidden="true" />
+            <span className="sr-only">{searchLabel}</span>
+            <input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder={searchPlaceholder} type="search" />
+            {search ? (
+              <button type="button" aria-label="Clear leaderboard search" onClick={() => onSearchChange("")}>
+                <X aria-hidden="true" />
+              </button>
+            ) : null}
+          </label>
+          <p className="leaderboard-ref-directory-count" aria-live="polite">{visibleLabel}</p>
+        </div>
+
+        {loading ? (
+          <div className="leaderboard-ref-directory-state" aria-live="polite">Loading the full public ranking...</div>
+        ) : error ? (
+          <div className="leaderboard-ref-directory-state leaderboard-ref-directory-state--error">
+            <span>{error}</span>
+            <button type="button" onClick={onRetry}>Retry</button>
+          </div>
+        ) : rows.length ? (
+          <>
+            <div className="leaderboard-ref-directory-scroll dzn-leaderboard-table-wrap">
+              <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+                <thead>
+                  <tr>
+                    {headers.map((header) => <th key={header}>{header}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shownRows.map((row, rowIndex) => {
+                    const rowRank = rankValues[rowIndex] ?? rowIndex + 1;
+                    const rowTone = rankTone(rowRank - 1);
+                    return (
+                      <tr key={rowRank} className={`dzn-leaderboard-row dzn-leaderboard-row--${rowTone} rounded-lg bg-black/24`}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={cellIndex} data-label={headers[cellIndex]}>
+                            <span className={cellIndex === 0 ? `leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rowTone}` : "text-sm font-bold text-zinc-100"}>{cell}</span>
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="leaderboard-ref-directory-footer">
+              <span>{capped ? `Rankings are capped at the first ${DIRECTORY_MAX_RANKS} public positions.` : "Every available public rank is shown."}</span>
+              {shownRows.length < rows.length ? (
+                <button type="button" onClick={onShowMore} className="leaderboard-ref-directory-more">
+                  Show {Math.min(DIRECTORY_VISIBLE_STEP, rows.length - shownRows.length)} more
+                  <ChevronDown aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="leaderboard-ref-directory-state">{empty}</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function StatCard({ icon: Icon, label, value, tone }: { icon: typeof Activity; label: string; value: string; tone: "violet" | "cyan" | "orange" | "red" }) {
   const longValueClass = value.length > 7 ? " leaderboard-reference-stat-value--long" : "";
   return (
@@ -997,6 +1263,18 @@ function normalizePayload(data: LeaderboardsPayload) {
     access_level: data.access_level === "preview" ? ("preview" as const) : ("full" as const),
     is_locked: Boolean(data.is_locked),
     locked_reason: data.locked_reason ?? null,
+  };
+}
+
+function normalizeDirectoryPayload(data: LeaderboardsPayload, directory: LeaderboardDirectory) {
+  const normalized = normalizePayload(data);
+  const rows = directory === "servers" ? normalized.top_servers : normalized.top_players;
+  return {
+    ...normalized,
+    directory,
+    directory_cap: Math.max(0, numberOrZero(data.directory_cap) || DIRECTORY_MAX_RANKS),
+    directory_total: Math.max(rows.length, numberOrZero(data.directory_total)),
+    directory_capped: Boolean(data.directory_capped),
   };
 }
 
