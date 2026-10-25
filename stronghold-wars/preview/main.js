@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES } from './game-service.js';
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
-import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile } from './squad-assets.js';
+import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, evaluateWarSquad } from './squad-assets.js';
 import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout } from './patrol-routes.js';
 import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
@@ -2588,7 +2588,7 @@ function warCommunityName(communityId) {
 
 function warTimelineHTML(war) {
   const events = (war.events || []).slice(-10);
-  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.type === 'attack' && event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts${event.details.tactics?.plan ? ` · ${escapeHTML(event.details.tactics.laneName)} → ${escapeHTML(event.details.tactics.objectiveName)} · ${escapeHTML(event.details.tactics.methodName)}` : ''}${event.details.orders?.length ? ` · ${event.details.orders.map(order => escapeHTML(order.name)).join(' → ')}` : ''}</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
+  return events.length ? `<h3>Event timeline · replay log</h3>${events.map(event => `<div class="war-event"><span class="war-tag">${escapeHTML(event.type.toUpperCase())}</span> · ${new Date(event.at).toLocaleTimeString()} — ${escapeHTML(event.text)}${event.type === 'attack' && event.details?.attackId ? `<p class="help">Replay ID ${escapeHTML(event.details.attackId)} · ${escapeHTML(event.details.tactic)} · ${event.details.score} pts${event.details.tactics?.plan ? ` · ${escapeHTML(event.details.tactics.laneName)} → ${escapeHTML(event.details.tactics.objectiveName)} · ${escapeHTML(event.details.tactics.methodName)}` : ''}${event.details.squad?.counts ? ` · ${escapeHTML(trainingSquadSummary(event.details.squad.counts))}` : ''}${event.details.orders?.length ? ` · ${event.details.orders.map(order => escapeHTML(order.name)).join(' → ')}` : ''}</p>` : ''}</div>`).join('')}` : '<p class="help">No war events yet.</p>';
 }
 
 function warSnapshotLine(side) {
@@ -2631,7 +2631,7 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
-      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit adds +${currentSide.stats.assaultKit.scoreBonus} score and shields ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with Sentinel reinforcement' : ''}${currentSide.stats.assaultKit.supportRole ? ' and Lifeline support' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit adds +${currentSide.stats.reconKit.scoreBonus} score and shields ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with Lifeline support' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
+      <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit can add up to +${currentSide.stats.assaultKit.scoreBonus} score and shield ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with a selected Sentinel' : ''}${currentSide.stats.assaultKit.supportRole ? ' and selected Lifeline' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit can add up to +${currentSide.stats.reconKit.scoreBonus} score and shield ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with a selected Lifeline' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
       ${canAttack ? `<p class="help">Choose a route, target and approach before committing your one attack. The locked wall layout changes the risk and score.</p><div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Plan Assault</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Plan Recon</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
       ${resumableAttack && readiness.eligible ? `<div class="row"><button data-war-resume="${escapeHTML(resumableAttack.attackId)}" data-war-id="${escapeHTML(war.id)}">Resume attack · ${resumableAttack.orders?.length || 0}/2 field orders</button></div>` : ''}
       ${leadership ? `<div class="row"><button data-war-resolve="${escapeHTML(war.id)}" ${canResolve ? '' : 'disabled'}>${canResolve ? 'Resolve war · lock result' : 'Resolve after all timed stages close'}</button></div>` : ''}`;
@@ -3146,14 +3146,29 @@ function showWarPlanner(warId, tactic) {
   const war = service.getWar(warId);
   if (!war || war.state !== 'active' || !['assault', 'recon'].includes(tactic)) { showWarTable('This war attack is no longer available.'); return; }
   const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+  const attacker = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+  const capacity = attacker.stats.squadSize;
+  const leadRole = tactic === 'recon' ? 'recon' : 'assault';
+  const squadRows = Object.entries(SQUAD_ROLES).map(([role, definition]) => {
+    const kit = squadProfile(role, attacker.base.levels);
+    return `<label>${escapeHTML(definition.name)} <small>${kit.unlocked ? `L${kit.tier} · ${kit.ability}` : 'Locked at war acceptance'}</small><input type="number" data-war-squad="${role}" min="0" max="${capacity}" step="1" value="${role === leadRole ? capacity : 0}" ${kit.unlocked ? '' : 'disabled'}></label>`;
+  }).join('');
   const options = (values, selected) => Object.entries(values).map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${escapeHTML(typeof label === 'string' ? label : label.name)}</option>`).join('');
-  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. This uses the accepted war’s locked building and wall positions. Confirming spends your one deployment.</p><div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(WAR_OBJECTIVES, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">A breach opens the wall segments on the chosen line but draws heavier counterfire. A flank avoids the cut and trades speed for safer movement. Scores remain capped; this is a local war preview.</p>`);
-  const select = () => ({ lane: $('warPlanLane').value, objective: $('warPlanObjective').value, method: $('warPlanMethod').value });
+  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. This uses the accepted war’s locked building and wall positions. Confirming spends your one deployment.</p><div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(WAR_OBJECTIVES, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><details class="war-squad-picker" open><summary>Deploy your squad · ${capacity} frozen Hall slots</summary><div class="war-squad-grid">${squadRows}</div><p id="warSquadStatus" class="help" role="status"></p></details><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">Fixers help cut defended walls, Ghosts reward covered flanks, Sentinels cover the battery and Lifeline medics reduce losses. Kit tiers are locked at acceptance. This war remains a local preview.</p>`);
+  const squadInputs = [...panel.querySelectorAll('[data-war-squad]')];
+  const select = () => ({ lane: $('warPlanLane').value, objective: $('warPlanObjective').value, method: $('warPlanMethod').value,
+    squad: Object.fromEntries(squadInputs.map(input => [input.dataset.warSquad, Number(input.value)])) });
   const refresh = () => {
-    const tactics = evaluateWarPlan(defender, tactic, select());
-    $('warPlanPreview').innerHTML = tactics.ok ? `${warPlanMapHTML(defender, tactics)}<div class="war-plan-summary"><b>${escapeHTML(tactics.laneName)} → ${escapeHTML(tactics.objectiveName)}</b><span>${tactics.wallCount} wall segments on route · ${tactics.wallPressure} combined tier</span><span>${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical score · ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} casualty pressure</span></div>` : `<p class="notice warn">${escapeHTML(tactics.error)}</p>`;
+    const choice = select();
+    const tactics = evaluateWarPlan(defender, tactic, choice);
+    const squad = evaluateWarSquad(attacker.base.levels, tactic, choice.squad, capacity, tactics);
+    const assigned = Object.values(choice.squad).reduce((sum, count) => sum + count, 0);
+    $('warSquadStatus').textContent = squad.ok ? `${assigned}/${capacity} ready · ${trainingSquadSummary(squad.counts)} · ${squad.scoreDelta >= 0 ? '+' : ''}${squad.scoreDelta} score · ${squad.casualtyDelta >= 0 ? '+' : ''}${squad.casualtyDelta} casualty pressure${squad.specialties.length ? ` · ${squad.specialties.join(' · ')}` : ''}` : `${assigned}/${capacity} assigned · ${squad.error}`;
+    $('warPlanConfirm').disabled = !tactics.ok || !squad.ok;
+    $('warPlanPreview').innerHTML = tactics.ok ? `<div class="war-plan-summary"><b>${escapeHTML(tactics.laneName)} → ${escapeHTML(tactics.objectiveName)}</b><span>${tactics.wallCount} walls · tier ${tactics.wallPressure}</span><span>${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} route score · ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} route risk</span></div><details class="war-route-details"><summary>Inspect route on the locked base</summary>${warPlanMapHTML(defender, tactics)}</details>` : `<p class="notice warn">${escapeHTML(tactics.error)}</p>`;
   };
   for (const id of ['warPlanLane', 'warPlanObjective', 'warPlanMethod']) $(id).onchange = refresh;
+  squadInputs.forEach(input => input.oninput = refresh);
   $('warPlanConfirm').onclick = () => launchWarAttack(warId, tactic, select());
   $('warPlanCancel').onclick = showWarTable;
   refresh();
@@ -3196,6 +3211,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
   const squadSize = attackingSide.stats.squadSize;
+  const selectedRoles = result.squad?.counts ? Object.entries(result.squad.counts).flatMap(([role, count]) => Array(count).fill(role)) : null;
   const route = result.tactics?.route || [{ x: -22, z: 0 }, { x: -17, z: 0 }, { x: -3, z: 0 }];
   const first = route[0], second = route[1];
   const dx = second.x - first.x, dz = second.z - first.z;
@@ -3203,9 +3219,9 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   const across = { x: -dz / length, z: dx / length };
   const troops = [];
   for (let i = 0; i < squadSize; i++) {
-    let role = tactic === 'recon' ? 'recon' : 'assault';
-    if (squadUnlocked('medic', attackingSide.base.levels) && i === squadSize - 1) role = 'medic';
-    else if (tactic === 'assault' && squadUnlocked('sentinel', attackingSide.base.levels) && i % 4 === 3) role = 'sentinel';
+    let role = selectedRoles?.[i] || (tactic === 'recon' ? 'recon' : 'assault');
+    if (!selectedRoles && squadUnlocked('medic', attackingSide.base.levels) && i === squadSize - 1) role = 'medic';
+    else if (!selectedRoles && tactic === 'assault' && squadUnlocked('sentinel', attackingSide.base.levels) && i % 4 === 3) role = 'sentinel';
     const troop = makeSoldier(role, attackingSide.base.levels);
     const spread = (i - (squadSize - 1) / 2) * 0.9;
     const path = route.map(point => new THREE.Vector3(OUTPOST.x + point.x + across.x * spread, 0, OUTPOST.z + point.z + across.z * spread));

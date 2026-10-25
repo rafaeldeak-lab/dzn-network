@@ -4,7 +4,7 @@
  * inventories, idempotent actions, progression, and Forge persistence. It is
  * intentionally local-only; it is not an authentication or security boundary.
  */
-import { SQUAD_ROLES, squadBattleStats, squadUnlocked } from './squad-assets.js';
+import { SQUAD_ROLES, squadBattleStats, squadUnlocked, evaluateWarSquad } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
 import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
@@ -302,6 +302,8 @@ function normalizeWarRecord(war) {
   const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => {
     const tactic = a.tactic === 'recon' ? 'recon' : 'assault';
     const evaluated = a.tactics?.plan ? evaluateWarPlan(a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger, tactic, a.tactics.plan) : null;
+    const attacker = a.communityId === war.challengerCommunityId ? snapshots.challenger : snapshots.defender;
+    const squad = a.squad?.counts ? evaluateWarSquad(attacker.base.levels, tactic, a.squad.counts, attacker.stats.squadSize, evaluated) : null;
     return {
       attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
       tactic, at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
@@ -310,7 +312,7 @@ function normalizeWarRecord(war) {
         .filter((order, index, all) => all.findIndex(item => item.phase === order.phase) === index)
         .slice(0, 2).map(order => ({ ...evaluateWarFieldOrder(tactic, order.phase, order.command), at: safeInt(order.at) })) : [],
       returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
-      tactics: evaluated?.ok ? evaluated : null,
+      tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null,
     };
   }) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
@@ -1006,8 +1008,10 @@ export class LocalGameService {
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
     const tactics = plan === null ? null : evaluateWarPlan(defender, tactic, plan);
     if (tactics && !tactics.ok) return { ok: false, error: tactics.error };
+    const squad = plan?.squad == null ? null : evaluateWarSquad(attacker.base.levels, tactic, plan.squad, attacker.stats.squadSize, tactics);
+    if (squad && !squad.ok) return { ok: false, error: squad.error };
     const a = attacker.base.levels; const d = defender.base.levels;
-    const kit = tactic === 'assault' ? attacker.stats.assaultKit : attacker.stats.reconKit;
+    const kit = squad ? squadBattleStats(a, tactic, squad.counts) : tactic === 'assault' ? attacker.stats.assaultKit : attacker.stats.reconKit;
     const rawScore = tactic === 'assault'
       ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
       : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
@@ -1015,16 +1019,16 @@ export class LocalGameService {
     const defence = defenderBattleEffect(defender.base.defenders, tactic);
     const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2) - defence.exposureShield));
     const scoutBonus = this.getScoutReports(identityId, warId).some(scout => scout.warId === warId && scout.arrived) ? 4 : 0;
-    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus - defence.scorePenalty + (tactics?.scoreDelta || 0))));
-    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure + (tactics?.casualtyDelta || 0))));
+    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus - defence.scorePenalty + (tactics?.scoreDelta || 0) + (squad?.scoreDelta || 0))));
+    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure + (tactics?.casualtyDelta || 0) + (squad?.casualtyDelta || 0))));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage${tactics ? `; ${tactics.laneName} ${tactics.methodName.toLowerCase()} toward ${tactics.objectiveName}, ${tactics.wallCount} walls in corridor, ${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical points and ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} casualty pressure` : ''}, scoring ${score}.`;
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, -${kit.casualtyShield} losses from health/armour/support, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage${tactics ? `; ${tactics.laneName} ${tactics.methodName.toLowerCase()} toward ${tactics.objectiveName}, ${tactics.wallCount} walls in corridor, ${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical points and ${tactics.casualtyDelta >= 0 ? '+' : ''}${tactics.casualtyDelta} casualty pressure` : ''}${squad ? `; selected ${Object.entries(squad.counts).filter(([, count]) => count).map(([role, count]) => `${count} ${SQUAD_ROLES[role].name}`).join(', ')}, ${squad.scoreDelta >= 0 ? '+' : ''}${squad.scoreDelta} composition points and ${squad.casualtyDelta >= 0 ? '+' : ''}${squad.casualtyDelta} casualty pressure${squad.specialties.length ? ` (${squad.specialties.join(', ')})` : ''}` : ''}, scoring ${score}.`;
     const returnAt = now + WAR_RULES.squadReturnMs;
-    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, orders: [] };
+    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [] };
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, tactics, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
+    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, tactics, squad, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
     this.save();
     return result;

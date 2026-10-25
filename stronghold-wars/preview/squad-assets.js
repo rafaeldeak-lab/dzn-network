@@ -45,12 +45,12 @@ export function squadProfile(key, levels = {}) {
 }
 
 // Frozen into each local war snapshot. Damage helps scoring; health, armour and medic support reduce losses.
-export function squadBattleStats(levels = {}, tactic = 'assault') {
+export function squadBattleStats(levels = {}, tactic = 'assault', selectedCounts = null) {
   const lead = squadProfile(tactic === 'recon' ? 'recon' : 'assault', levels);
   const sentinel = squadProfile('sentinel', levels);
   const medic = squadProfile('medic', levels);
-  const reinforcement = tactic === 'assault' && sentinel.unlocked ? sentinel : null;
-  const support = medic.unlocked ? medic : null;
+  const reinforcement = tactic === 'assault' && sentinel.unlocked && (selectedCounts === null || selectedCounts.sentinel > 0) ? sentinel : null;
+  const support = medic.unlocked && (selectedCounts === null || selectedCounts.medic > 0) ? medic : null;
   const scoreBonus = Math.floor(Math.max(0, lead.damage - (tactic === 'recon' ? 20 : 24)) / 6)
     + (reinforcement ? Math.ceil(reinforcement.damage / 12) : 0);
   const casualtyShield = Math.floor(Math.max(0, lead.maxHealth + lead.armour * 5 - 160) / 50)
@@ -60,6 +60,42 @@ export function squadBattleStats(levels = {}, tactic = 'assault') {
     leadDamage: lead.damage, leadArmour: lead.armour, ability: lead.ability,
     reinforcementRole: reinforcement?.role || '', reinforcementTier: reinforcement?.tier || 0,
     supportRole: support?.role || '', supportTier: support?.tier || 0, scoreBonus, casualtyShield });
+}
+
+// A war army uses every slot in its accepted, frozen Hall snapshot. Only the
+// selected roster is deployed; each specialist has a bounded tactical tradeoff.
+export function evaluateWarSquad(levels = {}, tactic = 'assault', input, capacity, tactics = null) {
+  if (!['assault', 'recon'].includes(tactic) || !input || typeof input !== 'object' || Array.isArray(input)
+    || !Number.isSafeInteger(capacity) || capacity < 1 || capacity > 12
+    || Object.keys(input).some(key => !SQUAD_ROLES[key]))
+    return { ok: false, error: 'Choose a valid DZN war squad.' };
+  const counts = {};
+  let total = 0;
+  for (const key of Object.keys(SQUAD_ROLES)) {
+    const count = input[key] ?? 0;
+    if (!Number.isSafeInteger(count) || count < 0 || count > capacity || (count && !squadUnlocked(key, levels)))
+      return { ok: false, error: 'Use whole-number counts of troops unlocked in the accepted war snapshot.' };
+    counts[key] = count;
+    total += count;
+  }
+  const leadRole = tactic === 'recon' ? 'recon' : 'assault';
+  if (total !== capacity || counts[leadRole] < 1)
+    return { ok: false, error: `Fill all ${capacity} squad slots and include at least one ${tactic === 'recon' ? 'Ghost' : 'Warden'} to lead.` };
+  const lead = squadProfile(tactic === 'recon' ? 'recon' : 'assault', levels);
+  const baselineDurability = lead.maxHealth + lead.armour * 4;
+  let damage = 0, durability = 0;
+  for (const [key, count] of Object.entries(counts)) {
+    const kit = squadProfile(key, levels);
+    damage += kit.damage * count;
+    durability += (kit.maxHealth + kit.armour * 4) * count;
+  }
+  const breachAssist = tactics?.plan?.method === 'breach' && tactics.wallCount > 0 ? Math.min(4, counts.engineer * 2) : 0;
+  const flankIntel = tactics?.plan?.method === 'flank' ? Math.min(3, counts.recon) : 0;
+  const batteryCover = tactics?.plan?.objective === 'tower' ? Math.min(3, counts.sentinel) : 0;
+  const scoreDelta = Math.max(-10, Math.min(10, Math.round((damage - lead.damage * capacity) / (capacity * 4)) + breachAssist + flankIntel + batteryCover));
+  const casualtyDelta = Math.max(-3, Math.min(3, Math.round((baselineDurability * capacity - durability) / (capacity * 60)) - Math.min(3, counts.medic)));
+  return { ok: true, counts, capacity, scoreDelta, casualtyDelta,
+    specialties: [breachAssist ? `Fixer breach +${breachAssist}` : '', flankIntel ? `Ghost intel +${flankIntel}` : '', batteryCover ? `Sentinel cover +${batteryCover}` : '', counts.medic ? `Lifeline recovery -${Math.min(3, counts.medic)} losses` : ''].filter(Boolean) };
 }
 
 export function squadAsset(key, tier) {

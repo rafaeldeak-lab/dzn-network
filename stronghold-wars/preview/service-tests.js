@@ -1,6 +1,6 @@
 import { GAME_CONFIG, LocalGameService, CORRUPT_BACKUP_PREFIX, LEGACY_BACKUP_KEY, LEGACY_STORAGE_KEY, SERVICE_STORAGE_KEY, V2_BACKUP_KEY, V2_STORAGE_KEY, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_RULES } from './game-service.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
-import { squadBattleStats, squadProfile, squadUnlocked } from './squad-assets.js';
+import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from './squad-assets.js';
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
@@ -537,10 +537,27 @@ export function runServiceTests() {
   assert(breachPlan.ok && breachPlan.wallPressure === 3 && breachPlan.breachedWallIds[0] === 'wall-1' && breachPlan.route.length === 4, 'a locked placed wall appears on the west assault corridor and supplies a breach waypoint');
   assert(flankPlan.ok && flankPlan.breachedWallIds.length === 0 && flankPlan.casualtyDelta < breachPlan.casualtyDelta && clearLane.wallPressure === 0, 'flanking avoids the cut and another lane avoids the placed wall');
   assert(!evaluateWarPlan(corridorFixture, 'assault', { lane: 'teleport', objective: 'hq', method: 'breach' }).ok, 'unknown tactical routes cannot be submitted');
+  const advancedLevels = { hq: 4, tower: 3, workshop: 3, comms: 3 };
+  const baseArmy = evaluateWarSquad(advancedLevels, 'assault', { assault: 10 }, 10, breachPlan);
+  const specialistArmy = evaluateWarSquad(advancedLevels, 'assault', { assault: 3, recon: 1, engineer: 2, sentinel: 2, medic: 2 }, 10, breachPlan);
+  assert(baseArmy.ok && specialistArmy.ok && specialistArmy.specialties.some(text => text.includes('Fixer breach')) && specialistArmy.specialties.some(text => text.includes('Lifeline recovery')) && specialistArmy.casualtyDelta < baseArmy.casualtyDelta, 'a full unlocked mixed army gives route-specific Fixer support and medic recovery');
+  assert(squadBattleStats(advancedLevels, 'assault', baseArmy.counts).reinforcementRole === ''
+    && squadBattleStats(advancedLevels, 'assault', baseArmy.counts).supportRole === ''
+    && squadBattleStats(advancedLevels, 'assault', specialistArmy.counts).reinforcementRole === 'sentinel'
+    && squadBattleStats(advancedLevels, 'assault', specialistArmy.counts).supportRole === 'medic', 'unselected specialists cannot grant hidden Sentinel or Lifeline kit bonuses');
+  assert(!evaluateWarSquad(advancedLevels, 'assault', { assault: 9 }, 10, breachPlan).ok
+    && !evaluateWarSquad(advancedLevels, 'assault', { assault: 11 }, 10, breachPlan).ok
+    && !evaluateWarSquad(advancedLevels, 'assault', { assault: 9, medic: 0.5 }, 10, breachPlan).ok
+    && !evaluateWarSquad(advancedLevels, 'assault', { assault: 0, medic: 10 }, 10, breachPlan).ok
+    && !evaluateWarSquad(advancedLevels, 'recon', { assault: 10 }, 10, breachPlan).ok, 'war roster requires exact capacity, whole counts and the tactic’s lead soldier');
   const attackerStats = lockedWar.snapshots.challenger.base.levels;
   const defenderStats = lockedWar.snapshots.defender.base.levels;
   const expectedAssault = Math.max(0, Math.min(100, Math.round(20 + attackerStats.hq * 12 + attackerStats.tower * 16 + attackerStats.comms * 4 - defenderStats.hq * 4 - defenderStats.tower * 10 - 3)));
   const ironStartParts = warService.snapshot('iron-owner').member.parts;
+  const invalidPlan = { lane: 'west', objective: 'tower', method: 'flank' };
+  assert(!warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'invalid-locked-sentinel', { ...invalidPlan, squad: { assault: 7, sentinel: 1 } }).ok
+    && !warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'invalid-negative-army', { ...invalidPlan, squad: { assault: 9, recon: -1 } }).ok
+    && warService.getWar(challenge.warId).attacks.length === 0, 'server-owned war action rejects locked and negative squads without consuming a deployment');
   const assault = warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'war-iron-assault');
   assert(assault.ok && assault.score === expectedAssault && assault.attackId && assault.feedback.includes('counterfire'), 'Assault score and visible defence feedback derive from locked snapshots');
   assert(!warService.issueWarFieldOrder('violet-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'foreign-order').ok, 'opposing roster members cannot command another squad');
@@ -561,11 +578,12 @@ export function runServiceTests() {
   assert(!warService.submitWarAttack('iron-owner', challenge.warId, 'recon', 'war-iron-second-identity').ok, 'one roster member cannot attack twice under new action IDs');
   assert(!warService.resolveWar('iron-owner', challenge.warId, 'war-resolve-early').ok, 'leadership cannot resolve while attack slots and time remain');
   const violetRecon = warService.submitWarAttack('violet-owner', challenge.warId, 'recon', 'war-violet-recon');
-  const ironReconPlan = { lane: 'south', objective: 'comms', method: 'flank' };
+  const reconCapacity = lockedWar.snapshots.challenger.stats.squadSize;
+  const ironReconPlan = { lane: 'south', objective: 'comms', method: 'flank', squad: { recon: reconCapacity - 2, engineer: 2 } };
   const ironRecon = warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', ironReconPlan);
   const violetAssault = warService.submitWarAttack('violet-admin', challenge.warId, 'assault', 'war-violet-assault');
   assert(violetRecon.ok && ironRecon.ok && violetAssault.ok, 'both communities can deploy distinct permitted roster members');
-  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical points'), 'a committed route and objective change the actual score and explanation');
+  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition points'), 'a committed route, objective and chosen squad change the actual score and explanation');
   assert(warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', { lane: 'east', objective: 'hq', method: 'breach' }).replay && warService.getWar(challenge.warId).attacks.length === 4, 'replaying an attack action cannot choose a new route or earn a second score');
   assert(new Set(warService.getWar(challenge.warId).attackIds).size === 4, 'all generated attack IDs are unique and persisted');
   assert(!warService.submitWarAttack('iron-member', challenge.warId, 'assault', 'war-iron-over-cap').ok, 'community attack cap is enforced at two deployments');
@@ -578,6 +596,8 @@ export function runServiceTests() {
   const tacticalReload = new LocalGameService({ storage: warStorage, now: () => warClock });
   const persistedTactics = tacticalReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === ironRecon.attackId)?.tactics;
   assert(persistedTactics?.plan.lane === 'south' && persistedTactics.route.length === 4 && persistedTactics.scoreDelta === ironRecon.tactics.scoreDelta, 'the frozen tactical order and path survive save reload');
+  const persistedSquad = tacticalReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === ironRecon.attackId)?.squad;
+  assert(persistedSquad?.counts.recon === reconCapacity - 2 && persistedSquad?.counts.engineer === 2 && persistedSquad.scoreDelta === ironRecon.squad.scoreDelta, 'selected troops, upgraded kit effects and exact army capacity survive reload');
   assert(resolved.wear.length === 4 && violetRidgewatch.wear === 1 && warService.state.communities['violet-ridge'].base.landPlots[1].wear === 1 && ironTimberline.wear === 2, 'incoming attacks mark only claimed built districts with bounded visual wear');
   assert(warService.getWorldMap().find(node => node.id === 'violet-ridge').districts.find(plot => plot.id === 'ridgewatch-range').wear === 1, 'public world preview shows district wear without exposing private inventory');
   const winnerRewards = resolved.rewards.filter(reward => warService.profile(reward.identityId).communityId === resolved.winnerCommunityId);
