@@ -269,6 +269,36 @@ async function testCombinedReactionCaps() {
       (id, message_id, actor_user_id, reaction_key, active) VALUES ('message-legacy-reactivate', 'public-message', 'player', 'fire', 0)`).run();
     assert.throws(() => messageLimited.sqlite.prepare("UPDATE dzn_comms_message_reactions SET active = 1 WHERE id = 'message-legacy-reactivate'").run());
   } finally { messageLimited.close(); }
+
+  const customReactivation = await fixture();
+  try {
+    const actors = ["player", "other", "outsider", "owner"];
+    for (let index = 0; index < 24; index += 1) {
+      customReactivation.sqlite.prepare(`INSERT INTO dzn_comms_custom_emoji_reactions
+        (id, message_id, actor_user_id, reaction_key) VALUES (?, 'public-message', ?, ?)`)
+        .run(`custom-reactivation-active-${index}`, actors[Math.floor(index / 6)], `emoji:2f${String(index).padStart(3, "0")}`);
+    }
+    customReactivation.sqlite.prepare(`INSERT INTO dzn_comms_custom_emoji_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('custom-reactivation-inactive', 'public-message', 'other', 'emoji:2f000', 0)`).run();
+    customReactivation.sqlite.prepare("UPDATE dzn_comms_custom_emoji_reactions SET active = 1 WHERE id = 'custom-reactivation-inactive'").run();
+    assert.equal(customReactivation.sqlite.prepare("SELECT active FROM dzn_comms_custom_emoji_reactions WHERE id = 'custom-reactivation-inactive'").get()?.active, 1);
+  } finally { customReactivation.close(); }
+
+  const legacyReactivation = await fixture();
+  try {
+    legacyReactivation.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('legacy-reactivation-active', 'public-message', 'player', 'heart', 1)`).run();
+    const actors = ["player", "other", "outsider", "owner"];
+    for (let index = 0; index < 23; index += 1) {
+      legacyReactivation.sqlite.prepare(`INSERT INTO dzn_comms_custom_emoji_reactions
+        (id, message_id, actor_user_id, reaction_key) VALUES (?, 'public-message', ?, ?)`)
+        .run(`legacy-reactivation-custom-${index}`, actors[Math.floor(index / 6)], `emoji:3f${String(index).padStart(3, "0")}`);
+    }
+    legacyReactivation.sqlite.prepare(`INSERT INTO dzn_comms_message_reactions
+      (id, message_id, actor_user_id, reaction_key, active) VALUES ('legacy-reactivation-inactive', 'public-message', 'other', 'heart', 0)`).run();
+    legacyReactivation.sqlite.prepare("UPDATE dzn_comms_message_reactions SET active = 1 WHERE id = 'legacy-reactivation-inactive'").run();
+    assert.equal(legacyReactivation.sqlite.prepare("SELECT active FROM dzn_comms_message_reactions WHERE id = 'legacy-reactivation-inactive'").get()?.active, 1);
+  } finally { legacyReactivation.close(); }
 }
 
 async function testPrivateScopeAndModerationRemoval() {

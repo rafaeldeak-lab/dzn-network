@@ -956,7 +956,11 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
                 key={reaction.key}
                 type="button"
                 disabled={!reactionsWriteEnabled || reactionState === "saving"}
-                onClick={() => void changeReaction(reaction.key, reaction.current_user_reacted, reaction.emoji)}
+                onClick={() => void changeReaction(
+                  reaction.key,
+                  reaction.current_user_reacted,
+                  reaction.key.startsWith("emoji:") ? reaction.emoji : reaction.key,
+                )}
                 className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 text-xs font-bold transition disabled:cursor-default disabled:opacity-75 ${reaction.current_user_reacted ? "border-cyan-200/60 bg-cyan-300/15 text-cyan-50" : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-cyan-300/40 hover:bg-cyan-300/10"}`}
                 aria-label={`${reaction.current_user_reacted ? "Remove" : "Add"} ${reaction.emoji} reaction`}
                 title={reaction.current_user_reacted ? "Remove your reaction" : "Add this reaction"}

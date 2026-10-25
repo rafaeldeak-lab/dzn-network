@@ -100,7 +100,12 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS dzn_comms_custom_emoji_reaction_message_cap_reactivate
 BEFORE UPDATE OF active ON dzn_comms_custom_emoji_reactions
-WHEN NEW.active = 1 AND OLD.active = 0 AND (
+WHEN NEW.active = 1 AND OLD.active = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM dzn_comms_custom_emoji_reactions
+    WHERE message_id = NEW.message_id AND reaction_key = NEW.reaction_key AND active = 1
+  )
+  AND (
   SELECT COUNT(DISTINCT reaction_key) FROM (
     SELECT reaction_key FROM dzn_comms_message_reactions
     WHERE message_id = NEW.message_id AND active = 1
@@ -180,7 +185,12 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS dzn_comms_legacy_reaction_message_cap_reactivate
 BEFORE UPDATE OF active ON dzn_comms_message_reactions
-WHEN NEW.active = 1 AND OLD.active = 0 AND (
+WHEN NEW.active = 1 AND OLD.active = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM dzn_comms_message_reactions
+    WHERE message_id = NEW.message_id AND reaction_key = NEW.reaction_key AND active = 1
+  )
+  AND (
   SELECT COUNT(DISTINCT reaction_key) FROM (
     SELECT reaction_key FROM dzn_comms_message_reactions
     WHERE message_id = NEW.message_id AND active = 1
