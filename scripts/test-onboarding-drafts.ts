@@ -107,7 +107,12 @@ async function main() {
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
-  unavailableSqlite.exec("INSERT INTO users (id,discord_id,username) VALUES ('user-a','111111111111111111','Owner A')");
+  unavailableSqlite.exec(readFileSync("migrations/0012_billing_plans_and_advertising.sql", "utf8"));
+  unavailableSqlite.exec(`
+    INSERT INTO users (id,discord_id,username) VALUES ('user-a','111111111111111111','Owner A');
+    INSERT INTO owner_billing_accounts (id,discord_user_id,plan_key,plan_status,created_at,updated_at)
+      VALUES ('billing-a','111111111111111111','starter','trialing',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+  `);
   const unavailableEnv = { DB: d1(unavailableSqlite), SESSION_SECRET: "draft-test-secret" } as Env;
   const unavailableSession = await createSession(unavailableEnv, "user-a");
   const unavailable = await invoke(unavailableEnv, `dzn_session=${unavailableSession.token}`, "GET");
@@ -120,11 +125,15 @@ async function main() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
   sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0012_billing_plans_and_advertising.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0074_onboarding_drafts.sql", "utf8"));
   sqlite.exec(`
     INSERT INTO users (id,discord_id,username) VALUES
       ('user-a','111111111111111111','Owner A'),
       ('user-b','222222222222222222','Owner B');
+    INSERT INTO owner_billing_accounts (id,discord_user_id,plan_key,plan_status,created_at,updated_at) VALUES
+      ('billing-a','111111111111111111','starter','trialing',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
+      ('billing-b','222222222222222222','pro','active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
     INSERT INTO discord_guilds (id,guild_id,owner_user_id,name) VALUES
       ('guild-a','333333333333333333','user-a','Owner A Guild'),
       ('guild-b','444444444444444444','user-b','Owner B Guild');

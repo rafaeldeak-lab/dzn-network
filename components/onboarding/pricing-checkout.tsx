@@ -60,11 +60,22 @@ export function PricingCheckout({ planKey }: { planKey: "starter" | "pro" }) {
 
 export function PricingCheckoutStatus() {
   const searchParams = useSearchParams();
-  if (searchParams.get("billing") !== "cancelled") return null;
+  const billing = searchParams.get("billing");
+  if (!billing) return null;
+
+  const message = billing === "cancelled"
+    ? "Checkout cancelled. No payment was taken and no trial was started. Your existing DZN access has not changed."
+    : billing === "confirmation_pending"
+      ? "Stripe returned successfully. DZN is confirming the subscription before setup can start. Refresh this page in a moment, then reopen owner setup."
+      : billing === "setup_required"
+        ? "Owner setup starts only after Starter or Pro is active or trialing. Choose a plan and complete Stripe Checkout first; signing in or visiting setup does not start a payment or trial."
+        : null;
+
+  if (!message) return null;
 
   return (
     <div role="status" className="mt-6 border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm font-semibold leading-6 text-amber-50">
-      Checkout cancelled. No payment was taken and no trial was started. Your existing DZN access has not changed.
+      {message}
     </div>
   );
 }

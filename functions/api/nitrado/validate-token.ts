@@ -21,6 +21,7 @@ import {
   validateServerType,
 } from "../../_lib/onboarding";
 import { normalizeServerCategory } from "../../_lib/server-categories";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -41,6 +42,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const serviceId = body.serviceId?.trim();
   if (!token) return json({ error: "Nitrado token is required" }, { status: 400 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
   if (!body.discordGuildId || !body.serverType) {
     return json({ error: "Discord guild and server type are required before token validation" }, { status: 400 });
   }

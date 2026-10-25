@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { normalizeTags, validateServerType } from "../../_lib/onboarding";
 import { validatePublicListingInput, type PublicListingInput } from "../../_lib/review-moderation";
 import { normalizeServerCategory } from "../../_lib/server-categories";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type DraftBody = PublicListingInput & {
@@ -64,6 +65,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   if (request.method !== "PUT") return methodNotAllowed();
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403, headers: privateHeaders() });
+  }
   const body = await readJson<DraftBody>(request);
   const currentStep = normalizeStep(body.currentStep);
   const discordGuildId = optionalIdentifier(body.discordGuildId, 32);

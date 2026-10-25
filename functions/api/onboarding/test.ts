@@ -6,6 +6,7 @@ import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testEx
 import { getOnboardingServiceProof, onboardingProofStillCurrent, saveOnboardingServiceChecks } from "../../_lib/onboarding-service-proof";
 import { planAdmBackfillJobsForServer, type AdmImportJobProgressResult } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -14,6 +15,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
 
   const linkedServer = await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
   if (!linkedServer || typeof linkedServer.id !== "string") {

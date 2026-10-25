@@ -23,7 +23,7 @@ import {
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
 } from "../functions/_lib/onboarding";
-import { getOwnerBillingStatus, upsertBillingAccount, upsertOwnerEntitlements, type PlanKey } from "../functions/_lib/plans";
+import { getOwnerBillingStatus, upsertBillingAccount, type PlanKey } from "../functions/_lib/plans";
 import { onRequest as billingStatusHandler } from "../functions/api/billing/status";
 import { onRequest as validateNitradoTokenHandler } from "../functions/api/nitrado/validate-token";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
@@ -203,7 +203,11 @@ async function seedOwner(env: Env, db: SqliteD1Database, input: {
   db.sqlite
     .prepare("INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, permissions, is_owner) VALUES (?, ?, ?, ?, '8', 1)")
     .run(`${input.userId}-guild-row`, `${input.userId}-guild`, input.userId, `${input.userId} Guild`);
-  await upsertOwnerEntitlements(env, input.discordUserId, input.planKey ?? "free", input.status ?? "free");
+  await upsertBillingAccount(env, {
+    discordUserId: input.discordUserId,
+    planKey: input.planKey ?? "free",
+    planStatus: input.status ?? "free",
+  });
 }
 
 function insertLinkedServer(db: SqliteD1Database, input: {
@@ -746,6 +750,9 @@ async function assertBillingStatusPlanNormalization() {
     });
     if (testCase.legacyRawAccount) {
       db.sqlite
+        .prepare("DELETE FROM owner_billing_accounts WHERE discord_user_id = ?")
+        .run(`${testCase.label}-discord`);
+      db.sqlite
         .prepare(
           `INSERT INTO owner_billing_accounts (
             id, discord_user_id, stripe_customer_id, stripe_subscription_id, plan_key, plan_status,
@@ -879,7 +886,7 @@ async function assertTokenWriteFailureReleasesReservation() {
 
 async function assertServiceSpecificTokenFailureCanRecoverOnFullPlan() {
   const { db, env } = createSqliteEnv({ TOKEN_ENCRYPTION_KEY: undefined });
-  await seedOwner(env, db, { userId: "recover-token-user", discordUserId: "recover-token-discord", planKey: "free", status: "free" });
+  await seedOwner(env, db, { userId: "recover-token-user", discordUserId: "recover-token-discord", planKey: "starter", status: "trialing" });
   const session = await createSession(env, "recover-token-user");
   const requestBody = {
     token: "long-enough-token",
@@ -1113,7 +1120,7 @@ async function assertOnboardingSaveFailureReleasesReservationWithoutDeletingServ
 
 async function assertNitradoValidationLimitFailure() {
   const { db, env } = createSqliteEnv();
-  await seedOwner(env, db, { userId: "validate-user", discordUserId: "validate-discord", planKey: "free", status: "free" });
+  await seedOwner(env, db, { userId: "validate-user", discordUserId: "validate-discord", planKey: "starter", status: "active" });
   insertLinkedServer(db, { id: "validate-existing", userId: "validate-user", serviceId: "validate-service", status: "live" });
   const session = await createSession(env, "validate-user");
   const request = new Request("https://local.test/api/nitrado/validate-token", {

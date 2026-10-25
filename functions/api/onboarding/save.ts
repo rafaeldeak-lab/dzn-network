@@ -26,6 +26,7 @@ import { recordDiscordServerAnnouncementEvent } from "../../_lib/discord-server-
 import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
 import { saveBotOnboardingConfig } from "../../_lib/ctf-tournaments";
 import { normalizeServerCategory } from "../../_lib/server-categories";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
@@ -45,6 +46,9 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
 
   const body = await readJson<SaveBody>(request);
   if (!body.discordGuildId || !body.nitradoServiceId || !body.serverType) {
