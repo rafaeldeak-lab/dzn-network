@@ -107,13 +107,15 @@ async function run() {
   assert.match(client, /Field loadout/);
   assert.match(client, /Daily directive/);
   assert.match(client, /Directive route matched/);
-  assert.match(scene, /dznSurvivalCommandCanvas/);
+  assert.match(scene, /media\/stronghold\/rosebud\/hq_l01\.webp/);
+  assert.match(scene, /media\/stronghold\/rosebud\/watchtower_l01\.webp/);
+  assert.match(scene, /data-selected/);
   assert.match(client, /Set the field order/);
   assert.match(client, /Tactical command window/);
   assert.match(client, /selected route\{order \? ", locked field order," : ""\}/);
   assert.doesNotMatch(client, /Build a route, send a team, lock a tactical protocol/);
-  assert.match(scene, /fieldOrderColours/);
-  assert.match(styles, /survival-command-field-command-v2\.png/);
+  assert.match(styles, /forest-ground\.webp/);
+  assert.match(styles, /survival-command-scene__route/);
   assert.match(deletion, /dzn_survival_command_resolution_ledger/);
   assert.match(deletion, /dzn_survival_command_spend_ledger/);
   assert.match(playerHubRoute, /DZN_SURVIVAL_COMMAND_ENABLED === "true"/);
