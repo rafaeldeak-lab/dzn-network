@@ -386,6 +386,37 @@ export function runServiceTests() {
   assert(service.snapshot('iron-owner').member.parts === afterClaim, 'repeated claim does not duplicate output');
   checks.push('daily Salvage stability, Forge debit, refresh during work, ready, one-time claim and duplicate-claim guard');
 
+  let productionClock = 1_900_100_000_000;
+  const productionStorage = new MemoryStorage();
+  let productionService = new LocalGameService({ storage: productionStorage, now: () => productionClock });
+  assert(productionService.getProductionInfo('iron-owner').capacity === 500 && productionService.getProductionInfo('iron-owner').perSecond === 2, 'Level 1 Workshop starts with 500 Parts storage at two Parts per second');
+  productionClock += 10_000;
+  productionService = new LocalGameService({ storage: productionStorage, now: () => productionClock });
+  assert(productionService.snapshot('iron-owner').member.stored === 20, 'Workshop production catches up after ten seconds away');
+  productionService = new LocalGameService({ storage: productionStorage, now: () => productionClock });
+  assert(productionService.snapshot('iron-owner').member.stored === 20, 'reloading at the same time cannot mint Parts twice');
+  productionClock += 10_000;
+  assert(productionService.collectParts('iron-owner').amount === 40 && productionService.snapshot('iron-owner').member.stored === 0, 'collection includes unclaimed offline production once');
+  productionService.state.communities['iron-pines'].base.levels.workshop = 2;
+  productionService.save();
+  productionClock += 600_000;
+  productionService = new LocalGameService({ storage: productionStorage, now: () => productionClock });
+  assert(productionService.getProductionInfo('iron-owner').capacity === 750 && productionService.snapshot('iron-owner').member.stored === 750, 'upgraded Workshop production stops at its larger storage cap');
+  assert(productionService.setOwnerProActive('iron-owner', false).ok, 'owner can pause the local Pro preview');
+  productionClock += 60_000;
+  productionService = new LocalGameService({ storage: productionStorage, now: () => productionClock });
+  assert(productionService.snapshot('iron-owner').member.stored === 750 && productionService.getProductionInfo('iron-owner').perSecond === 0, 'inactive owner Pro does not produce Parts while away');
+  assert(productionService.setOwnerProActive('iron-owner', true).ok && productionService.collectParts('iron-owner').amount === 750, 'restoring Pro keeps stored Parts without backfilling locked time');
+  productionClock += 10_000;
+  assert(productionService.collectParts('iron-owner').amount === 40, 'upgraded Workshop resumes at the new rate after Pro is active');
+  const oldProductionSave = JSON.parse(productionStorage.getItem(SERVICE_STORAGE_KEY));
+  delete oldProductionSave.members['iron-owner'].productionAt;
+  const oldProductionStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: JSON.stringify(oldProductionSave) });
+  productionClock += 100_000;
+  const oldProductionReload = new LocalGameService({ storage: oldProductionStorage, now: () => productionClock });
+  assert(oldProductionReload.snapshot('iron-owner').member.stored === 0 && oldProductionReload.snapshot('iron-owner').member.productionAt === productionClock, 'old saves start their clock now without an invented offline grant');
+  checks.push('offline Workshop production, tiered storage, exact refresh and claim, Pro pause and safe old-save migration');
+
   const legacyRaw = JSON.stringify({ parts: 321, stored: 8.5, treasury: 77, levels: { hq: 2, workshop: 2, tower: 1, comms: 1 }, upgrades: { tower: { end: clock + 60_000 } }, raidCount: 4, lastRaidClaimed: 3, muted: true });
   const legacyStorage = new MemoryStorage({ [LEGACY_STORAGE_KEY]: legacyRaw });
   const migrated = new LocalGameService({ storage: legacyStorage, now: () => clock });

@@ -1715,10 +1715,6 @@ function isLeadership() {
   const role = service.profile()?.role;
   return role === 'owner' || role === 'admin';
 }
-function productionRate() {
-  if (!service.getAccess().allowed) return 0;
-  return GAME_CONFIG.buildings.workshop.stats[state.levels.workshop - 1].partsPerSecond;
-}
 function renderAppearanceGallery() {
   const gallery = $('appearanceGallery');
   if (!gallery) return;
@@ -1806,6 +1802,8 @@ function updateHud() {
   $('timber').textContent = access.allowed ? `🪵 ${Math.floor(state.timber)} Timber` : '🪵 Locked';
   $('treasury').textContent = access.allowed ? `🏦 ${Math.floor(state.treasury)} Unallocated` : '🏦 Locked';
   $('collectBtn').textContent = `Collect +${Math.floor(state.stored)}`;
+  const production = service.getProductionInfo();
+  $('collectBtn').title = production ? `Workshop / Forge: ${Math.floor(production.stored)}/${production.capacity} Parts stored · ${production.perSecond} Parts/sec. ${production.perSecond ? 'Production continues while away until storage is full.' : 'Production is paused until this community has access.'}` : '';
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
   $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
   const yard = service.community()?.saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
@@ -4500,8 +4498,7 @@ renderer.setAnimationLoop(time => {
   const dt = Math.min(0.1, timer.getDelta());
   elapsed += dt;
 
-  const memberInventory = service.member();
-  if (memberInventory) memberInventory.stored = Math.min(500, memberInventory.stored + productionRate() * dt);
+  service.advancePartsProduction();
   checkUpgrades();
 
   animated.radars.forEach(r => {

@@ -176,7 +176,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
+  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -478,6 +478,7 @@ function normalizeLoadedState(raw) {
     if (!saved) continue;
     fresh.members[profile.id] = {
       parts: safeInt(saved.parts), stored: Number.isFinite(Number(saved.stored)) ? Math.max(0, Number(saved.stored)) : 0,
+      productionAt: safeInt(saved.productionAt),
       salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt), nextTimberClaimAt: safeInt(saved.nextTimberClaimAt),
       timber: safeInt(saved.timber),
       lifetimeContributed: safeInt(saved.lifetimeContributed),
@@ -526,6 +527,10 @@ export class LocalGameService {
     this.backupKey = backupKey;
     this.state = null;
     this._load();
+    // Catch up each eligible member exactly once from the last saved clock.
+    // Older saves start their production clock now, without a retroactive grant.
+    for (const profile of PREVIEW_IDENTITIES) this.advancePartsProduction(profile.id);
+    this.save();
   }
 
   _preserveRawBackup(key, raw) {
@@ -1240,6 +1245,7 @@ export class LocalGameService {
 
   selectIdentity(identityId) {
     if (!this.profile(identityId)) return { ok: false, error: 'Unknown preview identity.' };
+    this.advancePartsProduction(identityId);
     this.state.currentIdentityId = identityId;
     this.save();
     return { ok: true };
@@ -1251,6 +1257,7 @@ export class LocalGameService {
     if (!profile || !entry) return { ok: false, error: 'Unknown preview identity.' };
     if (profile.role !== 'owner') return { ok: false, error: 'Only this community’s owner can change its simulated Pro status.' };
     if (!entry.definition.eligible) return { ok: false, error: 'The Free preview community is not eligible for this Pro toggle.' };
+    for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === profile.communityId)) this.advancePartsProduction(member.id);
     entry.saved.proActive = Boolean(active);
     this.save();
     return { ok: true, proActive: entry.saved.proActive };
@@ -2020,6 +2027,7 @@ export class LocalGameService {
       project.pinned = false;
       return false;
     }
+    if (project.key === 'workshop') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id);
     base.levels[project.key] = project.targetLevel;
     project.status = 'completed';
     project.completedAt = this.now();
@@ -2087,6 +2095,7 @@ export class LocalGameService {
     const member = this.member(identityId);
     if (accessError) return { ok: false, error: accessError };
     if (!member) return { ok: false, error: 'Member inventory unavailable.' };
+    this.advancePartsProduction(identityId);
     const amount = Math.floor(member.stored);
     if (!Number.isSafeInteger(amount) || amount < 1) return { ok: false, error: 'No whole Parts are ready to collect yet.' };
     member.parts += amount;
@@ -2228,6 +2237,29 @@ export class LocalGameService {
     else if (key === 'stored') member.stored = Math.max(0, Number(value) || 0);
     else member[key] = safeInt(value);
     this.save();
+  }
+
+  getProductionInfo(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const level = entry.saved.base.levels.workshop;
+    return { stored: member.stored, capacity: 500 + (level - 1) * 250,
+      perSecond: this.getAccess(identityId).allowed ? GAME_CONFIG.buildings.workshop.stats[level - 1].partsPerSecond : 0 };
+  }
+
+  advancePartsProduction(identityId = this.state.currentIdentityId) {
+    const member = this.member(identityId);
+    const info = this.getProductionInfo(identityId);
+    if (!member || !info) return 0;
+    const now = Math.max(0, Math.floor(Number(this.now()) || 0));
+    const previous = safeInt(member.productionAt);
+    member.productionAt = now;
+    if (!previous || now <= previous || !info.perSecond) return 0;
+    const produced = info.perSecond * Math.min(now - previous, DAY_MS) / 1000;
+    const before = member.stored;
+    member.stored = Math.max(before, Math.min(info.capacity, before + produced));
+    return member.stored - before;
   }
 
   getTrainingLoadout(identityId = this.state.currentIdentityId) {
