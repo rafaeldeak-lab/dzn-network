@@ -325,6 +325,7 @@ export default function LeaderboardsPage() {
   const totalPlayers = payload.top_players.length;
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
   const initialError = loadState === "error_initial";
+  const directoryBaseReady = loadState !== "loading_initial" && !initialError;
   const modeTransitionLoading = displayedMode !== activeMode && !serverModeError;
   const filteredServers = useMemo(
     () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.category, activeMode)),
@@ -342,7 +343,7 @@ export default function LeaderboardsPage() {
   }, [directoryPayload, directorySearch]);
 
   useEffect(() => {
-    if (!activeDirectory || loadState === "loading_initial" || initialError || payload.is_locked) {
+    if (!activeDirectory || !directoryBaseReady || payload.is_locked) {
       directoryRequest.current?.abort();
       directoryRequest.current = null;
       return;
@@ -395,7 +396,7 @@ export default function LeaderboardsPage() {
       controller.abort();
       if (directoryRequest.current === controller) directoryRequest.current = null;
     };
-  }, [activeDirectory, activeDirectoryMode, directoryReloadNonce, initialError, loadState, payload.is_locked]);
+  }, [activeDirectory, activeDirectoryMode, directoryBaseReady, directoryReloadNonce, payload.is_locked]);
 
   const playerContent = payload.is_locked ? (
     <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />

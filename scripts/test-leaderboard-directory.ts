@@ -30,7 +30,9 @@ assert.match(library, /getPublicLeaderboardDirectoryPayload/, "Directory data mu
 assert.match(library, /getRankedPublicServers\(env, PUBLIC_LEADERBOARD_DIRECTORY_CAP, options\.mode\)/, "Server directory ranks must use the canonical ranking source.");
 assert.match(library, /getTopPlayers\(env, PUBLIC_LEADERBOARD_DIRECTORY_CAP\)/, "Player directory ranks must use the canonical ranking source.");
 assert.match(page, /directory,\s*\n\s*full: "true"/, "The browser must request the bounded directory scope.");
-assert.match(page, /initialError \|\| payload\.is_locked/, "Locked leaderboard previews must not fetch the private directory.");
+assert.match(page, /!directoryBaseReady \|\| payload\.is_locked/, "Locked leaderboard previews must not fetch the private directory.");
+assert.match(page, /const directoryBaseReady = loadState !== "loading_initial" && !initialError;/, "The directory needs a stable base-load readiness gate.");
+assert.doesNotMatch(page, /directoryReloadNonce, initialError, loadState, payload\.is_locked/, "Background Top 10 refreshes must not reset directory browsing state.");
 assert.match(page, /Full Server Ranking/, "The server browse panel must be visible.");
 assert.match(page, /Full Player Ranking/, "The player browse panel must be visible.");
 assert.match(page, /Search a server or mode/, "Server search should be discoverable.");
