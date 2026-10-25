@@ -2788,12 +2788,33 @@ const fieldGroup = new THREE.Group();
 fieldGroup.position.copy(FIELD_ORIGIN);
 fieldGroup.visible = false;
 scene.add(fieldGroup);
+// Keep a precise walkable picking surface while showing the continuous forest
+// underneath. The mission is an outpost cut into the woods, not a floating pad.
 const fieldFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 36),
-  new THREE.MeshStandardMaterial({ map: tiledTexture('assets/concrete-pad.webp', 5), roughness: 0.92 }));
+  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
 fieldFloor.rotation.x = -Math.PI / 2;
 fieldFloor.position.y = 0.07;
-fieldFloor.receiveShadow = true;
 fieldGroup.add(fieldFloor);
+function fieldPaving(x, z, width, depth, repeat = 1) {
+  const paving = new THREE.Mesh(new THREE.PlaneGeometry(width, depth),
+    new THREE.MeshStandardMaterial({ map: tiledTexture('assets/concrete-pad.webp', repeat), roughness: 0.94,
+      color: 0xc1c8b8 }));
+  paving.rotation.x = -Math.PI / 2;
+  paving.position.set(x, 0.055, z);
+  paving.receiveShadow = true;
+  fieldGroup.add(paving);
+}
+// Broken service roads join the two route choices without obscuring cover.
+fieldPaving(0, -14, 9, 5, 1.3);
+fieldPaving(-9, -10.5, 5, 5, 0.9);
+fieldPaving(9, -10.5, 5, 5, 0.9);
+fieldPaving(0, -1, 8, 4, 1.1);
+fieldPaving(-9, -0.5, 5, 5, 0.9);
+fieldPaving(9, -0.5, 5, 5, 0.9);
+fieldPaving(-9, 8, 6, 6, 1);
+fieldPaving(9, 8, 6, 6, 1);
+fieldPaving(-9, 15, 5, 4, 0.8);
+fieldPaving(9, 15, 5, 4, 0.8);
 const fieldMarkers = new THREE.Group();
 fieldGroup.add(fieldMarkers);
 const fieldGate = new THREE.Group();
@@ -2815,6 +2836,11 @@ for (const [x, z] of [[-9, 8], [9, 8], [-9, 15], [9, 15]]) {
 for (const [x, z] of [[-14, -16], [14, -16], [-14, 16], [14, 16]]) {
   cyl(fieldGroup, 0.14, 0.23, 2.2, MAT.dark, x, 0, z);
   box(fieldGroup, 0.36, 0.15, 0.36, fieldBeaconMat, x, 2.15, z);
+}
+for (const [x, z, colour] of [[-11, -14, 0x9ee7c2], [11, -3, 0xb7a9ee], [-10, 10, 0x9ee7c2]]) {
+  const flood = new THREE.PointLight(colour, 2.4, 15, 2);
+  flood.position.set(x, 3.1, z);
+  fieldGroup.add(flood);
 }
 for (const [x, z] of [[-9, 8], [9, 8]]) {
   const base = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.65, 0.35, 20), MAT.metal);
@@ -2892,6 +2918,35 @@ function buildFieldSet() {
       fieldGroup.add(stack);
     }
   }).catch(error => console.warn('Outpost Ember cover detail unavailable.', error));
+  Promise.all(['pine_l03', 'pine_l04', 'pine_l05', 'granite_boulder',
+    'mossy_rock_cluster', 'fern_patch', 'brush_pile'].map(sceneryModel)).then(
+    ([pine3, pine4, pine5, boulder, rocks, fern, brush]) => {
+      const perimeter = [
+        [-21, -18, pine4], [-17, -12, pine5], [-22, -5, pine3], [-18, 2, pine4],
+        [-21, 10, pine5], [-17, 18, pine3], [-12, -22, pine3], [-5, -21, pine5],
+        [3, -22, pine4], [11, -21, pine3], [19, -17, pine4], [21, -7, pine3],
+      ];
+      for (const [x, z, template] of perimeter) {
+        const tree = template.clone(true);
+        tree.position.set(x, 0.06, z);
+        tree.rotation.y = (x * 0.37 + z * 0.19) % (Math.PI * 2);
+        tree.scale.setScalar(0.82 + (Math.abs(x + z) % 5) * 0.08);
+        tree.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        fieldGroup.add(tree);
+      }
+      const lowDetails = [
+        [-14, -12], [-15, -4], [-15, 7], [-13, 17], [14, -14], [16, -3],
+        [17, 8], [14, 17], [-2, -19], [7, 19], [-18, 15], [20, 2],
+      ];
+      for (const [index, [x, z]] of lowDetails.entries()) {
+        const detail = (index % 4 === 0 ? boulder : index % 3 === 0 ? rocks :
+          index % 2 === 0 ? brush : fern).clone(true);
+        detail.position.set(x, 0.06, z);
+        detail.rotation.y = index * 1.7;
+        detail.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+        fieldGroup.add(detail);
+      }
+    }).catch(error => console.warn('Outpost Ember forest detail unavailable.', error));
 }
 const fieldHud = document.createElement('section');
 fieldHud.id = 'fieldHud';
@@ -3107,7 +3162,7 @@ function enterExpeditionField() {
   closePanel();
   camTarget.copy(FIELD_ORIGIN).add(new THREE.Vector3(point.x * 0.6, 0, point.z * 0.6));
   cameraOffset.set(35, 43, 36);
-  zoom = 34;
+  zoom = 29;
   updateCamera();
   renderFieldHud();
   toast('Outpost Ember deployed. Move to a glowing objective.');
