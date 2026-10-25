@@ -50,6 +50,7 @@ class LocalD1 {
 async function fixture() {
   const db = new LocalD1();
   db.sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
+  db.sqlite.exec(readFileSync("migrations/0012_billing_plans_and_advertising.sql", "utf8"));
   db.sqlite.exec(`
     ALTER TABLE linked_servers ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active_live';
     ALTER TABLE linked_servers ADD COLUMN lifecycle_reason TEXT;
@@ -59,6 +60,8 @@ async function fixture() {
     CREATE TABLE kill_events (linked_server_id TEXT, victim_name TEXT, distance REAL);
     CREATE TABLE server_stats (linked_server_id TEXT, unique_players INTEGER);
     INSERT INTO users (id, discord_id, username) VALUES ('owner', 'discord-owner', 'Owner'), ('other', 'discord-other', 'Other');
+    INSERT INTO owner_billing_accounts (id, discord_user_id, plan_key, plan_status, created_at, updated_at)
+      VALUES ('owner-billing', 'discord-owner', 'starter', 'trialing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     INSERT INTO discord_guilds (id, guild_id, owner_user_id, name) VALUES ('guild', '123456', 'owner', 'Test guild');
     INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, server_name, server_type, nitrado_service_id, public_slug)
       VALUES ('server', 'owner', '123456', 'guild', 'Synthetic DayZ', 'PVE', '12345', 'synthetic-dayz');
@@ -249,7 +252,7 @@ async function main() {
       assert.equal((await invoke(handler, env, "")).status, 401);
       assert.equal((await invoke(handler, env, cookie, "GET")).status, 405);
       const other = await createSession(env, "other");
-      assert.equal((await invoke(handler, env, `dzn_session=${other.token}`, "POST", { linked_server_id: "server" })).status, 400);
+      assert.equal((await invoke(handler, env, `dzn_session=${other.token}`, "POST", { linked_server_id: "server" })).status, 403);
       assert.equal(calls, 0);
       db.sqlite.close();
       scenarios += 3;

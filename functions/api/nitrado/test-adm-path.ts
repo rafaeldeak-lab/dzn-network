@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { PagesFunction } from "../../_lib/types";
 
 type TestAdmPathBody = {
@@ -15,6 +16,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
 
   const body = await readJson<TestAdmPathBody>(request);
   const admPath = sanitizeAdmPath(body.path);

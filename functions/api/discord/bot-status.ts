@@ -3,6 +3,7 @@ import { canManageDiscordGuild } from "../../_lib/discord";
 import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, mockGuilds } from "../../_lib/mock";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 import { DZN_BOT_INSTALL_PERMISSIONS } from "../../../lib/discord-bot-permissions";
 
@@ -18,6 +19,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const user = await resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized", error_code: "not_authorized" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
 
   const url = new URL(request.url);
   const guildId = normalizeDiscordId(url.searchParams.get("guild_id"));

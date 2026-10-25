@@ -142,6 +142,8 @@ assert.ok(checkout.includes("StarterCheckoutButton") && checkout.includes("inFli
 assert.ok(checkout.includes("failure instanceof ApiRequestError") && checkout.includes("failure.status !== 401"));
 assert.match(checkout, /cancelReturnTo="\/pricing"/);
 assert.match(checkout, /Checkout cancelled\. No payment was taken and no trial was started\./);
+assert.match(checkout, /Owner setup starts only after Starter or Pro is active or trialing\./);
+assert.match(checkout, /Stripe returned successfully\. DZN is confirming the subscription before setup can start\./);
 assert.match(route, /PricingCheckoutStatus/);
 const client = readFileSync("components/onboarding/api.ts", "utf8");
 assert.ok(client.includes("readonly status?: number") && client.includes("data.offer, response.status"));

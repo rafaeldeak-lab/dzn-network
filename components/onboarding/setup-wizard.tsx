@@ -46,7 +46,7 @@ import {
   testOnboarding,
   validateNitradoToken,
 } from "./api";
-import type { AdmApiDebug, DiscordBotStatusResponse, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
+import type { AdmApiDebug, AuthResponse, DiscordBotStatusResponse, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerCategoryOption, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
 import { DZN_BOT_INSTALL_PERMISSIONS } from "@/lib/discord-bot-permissions";
@@ -142,9 +142,15 @@ async function loadOnboardingDraftWithRetry() {
   throw lastError;
 }
 
+function canStartOwnerSetup(navigation: AuthResponse["navigation"]) {
+  const planStatus = navigation?.plan_status?.trim().toLowerCase();
+  return navigation?.plan_tier !== "free" && (planStatus === "active" || planStatus === "trialing");
+}
+
 export function SetupWizard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [redirectingToPricing, setRedirectingToPricing] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [step, setStep] = useState(0);
   const [guilds, setGuilds] = useState<DiscordGuild[]>([]);
@@ -205,6 +211,13 @@ export function SetupWizard() {
     async function load() {
       try {
         const auth = await getMe();
+        if (!canStartOwnerSetup(auth.navigation)) {
+          setAuthenticated(true);
+          setRedirectingToPricing(true);
+          const billingState = new URLSearchParams(window.location.search).get("billing");
+          router.replace(`/pricing?billing=${billingState === "success" ? "confirmation_pending" : "setup_required"}`);
+          return;
+        }
         setAuthenticated(true);
         const [guildResult, draftLoad] = await Promise.all([
           loadDiscordGuilds(true),
@@ -287,7 +300,7 @@ export function SetupWizard() {
       }
     }
     load();
-  }, [loadDiscordGuilds]);
+  }, [loadDiscordGuilds, router]);
 
   useEffect(() => {
     if (!authenticated || !draftHydrated || !draftAvailable || reviewMode || publicationComplete || (step === 6 && publishedServer)) return;
@@ -734,7 +747,7 @@ export function SetupWizard() {
     if (id) setServiceIdInput(id);
   }
 
-  if (loading) return <SetupFrame><LoadingState /></SetupFrame>;
+  if (loading || redirectingToPricing) return <SetupFrame><LoadingState /></SetupFrame>;
 
   if (!authenticated) {
     return (

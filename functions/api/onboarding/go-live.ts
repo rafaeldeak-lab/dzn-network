@@ -2,6 +2,7 @@ import { getCurrentLinkedServer, getSessionUser, requireDb } from "../../_lib/db
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import { getOnboardingServiceProof, saveOnboardingServiceChecks } from "../../_lib/onboarding-service-proof";
+import { canAccessOwnerOnboarding, OWNER_ONBOARDING_PLAN_REQUIRED } from "../../_lib/owner-onboarding-access";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -10,6 +11,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const user = await getSessionUser(env, request);
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
+  if (!await canAccessOwnerOnboarding(env, user)) {
+    return json({ error: OWNER_ONBOARDING_PLAN_REQUIRED.message, error_code: OWNER_ONBOARDING_PLAN_REQUIRED.code }, { status: 403 });
+  }
 
   const linkedServer = await getCurrentLinkedServer(env, user.id);
   if (!linkedServer || typeof linkedServer.id !== "string") {
