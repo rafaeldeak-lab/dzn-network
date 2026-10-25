@@ -55,6 +55,8 @@ const DELETED_MESSAGE_NOTICE_MS = 2_000;
 const CAPABILITY_PROBE_RETRY_DELAY_MS = 5_000;
 const CAPABILITY_PROBE_RETRY_LIMIT = 3;
 const MESSAGE_RAIL_BOTTOM_TOLERANCE_PX = 32;
+const TYPING_IDLE_TIMEOUT_MS = 5_000;
+const TYPING_REFRESH_INTERVAL_MS = 4_000;
 
 type MessageRailMetrics = Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">;
 type MessageRailTimelineItem = Pick<CommsHistoryMessage, "created_at" | "id">;
@@ -174,6 +176,7 @@ export function DznCommsShell() {
   const [typingNames, setTypingNames] = useState<string[]>([]);
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
   const typingSessionChannelRef = useRef<string | null>(null);
+  const typingLastInputAtRef = useRef(0);
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyProbeEnabled ? "loading" : "static",
     payload: staticPayload,
@@ -348,20 +351,30 @@ export function DznCommsShell() {
     }
     const channel = payload.channel.slug;
     let cancelled = false;
-    const update = () => {
+    let lastRefreshAt = 0;
+    const stop = () => {
+      if (typingSessionChannelRef.current !== channel) return;
+      typingSessionChannelRef.current = null;
+      void setCommsTyping(channel, false).catch(() => undefined);
+    };
+    const refresh = () => {
       if (cancelled) return;
+      const now = Date.now();
+      if (now - typingLastInputAtRef.current > TYPING_IDLE_TIMEOUT_MS) {
+        stop();
+        return;
+      }
+      if (typingSessionChannelRef.current === channel && now - lastRefreshAt < TYPING_REFRESH_INTERVAL_MS) return;
+      lastRefreshAt = now;
       typingSessionChannelRef.current = channel;
       void setCommsTyping(channel, true).catch(() => undefined);
     };
-    update();
-    const interval = window.setInterval(update, 4_000);
+    refresh();
+    const interval = window.setInterval(refresh, 1_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
-      if (typingSessionChannelRef.current === channel) {
-        typingSessionChannelRef.current = null;
-        void setCommsTyping(channel, false).catch(() => undefined);
-      }
+      stop();
     };
   }, [hasDraft, payload.channel.slug, sending, typingWriteEnabled]);
 
@@ -798,7 +811,10 @@ export function DznCommsShell() {
                 <textarea
                   disabled={!sendingEnabled || sending}
                   value={draft}
-                  onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
+                  onChange={(event) => {
+                    typingLastInputAtRef.current = Date.now();
+                    setDraft([...event.target.value].slice(0, 2_000).join(""));
+                  }}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || !canSend) return;
                     event.preventDefault();
