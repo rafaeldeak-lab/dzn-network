@@ -1,5 +1,6 @@
 // A frozen local war snapshot is the only input to a tactical order. The
 // browser preview never reads the defender's subsequently edited live base.
+import { SQUAD_ROLES, squadProfile } from './squad-assets.js';
 export const WAR_LANES = Object.freeze({
   west: Object.freeze({ name: 'West treeline', start: [-22, 0], entry: [-16, 0] }),
   south: Object.freeze({ name: 'South ridge', start: [0, 22], entry: [0, 16] }),
@@ -47,6 +48,57 @@ export function evaluateWarFieldOrder(tactic, phase, command) {
 }
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+const whole = (value, maximum) => clamp(Math.floor(Number(value) || 0), 0, maximum);
+
+// This bounded replay record turns an already committed war result into visible
+// health and impact beats. It never awards points or decides a new casualty.
+export function buildWarDamageReport(attacker, defender, attack) {
+  if (!attacker?.base?.levels || !defender?.base?.levels || !attack || !['assault', 'recon'].includes(attack.tactic))
+    return { ok: false, error: 'A locked war attack and both base snapshots are required.' };
+  const capacity = whole(attacker.stats?.squadSize, 12);
+  if (!capacity) return { ok: false, error: 'The locked squad has no deployment slots.' };
+  const lead = attack.tactic === 'recon' ? 'recon' : 'assault';
+  const roles = Object.keys(SQUAD_ROLES).flatMap(role => Array(whole(attack.squad?.counts?.[role], capacity)).fill(role)).slice(0, capacity);
+  while (roles.length < capacity) roles.push(lead);
+  if (!attack.squad?.counts) for (let slot = 0; slot < capacity; slot++) {
+    if (slot === capacity - 1 && squadProfile('medic', attacker.base.levels).unlocked) roles[slot] = 'medic';
+    else if (attack.tactic === 'assault' && slot % 4 === 3 && squadProfile('sentinel', attacker.base.levels).unlocked) roles[slot] = 'sentinel';
+  }
+  const casualties = whole(attack.casualties, capacity);
+  const squad = roles.map((role, slot) => {
+    const maxHealth = squadProfile(role, attacker.base.levels).maxHealth;
+    const withdrawn = slot >= capacity - casualties;
+    const damage = withdrawn ? maxHealth : Math.min(maxHealth - 1, Math.round(maxHealth * (0.16 + slot % 3 * 0.055)));
+    const first = Math.round(damage * 0.35);
+    const second = Math.round(damage * 0.35);
+    return { slot, role, maxHealth, remainingHealth: maxHealth - damage, withdrawn,
+      hits: [{ at: 0.43 + slot % 3 * 0.012, damage: first }, { at: 0.61 + slot % 2 * 0.014, damage: second },
+        { at: withdrawn ? 0.74 : 0.68, damage: damage - first - second }].filter(hit => hit.damage > 0) };
+  });
+  const objectiveKey = Object.hasOwn(WAR_OBJECTIVES, attack.tactics?.plan?.objective) ? attack.tactics.plan.objective : 'hq';
+  const level = clamp(whole(defender.base.levels[objectiveKey], 5), 1, 5);
+  const maxHealth = 180 + level * 70;
+  // A recall loses war points after the fight; it does not repair the target.
+  const committedScore = whole(Number(attack.score) + Number(attack.recallPenalty || 0), 100);
+  const damage = Math.min(maxHealth - 1, Math.round(maxHealth * committedScore * 0.0085));
+  const volley = Math.round(damage * 0.28);
+  const objective = { key: objectiveKey, name: WAR_OBJECTIVES[objectiveKey], maxHealth, remainingHealth: maxHealth - damage,
+    hits: [{ at: 0.51, damage: volley }, { at: 0.65, damage: volley }, { at: 0.79, damage: damage - volley * 2 }].filter(hit => hit.damage > 0) };
+  const wallsById = new Map((defender.base.layout?.walls || []).map(wall => [wall.id, wall]));
+  const breachedWallIds = Array.isArray(attack.tactics?.breachedWallIds) ? attack.tactics.breachedWallIds : [];
+  const walls = [...new Set(breachedWallIds)].slice(0, 4).map((id, index) => {
+    const wall = wallsById.get(id);
+    if (!wall) return null;
+    const tier = clamp(whole(wall.level, 5), 1, 5);
+    const wallHealth = 55 + tier * 35;
+    const first = Math.round(wallHealth * 0.3), second = Math.round(wallHealth * 0.35);
+    return { id, x: wall.x, z: wall.z, tier, maxHealth: wallHealth, remainingHealth: 0,
+      hits: [{ at: 0.3 + index * 0.012, damage: first }, { at: 0.36 + index * 0.012, damage: second },
+        { at: 0.42 + index * 0.012, damage: wallHealth - first - second }] };
+  }).filter(Boolean);
+  return { ok: true, version: 1, casualties, squad, objective, walls };
+}
+
 const point = pair => ({ x: pair[0], z: pair[1] });
 function distanceToSegment(wall, start, end) {
   const dx = end.x - start.x, dz = end.z - start.z;

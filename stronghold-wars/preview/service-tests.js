@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -580,11 +580,28 @@ export function runServiceTests() {
     && warService.getWar(challenge.warId).attacks.length === 0, 'server-owned war action rejects locked and negative squads without consuming a deployment');
   const assault = warService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'war-iron-assault');
   assert(assault.ok && assault.score === expectedAssault && assault.attackId && assault.feedback.includes('counterfire'), 'Assault score and visible defence feedback derive from locked snapshots');
+  assert(assault.damage.ok && assault.damage.squad.length === lockedWar.snapshots.challenger.stats.squadSize
+    && assault.damage.squad.filter(unit => unit.remainingHealth === 0).length === assault.casualties
+    && assault.damage.squad.every(unit => unit.hits.reduce((sum, hit) => sum + hit.damage, unit.remainingHealth) === unit.maxHealth),
+  'every committed troop has bounded, fully accounted health matching the locked casualty count');
+  const breachDamage = buildWarDamageReport(lockedWar.snapshots.challenger, corridorFixture,
+    { tactic: 'assault', score: 55, casualties: 1, tactics: breachPlan });
+  assert(breachDamage.ok && breachDamage.walls.length === breachPlan.breachedWallIds.length
+    && breachDamage.walls.every(wall => wall.hits.reduce((sum, hit) => sum + hit.damage, 0) === wall.maxHealth)
+    && buildWarDamageReport(lockedWar.snapshots.challenger, corridorFixture,
+      { tactic: 'assault', score: 55, casualties: 1, tactics: flankPlan }).walls.length === 0,
+  'only selected breach walls lose their own tiered health; a flank does not invent wall damage');
+  assert(JSON.stringify(breachDamage) === JSON.stringify(buildWarDamageReport(lockedWar.snapshots.challenger, corridorFixture,
+    { tactic: 'assault', score: 55, casualties: 1, tactics: breachPlan }))
+    && breachDamage.objective.remainingHealth > 0 && breachDamage.objective.remainingHealth < breachDamage.objective.maxHealth,
+  'the frozen result produces the same bounded damage replay without destroying a permanent structure');
   assert(!warService.issueWarFieldOrder('violet-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'foreign-order').ok, 'opposing roster members cannot command another squad');
   assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'pursue', 'out-of-sequence').ok, 'withdrawal requires a contact order');
   assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'teleport', 'invalid-order').ok, 'unknown battle commands are rejected');
   const contactOrder = warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'smoke', 'contact-smoke');
   assert(contactOrder.ok && contactOrder.score === assault.score && contactOrder.casualties <= assault.casualties, 'smoke protects the squad without inflating an assault score');
+  assert(contactOrder.damage.casualties === contactOrder.casualties && contactOrder.damage.squad.filter(unit => unit.remainingHealth === 0).length === contactOrder.casualties,
+    'a field order updates the remaining troop health beats with its saved casualty result');
   assert(warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'contact-smoke').replay, 'the same field-order action replays without changing its command');
   assert(!warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'contact', 'focus', 'contact-again').ok, 'a second contact command cannot score twice');
   const withdrawalOrder = warService.issueWarFieldOrder('iron-owner', challenge.warId, assault.attackId, 'withdrawal', 'pursue', 'withdrawal-pursue');
@@ -592,6 +609,8 @@ export function runServiceTests() {
   const orderedReload = new LocalGameService({ storage: warStorage, now: () => warClock });
   const persistedAttack = orderedReload.getWar(challenge.warId).attacks.find(attack => attack.attackId === assault.attackId);
   assert(persistedAttack.orders.length === 2 && persistedAttack.score === withdrawalOrder.score && persistedAttack.casualties === withdrawalOrder.casualties, 'both battle orders and their adjusted outcome survive a save reload');
+  assert(JSON.stringify(persistedAttack.damage) === JSON.stringify(withdrawalOrder.damage),
+    'the damage report is regenerated from the saved attack and final field orders after reload');
   const duplicateAssault = warService.submitWarAttack('iron-owner', challenge.warId, 'recon', 'war-iron-assault');
   assert(duplicateAssault.ok && duplicateAssault.replay && duplicateAssault.attackId === assault.attackId && warService.getWar(challenge.warId).attacks.length === 1, 'a repeated action ID is replay-safe and cannot deploy a second attack');
   assert(!warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-assault').ok, 'action IDs cannot be reused by another identity');

@@ -10,7 +10,7 @@ import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
 import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
 import { PATROL_ORDERS } from './patrol-routes.js';
-import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder } from './war-tactics.js';
+import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport } from './war-tactics.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -304,7 +304,7 @@ function normalizeWarRecord(war) {
     const evaluated = a.tactics?.plan ? evaluateWarPlan(a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger, tactic, a.tactics.plan) : null;
     const attacker = a.communityId === war.challengerCommunityId ? snapshots.challenger : snapshots.defender;
     const squad = a.squad?.counts ? evaluateWarSquad(attacker.base.levels, tactic, a.squad.counts, attacker.stats.squadSize, evaluated) : null;
-    return {
+    const normalized = {
       attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
       tactic, at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
       baseScore: safeInt(a.baseScore ?? a.score), baseCasualties: safeInt(a.baseCasualties ?? a.casualties),
@@ -316,6 +316,8 @@ function normalizeWarRecord(war) {
       defenceOrderActive: Boolean(a.defenceOrderActive), defenceOrderPenalty: safeInt(a.defenceOrderPenalty), defenceExposureShield: safeInt(a.defenceExposureShield),
       tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null,
     };
+    normalized.damage = buildWarDamageReport(attacker, a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger, normalized);
+    return normalized;
   }) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
   const stages = Array.isArray(war.stages) ? war.stages.filter(item => WAR_STAGE_DEFS.some(def => def.id === item?.id)).slice(0, WAR_STAGE_DEFS.length).map(item => ({
@@ -1059,9 +1061,10 @@ export class LocalGameService {
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
       baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [] };
+    attack.damage = buildWarDamageReport(attacker, defender, attack);
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, tactics, squad, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
+    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, tactics, squad, damage: attack.damage, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
       totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
@@ -1090,6 +1093,8 @@ export class LocalGameService {
     const previousCasualties = attack.casualties;
     attack.score = Math.max(0, Math.min(100, attack.score + effect.scoreDelta));
     attack.casualties = Math.max(0, Math.min(attacker.stats.squadSize, attack.casualties + effect.casualtyDelta));
+    const defender = attack.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    attack.damage = buildWarDamageReport(attacker, defender, attack);
     const order = { ...effect, at: this.now() };
     attack.orders.push(order);
     war.score[attack.communityId] += attack.score - previousScore;
@@ -1100,7 +1105,8 @@ export class LocalGameService {
       attackEvent.text = `${profile.name} deployed ${attack.tactic === 'assault' ? 'Assault' : 'Recon'} · ${attack.score} points · ${attack.casualties} squad losses after field orders.`;
     }
     war.events.push({ type: 'field-order', at: order.at, actorId: identityId, text: `${profile.name}: ${order.name} · ${attack.score} attack points, ${attack.casualties} squad losses.`, details: { attackId, phase, command, score: attack.score, casualties: attack.casualties } });
-    const result = { ok: true, warId, attackId, order, score: attack.score, casualties: attack.casualties, totalScore: war.score[attack.communityId], feedback: attack.feedback };
+    const result = { ok: true, warId, attackId, order, score: attack.score, casualties: attack.casualties, damage: attack.damage,
+      totalScore: war.score[attack.communityId], feedback: attack.feedback };
     this._recordWarAction(identityId, actionId, 'war-field-order', result);
     this.save();
     return result;

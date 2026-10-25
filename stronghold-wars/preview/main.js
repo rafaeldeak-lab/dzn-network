@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, evaluateWarPlan } from './war-tactics.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -2666,7 +2666,12 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
     actions += `<div class="world-mission"><strong>SCOUTS & HOME DEFENCE</strong><p>${away.length} squad${away.length === 1 ? '' : 's'} away from your base. Every away squad can expose home defence to a timely counterattack; barricades and a prepared home reserve can reduce the bonus.</p>${readiness.eligible && hasRoster && !ownScout && scouts.length < WAR_RULES.maxScoutsPerSide ? `<button data-war-scout="${escapeHTML(war.id)}">Send scout · ${WAR_RULES.scoutArrivalMs / 1000}s to intel</button>` : ''}${scouts.map(scout => `<p>${escapeHTML(scout.id)} · ${scout.recalledAt ? 'recalled' : scout.active ? scout.arrived ? `intel received, returns in ${formatRemaining(scout.returnAt)}` : `travelling, arrives in ${formatRemaining(scout.arrivalAt)}` : 'returned'}${scout.intel ? ` · Hall L${scout.intel.hallLevel}, Tower L${scout.intel.towerLevel}, ${scout.intel.fortification} barricades` : ''}${scout.active && scout.identityId === currentIdentity.id ? ` <button data-scout-recall="${escapeHTML(scout.id)}">Recall scout</button>` : ''}</p>`).join('')}${ownAwayAttacks.map(attack => `<p>War squad ${escapeHTML(attack.attackId)} returns in ${formatRemaining(attack.returnAt)} · <button data-war-recall="${escapeHTML(attack.attackId)}" data-war-id="${escapeHTML(war.id)}">Recall to defend (25% point cost)</button></p>`).join('')}</div>`;
   }
   const status = war.state.toUpperCase();
-  return `<article class="war-card ${war.state === 'active' ? 'ready' : ''}" data-war-record="${escapeHTML(war.id)}" data-war-state="${escapeHTML(war.state)}"><span class="war-tag">${status} · ${escapeHTML(war.id)}</span><h3>${escapeHTML(challenger.name)} vs ${escapeHTML(defender.name)}</h3><p class="help">Captured before the challenge · fixed for scoring. ${isParticipant ? 'Shared war record for both preview communities.' : ''}</p>${actions}${warTimelineHTML(war)}</article>`;
+  const damageReports = war.attacks.length ? `<details class="war-card"><summary><b>Battle condition · ${war.attacks.length} deployment${war.attacks.length === 1 ? '' : 's'}</b></summary><p class="help">Replay health follows each committed result. Damage shown here does not award extra war points.</p>${war.attacks.map(attack => {
+    const report = attack.damage;
+    if (!report?.ok) return '';
+    return `<p><b>${escapeHTML(attack.attackId)}</b> · ${escapeHTML(report.objective.name)} ${Math.round(report.objective.remainingHealth / report.objective.maxHealth * 100)}% integrity · ${report.walls.length} wall ${report.walls.length === 1 ? 'breach' : 'breaches'} · ${report.squad.length - report.casualties}/${report.squad.length} troops returned.</p>`;
+  }).join('')}</details>` : '';
+  return `<article class="war-card ${war.state === 'active' ? 'ready' : ''}" data-war-record="${escapeHTML(war.id)}" data-war-state="${escapeHTML(war.state)}"><span class="war-tag">${status} · ${escapeHTML(war.id)}</span><h3>${escapeHTML(challenger.name)} vs ${escapeHTML(defender.name)}</h3><p class="help">Captured before the challenge · fixed for scoring. ${isParticipant ? 'Shared war record for both preview communities.' : ''}</p>${actions}${damageReports}${warTimelineHTML(war)}</article>`;
 }
 
 function showWarTable(errorMessage = '') {
@@ -3120,6 +3125,76 @@ function clearWarEffects(battle) {
   battle.effects.length = 0;
 }
 
+function makeWarHealthBar(width = 0.78) {
+  const group = new THREE.Group();
+  const background = new THREE.Mesh(new THREE.PlaneGeometry(width, 0.105),
+    new THREE.MeshBasicMaterial({ color: 0x14251e, transparent: true, opacity: 0.9, depthTest: false }));
+  const fill = new THREE.Mesh(new THREE.PlaneGeometry(width - 0.04, 0.065),
+    new THREE.MeshBasicMaterial({ color: 0x8cf0a2, depthTest: false }));
+  fill.position.z = 0.005;
+  group.add(background, fill);
+  group.renderOrder = 30;
+  group.userData.fill = fill;
+  group.userData.width = width - 0.04;
+  scene.add(group);
+  return group;
+}
+
+function setWarHealthBar(bar, fraction) {
+  const health = THREE.MathUtils.clamp(fraction, 0, 1);
+  bar.userData.fill.scale.x = Math.max(0.001, health);
+  bar.userData.fill.position.x = -(1 - health) * bar.userData.width / 2;
+  bar.userData.fill.material.color.setHex(health > 0.55 ? 0x8cf0a2 : health > 0.25 ? 0xffce73 : 0xff7474);
+  bar.quaternion.copy(camera.quaternion);
+  bar.visible = health > 0;
+}
+
+function disposeWarHealthBar(bar) {
+  scene.remove(bar);
+  for (const child of bar.children) {
+    child.geometry.dispose();
+    child.material.dispose();
+  }
+}
+
+function warHealthAt(track, progress) {
+  return Math.max(0, track.maxHealth - track.hits.filter(hit => hit.at <= progress).reduce((sum, hit) => sum + hit.damage, 0));
+}
+
+function updateWarDamage(battle, progress) {
+  const report = battle.damage;
+  if (!report?.ok) return;
+  for (const [index, troop] of battle.troops.entries()) {
+    const track = report.squad[index];
+    if (!track) continue;
+    for (const hit of track.hits) if (hit.at <= progress && hit.at > troop.lastDamageAt) {
+      spawnWarPulse(battle, troop.mesh.position, 0xff9d72, 0.48);
+      troop.lastDamageAt = hit.at;
+    }
+    const health = warHealthAt(track, progress);
+    troop.healthBar.position.copy(troop.mesh.position).add(new THREE.Vector3(0, 2.25, 0));
+    setWarHealthBar(troop.healthBar, health / track.maxHealth);
+  }
+  const objective = report.objective;
+  for (const hit of objective.hits) if (hit.at <= progress && hit.at > battle.lastObjectiveHitAt) {
+    const point = battle.objectiveMarker.position;
+    spawnWarPulse(battle, new THREE.Vector3(OUTPOST.x + point.x, 0.18, OUTPOST.z + point.z), 0xffb45e, 1.65);
+    battle.lastObjectiveHitAt = hit.at;
+  }
+  battle.objectiveHealthBar.position.set(OUTPOST.x + battle.objectiveMarker.position.x, 6, OUTPOST.z + battle.objectiveMarker.position.z);
+  setWarHealthBar(battle.objectiveHealthBar, warHealthAt(objective, progress) / objective.maxHealth);
+  for (const wall of report.walls) {
+    for (const hit of wall.hits) if (hit.at <= progress && hit.at > (battle.lastWallHitAt[wall.id] || 0)) {
+      spawnWarPulse(battle, new THREE.Vector3(OUTPOST.x + wall.x, 0.13, OUTPOST.z + wall.z), 0xffbc6c, 0.8);
+      battle.lastWallHitAt[wall.id] = hit.at;
+    }
+    if (warHealthAt(wall, progress) === 0) for (const mesh of warWallMeshes) if (mesh.userData.wallId === wall.id) mesh.visible = false;
+  }
+  const activeTroops = report.squad.filter(track => warHealthAt(track, progress) > 0).length;
+  const brokenWalls = report.walls.filter(wall => warHealthAt(wall, progress) === 0).length;
+  battle.damageStatus.textContent = `SQUAD ${activeTroops}/${report.squad.length} · ${objective.name.toUpperCase()} ${Math.round(warHealthAt(objective, progress) / objective.maxHealth * 100)}% · WALLS ${brokenWalls}/${report.walls.length}`;
+}
+
 function buildWarBaseVisual(side) {
   clearWarBaseVisuals();
   const token = warDefenderToken;
@@ -3259,6 +3334,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
   const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+  const damage = result.damage?.ok ? result.damage : buildWarDamageReport(attackingSide, defendingSide, result);
   buildWarBaseVisual(defendingSide);
   const objective = defendingSide.base.layout.structures[result.tactics.plan.objective];
   const objectiveMarker = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.45, 40),
@@ -3282,7 +3358,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
   const squadSize = attackingSide.stats.squadSize;
-  const selectedRoles = result.squad?.counts ? Object.entries(result.squad.counts).flatMap(([role, count]) => Array(count).fill(role)) : null;
+  const selectedRoles = damage.ok ? damage.squad.map(unit => unit.role) : null;
   const route = result.tactics?.route || [{ x: -22, z: 0 }, { x: -17, z: 0 }, { x: -3, z: 0 }];
   const first = route[0], second = route[1];
   const dx = second.x - first.x, dz = second.z - first.z;
@@ -3327,15 +3403,19 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     troop.position.copy(path[0]);
     scene.add(troop);
     warTroopMeshes.push(troop);
-    troops.push({ mesh: troop, role, roleRing, path, phase: i * 0.45, lag: role === 'medic' ? 0.08 : role === 'sentinel' ? 0.04 : 0,
+    troops.push({ mesh: troop, role, roleRing, healthBar: makeWarHealthBar(), lastDamageAt: 0, path, phase: i * 0.45, lag: role === 'medic' ? 0.08 : role === 'sentinel' ? 0.04 : 0,
       nextAction: 4.4 + i * 0.11, withdrawn: i >= squadSize - result.casualties });
   }
-  warBattle = { warId, tactic, result, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false, orders: [...(result.orders || [])], orderView: '', coverUntil: 0, previousCameraOffset: cameraOffset.clone() };
+  warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, objectiveHealthBar: makeWarHealthBar(1.35),
+    lastObjectiveHitAt: 0, lastWallHitAt: {}, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false,
+    orders: [...(result.orders || [])], orderView: '', coverUntil: 0, previousCameraOffset: cameraOffset.clone() };
   scene.add(warFillLight, warKeyLight, warKeyLight.target);
   warHud.hidden = false;
   warHud.style.maxWidth = 'min(355px,calc(100vw - 24px))';
   const roster = [...new Set(troops.map(troop => troop.role))].map(role => `<span style="color:#${WAR_ROLE_COLOURS[role].toString(16).padStart(6, '0')}">● ${WAR_ROLE_LABELS[role]} ${troops.filter(troop => troop.role === role).length}</span>`).join(' · ');
-  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}`;
+  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div><div class="war-damage-status" style="color:#b8efc9;font-weight:650;line-height:1.4;margin-top:5px" aria-live="off"></div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}`;
+  warBattle.damageStatus = warHud.querySelector('.war-damage-status');
+  updateWarDamage(warBattle, 0);
   warOrders.hidden = false;
   warOrders.innerHTML = '<b>FIELD COMMAND</b><p>Approaching the defended base. Contact orders unlock shortly.</p>';
   camTarget.copy(OUTPOST);
@@ -3358,6 +3438,8 @@ warOrders.onclick = event => {
   warBattle.result.score = result.score;
   warBattle.result.casualties = result.casualties;
   warBattle.result.feedback = result.feedback;
+  warBattle.result.damage = result.damage;
+  warBattle.damage = result.damage;
   warBattle.troops.forEach((troop, index) => { troop.withdrawn = index >= warBattle.squadSize - result.casualties; });
   if (command === 'smoke' || command === 'cover') {
     warBattle.coverUntil = warBattle.time + 2.2;
@@ -3439,9 +3521,9 @@ function updateWarBattle(dt) {
   warHud.querySelector('.war-progress').textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.7 ? 'ADVANCE' : progress < 0.84 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${warBattle.squadSize - warBattle.result.casualties}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
   for (const troop of warBattle.troops) {
     const actionProgress = Math.max(0, progress - troop.lag);
-    const retreating = troop.withdrawn ? actionProgress > 0.52 : actionProgress > 0.84;
+    const retreating = troop.withdrawn ? actionProgress > 0.74 : actionProgress > 0.84;
     const travel = retreating
-      ? Math.max(0.16, (troop.withdrawn ? 0.74 - (actionProgress - 0.52) * 1.35 : 1 - (actionProgress - 0.84) * 2.5))
+      ? Math.max(0.16, (troop.withdrawn ? 0.94 - (actionProgress - 0.74) * 2.7 : 1 - (actionProgress - 0.84) * 2.5))
       : Math.min(1, actionProgress / 0.7);
     const heading = warPathPosition(troop.path, travel, troop.mesh.position);
     const advancing = !retreating && actionProgress < 0.7;
@@ -3451,9 +3533,8 @@ function updateWarBattle(dt) {
     animateSoldier(troop.mesh, warBattle.time * 8 + troop.phase, advancing || retreating ? 1 : 0, null, dt);
     if (!retreating && progress > 0.37 && progress < 0.83) animateWarRoleAction(warBattle, troop);
   }
-  if (tactics?.breachedWallIds.length && progress >= 0.35) {
-    const breached = new Set(tactics.breachedWallIds);
-    for (const wall of warWallMeshes) if (breached.has(wall.userData.wallId)) wall.visible = false;
+  updateWarDamage(warBattle, progress);
+  if (tactics?.breachedWallIds.length && progress >= 0.42) {
     if (!warBattle.breachShown) {
       warBattle.breachShown = true;
       const breach = tactics.route[2];
@@ -3503,6 +3584,8 @@ function updateWarBattle(dt) {
     spawnSmoke(OUTPOST.clone().add(new THREE.Vector3(-2 + Math.sin(warBattle.time) * 3, 1, Math.cos(warBattle.time) * 4)));
   }
   if (warBattle.time < warBattle.duration) return;
+  for (const troop of warBattle.troops) disposeWarHealthBar(troop.healthBar);
+  disposeWarHealthBar(warBattle.objectiveHealthBar);
   for (const troop of warTroopMeshes) {
     scene.remove(troop);
     const ring = troop.children.find(child => child.geometry?.type === 'RingGeometry');
