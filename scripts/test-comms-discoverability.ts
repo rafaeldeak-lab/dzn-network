@@ -1,23 +1,27 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const layoutSource = readFileSync("app/layout.tsx", "utf8");
-const communityPageSource = readFileSync("app/community/page.tsx", "utf8");
-const globalStylesSource = readFileSync("app/globals.css", "utf8");
-const headerSource = readFileSync("components/site-header.tsx", "utf8");
-const launcherSource = readFileSync("components/comms/dzn-comms-launcher.tsx", "utf8");
-const commsSource = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
+function readSource(path: string) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const layoutSource = readSource("app/layout.tsx");
+const communityPageSource = readSource("app/community/page.tsx");
+const globalStylesSource = readSource("app/globals.css");
+const headerSource = readSource("components/site-header.tsx");
+const launcherSource = readSource("components/comms/dzn-comms-launcher.tsx");
+const commsSource = readSource("components/comms/dzn-comms-shell.tsx");
 const staticPayloadSource = commsSource.slice(
   commsSource.indexOf("const staticPayload"),
   commsSource.indexOf("export function DznCommsShell"),
 );
-const assistSource = readFileSync("components/comms/dzn-assist.tsx", "utf8");
-const assistGuidesSource = readFileSync("lib/dzn-assist.ts", "utf8");
-const assistRuntimeSource = readFileSync("lib/dzn-assist-runtime.ts", "utf8");
-const updatesSource = readFileSync("lib/dzn-updates.ts", "utf8");
-const updatesFeedSource = readFileSync("components/comms/dzn-updates-feed.tsx", "utf8");
-const updatesPageSource = readFileSync("app/updates/page.tsx", "utf8");
-const publicAccessPolicy = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
+const assistSource = readSource("components/comms/dzn-assist.tsx");
+const assistGuidesSource = readSource("lib/dzn-assist.ts");
+const assistRuntimeSource = readSource("lib/dzn-assist-runtime.ts");
+const updatesSource = readSource("lib/dzn-updates.ts");
+const updatesFeedSource = readSource("components/comms/dzn-updates-feed.tsx");
+const updatesPageSource = readSource("app/updates/page.tsx");
+const publicAccessPolicy = readSource("docs/PUBLIC_ACCESS_POLICY.md");
 
 assert.equal(layoutSource.includes("<DznCommsLauncher />"), true, "The Comms launcher must be mounted across the site.");
 assert.equal(headerSource.includes('{ href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle }'), true, "The shared header must clearly link to chat and help.");

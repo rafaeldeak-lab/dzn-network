@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-const healthApiSource = readFileSync("functions/api/servers/[serverId]/dashboard/health.ts", "utf8");
+function readSource(path: string) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const dashboardSource = readSource("components/onboarding/dashboard.tsx");
+const healthApiSource = readSource("functions/api/servers/[serverId]/dashboard/health.ts");
 
 const autoSurfaceStart = dashboardSource.indexOf("function AutoSyncDashboard");
 const autoSurfaceEnd = dashboardSource.indexOf("function LastSyncDetails");

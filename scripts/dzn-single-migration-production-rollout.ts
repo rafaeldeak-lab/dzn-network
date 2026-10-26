@@ -443,7 +443,9 @@ function normalizeSql(source: string) {
 }
 
 function sourceStatements(plan: MigrationPlan) {
-  const source = readFileSync(join("migrations", plan.migration), "utf8");
+  // Migration plans pin the canonical Git blob, which always uses LF. Normalize a
+  // Windows checkout before hashing so the integrity guard is platform-neutral.
+  const source = readFileSync(join("migrations", plan.migration), "utf8").replace(/\r\n/g, "\n");
   if (plan.statePreservation) {
     const sourceHash = createHash("sha256").update(source).digest("hex");
     if (sourceHash !== plan.statePreservation.sourceHash) {
