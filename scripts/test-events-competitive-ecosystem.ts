@@ -8,7 +8,7 @@ import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCateg
 import type { Env } from "../functions/_lib/types";
 
 function source(path: string) {
-  return readFileSync(path, "utf8");
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
 
 function includesAll(file: string, snippets: string[]) {

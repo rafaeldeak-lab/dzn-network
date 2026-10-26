@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-const api = readFileSync("components/onboarding/api.ts", "utf8");
-const types = readFileSync("components/onboarding/types.ts", "utf8");
+function readSource(path: string) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const dashboard = readSource("components/onboarding/dashboard.tsx");
+const api = readSource("components/onboarding/api.ts");
+const types = readSource("components/onboarding/types.ts");
 
 const admJobCompletionBlock = dashboard.slice(
   dashboard.indexOf("if (isCompletedAdmImportJobStatus(response.job.status))"),
