@@ -10,7 +10,7 @@ import { routeBriefing } from './world-map.js';
 import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
 import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
 import { PATROL_ORDERS } from './patrol-routes.js';
-import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat } from './war-tactics.js';
+import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter } from './war-tactics.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -180,7 +180,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
+  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], warDeployments: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -305,8 +305,10 @@ function normalizeWarRecord(war) {
   }
   const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => {
     const tactic = a.tactic === 'recon' ? 'recon' : 'assault';
-    const evaluated = a.tactics?.plan ? evaluateWarPlan(a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger, tactic, a.tactics.plan) : null;
     const attacker = a.communityId === war.challengerCommunityId ? snapshots.challenger : snapshots.defender;
+    const defender = a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger;
+    const conditionAtLaunch = normalizeWarCondition(defender, a.conditionAtLaunch);
+    const evaluated = a.tactics?.plan ? evaluateWarPlan(defender, tactic, a.tactics.plan, conditionAtLaunch) : null;
     const squad = a.squad?.counts ? evaluateWarSquad(attacker.base.levels, tactic, a.squad.counts, attacker.stats.squadSize, evaluated) : null;
     const normalized = {
       attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
@@ -319,9 +321,8 @@ function normalizeWarRecord(war) {
       returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
       defenceOrder: Object.hasOwn(WAR_DEFENCE_ORDERS, a.defenceOrder) ? a.defenceOrder : 'balanced',
       defenceOrderActive: Boolean(a.defenceOrderActive), defenceOrderPenalty: safeInt(a.defenceOrderPenalty), defenceExposureShield: safeInt(a.defenceExposureShield),
-      tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null,
+      tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null, conditionAtLaunch,
     };
-    const defender = a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger;
     normalized.damage = normalized.combatVersion === 2
       ? simulateWarCombat(attacker, defender, normalized)
       : buildWarDamageReport(attacker, defender, normalized);
@@ -502,6 +503,8 @@ function normalizeLoadedState(raw) {
         ? normalizedReserve(saved.trainingReserve) : starterReserve(),
       trainingJobs: Array.isArray(saved.trainingJobs) ? saved.trainingJobs.filter(job => job && typeof job.id === 'string' && TRAINING_ROLES.includes(job.role) && Number.isFinite(Number(job.finishAt)))
         .slice(-100).map(job => ({ id: job.id, role: job.role, count: Math.min(12, safeInt(job.count)), finishAt: safeInt(job.finishAt) })).filter(job => job.count > 0) : [],
+      warDeployments: Array.isArray(saved.warDeployments) ? saved.warDeployments.filter(item => item && typeof item.warId === 'string' && typeof item.attackId === 'string' && Number.isFinite(Number(item.returnAt)))
+        .slice(-100).map(item => ({ warId: item.warId, attackId: item.attackId, returnAt: safeInt(item.returnAt), counts: normalizedReserve(item.counts) })) : [],
       fieldOrders: {
         day: typeof saved.fieldOrders?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.fieldOrders.day) ? saved.fieldOrders.day : '',
         completed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.completed.includes(id)),
@@ -835,6 +838,13 @@ export class LocalGameService {
     return war ? clone(war) : null;
   }
 
+  getWarCondition(warId, defendingCommunityId) {
+    const war = this._warById(warId);
+    if (!war || ![war.challengerCommunityId, war.defenderCommunityId].includes(defendingCommunityId)) return null;
+    const defender = defendingCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    return clone(warConditionAfter(defender, war.attacks.filter(attack => attack.communityId !== defendingCommunityId)));
+  }
+
   getWars(identityId = this.state.currentIdentityId) {
     this._syncWarDeadlines();
     const profile = this.profile(identityId);
@@ -1070,10 +1080,18 @@ export class LocalGameService {
     if (this.getScoutReports(identityId, warId).some(scout => scout.identityId === identityId && scout.active)) return { ok: false, error: 'Your scout squad is still away. Recall it or wait for its return before attacking.' };
     const attacker = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
-    const tactics = plan === null ? null : evaluateWarPlan(defender, tactic, plan);
+    const conditionAtLaunch = this.getWarCondition(warId, defender.communityId);
+    const tactics = plan === null ? null : evaluateWarPlan(defender, tactic, plan, conditionAtLaunch);
     if (tactics && !tactics.ok) return { ok: false, error: tactics.error };
     const squad = plan?.squad == null ? null : evaluateWarSquad(attacker.base.levels, tactic, plan.squad, attacker.stats.squadSize, tactics);
     if (squad && !squad.ok) return { ok: false, error: squad.error };
+    // Current tactical deployments use the member's trained personal reserve.
+    // Historical plan-less attacks retain their saved legacy rules.
+    if (squad) {
+      const reserve = this.getTrainingReadiness(identityId)?.reserve;
+      const missing = TRAINING_ROLES.filter(role => squad.counts[role] > (reserve?.[role] || 0));
+      if (missing.length) return { ok: false, error: `Train ${missing.map(role => SQUAD_ROLES[role].name).join(', ')} before deploying this war squad.` };
+    }
     const a = attacker.base.levels; const d = defender.base.levels;
     const kit = squad ? squadBattleStats(a, tactic, squad.counts) : tactic === 'assault' ? attacker.stats.assaultKit : attacker.stats.reconKit;
     const rawScore = tactic === 'assault'
@@ -1093,13 +1111,18 @@ export class LocalGameService {
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
       combatVersion: tactics?.ok ? 2 : 1, combatBaseScore: score,
-      baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [] };
+      baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [], conditionAtLaunch };
     attack.damage = attack.combatVersion === 2 ? simulateWarCombat(attacker, defender, attack) : buildWarDamageReport(attacker, defender, attack);
     if (!attack.damage.ok) return attack.damage;
     if (attack.combatVersion === 2) {
       attack.score = attack.baseScore = attack.damage.score;
       attack.casualties = attack.baseCasualties = attack.damage.casualties;
       attack.feedback += ` The locked battle dealt ${attack.damage.objective.maxHealth - attack.damage.objective.remainingHealth}/${attack.damage.objective.maxHealth} objective damage, broke ${attack.damage.walls.filter(wall => !wall.remainingHealth).length}/${attack.damage.walls.length} route walls and withdrew ${attack.casualties}/${attacker.stats.squadSize} troops, scoring ${attack.score}.`;
+    }
+    if (squad) {
+      const member = this.member(identityId);
+      for (const role of TRAINING_ROLES) member.trainingReserve[role] -= squad.counts[role];
+      member.warDeployments.push({ warId, attackId, returnAt, counts: clone(squad.counts) });
     }
     war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += attack.score;
     war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${attack.score} points · ${attack.casualties} squad losses.`, details: clone(attack) });
@@ -2284,13 +2307,24 @@ export class LocalGameService {
     if (!member) return;
     const now = this.now();
     const pending = [];
+    const away = [];
     let changed = false;
     for (const job of member.trainingJobs) {
       if (job.finishAt > now) { pending.push(job); continue; }
       member.trainingReserve[job.role] = Math.min(100, member.trainingReserve[job.role] + job.count);
       changed = true;
     }
-    if (changed) { member.trainingJobs = pending; this.save(); }
+    for (const deployment of member.warDeployments) {
+      const attack = this._warById(deployment.warId)?.attacks.find(item => item.attackId === deployment.attackId && item.identityId === identityId);
+      if (!attack) { changed = true; continue; }
+      if (Math.min(deployment.returnAt, attack.returnedAt || Infinity) > now) { away.push(deployment); continue; }
+      // The final saved combat report includes field orders issued after launch.
+      // Only its surviving soldiers return; a reload cannot grant them twice.
+      for (const soldier of attack.damage?.squad || []) if (TRAINING_ROLES.includes(soldier.role) && soldier.remainingHealth > 0)
+        member.trainingReserve[soldier.role] = Math.min(100, member.trainingReserve[soldier.role] + 1);
+      changed = true;
+    }
+    if (changed) { member.trainingJobs = pending; member.warDeployments = away; this.save(); }
   }
 
   getTrainingReadiness(identityId = this.state.currentIdentityId) {
@@ -2301,8 +2335,9 @@ export class LocalGameService {
     const reserve = normalizedReserve(member.trainingReserve);
     const missing = Object.fromEntries(TRAINING_ROLES.map(role => [role, Math.max(0, loadout.counts[role] - reserve[role])]));
     return { ...loadout, reserve, missing, ready: TRAINING_ROLES.every(role => missing[role] === 0),
-      jobs: clone(member.trainingJobs), reserveCapacity: loadout.capacity * 2,
-      occupied: TRAINING_ROLES.reduce((sum, role) => sum + reserve[role], 0) + member.trainingJobs.reduce((sum, job) => sum + job.count, 0) };
+      jobs: clone(member.trainingJobs), away: clone(member.warDeployments), reserveCapacity: loadout.capacity * 2,
+      occupied: TRAINING_ROLES.reduce((sum, role) => sum + reserve[role], 0) + member.trainingJobs.reduce((sum, job) => sum + job.count, 0)
+        + member.warDeployments.reduce((sum, deployment) => sum + TRAINING_ROLES.reduce((count, role) => count + deployment.counts[role], 0), 0) };
   }
 
   trainTroops(identityId, role, count, actionId = this.newActionId('training')) {

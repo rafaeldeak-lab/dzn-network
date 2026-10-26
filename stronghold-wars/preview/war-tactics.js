@@ -49,6 +49,42 @@ export function evaluateWarFieldOrder(tactic, phase, command) {
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const whole = (value, maximum) => clamp(Math.floor(Number(value) || 0), 0, maximum);
+const objectiveMaxHealth = (defender, key) => 180 + clamp(whole(defender.base.levels[key], 5), 1, 5) * 70;
+const wallMaxHealth = wall => 55 + clamp(whole(wall.level, 5), 1, 5) * 35;
+const savedHealth = (value, maximum) => Number.isFinite(value) ? whole(value, maximum) : maximum;
+
+// Store only damaged IDs from the accepted base. A later strike takes this
+// snapshot at launch, so field orders never rewrite a strike already launched.
+export function normalizeWarCondition(defender, source) {
+  const objectives = {};
+  for (const key of Object.keys(WAR_OBJECTIVES)) {
+    if (Number.isFinite(source?.objectives?.[key])) objectives[key] = whole(source.objectives[key], objectiveMaxHealth(defender, key));
+  }
+  const walls = {};
+  for (const wall of defender.base.layout?.walls || []) {
+    if (Number.isFinite(source?.walls?.[wall.id])) walls[wall.id] = whole(source.walls[wall.id], wallMaxHealth(wall));
+  }
+  return { objectives, walls };
+}
+
+export function warConditionAfter(defender, attacks) {
+  const condition = { objectives: {}, walls: {} };
+  for (const attack of attacks) {
+    if (!attack.damage?.ok) continue;
+    const target = attack.damage.objective;
+    if (Object.hasOwn(WAR_OBJECTIVES, target?.key)) {
+      const maximum = objectiveMaxHealth(defender, target.key);
+      condition.objectives[target.key] = Math.min(savedHealth(condition.objectives[target.key], maximum), whole(target.remainingHealth, maximum));
+    }
+    for (const segment of attack.damage.walls || []) {
+      const wall = defender.base.layout?.walls?.find(item => item.id === segment.id);
+      if (!wall) continue;
+      const maximum = wallMaxHealth(wall);
+      condition.walls[wall.id] = Math.min(savedHealth(condition.walls[wall.id], maximum), whole(segment.remainingHealth, maximum));
+    }
+  }
+  return condition;
+}
 
 function attackRoles(attacker, attack, capacity) {
   const lead = attack.tactic === 'recon' ? 'recon' : 'assault';
@@ -125,14 +161,16 @@ export function simulateWarCombat(attacker, defender, attack) {
   if (!Object.hasOwn(WAR_OBJECTIVES, objectiveKey)) return { ok: false, error: 'The locked objective is invalid.' };
   const level = clamp(whole(defender.base.levels[objectiveKey], 5), 1, 5);
   const objectiveHealth = 180 + level * 70;
-  const objective = { key: objectiveKey, name: WAR_OBJECTIVES[objectiveKey], maxHealth: objectiveHealth, remainingHealth: objectiveHealth, hits: [] };
+  const startingHealth = savedHealth(attack.conditionAtLaunch?.objectives?.[objectiveKey], objectiveHealth);
+  const objective = { key: objectiveKey, name: WAR_OBJECTIVES[objectiveKey], maxHealth: objectiveHealth, startingHealth, remainingHealth: startingHealth, hits: [] };
   const wallById = new Map((defender.base.layout?.walls || []).map(wall => [wall.id, wall]));
   const walls = [...new Set(attack.tactics.breachedWallIds || [])].slice(0, 4).map(id => {
     const wall = wallById.get(id);
     if (!wall) return null;
     const tier = clamp(whole(wall.level, 5), 1, 5);
     const maxHealth = 55 + tier * 35;
-    return { id, x: wall.x, z: wall.z, tier, maxHealth, remainingHealth: maxHealth, hits: [] };
+    const startingHealth = savedHealth(attack.conditionAtLaunch?.walls?.[id], maxHealth);
+    return { id, x: wall.x, z: wall.z, tier, maxHealth, startingHealth, remainingHealth: startingHealth, hits: [] };
   }).filter(Boolean);
   const orders = Array.isArray(attack.orders) ? attack.orders : [];
   const contact = orders.find(order => order.phase === 'contact')?.command;
@@ -196,8 +234,8 @@ export function simulateWarCombat(attacker, defender, attack) {
   }
   for (const unit of squad) unit.withdrawn = unit.remainingHealth === 0;
   const casualties = squad.filter(unit => unit.withdrawn).length;
-  const breached = walls.filter(wall => wall.remainingHealth === 0).length;
-  const damageFraction = (objective.maxHealth - objective.remainingHealth) / objective.maxHealth;
+  const breached = walls.filter(wall => wall.startingHealth > 0 && wall.remainingHealth === 0).length;
+  const damageFraction = (objective.startingHealth - objective.remainingHealth) / objective.maxHealth;
   const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2), 0, 100);
   return { ok: true, version: 2, score, casualties, squad, objective, walls };
 }
@@ -210,7 +248,7 @@ function distanceToSegment(wall, start, end) {
   return { distance: Math.hypot(wall.x - start.x - dx * fraction, wall.z - start.z - dz * fraction), fraction };
 }
 
-export function evaluateWarPlan(defender, tactic, input) {
+export function evaluateWarPlan(defender, tactic, input, condition = null) {
   if (!defender?.base?.layout || !['assault', 'recon'].includes(tactic) || !input || typeof input !== 'object'
     || !WAR_LANES[input.lane] || !WAR_OBJECTIVES[input.objective] || !WAR_METHODS[input.method]) {
     return { ok: false, error: 'Choose a valid entry, objective and approach.' };
@@ -221,7 +259,8 @@ export function evaluateWarPlan(defender, tactic, input) {
   const targetSource = defender.base.layout.structures?.[plan.objective];
   if (!Number.isFinite(targetSource?.x) || !Number.isFinite(targetSource?.z)) return { ok: false, error: 'The locked target position is unavailable.' };
   const target = { x: targetSource.x, z: targetSource.z };
-  const corridor = (defender.base.layout.walls || []).map(wall => ({ wall, ...distanceToSegment(wall, entry, target) }))
+  const corridor = (defender.base.layout.walls || []).filter(wall => condition?.walls?.[wall.id] !== 0)
+    .map(wall => ({ wall, ...distanceToSegment(wall, entry, target) }))
     .filter(hit => hit.distance <= 2.25 && hit.fraction < 0.88)
     .sort((a, b) => a.fraction - b.fraction || a.wall.id.localeCompare(b.wall.id));
   const wallPressure = clamp(corridor.reduce((sum, hit) => sum + hit.wall.level, 0), 0, 12);

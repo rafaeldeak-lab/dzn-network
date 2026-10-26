@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -654,6 +654,41 @@ export function runServiceTests() {
   assert(focusCombat.objective.remainingHealth <= coveredCombat.objective.remainingHealth
     && coveredCombat.casualties <= focusCombat.casualties,
   'focus and pursuit push objective damage while smoke and cover protect the deployed squad');
+  const priorCondition = normalizeWarCondition(corridorFixture, { objectives: { hq: 100, tower: -40 }, walls: { 'wall-1': 0, invented: 0 } });
+  const followPlan = evaluateWarPlan(corridorFixture, 'assault', { lane: 'west', objective: 'hq', method: 'breach' }, priorCondition);
+  const followCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: followPlan, conditionAtLaunch: priorCondition });
+  assert(priorCondition.objectives.tower === 0 && !Object.hasOwn(priorCondition.walls, 'invented')
+    && followPlan.wallCount === 0 && followCombat.objective.startingHealth === 100 && followCombat.walls.length === 0
+    && followCombat.objective.remainingHealth <= 100
+    && followCombat.score === Math.max(0, Math.min(100, Math.round(45 + (100 - followCombat.objective.remainingHealth) / followCombat.objective.maxHealth * 19 - followCombat.casualties * 2)))
+    && followCombat.objective.hits.reduce((sum, hit) => sum + hit.damage, followCombat.objective.remainingHealth) === 100,
+  'a second strike sees a previous wall breach and only the target health remaining at launch');
+  const carryForward = warConditionAfter(corridorFixture, [{ damage: cutCombat }, { damage: followCombat }]);
+  assert(carryForward.objectives.hq === Math.min(cutCombat.objective.remainingHealth, followCombat.objective.remainingHealth)
+    && carryForward.walls['wall-1'] === cutCombat.walls[0].remainingHealth
+    && JSON.stringify(followCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: followPlan, conditionAtLaunch: priorCondition })),
+  'cumulative fortification condition and a launched strike replay deterministically');
+  checks.push('persistent war objective and wall condition, fresh-damage scoring, bounded snapshot and deterministic replay');
+  const carryStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const carryService = new LocalGameService({ storage: carryStorage, now: () => warClock });
+  const carryCapacity = lockedWar.snapshots.challenger.stats.squadSize;
+  carryService.member('iron-owner').trainingReserve.assault = carryCapacity;
+  carryService.member('iron-admin').trainingReserve.assault = carryCapacity;
+  carryService.save();
+  const carryPlan = { lane: 'west', objective: 'tower', method: 'flank', squad: { assault: carryCapacity } };
+  const firstStrike = carryService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'carry-first', carryPlan);
+  const secondStrike = carryService.submitWarAttack('iron-admin', challenge.warId, 'assault', 'carry-second', carryPlan);
+  assert(firstStrike.ok && secondStrike.ok && secondStrike.damage.objective.startingHealth === firstStrike.damage.objective.remainingHealth
+    && carryService.getWarCondition(challenge.warId, 'violet-ridge').objectives.tower === secondStrike.damage.objective.remainingHealth,
+  'two distinct roster members attack the same weakened building without resetting its health');
+  const laterFirstOrder = carryService.issueWarFieldOrder('iron-owner', challenge.warId, firstStrike.attackId, 'contact', 'focus', 'carry-later-order');
+  assert(laterFirstOrder.ok && JSON.stringify(carryService.getWar(challenge.warId).attacks[1].damage) === JSON.stringify(secondStrike.damage),
+  'a delayed order on the first strike does not retroactively change the second strike');
+  const persistedCarry = new LocalGameService({ storage: carryStorage, now: () => warClock }).getWar(challenge.warId).attacks;
+  assert(JSON.stringify(persistedCarry[1].damage) === JSON.stringify(secondStrike.damage)
+    && persistedCarry[1].conditionAtLaunch.objectives.tower === firstStrike.damage.objective.remainingHealth,
+  'the second strike keeps its launch condition and exact hit report across a browser reload');
+  checks.push('shared-war consecutive strikes, frozen carry-over and save reload');
   checks.push('snapshot-driven spatial combat, wall absorption, upgraded turret attrition, medic healing and field-order tradeoffs');
   const attackerStats = lockedWar.snapshots.challenger.base.levels;
   const defenderStats = lockedWar.snapshots.defender.base.levels;
@@ -711,6 +746,12 @@ export function runServiceTests() {
     'home reserve subtracts a bounded exposure advantage while the rival squad is away');
   const reconCapacity = lockedWar.snapshots.challenger.stats.squadSize;
   const ironReconPlan = { lane: 'south', objective: 'comms', method: 'flank', squad: { recon: reconCapacity - 2, engineer: 2 } };
+  const untrainedAttack = warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'untrained-recon', ironReconPlan);
+  assert(!untrainedAttack.ok && /Train/.test(untrainedAttack.error) && warService.getWar(challenge.warId).attacks.length === 2,
+    'an untrained tactical roster cannot consume an attack or create free soldiers');
+  warService.member('iron-admin').trainingReserve.recon = reconCapacity - 2;
+  warService.member('iron-admin').trainingReserve.engineer = 2;
+  warService.save();
   const unguardedRelayStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
   const unguardedRelay = new LocalGameService({ storage: unguardedRelayStorage, now: () => warClock });
   unguardedRelay.state.wars.find(item => item.id === challenge.warId).defenceOrders['violet-ridge'].order = 'balanced';
@@ -718,6 +759,11 @@ export function runServiceTests() {
   const ironRecon = warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', ironReconPlan);
   const violetAssault = warService.submitWarAttack('violet-admin', challenge.warId, 'assault', 'war-violet-assault');
   assert(violetRecon.ok && ironRecon.ok && violetAssault.ok, 'both communities can deploy distinct permitted roster members');
+  assert(warService.getTrainingReadiness('iron-admin').reserve.recon === 0
+    && warService.getTrainingReadiness('iron-admin').reserve.engineer === 0
+    && warService.getTrainingReadiness('iron-admin').away.length === 1
+    && !warService.trainTroops('iron-admin', 'assault', 5, 'overfilled-away-camp').ok,
+  'a war deployment moves the exact trained roster into occupied away camp spaces');
   assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical planning points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition planning points') && ironRecon.damage.version === 2,
     'a committed route, objective and chosen squad change the actual battle score and explanation');
   assert(ironRecon.defenceOrder === 'signals' && ironRecon.defenceOrderActive && ironRecon.defenceOrderPenalty === 4
@@ -736,6 +782,17 @@ export function runServiceTests() {
   assert(reloadedV2.combatVersion === 2 && reloadedV2.orders.length === 2 && reloadedV2.score === liveWithdrawal.score
     && JSON.stringify(reloadedV2.damage) === JSON.stringify(liveWithdrawal.damage),
   'a hit-based attack and its two field orders replay exactly after browser reload');
+  const returnedStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const returnedService = new LocalGameService({ storage: returnedStorage, now: () => warClock + WAR_RULES.squadReturnMs + 1 });
+  const returning = returnedService.getTrainingReadiness('iron-admin');
+  assert(returning.away.length === 0
+    && returning.reserve.recon === liveWithdrawal.damage.squad.filter(unit => unit.role === 'recon' && unit.remainingHealth > 0).length
+    && returning.reserve.engineer === liveWithdrawal.damage.squad.filter(unit => unit.role === 'engineer' && unit.remainingHealth > 0).length,
+  'after reload, only final field-order survivors return to the personal camp once');
+  const settledReserve = JSON.stringify(returning.reserve);
+  assert(JSON.stringify(new LocalGameService({ storage: returnedStorage, now: () => warClock + WAR_RULES.squadReturnMs + 2 }).getTrainingReadiness('iron-admin').reserve) === settledReserve,
+    'a second reload cannot duplicate returned soldiers');
+  checks.push('trained war rosters, away camp capacity, final casualty returns and one-time reload settlement');
   assert(warService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'war-iron-recon', { lane: 'east', objective: 'hq', method: 'breach' }).replay && warService.getWar(challenge.warId).attacks.length === 4, 'replaying an attack action cannot choose a new route or earn a second score');
   assert(new Set(warService.getWar(challenge.warId).attackIds).size === 4, 'all generated attack IDs are unique and persisted');
   assert(!warService.submitWarAttack('iron-member', challenge.warId, 'assault', 'war-iron-over-cap').ok, 'community attack cap is enforced at two deployments');
