@@ -31,7 +31,7 @@ import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "../../lib/support";
 
 export const metadata: Metadata = {
   title: "DZN Pro | Advanced tools for DayZ server owners",
-  description: `${PAYMENT_COPY.player} Compare Starter with DZN Pro: ${PAYMENT_COPY.proPrice}, no trial. Payment method required; monthly renewal until cancelled.`,
+  description: `${PAYMENT_COPY.player} Starter: ${PAYMENT_COPY.starterOffer}; payment method required. DZN Pro: ${PAYMENT_COPY.proTerms}; monthly renewal continues until cancelled.`,
   alternates: { canonical: "/pricing" },
 };
 
