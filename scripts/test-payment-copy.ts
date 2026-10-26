@@ -31,6 +31,8 @@ assert.equal(pricingReturnTo("/setup"), "/setup");
 const route = readFileSync("app/pricing/page.tsx", "utf8");
 const checkout = readFileSync("components/onboarding/pricing-checkout.tsx", "utf8");
 assert.ok(route.includes("PAYMENT_FAQS") && route.includes("PAYMENT_COPY.consent"));
+assert.match(route, /description:[\s\S]*PAYMENT_COPY\.starterOffer[\s\S]*PAYMENT_COPY\.proTerms/,
+  "Pricing metadata must disclose both Starter and Pro billing terms.");
 for (const policyRoute of ["terms", "privacy", "refunds"]) {
   const policy = readFileSync(`app/${policyRoute}/page.tsx`, "utf8");
   assert.match(policy, /DZN_SUPPORT_EMAIL/);

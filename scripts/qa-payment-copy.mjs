@@ -60,7 +60,8 @@ if (!process.argv.includes("--serve")) {
         if (req.method() !== "GET") {
           assert.equal(url.pathname, "/api/billing/create-checkout-session");
           const body = req.postDataJSON(); writes.push(body);
-          assert.deepEqual(Object.keys(body).sort(), body.accepted_offer ? ["accepted_offer","plan_key","returnTo"] : ["plan_key","returnTo"]);
+          assert.deepEqual(Object.keys(body).sort(), body.accepted_offer ? ["accepted_offer","cancelReturnTo","plan_key","returnTo"] : ["cancelReturnTo","plan_key","returnTo"]);
+          assert.equal(body.cancelReturnTo, "/pricing", "Abandoned checkout must always return to pricing.");
           if (rejectPrice) return route.fulfill({ status: 503, json: { error: "Plan pricing needs a support check before checkout. No new payment has been started.", errorCode: "CHECKOUT_PRICE_REVIEW_REQUIRED" } });
           if (body.plan_key === "starter" && !body.accepted_offer) return route.fulfill({ status: 409, json: { error: "Confirmation required", errorCode: "STARTER_PAID_CONFIRMATION_REQUIRED", offer: { id: "starter-gbp-2-month-no-trial-v1", confirmation: "a".repeat(64) } } });
           return route.fulfill({ json: { url: base + "/qa-stripe" } });
@@ -79,8 +80,11 @@ if (!process.argv.includes("--serve")) {
         await details.locator("summary").focus(); await page.keyboard.press("Enter");
         assert.equal(await details.getAttribute("open"), "");
       }
-      assert.equal(await page.locator("tbody .text-green-400").count() > 0, true);
-      assert.equal(await page.locator("tbody .text-red-400").count() > 0, true);
+      const comparison = page.locator('section[aria-labelledby="comparison-title"]');
+      assert.equal(await comparison.locator("svg.text-cyan-200, svg.text-amber-200").count() > 0, true,
+        "The comparison must show included features for at least one plan.");
+      assert.equal(await comparison.getByText("Not included", { exact: true }).count() > 0, true,
+        "The comparison must disclose unavailable features instead of implying all features are included.");
       await page.screenshot({ path: path.join(evidence, `pricing-paused-${width}.png`), fullPage: true });
       availability = "unknown"; await page.reload();
       await page.getByText(/Checkout is currently unavailable/).first().waitFor();
@@ -116,10 +120,11 @@ if (!process.argv.includes("--serve")) {
       await page.waitForURL(base + "/qa-stripe");
       assert.equal(writes.at(-1).accepted_offer, "a".repeat(64));
       assert.equal(writes.at(-1).returnTo, "/setup");
+      assert.equal(writes.at(-1).cancelReturnTo, "/pricing");
       await page.goto(base + "/pricing?returnTo=https%3A%2F%2Fevil.example");
       await page.getByRole("button", { name: "Choose Pro", exact: true }).click();
       await page.waitForURL(base + "/qa-stripe");
-      assert.deepEqual(writes.at(-1), { plan_key: "pro", returnTo: "/setup" });
+      assert.deepEqual(writes.at(-1), { plan_key: "pro", returnTo: "/setup", cancelReturnTo: "/pricing" });
       rejectPrice = true;
       for (const plan of ["Starter", "Pro"]) {
         await page.goto(base + "/pricing");
