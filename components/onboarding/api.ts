@@ -209,7 +209,7 @@ export async function createCheckoutSession(
   planKey: "starter" | "pro",
   returnTo = "/dashboard",
   acceptedOffer?: string,
-  cancelReturnTo = returnTo,
+  cancelReturnTo = "/pricing",
 ) {
   return request<{ url: string }>("/api/billing/create-checkout-session", {
     method: "POST",

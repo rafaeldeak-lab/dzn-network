@@ -8,6 +8,7 @@ import {
   paidPlanKey,
 } from "../../_lib/plans";
 import { isTestStripeModeOnProductionHost } from "../../_lib/stripe";
+import { safeReturnTo } from "../../_lib/oauth";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 type CheckoutBody = {
@@ -51,7 +52,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       planKey,
       priceId,
       returnTo: body.returnTo ?? "/dashboard",
-      cancelReturnTo: body.cancelReturnTo ?? body.returnTo ?? "/dashboard",
+      cancelReturnTo: cancellationReturnTo(body.cancelReturnTo),
       acceptedOffer: body.accepted_offer,
     });
     return json(result, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
@@ -64,6 +65,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     });
   }
 };
+
+function cancellationReturnTo(value: unknown) {
+  const target = safeReturnTo(typeof value === "string" ? value : null, "/pricing");
+  const pathname = new URL(target, "https://dzn.invalid").pathname;
+
+  // Completing checkout may continue into setup after Stripe confirms the plan.
+  // Cancelling must always return to plan selection, including for legacy callers.
+  return pathname === "/setup" || pathname.startsWith("/setup/") ? "/pricing" : target;
+}
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);
