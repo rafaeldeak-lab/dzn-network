@@ -123,12 +123,24 @@ async function run() {
   assert.equal(cancelUrl.pathname, "/pricing");
   assert.equal(cancelUrl.searchParams.get("billing"), "cancelled");
 
+  const defaultCancel = await fixture();
+  await request(defaultCancel, "pro", 200);
+  const defaultCancelUrl = new URL(new URLSearchParams([...sessions.values()].at(-1)!.body).get("cancel_url")!);
+  assert.equal(defaultCancelUrl.pathname, "/pricing");
+  assert.equal(defaultCancelUrl.searchParams.get("billing"), "cancelled");
+
+  const legacySetupCancel = await fixture();
+  await request(legacySetupCancel, "starter", 200, legacySetupCancel.token, { cancelReturnTo: "/setup?legacy=1" });
+  const legacySetupCancelUrl = new URL(new URLSearchParams([...sessions.values()].at(-1)!.body).get("cancel_url")!);
+  assert.equal(legacySetupCancelUrl.pathname, "/pricing");
+  assert.equal(legacySetupCancelUrl.searchParams.get("billing"), "cancelled");
+
   const unsafeCancel = await fixture();
   await request(unsafeCancel, "pro", 200, unsafeCancel.token, { cancelReturnTo: "https://evil.example/checkout" });
   const unsafeCancelUrl = new URL(new URLSearchParams([...sessions.values()].at(-1)!.body).get("cancel_url")!);
   assert.equal(unsafeCancelUrl.origin, "https://local.test");
-  assert.equal(unsafeCancelUrl.pathname, "/dashboard");
-  console.log("PASS pricing checkout returns to setup only after completion, returns cancellation to pricing, and rejects unsafe cancellation destinations");
+  assert.equal(unsafeCancelUrl.pathname, "/pricing");
+  console.log("PASS completed checkout returns to setup, while default, legacy setup and unsafe cancellation destinations return to pricing");
 
   const f = await fixture(); loseResponse = true;
   await request(f, "starter", 503);

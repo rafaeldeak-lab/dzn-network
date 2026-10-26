@@ -5,7 +5,7 @@ import { ArrowRight, CreditCard, X } from "lucide-react";
 import { ApiRequestError, createCheckoutSession } from "./api";
 import { RETURNING_STARTER_OFFER } from "../../lib/billing/returning-starter";
 
-export function StarterCheckoutButton({ disabled = false, label = "Choose Starter", returnTo = "/dashboard", cancelReturnTo = returnTo }: {
+export function StarterCheckoutButton({ disabled = false, label = "Choose Starter", returnTo = "/dashboard", cancelReturnTo = "/pricing" }: {
   disabled?: boolean; label?: string; returnTo?: string; cancelReturnTo?: string;
 }) {
   const [busy, setBusy] = useState(false);
