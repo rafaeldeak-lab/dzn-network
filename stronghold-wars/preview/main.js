@@ -119,7 +119,7 @@ if (webglContext) {
   try {
     renderer = new THREE.WebGLRenderer({ canvas: renderCanvas, context: webglContext, antialias: true });
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1;
+    renderer.toneMappingExposure = 1.18;
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -400,13 +400,18 @@ window.addEventListener('resize', () => {
   updateCamera();
 });
 
-scene.add(new THREE.HemisphereLight(0x9fd4ff, 0x203018, 0.9));
+scene.add(new THREE.HemisphereLight(0xc9e4ff, 0x55604a, 1.25));
 const sun = new THREE.DirectionalLight(0xffd9a0, 2.2);
 sun.position.set(30, 45, 15);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, far: 120 });
 scene.add(sun);
+// A broad opposite fill reveals black armour and textured building sides at
+// normal strategy zoom without flattening the warm key light or its shadows.
+const detailFill = new THREE.DirectionalLight(0xdedcff, 1.1);
+detailFill.position.set(-25, 24, -20);
+scene.add(detailFill);
 const purpleFill = new THREE.PointLight(0xa855f7, 60, 40);
 purpleFill.position.set(-6, 8, -6);
 scene.add(purpleFill);
@@ -1335,7 +1340,7 @@ function equipSoldier(soldier, role, tier) {
         carbine.name = 'warden_carbine';
         carbine.rotation.y = Math.PI / 2;
         carbine.scale.setScalar(0.84 + tier * 0.04);
-        carbine.position.set(0.06, 0.86, -0.27);
+        carbine.position.set(0.18, 1.03, -0.23);
         carbine.traverse(item => { if (item.isMesh) item.castShadow = true; });
         model.add(carbine);
         model.updateMatrixWorld(true);
@@ -1375,6 +1380,18 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
     }
     soldier.userData.walkMixer.update(Math.max(0, dt) * (pace > 0.05 ? pace : (soldier.userData.idleAction ? 1 : 0)));
     const model = soldier.getObjectByName('squad_model');
+    if (model && soldier.userData.squadRole === 'assault') {
+      // The image-guided Warden arrived with a loose arm gait. Keep both hands
+      // forward around the rifle while the imported leg walk still plays.
+      for (const [name, forward, across, tuck] of [['UpperArm_R', .62, -.35, -.6], ['Forearm_R', .45, -.1, -.35], ['UpperArm_L', .7, .35, .6], ['Forearm_L', .28, .1, .35]]) {
+        const limb = model.getObjectByName(name);
+        if (limb) {
+          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tuck));
+          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), across));
+          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forward));
+        }
+      }
+    }
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;
   }
@@ -3120,12 +3137,12 @@ function renderFieldHud(message = '') {
       : attempt.operativeId === 'signal' ? ['approach', 'barrier'].includes(attempt.phase)
         : attempt.casualties > 0 || attempt.health < 100;
     tactical.disabled = !abilityTargetReady || attempt.turn < attempt.tacticalReadyTurn;
-    tactical.onclick = () => useFieldAbility('tactical');
+    tactical.onclick = () => activateFieldAbility('tactical');
     abilities.append(tactical);
     const ultimate = document.createElement('button');
     ultimate.textContent = 'Ultimate · ' + OPERATIVES[attempt.operativeId].ultimate;
     ultimate.disabled = !abilityTargetReady || attempt.ultimateUsed;
-    ultimate.onclick = () => useFieldAbility('ultimate');
+    ultimate.onclick = () => activateFieldAbility('ultimate');
     abilities.append(ultimate);
     if (!attempt.fieldUpgrade && attempt.phase !== 'extraction') {
       const upgrade = document.createElement('select');
@@ -3284,7 +3301,7 @@ function resolveFieldChoice() {
   renderFieldHud(after.events.at(-1)?.text || 'Objective resolved.');
   updateHud();
 }
-function useFieldAbility(kind) {
+function activateFieldAbility(kind) {
   if (!fieldSession) return;
   const result = operations.useAbility(fieldSession.identityId, kind);
   if (result.ok) {
