@@ -61,7 +61,7 @@ export const GAME_CONFIG = Object.freeze({
   barricadeTimberCost: 30,
   maxBarricadesPerPlot: 3,
   facilities: Object.freeze({
-    'timberline-depot': Object.freeze({ name: 'Timberline Lumber Yard', model: 'timberline', purpose: 'Daily personal Timber resupply', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+    'timberline-depot': Object.freeze({ name: 'Timberline Lumber Yard', model: 'timberline', purpose: 'Stored Timber production and daily personal resupply', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'ridgewatch-range': Object.freeze({ name: 'Ridgewatch Training Range', model: 'ridgewatch', purpose: '+2 Assault score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'signal-marsh': Object.freeze({ name: 'Signal Marsh Relay', model: 'signal', purpose: '+2 Recon score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'highland-works': Object.freeze({ name: 'Highland Defence Works', model: 'highland', purpose: '-2 opposing attack score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
@@ -180,7 +180,7 @@ function emptyBase(treasury = 200) {
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], warDeployments: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
+  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, timberStored: 0, timberProductionAt: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], warDeployments: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -486,6 +486,8 @@ function normalizeLoadedState(raw) {
       productionAt: safeInt(saved.productionAt),
       salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt), nextTimberClaimAt: safeInt(saved.nextTimberClaimAt),
       timber: safeInt(saved.timber),
+      timberStored: Number.isFinite(Number(saved.timberStored)) ? Math.max(0, Math.min(110, Number(saved.timberStored))) : 0,
+      timberProductionAt: safeInt(saved.timberProductionAt),
       lifetimeContributed: safeInt(saved.lifetimeContributed),
       forgeJobs: Array.isArray(saved.forgeJobs) ? saved.forgeJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.forgeRecipes.some(r => r.id === j.recipeId)).map(j => ({
         id: j.id, recipeId: j.recipeId, input: safeInt(j.input), output: safeInt(j.output), durationSeconds: safeInt(j.durationSeconds),
@@ -541,7 +543,10 @@ export class LocalGameService {
     this._load();
     // Catch up each eligible member exactly once from the last saved clock.
     // Older saves start their production clock now, without a retroactive grant.
-    for (const profile of PREVIEW_IDENTITIES) this.advancePartsProduction(profile.id);
+    for (const profile of PREVIEW_IDENTITIES) {
+      this.advancePartsProduction(profile.id);
+      this.advanceTimberProduction(profile.id);
+    }
     this.save();
   }
 
@@ -1278,6 +1283,7 @@ export class LocalGameService {
   selectIdentity(identityId) {
     if (!this.profile(identityId)) return { ok: false, error: 'Unknown preview identity.' };
     this.advancePartsProduction(identityId);
+    this.advanceTimberProduction(identityId);
     this.state.currentIdentityId = identityId;
     this.save();
     return { ok: true };
@@ -1289,7 +1295,10 @@ export class LocalGameService {
     if (!profile || !entry) return { ok: false, error: 'Unknown preview identity.' };
     if (profile.role !== 'owner') return { ok: false, error: 'Only this community’s owner can change its simulated Pro status.' };
     if (!entry.definition.eligible) return { ok: false, error: 'The Free preview community is not eligible for this Pro toggle.' };
-    for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === profile.communityId)) this.advancePartsProduction(member.id);
+    for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === profile.communityId)) {
+      this.advancePartsProduction(member.id);
+      this.advanceTimberProduction(member.id);
+    }
     entry.saved.proActive = Boolean(active);
     this.save();
     return { ok: true, proActive: entry.saved.proActive };
@@ -1914,6 +1923,7 @@ export class LocalGameService {
     const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
     const targetLevel = project.targetLevel;
     if (completed) {
+      if (plotId === 'timberline-depot') for (const profile of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advanceTimberProduction(profile.id);
       plot.facilityLevel = targetLevel; plot.facilityProject = null;
       this._recordChronicle(entry.saved.base, `facility:${plotId}:${targetLevel}`, 'facility', `${GAME_CONFIG.facilities[plotId].name} reached Level ${targetLevel}.`);
     }
@@ -1991,6 +2001,21 @@ export class LocalGameService {
     member.nextTimberClaimAt = now + DAY_MS;
     this.save();
     return { ok: true, amount, nextClaimAt: member.nextTimberClaimAt };
+  }
+
+  collectYardTimber(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const info = this.getTimberProductionInfo(identityId);
+    if (!info?.level) return { ok: false, error: 'Build the Timberline Lumber Yard to collect produced Timber.' };
+    this.advanceTimberProduction(identityId);
+    const member = this.member(identityId);
+    const amount = Math.floor(member.timberStored);
+    if (amount < 1) return { ok: false, error: 'No whole Timber is ready to collect yet.' };
+    member.timber += amount;
+    member.timberStored -= amount;
+    this.save();
+    return { ok: true, amount };
   }
 
   recycleTimber(identityId = this.state.currentIdentityId, actionId = this.newActionId('recycle-timber')) {
@@ -2292,6 +2317,30 @@ export class LocalGameService {
     const before = member.stored;
     member.stored = Math.max(before, Math.min(info.capacity, before + produced));
     return member.stored - before;
+  }
+
+  getTimberProductionInfo(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const plot = entry.saved.base.landPlots.find(item => item.id === 'timberline-depot');
+    const level = plot?.status === 'claimed' ? plot.facilityLevel : 0;
+    return { level, stored: member.timberStored, capacity: level ? 30 + (level - 1) * 20 : 0,
+      perMinute: level && this.getAccess(identityId).allowed ? level * 2 : 0 };
+  }
+
+  advanceTimberProduction(identityId = this.state.currentIdentityId) {
+    const member = this.member(identityId);
+    const info = this.getTimberProductionInfo(identityId);
+    if (!member || !info) return 0;
+    const now = Math.max(0, Math.floor(Number(this.now()) || 0));
+    const previous = safeInt(member.timberProductionAt);
+    member.timberProductionAt = now;
+    if (!previous || now <= previous || !info.perMinute) return 0;
+    const produced = info.perMinute * Math.min(now - previous, DAY_MS) / 60_000;
+    const before = member.timberStored;
+    member.timberStored = Math.max(before, Math.min(info.capacity, before + produced));
+    return member.timberStored - before;
   }
 
   getTrainingLoadout(identityId = this.state.currentIdentityId) {

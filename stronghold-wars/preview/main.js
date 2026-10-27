@@ -1841,7 +1841,9 @@ function updateHud() {
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
   $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
   const yard = service.community()?.saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
-  $('yardBtn').textContent = yard?.facilityLevel ? `🪵 Lumber Yard L${yard.facilityLevel}` : state.levels.hq < 2 ? '🪵 Lumber Yard · Hall L2' : '🪵 Lumber Yard';
+  const yardProduction = service.getTimberProductionInfo();
+  $('yardBtn').textContent = yard?.facilityLevel ? `🪵 Yard L${yard.facilityLevel}${Math.floor(yardProduction?.stored || 0) ? ` · ${Math.floor(yardProduction.stored)} ready` : ''}` : state.levels.hq < 2 ? '🪵 Lumber Yard · Hall L2' : '🪵 Lumber Yard';
+  $('yardBtn').title = yardProduction?.level ? `${Math.floor(yardProduction.stored)}/${yardProduction.capacity} Timber stored · ${yardProduction.perMinute} Timber/min. Open the Yard to collect.` : 'Clear and claim Timberline Depot, then fund its Lumber Yard.';
   updatePreviewCard();
   updateBuildingList();
 }
@@ -2247,6 +2249,7 @@ function showLandPanel(focusPlotId = null) {
     $('closeBtn').onclick = closePanel;
     return;
   }
+  service.advanceTimberProduction();
   const snapshot = service.snapshot();
   const hall = snapshot.base.levels.hq;
   const repairPriority = snapshot.base.repairPriority;
@@ -2280,7 +2283,10 @@ function showLandPanel(focusPlotId = null) {
         facilityHtml += `<button data-approve-facility="${config.id}" ${target > hall ? 'disabled' : ''}>Approve Level ${target} · ${partsCost} Parts + ${timberCost} Timber</button>`;
         if (target > hall) facilityHtml += `<p class="help">Command Hall L${target} required for the next facility tier.</p>`;
       }
-      if (config.id === 'timberline-depot' && plot.facilityLevel > 0) facilityHtml += `<div class="row"><button data-depot-claim="${config.id}" ${snapshot.member.nextTimberClaimAt > Date.now() ? 'disabled' : ''}>${snapshot.member.nextTimberClaimAt > Date.now() ? `Resupply in ${formatRemaining(snapshot.member.nextTimberClaimAt)}` : 'Claim daily Timber'}</button></div>`;
+      if (config.id === 'timberline-depot' && plot.facilityLevel > 0) {
+        const production = service.getTimberProductionInfo();
+        facilityHtml += `<p class="notice">Lumber stock: ${Math.floor(production.stored)}/${production.capacity} · +${production.perMinute} Timber/min${production.perMinute ? '' : ' · paused'}</p><div class="row"><button data-yard-collect="${config.id}" ${production.stored < 1 ? 'disabled' : ''}>Collect ${Math.floor(production.stored)} Timber</button><button data-depot-claim="${config.id}" ${snapshot.member.nextTimberClaimAt > Date.now() ? 'disabled' : ''}>${snapshot.member.nextTimberClaimAt > Date.now() ? `Resupply in ${formatRemaining(snapshot.member.nextTimberClaimAt)}` : 'Claim daily Timber'}</button></div>`;
+      }
     }
     let routeHtml = '';
     if (plot.status === 'claimed') {
@@ -2391,6 +2397,11 @@ function showLandPanel(focusPlotId = null) {
     const result = service.claimDepotTimber();
     toast(result.ok ? `Lumber Yard resupply +${result.amount} personal Timber` : result.error);
     updateHud(); showLandPanel();
+  });
+  panel.querySelectorAll('[data-yard-collect]').forEach(button => button.onclick = () => {
+    const result = service.collectYardTimber();
+    toast(result.ok ? `+${result.amount} Timber collected from the Lumber Yard` : result.error);
+    updateHud(); showLandPanel('timberline-depot');
   });
 }
 
@@ -4558,6 +4569,7 @@ renderer.setAnimationLoop(time => {
   elapsed += dt;
 
   service.advancePartsProduction();
+  service.advanceTimberProduction();
   checkUpgrades();
 
   animated.radars.forEach(r => {

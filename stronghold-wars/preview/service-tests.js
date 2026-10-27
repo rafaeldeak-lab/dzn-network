@@ -225,6 +225,37 @@ export function runServiceTests() {
   assert(!facilityService.recycleTimber('iron-unverified', 'facility-recycle-locked').ok, 'unverified identity cannot use the renewable route');
   checks.push('district construction, approval roles, entitlement gates, one-time completion, daily and recycled Timber, reload');
 
+  let yardClock = 1_900_050_000_000;
+  const yardStorage = new MemoryStorage();
+  let yardService = new LocalGameService({ storage: yardStorage, now: () => yardClock });
+  const yardPlot = yardService.community('iron-owner').saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
+  yardPlot.status = 'claimed'; yardPlot.treesRemaining = 0; yardPlot.timberFunded = 60; yardPlot.facilityLevel = 1;
+  yardService.save();
+  assert(yardService.getTimberProductionInfo('iron-member').capacity === 30 && yardService.getTimberProductionInfo('iron-member').perMinute === 2, 'Level 1 Lumber Yard has a separate two Timber per minute collector and 30 Timber stock cap');
+  assert(!yardService.collectYardTimber('iron-unverified').ok && !yardService.collectYardTimber('free-owner').ok, 'unverified and Free preview identities cannot collect Yard stock');
+  yardClock += 30 * 60_000;
+  yardService = new LocalGameService({ storage: yardStorage, now: () => yardClock });
+  assert(yardService.member('iron-member').timberStored === 30 && yardService.member('iron-owner').timberStored === 30, 'offline Yard production fills each verified member stock only to its level cap');
+  yardService = new LocalGameService({ storage: yardStorage, now: () => yardClock });
+  assert(yardService.member('iron-member').timberStored === 30, 'reload at the same timestamp cannot mint Yard stock twice');
+  assert(yardService.collectYardTimber('iron-member').amount === 30 && yardService.member('iron-member').timberStored === 0, 'collection transfers only produced Timber to the member balance');
+  assert(!yardService.collectYardTimber('iron-member').ok && yardService.member('iron-owner').timberStored === 30, 'repeat collection cannot duplicate stock and another member keeps their own stock');
+  yardService.setOwnerProActive('iron-owner', false);
+  yardClock += 10 * 60_000;
+  yardService = new LocalGameService({ storage: yardStorage, now: () => yardClock });
+  assert(yardService.member('iron-member').timberStored === 0 && yardService.getTimberProductionInfo('iron-member').perMinute === 0, 'inactive simulated Pro pauses Yard production without erasing stock');
+  yardService.setOwnerProActive('iron-owner', true);
+  yardService.community('iron-owner').saved.base.landPlots.find(plot => plot.id === 'timberline-depot').facilityLevel = 2;
+  yardClock += 30_000;
+  assert(yardService.collectYardTimber('iron-member').amount === 2 && yardService.getTimberProductionInfo('iron-member').capacity === 50, 'Level 2 Yard produces four Timber per minute and increases storage');
+  const oldYardSave = JSON.parse(yardStorage.getItem(SERVICE_STORAGE_KEY));
+  delete oldYardSave.members['iron-member'].timberProductionAt;
+  const oldYardStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: JSON.stringify(oldYardSave) });
+  yardClock += 60 * 60_000;
+  const oldYardReload = new LocalGameService({ storage: oldYardStorage, now: () => yardClock });
+  assert(oldYardReload.member('iron-member').timberStored === 0 && oldYardReload.member('iron-member').timberProductionAt === yardClock, 'older saves start the Yard clock now without a retroactive Timber grant');
+  checks.push('separate Lumber Yard production, tiered storage, exact offline collection, Pro pause, member isolation and old-save clock');
+
   const routeStorage = new MemoryStorage();
   let routeService = new LocalGameService({ storage: routeStorage, now: () => clock });
   routeService.community('iron-owner').saved.base.levels.hq = 2;
