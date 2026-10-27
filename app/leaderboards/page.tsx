@@ -813,7 +813,7 @@ function LongestKillsSection({
 
 function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) {
   return (
-    <section className="leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-4">
+    <section className="leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-3 sm:p-4">
       <div className="relative z-10">
         <div className="leaderboard-reference-panel-header flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -959,25 +959,25 @@ function LeaderboardTable({
   return (
     <section className="leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-4">
       <div className="relative z-10">
-        <div className="leaderboard-reference-panel-header flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <div className="leaderboard-reference-panel-header flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
             <Icon className="h-5 w-5 text-violet-200" />
             <h2 className="text-xl font-black uppercase text-white">{title}</h2>
           </div>
           {actionLabel && actionHref ? (
-            <Link href={actionHref} className="leaderboard-reference-panel-action inline-flex items-center gap-1 rounded border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-[10px] font-black uppercase text-violet-100">
+            <Link href={actionHref} className="leaderboard-reference-panel-action inline-flex items-center gap-1 rounded border border-violet-300/20 bg-violet-500/10 px-2.5 py-1.5 text-[10px] font-black uppercase text-violet-100">
               {actionLabel}
               <ArrowRight className="h-3 w-3" />
             </Link>
           ) : null}
         </div>
         {rows.length ? (
-          <div className="dzn-leaderboard-table-wrap mt-3 overflow-x-auto">
-            <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+          <div className="dzn-leaderboard-table-wrap mt-2.5 overflow-x-auto">
+            <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-1 text-left">
               <thead>
                 <tr>
                   {headers.map((header) => (
-                    <th key={header} className="px-3 py-2 text-xs font-black uppercase text-zinc-500">
+                    <th key={header} className="px-2.5 py-1.5 text-xs font-black uppercase text-zinc-500">
                       {header}
                     </th>
                   ))}
@@ -990,7 +990,7 @@ function LeaderboardTable({
                   return (
                   <tr key={rowIndex} className={`dzn-leaderboard-row dzn-leaderboard-row--${rowTone} rounded-lg bg-black/24`}>
                     {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} data-label={headers[cellIndex]} className="border-y border-white/10 px-3 py-2 first:rounded-l last:rounded-r">
+                      <td key={cellIndex} data-label={headers[cellIndex]} className="border-y border-white/10 px-2.5 py-1.5 first:rounded-l last:rounded-r">
                         <span className={cellIndex === 0 ? `leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rowTone}` : "text-sm font-bold text-zinc-100"}>
                           {cell}
                         </span>
@@ -1055,7 +1055,7 @@ function FullLeaderboardDirectory({
   const id = `${title.toLowerCase().replaceAll(" ", "-")}-title`;
 
   return (
-    <section className="leaderboard-ref-directory leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-4" aria-labelledby={id}>
+    <section className="leaderboard-ref-directory leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-3 sm:p-4" aria-labelledby={id}>
       <div className="relative z-10">
         <div className="leaderboard-reference-panel-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
@@ -1092,7 +1092,7 @@ function FullLeaderboardDirectory({
         ) : rows.length ? (
           <>
             <div className="leaderboard-ref-directory-scroll dzn-leaderboard-table-wrap">
-              <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+              <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-1 text-left">
                 <thead>
                   <tr>
                     {headers.map((header) => <th key={header}>{header}</th>)}

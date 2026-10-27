@@ -840,11 +840,15 @@ function TacticalFeatureCard({
   return <Link href={href} className="group relative block overflow-hidden border border-white/12 bg-[#080b16] transition hover:border-white/30">{content}</Link>;
 }
 
-function DiscordIdentityAvatar({ displayName, avatarUrl, size }: { displayName: string; avatarUrl: string | null; size: "hero" | "profile" }) {
+function DiscordIdentityAvatar({ displayName, avatarUrl, size }: { displayName: string; avatarUrl: string | null; size: "hero" | "profile" | "summary" }) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const safeAvatarUrl = safeAuthenticatedDiscordAvatarUrl(avatarUrl);
   const initial = initialsFromName(displayName).slice(0, 1);
-  const dimensionClass = size === "hero" ? "h-16 w-16 text-2xl" : "h-20 w-20 text-3xl";
+  const dimensionClass = size === "hero"
+    ? "h-16 w-16 text-2xl"
+    : size === "profile"
+      ? "h-20 w-20 text-3xl"
+      : "h-14 w-14 text-xl";
 
   return (
     <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden border-2 border-cyan-200/60 bg-cyan-300/10 font-black text-cyan-100 ${dimensionClass}`} role="img" aria-label={`${displayName} Discord profile`}>
@@ -1232,64 +1236,64 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
       : profile?.public_profile_status === "unavailable" ? "Status unavailable" : "Not published";
 
   return (
-    <section id="profile-summary" aria-labelledby="profile-summary-title" className="min-w-0 scroll-mt-72 rounded-lg border border-emerald-300/25 bg-slate-950/78 p-4 backdrop-blur sm:p-5 md:scroll-mt-44">
+    <section id="profile-summary" aria-labelledby="profile-summary-title" className="min-w-0 scroll-mt-72 rounded-lg border border-emerald-300/25 bg-slate-950/78 p-3 backdrop-blur sm:p-4 md:scroll-mt-44">
       <div className="flex items-center gap-3">
-        <span className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-emerald-300/35 bg-emerald-300/10 text-emerald-100">
-          <UserRound aria-hidden="true" className="h-5 w-5" />
+        <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-emerald-300/35 bg-emerald-300/10 text-emerald-100">
+          <UserRound aria-hidden="true" className="h-4 w-4" />
         </span>
         <div>
-          <h2 id="profile-summary-title" className="text-lg font-black uppercase text-white">My Profile</h2>
+          <h2 id="profile-summary-title" className="text-base font-black uppercase text-white">My Profile</h2>
         </div>
       </div>
 
       {profile && progression ? (
-        <div className="mt-4 space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,0.9fr)] xl:items-start">
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(24rem,1.05fr)] xl:items-start">
             <div className="min-w-0">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <DiscordIdentityAvatar displayName={profile.display_name} avatarUrl={profileAvatarUrl} size="profile" />
+              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <DiscordIdentityAvatar displayName={profile.display_name} avatarUrl={profileAvatarUrl} size="summary" />
                   <div className="min-w-0">
-                    <p className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">{profile.display_name}</p>
-                    <p className="mt-1 text-xs font-black uppercase text-emerald-100">Discord verified private account</p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{profile.public_profile_message}</p>
+                    <p className="break-words text-base font-black text-white [overflow-wrap:anywhere]">{profile.display_name}</p>
+                    <p className="mt-0.5 text-[0.68rem] font-black uppercase text-emerald-100">Discord verified private account</p>
+                    <p className="mt-1.5 text-sm font-semibold leading-5 text-slate-300">{profile.public_profile_message}</p>
                   </div>
                 </div>
-                <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
+                <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[0.68rem] font-black uppercase text-emerald-100">
                   {publicStatus}
                 </span>
               </div>
-              <nav aria-label="My profile actions" className="mt-3 flex flex-wrap gap-2">
-                <a href="/player/profile#profile-settings" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-emerald-300/30 px-3 py-2 text-sm font-bold text-emerald-100 hover:bg-emerald-300/10">
+              <nav aria-label="My profile actions" className="mt-2.5 flex flex-wrap gap-1.5">
+                <a href="/player/profile#profile-settings" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-emerald-300/30 px-2.5 py-1.5 text-xs font-bold text-emerald-100 hover:bg-emerald-300/10">
                   <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" /> Edit profile
                 </a>
-                <a href="/player/profile#game-account" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-cyan-300/30 px-3 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-300/10">
+                <a href="/player/profile#game-account" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-cyan-300/30 px-2.5 py-1.5 text-xs font-bold text-cyan-100 hover:bg-cyan-300/10">
                   <Gamepad2 aria-hidden="true" className="h-4 w-4 shrink-0" /> Game account
                 </a>
                 {profile.public_profile_status === "published" && profile.public_profile_href ? (
-                  <Link href={profile.public_profile_href} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/25 px-3 py-2 text-sm font-bold text-white hover:bg-white/10">
+                  <Link href={profile.public_profile_href} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/25 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-white/10">
                     <ExternalLink aria-hidden="true" className="h-4 w-4 shrink-0" /> View public profile
                   </Link>
                 ) : null}
               </nav>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-2.5 grid grid-cols-2 gap-1.5">
                 <MetricTile label="Game Profiles" value={profile.linked_game_profiles === null ? "--" : String(profile.linked_game_profiles)} />
                 <MetricTile label="Public Servers" value={profile.linked_public_servers === null ? "--" : String(profile.linked_public_servers)} />
               </div>
 
             </div>
 
-            <div className="min-w-0 border-t border-white/10 pt-3 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
-              <div className="flex items-start gap-2.5">
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
-                  <Activity aria-hidden="true" className="h-5 w-5" />
+            <div className="min-w-0 border-t border-white/10 pt-3 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
+                  <Activity aria-hidden="true" className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
                   <h3 className="text-sm font-black uppercase text-white">My Server Stats</h3>
-                  <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-300">{progression.message}</p>
+                  <p className="text-xs font-semibold leading-5 text-slate-300">{progression.message}</p>
                 </div>
               </div>
-              <dl aria-label="Server statistics" className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-cyan-300/18 bg-white/10 sm:grid-cols-4">
+              <dl aria-label="Server statistics" className="mt-2.5 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-cyan-300/18 bg-white/10 sm:grid-cols-4">
                 <CompactStat label="Kills" value={hasStats && progression.gameplay_totals.kills !== null ? String(progression.gameplay_totals.kills) : "--"} />
                 <CompactStat label="Deaths" value={hasStats && progression.gameplay_totals.deaths !== null ? String(progression.gameplay_totals.deaths) : "--"} />
                 <CompactStat label="Suicides" value={hasStats && progression.gameplay_totals.suicides !== null ? String(progression.gameplay_totals.suicides) : "--"} />
@@ -1298,16 +1302,16 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
               {progression.featured_server ? (
                 <Link
                   href={`/servers/profile?slug=${encodeURIComponent(progression.featured_server.public_slug)}`}
-                  className="group mt-3 flex items-center justify-between gap-3 rounded-md border border-cyan-300/18 bg-slate-950/50 px-3 py-2.5 transition hover:border-cyan-200/45"
+                  className="group mt-2.5 flex items-center justify-between gap-3 rounded-md border border-cyan-300/18 bg-slate-950/50 px-2.5 py-2 transition hover:border-cyan-200/45"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-black uppercase text-white transition group-hover:text-cyan-100">
                       {progression.featured_server.server_name}
                     </span>
-                    <span className="mt-0.5 block truncate text-[0.65rem] font-bold uppercase text-slate-400">
+                    <span className="mt-0.5 block truncate text-[0.6rem] font-bold uppercase text-slate-400">
                       {progression.featured_server.server_type} - {progression.featured_server.platform ?? "Platform TBA"} - {progression.featured_server.map_name ?? "Map TBA"}
                     </span>
-                    <span className="mt-1 block text-xs font-semibold text-slate-300">
+                    <span className="mt-0.5 block text-[0.7rem] font-semibold text-slate-300">
                       {progression.featured_server.kills} kills / {progression.featured_server.deaths} deaths / {formatDistance(progression.featured_server.longest_kill_distance)} longest
                     </span>
                   </span>
@@ -1315,11 +1319,11 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
                 </Link>
               ) : null}
 
-              <div className="mt-3 border-t border-white/10 pt-3">
-                <h3 className="text-sm font-black uppercase text-white">Player Progression</h3>
-                <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+              <div className="mt-2.5 border-t border-white/10 pt-2.5">
+                <h3 className="text-xs font-black uppercase text-white">Player Progression</h3>
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
                 {progression.tracks.map((track) => (
-                  <li key={track.key} className="flex items-center justify-between gap-2 bg-white/[0.025] px-2.5 py-1.5 text-xs">
+                  <li key={track.key} className="flex min-w-0 items-center gap-1.5 rounded-md border border-white/8 bg-white/[0.025] px-2 py-1 text-[0.68rem]">
                     <span className="min-w-0 truncate font-bold text-violet-100">{track.label}</span>
                     <span className="shrink-0 text-slate-400">Not available yet</span>
                   </li>
@@ -1507,18 +1511,18 @@ function CommunityMetricTile({ label, value }: { label: string; value: string })
 
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-white/10 bg-white/6 p-3">
-      <p className="text-xl font-black text-white">{value}</p>
-      <p className="mt-1 text-xs font-bold uppercase text-slate-400">{label}</p>
+    <div className="rounded-md border border-white/10 bg-white/6 px-2.5 py-2">
+      <p className="text-lg font-black leading-none text-white">{value}</p>
+      <p className="mt-1 text-[0.65rem] font-bold uppercase text-slate-400">{label}</p>
     </div>
   );
 }
 
 function CompactStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 bg-slate-950/72 px-2.5 py-2">
+    <div className="min-w-0 bg-slate-950/72 px-2 py-1.5">
       <dt className="truncate text-[0.65rem] font-black uppercase text-slate-400">{label}</dt>
-      <dd className="mt-0.5 truncate text-lg font-black leading-none text-white">{value}</dd>
+      <dd className="mt-0.5 truncate text-base font-black leading-none text-white">{value}</dd>
     </div>
   );
 }

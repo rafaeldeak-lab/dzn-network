@@ -2405,7 +2405,7 @@ body.dzn-pricing-modal-open {
   width: 100%;
   min-width: 0 !important;
   table-layout: fixed;
-  border-spacing: 0 0.38rem !important;
+  border-spacing: 0 0.3rem !important;
 }
 
 .leaderboard-ref-table th,
@@ -2907,8 +2907,8 @@ body.dzn-pricing-modal-open {
   .leaderboard-reference-page .dzn-leaderboard-table tr.dzn-leaderboard-row {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 8px 4px;
-    padding-block: 12px;
+    gap: 6px 4px;
+    padding-block: 9px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.16);
     background: transparent;
   }
@@ -2926,7 +2926,7 @@ body.dzn-pricing-modal-open {
   .leaderboard-reference-page .dzn-leaderboard-table td::before {
     content: attr(data-label);
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     color: #a1a1aa;
     font-size: 10px;
     font-weight: 700;
