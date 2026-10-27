@@ -121,6 +121,38 @@ export function runServiceTests() {
   assert(builderService.processConstructionJobs('iron-owner').length === 2, 'parallel upgrades complete at the same deadline');
   checks.push('builder capacity, queued and parallel construction, scaffold timing, offline completion and reload safety');
 
+  let districtClock = 1_920_000_000_000;
+  const districtStorage = new MemoryStorage();
+  let districtService = new LocalGameService({ storage: districtStorage, now: () => districtClock });
+  const districtBase = districtService.community('iron-owner').saved.base;
+  districtBase.levels.hq = 2;
+  const districtPlot = districtBase.landPlots.find(plot => plot.id === 'timberline-depot');
+  districtPlot.status = 'claimed'; districtPlot.treesRemaining = 0; districtPlot.timberFunded = 60;
+  districtService.member('iron-owner').parts = 1000;
+  districtService.member('iron-owner').timber = 200;
+  districtService.save();
+  const districtCore = districtService.approveProject('iron-owner', 'workshop', 'district-core');
+  assert(districtCore.ok && districtService.approveFacility('iron-owner', 'timberline-depot', 'district-facility').ok && districtService.approveRoute('iron-owner', 'timberline-depot', 'district-route').ok, 'owner approves core, facility and route upgrades on the same base');
+  assert(districtService.contributeToProject('iron-owner', districtCore.projectId, 250, 'district-core-fund').constructionStarted, 'core upgrade takes the first crew slot');
+  assert(districtService.contributeFacility('iron-owner', 'timberline-depot', 100, 30, 'district-facility-fund').constructionStarted, 'fully funded facility enters the shared queue');
+  assert(districtService.contributeRoute('iron-owner', 'timberline-depot', 65, 30, 'district-route-fund').constructionStarted, 'fully funded route enters the shared queue');
+  const scheduled = districtService.snapshot('iron-owner').base;
+  const coreJob = scheduled.projects.find(project => project.id === districtCore.projectId);
+  const facilityJob = scheduled.landPlots[1].facilityProject;
+  const routeJob = scheduled.landPlots[1].routeProject;
+  assert(facilityJob.crewSlot === 0 && routeJob.crewSlot === 0 && facilityJob.startedAt === coreJob.finishAt && routeJob.startedAt === facilityJob.finishAt, 'one builder crew serializes all three project types');
+  assert(scheduled.landPlots[1].facilityLevel === 0 && scheduled.landPlots[1].routeLevel === 0 && districtService.routeNetworkBonus('iron-owner') === 0, 'queued district upgrades grant no early building or resource bonus');
+  districtClock = coreJob.finishAt;
+  districtService = new LocalGameService({ storage: districtStorage, now: () => districtClock });
+  assert(districtService.snapshot('iron-owner').base.levels.workshop === 2 && districtService.snapshot('iron-owner').base.landPlots[1].facilityLevel === 0, 'refresh completes core work and leaves the facility active');
+  districtClock = facilityJob.finishAt;
+  districtService = new LocalGameService({ storage: districtStorage, now: () => districtClock });
+  assert(districtService.snapshot('iron-owner').base.landPlots[1].facilityLevel === 1 && districtService.snapshot('iron-owner').base.landPlots[1].routeLevel === 0, 'refresh completes the facility and leaves the route active');
+  districtClock = routeJob.finishAt;
+  districtService = new LocalGameService({ storage: districtStorage, now: () => districtClock });
+  assert(districtService.snapshot('iron-owner').base.landPlots[1].routeLevel === 1 && districtService.routeNetworkBonus('iron-owner') === 5 && districtService.processConstructionJobs('iron-owner').length === 0, 'route bonus begins once at its saved deadline');
+  checks.push('shared core and district builder queue, delayed benefits and one-time offline completion');
+
   const pinService = new LocalGameService({ storage: new MemoryStorage(), now: () => clock });
   // Seed a review fixture with four eligible approved records. The progression
   // gates normally limit simultaneous projects, so this isolates the pin cap.
@@ -251,8 +283,12 @@ export function runServiceTests() {
   assert(facilityService.contributeFacility('iron-member', 'timberline-depot', 50, 15, 'facility-partial').replay && facilityService.member('iron-member').parts === partialBalance.parts && facilityService.member('iron-member').timber === partialBalance.timber, 'facility donation replay does not debit resources twice');
   assert(!facilityService.contributeFacility('iron-member', 'ridgewatch-range', 10, 0, 'facility-partial').ok, 'same action ID cannot replay against another plot');
   const finalFacility = facilityService.contributeFacility('iron-member', 'timberline-depot', 50, 15, 'facility-final');
-  assert(finalFacility.ok && finalFacility.completed && finalFacility.facilityLevel === 1, 'final community donation completes the first visual tier exactly once');
-  assert(!facilityService.contributeFacility('iron-owner', 'timberline-depot', 50, 15, 'facility-after-complete').ok, 'completed facility project closes to further funding');
+  assert(finalFacility.ok && finalFacility.constructionStarted && finalFacility.facilityLevel === 0, 'final community donation assigns a crew without granting the facility early');
+  assert(!facilityService.contributeFacility('iron-owner', 'timberline-depot', 50, 15, 'facility-after-complete').ok, 'constructing facility project closes to further funding');
+  assert(facilityService.processConstructionJobs('iron-owner').length === 0, 'facility remains unfinished before its deadline');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 1000;
+  facilityService = new LocalGameService({ storage: facilityStorage, now: () => clock });
+  assert(facilityService.snapshot('iron-member').base.landPlots[1].facilityLevel === 1 && facilityService.processConstructionJobs('iron-owner').length === 0, 'offline facility completion runs once at the saved deadline');
   assert(facilityService.claimDepotTimber('iron-member').amount === 20, 'Level 1 Lumber Yard grants daily personal Timber');
   assert(!facilityService.claimDepotTimber('iron-member').ok, 'daily Lumber Yard cannot be claimed again immediately');
   facilityService = new LocalGameService({ storage: facilityStorage, now: () => clock });
@@ -317,7 +353,10 @@ export function runServiceTests() {
   assert(routeService.contributeRoute('iron-member', 'timberline-depot', 20, 10, 'route-partial').replay && routeService.member('iron-member').parts === routeBalance.parts && routeService.member('iron-member').timber === routeBalance.timber, 'replayed route donation cannot debit twice');
   assert(!routeService.contributeRoute('iron-admin', 'timberline-depot', 20, 10, 'route-partial').ok, 'another identity cannot borrow a route action ID');
   const builtRoute = routeService.contributeRoute('iron-member', 'timberline-depot', 25, 10, 'route-complete');
-  assert(builtRoute.ok && builtRoute.completed && builtRoute.routeLevel === 1 && routeService.routeNetworkBonus('iron-owner') === 5, 'shared Level 1 route adds exactly five local daily Salvage');
+  assert(builtRoute.ok && builtRoute.constructionStarted && builtRoute.routeLevel === 0 && routeService.routeNetworkBonus('iron-owner') === 0, 'route funding assigns a crew without granting its bonus early');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 1000;
+  routeService = new LocalGameService({ storage: routeStorage, now: () => clock });
+  assert(routeService.routeNetworkBonus('iron-owner') === 5 && routeService.processConstructionJobs('iron-owner').length === 0, 'shared Level 1 route grants its bonus once after offline completion');
   assert(routeService.getChronicle('iron-member').entries.some(item => item.id === 'land:timberline-depot') && routeService.getChronicle('iron-member').entries.some(item => item.id === 'route:timberline-depot:1'), 'completed land and supply route enter the community Chronicle');
   assert(routeService.routeNetworkBonus('violet-owner') === 0 && !routeService.contributeRoute('iron-member', 'timberline-depot', 1, 1, 'route-after-complete').ok, 'other communities cannot borrow routes and completed projects close');
   routeService = new LocalGameService({ storage: routeStorage, now: () => clock });
@@ -325,7 +364,9 @@ export function runServiceTests() {
   assert(routeService.approveRoute('iron-admin', 'timberline-depot', 'route-level-two').targetLevel === 2, 'admin can approve the next Hall-gated route tier');
   assert(routeService.snapshot('iron-owner').base.landPlots[1].routeProject.partsCost === 100, 'approved route project persists at its fixed costs');
   assert(routeService.recycleTimber('iron-member', 'route-recycle').ok, 'finite forest can supply further route levels through recycling');
-  assert(routeService.contributeRoute('iron-member', 'timberline-depot', 100, 35, 'route-level-two-fund').routeLevel === 2, 'member completes the Level 2 route with recycled Timber');
+  assert(routeService.contributeRoute('iron-member', 'timberline-depot', 100, 35, 'route-level-two-fund').constructionStarted, 'member funds Level 2 route with recycled Timber');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 2 * 1000;
+  assert(routeService.processConstructionJobs('iron-owner').includes('route:timberline-depot') && routeService.routeNetworkBonus('iron-owner') === 10, 'Level 2 route bonus begins after its construction deadline');
   assert(!routeService.approveRoute('iron-owner', 'timberline-depot', 'route-level-three-locked').ok, 'Hall Level 2 cannot approve route Level 3');
   assert(routeService.claimDailySalvage('iron-member').amount === 110 && !routeService.claimDailySalvage('iron-member').ok, 'route tiers add to a once-daily personal claim without repeat grants');
   assert(routeService.claimDailySalvage('violet-member').amount === GAME_CONFIG.dailySalvage, 'another community keeps its unmodified local daily claim');

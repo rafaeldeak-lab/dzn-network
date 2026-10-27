@@ -29,8 +29,8 @@ war through the DZN backend yet.
 
 ## Builder crews and construction
 
-Funding a Command Hall, Workshop, Arc Battery or Communications upgrade now
-assigns a builder crew. Hall Levels 1–2 provide one crew, Levels 3–4 provide
+Funding a Command Hall, Workshop, Arc Battery, Communications, district facility
+or supply route upgrade assigns a builder crew. Hall Levels 1–2 provide one crew, Levels 3–4 provide
 two, and Level 5 provides three. When every crew is busy, the next fully funded
 project waits for the earliest free crew. Each target level takes 20 seconds
 per level in this accelerated preview. Its previous building level remains
@@ -39,8 +39,8 @@ progress, and the existing upgrade celebration plays at completion. The 3D
 Fixer walks between the camp and the current work site while on its ordinary
 role route. Projects and deadlines survive refresh and finish once, even when
 the player was away. The public world preview shows funding, queued work and
-construction separately. District facilities and supply routes still complete
-when fully funded; they do not use these builder crews yet.
+construction separately. District upgrades share the same crew queue, so their
+new production and route bonuses begin only after construction finishes.
 
 ## Base layout and timed war objectives
 

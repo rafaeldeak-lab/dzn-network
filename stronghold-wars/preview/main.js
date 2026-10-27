@@ -705,6 +705,8 @@ const modelLoadPromises = new Map();
 const animatedSquadTemplates = new Map();
 const landScenery = new THREE.Group();
 scene.add(landScenery);
+let districtScaffoldTemplate = null;
+const animatedDistrictScaffolds = [];
 const sceneryTemplates = new Map();
 const landPickGeometry = new THREE.CylinderGeometry(1.1, 1.1, 5.5, 8);
 const landPickMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
@@ -801,6 +803,7 @@ async function reconcileLandScenery() {
     landScenery.clear();
     landTreePicks = [];
     animated.yards.length = 0;
+    animatedDistrictScaffolds.length = 0;
     const beacon = models[`chronicle_l0${base.levels.hq}`]?.clone(true);
     if (beacon) {
       beacon.position.set(-8, .1, -9);
@@ -928,6 +931,16 @@ async function reconcileLandScenery() {
           pallet.position.set(x + 3.9, .1, z + 2.1);
           pallet.rotation.y = -.45;
           landScenery.add(pallet);
+        }
+        for (const [kind, project] of [['facility', plot.facilityProject], ['route', plot.routeProject]]) {
+          if (project?.status !== 'constructing' || project.startedAt > Date.now()) continue;
+          districtScaffoldTemplate ||= makeScaffold();
+          const scaffold = districtScaffoldTemplate.clone(true);
+          scaffold.scale.setScalar(kind === 'route' ? .52 : .85);
+          const point = kind === 'route' ? [x * .7, z * .7] : [x, z];
+          scaffold.position.set(point[0], .14, point[1]);
+          landScenery.add(scaffold);
+          animatedDistrictScaffolds.push(scaffold.getObjectByName('scaffold_crane'));
         }
       }
       for (const [name, ox, oz, rotation] of [
@@ -1064,6 +1077,7 @@ function makeScaffold() {
   box(s, 6.2, 0.1, 0.1, MAT.scaffold, 0, 3, 3);
   box(s, 6.2, 0.1, 0.1, MAT.scaffold, 0, 3, -3);
   const crane = new THREE.Group();
+  crane.name = 'scaffold_crane';
   crane.position.set(3, 6, 3);
   box(crane, 5, 0.25, 0.25, MAT.scaffold, -2.5, 0, 0);
   box(crane, 0.04, 2, 0.04, MAT.dark, -4.5, -2, 0);
@@ -1440,8 +1454,14 @@ function syncPatrolOrders() {
   const base = service.community()?.saved.base;
   const orders = base?.patrolOrders || {};
   const yardRoute = activePatrolLayout?.yardAccessible ? ['workshop', 'yard', 'camp', 'workshop'] : null;
-  const workSite = base?.projects.filter(project => project.status === 'constructing' && project.startedAt <= Date.now()).sort((a, b) => a.finishAt - b.finishAt)[0];
-  const engineerRoute = workSite ? ['camp', workSite.key === 'hq' ? 'hall' : workSite.key, 'camp'] : yardRoute;
+  const workSite = (base ? service._constructionJobs(base) : []).filter(({ project }) => project.startedAt <= Date.now()).sort((a, b) => a.project.finishAt - b.project.finishAt)[0];
+  const target = workSite?.kind === 'core' ? (workSite.project.key === 'hq' ? 'hall' : workSite.project.key)
+    : workSite ? `district:${workSite.plot.id}` : null;
+  if (workSite?.plot) {
+    const point = base.layout.structures[workSite.plot.id] || { x: GAME_CONFIG.landPlots.find(plot => plot.id === workSite.plot.id).position[0], z: GAME_CONFIG.landPlots.find(plot => plot.id === workSite.plot.id).position[1] };
+    activePatrolNodes[target] = [point.x + 6, point.z];
+  }
+  const engineerRoute = target ? ['camp', target, 'camp'] : yardRoute;
   for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard', patrol.role === 'engineer' ? engineerRoute : null);
 }
 // One chosen commander is physically present at the bivouac while at home.
@@ -1940,6 +1960,12 @@ function refreshConstructionTimers() {
     const finishAt = Number(label.dataset.publicBuildFinish);
     label.textContent = startedAt > Date.now() ? `Queued · starts in ${formatRemaining(startedAt)}` : `Under construction · ${formatRemaining(finishAt)} remaining`;
   });
+  document.querySelectorAll('[data-district-build]').forEach(label => {
+    const [kind, plotId] = label.dataset.districtBuild.split(':');
+    const plot = service.community()?.saved.base.landPlots.find(item => item.id === plotId);
+    const project = kind === 'facility' ? plot?.facilityProject : plot?.routeProject;
+    if (project) label.textContent = constructionStatus(project);
+  });
 }
 function showProjectsPanel() {
   selectedKey = null;
@@ -2299,7 +2325,7 @@ function showLandPanel(focusPlotId = null) {
       facilityHtml = `<p><b>${escapeHTML(facility.name)} · Level ${plot.facilityLevel}/5</b></p><p class="help">${escapeHTML(facility.purpose)}${config.id === 'timberline-depot' && plot.facilityLevel > 0 ? ` · ${20 + (plot.facilityLevel - 1) * 10} Timber per member daily` : ''}</p>`;
       if (project) {
         const donors = project.donors.map(d => `${escapeHTML(d.name)}: ${d.parts} Parts + ${d.timber} Timber`).join(' · ');
-        facilityHtml += `<p>Approved Level ${project.targetLevel}: ${project.partsFunded}/${project.partsCost} Parts · ${project.timberFunded}/${project.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (project.partsFunded + project.timberFunded) / (project.partsCost + project.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p><button data-fund-facility="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate Parts &amp; Timber</button>`;
+        facilityHtml += `<p>Upgrade to Level ${project.targetLevel}: ${project.partsFunded}/${project.partsCost} Parts · ${project.timberFunded}/${project.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (project.partsFunded + project.timberFunded) / (project.partsCost + project.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p>${project.status === 'constructing' ? `<p class="notice" data-district-build="facility:${config.id}">${escapeHTML(constructionStatus(project))}</p>` : `<button data-fund-facility="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate Parts &amp; Timber</button>`}`;
       } else if (plot.facilityLevel < 5 && isLeadership()) {
         const target = plot.facilityLevel + 1;
         const [partsCost, timberCost] = facility.costs[target];
@@ -2317,7 +2343,7 @@ function showLandPanel(focusPlotId = null) {
       const routeProject = plot.routeProject;
       if (routeProject) {
         const donors = routeProject.donors.map(d => `${escapeHTML(d.name)}: ${d.parts} Parts + ${d.timber} Timber`).join(' · ');
-        routeHtml += `<p>Approved Level ${routeProject.targetLevel}: ${routeProject.partsFunded}/${routeProject.partsCost} Parts · ${routeProject.timberFunded}/${routeProject.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (routeProject.partsFunded + routeProject.timberFunded) / (routeProject.partsCost + routeProject.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p><button data-fund-route="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate to supply route</button>`;
+        routeHtml += `<p>Upgrade to Level ${routeProject.targetLevel}: ${routeProject.partsFunded}/${routeProject.partsCost} Parts · ${routeProject.timberFunded}/${routeProject.timberCost} Timber</p><div class="progress-track"><div class="progress-fill" style="width:${Math.floor(100 * (routeProject.partsFunded + routeProject.timberFunded) / (routeProject.partsCost + routeProject.timberCost))}%"></div></div><p class="help">${donors || 'Awaiting first contribution'}</p>${routeProject.status === 'constructing' ? `<p class="notice" data-district-build="route:${config.id}">${escapeHTML(constructionStatus(routeProject))}</p>` : `<button data-fund-route="${config.id}" ${snapshot.member.parts + snapshot.member.timber < 1 ? 'disabled' : ''}>Donate to supply route</button>`}`;
       } else if (plot.routeLevel < 5 && isLeadership()) {
         const target = plot.routeLevel + 1;
         const [partsCost, timberCost] = GAME_CONFIG.routeCosts[target];
@@ -2387,8 +2413,8 @@ function showLandPanel(focusPlotId = null) {
       Math.min(member.parts, project.partsCost - project.partsFunded), Math.min(member.timber, project.timberCost - project.timberFunded));
     if (!result.ok) toast(result.error);
     else {
-      toast(result.completed ? `${GAME_CONFIG.facilities[plotId].name} Level ${result.targetLevel} complete!` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
-      if (result.completed && !result.replay) { const config = GAME_CONFIG.landPlots.find(item => item.id === plotId); celebrateUpgrade(config.position[0], config.position[1], GAME_CONFIG.facilities[plotId].name, result.facilityLevel); reconcileLandScenery(); playClank(); }
+      toast(result.constructionStarted ? `${GAME_CONFIG.facilities[plotId].name} funded · builder crew assigned` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
+      if (result.constructionStarted) { reconcileLandScenery(); playClank(); }
       updateHud();
     }
     showLandPanel();
@@ -2406,12 +2432,8 @@ function showLandPanel(focusPlotId = null) {
       Math.min(member.parts, project.partsCost - project.partsFunded), Math.min(member.timber, project.timberCost - project.timberFunded));
     if (!result.ok) toast(result.error);
     else {
-      toast(result.completed ? `DZN supply route Level ${result.targetLevel} complete!` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
-      if (result.completed && !result.replay) {
-        const config = GAME_CONFIG.landPlots.find(item => item.id === plotId);
-        celebrateUpgrade(config.position[0] * .7, config.position[1] * .7, `${config.name} Supply Route`, result.routeLevel);
-        reconcileLandScenery(); playClank();
-      }
+      toast(result.constructionStarted ? `DZN supply route funded · builder crew assigned` : `${result.acceptedParts} Parts and ${result.acceptedTimber} Timber donated.`);
+      if (result.constructionStarted) { reconcileLandScenery(); playClank(); }
       updateHud();
     }
     showLandPanel();
@@ -2432,15 +2454,32 @@ let activeBuilderSiteId = null;
 function checkUpgrades() {
   const constructionCompleted = service.processConstructionJobs();
   for (const key of constructionCompleted) {
+    if (key.startsWith('facility:') || key.startsWith('route:')) {
+      const [kind, plotId] = key.split(':');
+      const config = GAME_CONFIG.landPlots.find(plot => plot.id === plotId);
+      const plot = service.community().saved.base.landPlots.find(item => item.id === plotId);
+      const point = service.community().saved.base.layout.structures[plotId];
+      const x = point?.x ?? config.position[0], z = point?.z ?? config.position[1];
+      reconcileLandScenery();
+      celebrateUpgrade(kind === 'route' ? x * .7 : x, kind === 'route' ? z * .7 : z,
+        kind === 'route' ? `${config.name} Supply Route` : GAME_CONFIG.facilities[plotId].name,
+        kind === 'route' ? plot.routeLevel : plot.facilityLevel);
+      toast(`${kind === 'route' ? 'Supply route' : GAME_CONFIG.facilities[plotId].name} construction complete`);
+      if (panel.style.display !== 'none' && panel.querySelector('h2')?.textContent === 'Land & Forest') showLandPanel();
+      continue;
+    }
     startReveal(key);
     syncPatrolOrders();
     toast(`${DEFS[key].name} construction complete · Level ${state.levels[key]}`);
     if (selectedKey === key) showBuildingPanel(key);
   }
-  const workSite = service.community()?.saved.base.projects.find(project => project.status === 'constructing' && project.startedAt <= Date.now());
-  if ((workSite?.id || null) !== activeBuilderSiteId) {
-    activeBuilderSiteId = workSite?.id || null;
+  const base = service.community()?.saved.base;
+  const workSite = (base ? service._constructionJobs(base) : []).filter(({ project }) => project.startedAt <= Date.now()).sort((a, b) => a.project.finishAt - b.project.finishAt)[0];
+  const workId = workSite ? `${workSite.kind}:${workSite.plot?.id || workSite.project.id}` : null;
+  if (workId !== activeBuilderSiteId) {
+    activeBuilderSiteId = workId;
     syncPatrolOrders();
+    if (workSite?.plot) reconcileLandScenery();
   }
   const completed = service.processLegacyJobs();
   for (const key of completed) {
@@ -4644,6 +4683,8 @@ renderer.setAnimationLoop(time => {
     if (yard.carriage) yard.carriage.position.z = 1.55 + Math.sin(yard.phase * 1.25) * .09;
     if (yard.hook) yard.hook.position.y = 2.54 + Math.sin(yard.phase * .8) * .12;
   });
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    for (const crane of animatedDistrictScaffolds) if (crane) crane.rotation.y += dt * .8;
   smokeTimer += dt;
   if (smokeTimer > 0.25) {
     smokeTimer = 0;
