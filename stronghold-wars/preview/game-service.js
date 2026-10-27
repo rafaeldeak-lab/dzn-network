@@ -137,6 +137,8 @@ const safeInt = (value, fallback = 0) => {
 const clone = value => JSON.parse(JSON.stringify(value));
 const TRAINING_ROLES = Object.freeze(Object.keys(SQUAD_ROLES));
 const trainingCapacity = levels => 2 + (levels.hq || 1) * 2;
+const REINFORCEMENT_REQUEST_MS = 12 * 60 * 60 * 1000;
+const MAX_REINFORCEMENTS_PER_REQUEST = 4;
 export const TRAINING_COSTS = Object.freeze({ assault: 30, recon: 40, engineer: 40, sentinel: 60, medic: 50 });
 export const TRAINING_SECONDS = Object.freeze({ assault: 12, recon: 16, engineer: 16, sentinel: 24, medic: 20 });
 const starterReserve = () => Object.fromEntries(TRAINING_ROLES.map(role => [role, role === 'assault' ? 4 : 0]));
@@ -167,6 +169,7 @@ function emptyBase(treasury = 200) {
     levels: { hq: 1, workshop: 1, tower: 1, comms: 1 },
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
+    reinforcementRequests: [],
     legacyJobs: [], completedLegacyJobIds: [],
     layout: defaultLayout(), blueprints: [],
     patrolOrders: Object.fromEntries(Object.keys(SQUAD_ROLES).map(role => [role, 'standard'])),
@@ -395,6 +398,15 @@ function normalizeLoadedState(raw) {
     normalized.nextProjectNumber = Math.max(1, safeInt(base.nextProjectNumber, 1));
     normalized.completedProjectIds = Array.isArray(base.completedProjectIds) ? [...new Set(base.completedProjectIds.filter(v => typeof v === 'string'))] : [];
     normalized.actionRecords = Array.isArray(base.actionRecords) ? base.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [];
+    normalized.reinforcementRequests = Array.isArray(base.reinforcementRequests) ? base.reinforcementRequests.filter(request =>
+      request && typeof request.id === 'string' && request.id.length <= 160 && TRAINING_ROLES.includes(request.role)
+      && PREVIEW_IDENTITIES.some(profile => profile.id === request.identityId && profile.communityId === community.id)
+      && Number.isSafeInteger(request.count) && request.count >= 1 && request.count <= MAX_REINFORCEMENTS_PER_REQUEST
+      && Number.isSafeInteger(request.donated) && request.donated >= 0 && request.donated <= request.count
+      && Number.isFinite(Number(request.createdAt)) && Number.isFinite(Number(request.expiresAt))
+    ).slice(-30).map(request => ({ id: request.id, identityId: request.identityId, role: request.role,
+      count: request.count, donated: request.donated, createdAt: safeInt(request.createdAt),
+      expiresAt: safeInt(request.expiresAt) })) : [];
     const chronicleIds = new Set();
     normalized.chronicle = Array.isArray(base.chronicle) ? base.chronicle.filter(item => {
       if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war|defender):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
@@ -2387,6 +2399,72 @@ export class LocalGameService {
       jobs: clone(member.trainingJobs), away: clone(member.warDeployments), reserveCapacity: loadout.capacity * 2,
       occupied: TRAINING_ROLES.reduce((sum, role) => sum + reserve[role], 0) + member.trainingJobs.reduce((sum, job) => sum + job.count, 0)
         + member.warDeployments.reduce((sum, deployment) => sum + TRAINING_ROLES.reduce((count, role) => count + deployment.counts[role], 0), 0) };
+  }
+
+  getReinforcementRequests(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError, requests: [] };
+    const now = this.now();
+    const requests = this.community(identityId).saved.base.reinforcementRequests
+      .filter(request => request.expiresAt > now && request.donated < request.count)
+      .map(request => ({ ...request, remaining: request.count - request.donated,
+        name: this.profile(request.identityId)?.name || 'Member' }));
+    return { ok: true, requests: clone(requests) };
+  }
+
+  requestReinforcements(identityId, role, count, actionId = this.newActionId('reinforcement-request')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Choose a connected preview member.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique request action is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === `reinforcement-request:${identityId}:${role}:${count}`
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!TRAINING_ROLES.includes(role) || !squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'That troop role is not unlocked for this community.' };
+    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_REINFORCEMENTS_PER_REQUEST) return { ok: false, error: `Request 1–${MAX_REINFORCEMENTS_PER_REQUEST} whole troops.` };
+    const now = this.now();
+    const base = entry.saved.base;
+    if (base.reinforcementRequests.some(request => request.identityId === identityId && request.expiresAt > now && request.donated < request.count))
+      return { ok: false, error: 'Finish or wait for your current request before posting another.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (readiness.occupied + count > readiness.reserveCapacity) return { ok: false, error: 'Leave enough free camp spaces for the requested troops.' };
+    const request = { id: actionId, identityId, role, count, donated: 0, createdAt: now, expiresAt: now + REINFORCEMENT_REQUEST_MS };
+    base.reinforcementRequests.push(request);
+    if (base.reinforcementRequests.length > 30) base.reinforcementRequests.splice(0, base.reinforcementRequests.length - 30);
+    const result = { ok: true, requestId: request.id, expiresAt: request.expiresAt };
+    this._recordAction(base.actionRecords, actionId, result, `reinforcement-request:${identityId}:${role}:${count}`);
+    this.save();
+    return result;
+  }
+
+  donateReinforcements(identityId, requestId, count, actionId = this.newActionId('reinforcement-donation')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Choose a connected preview member.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique donation action is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === `reinforcement-donation:${identityId}:${requestId}:${count}`
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_REINFORCEMENTS_PER_REQUEST) return { ok: false, error: 'Donate a whole troop count within the request limit.' };
+    const request = entry.saved.base.reinforcementRequests.find(item => item.id === requestId);
+    if (!request || request.expiresAt <= this.now() || request.donated >= request.count) return { ok: false, error: 'This reinforcement request is closed or expired.' };
+    if (request.identityId === identityId) return { ok: false, error: 'Members cannot donate to their own request.' };
+    if (count > request.count - request.donated) return { ok: false, error: 'That exceeds the remaining requested troops.' };
+    if (this._accessError(request.identityId)) return { ok: false, error: 'The receiving member is no longer eligible.' };
+    this._settleTraining(identityId);
+    const recipientReadiness = this.getTrainingReadiness(request.identityId);
+    if (recipientReadiness.occupied + count > recipientReadiness.reserveCapacity) return { ok: false, error: 'The receiving camp has no room for this donation.' };
+    const donor = this.member(identityId);
+    if (donor.trainingReserve[request.role] < count) return { ok: false, error: 'Train the requested troops before donating them.' };
+    donor.trainingReserve[request.role] -= count;
+    this.member(request.identityId).trainingReserve[request.role] += count;
+    request.donated += count;
+    const result = { ok: true, requestId, role: request.role, count, recipientId: request.identityId, remaining: request.count - request.donated };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, `reinforcement-donation:${identityId}:${requestId}:${count}`);
+    this.save();
+    return result;
   }
 
   trainTroops(identityId, role, count, actionId = this.newActionId('training')) {

@@ -2660,7 +2660,13 @@ function showTrainingLoadout(errorMessage = '') {
   }).join('');
   const queue = jobs.length ? jobs.map(job => `${job.count} ${SQUAD_ROLES[job.role].name.replace('DZN ', '')} · ${formatRemaining(job.finishAt)}`).join(' · ') : 'Empty';
   const returning = away.length ? away.map(deployment => `${trainingSquadSummary(deployment.counts)} · ${formatRemaining(deployment.returnAt)}`).join(' · ') : 'None';
-  openPanel(`<h2>Camp & training</h2><p>Assign up to ${capacity} troops for Outpost Delta. ${used} assigned · ${occupied}/${reserveCapacity} camp spaces used. Drills and server-war attacks both draw from your trained reserve; surviving war troops return after their mission.</p><p class="${readiness.ready ? 'help' : 'notice warn'}">${readiness.ready ? 'Drill squad ready to deploy.' : 'Drill squad missing: ' + trainingSquadSummary(readiness.missing)}</p><p class="help">Training queue: ${escapeHTML(queue)}. Away on war duty: ${escapeHTML(returning)}. Jobs and returns finish while you are away.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : ''}${rows}<p class="help">Ghosts move quickly, Fixers pressure the battery, Sentinels absorb fire, and Lifeline medics recover nearby allies. Unlocked kit levels apply automatically.</p><div class="row"><button id="saveTrainingLoadout" ${access.allowed ? '' : 'disabled'}>Save squad</button><button id="backToWarTable">War Table</button></div>`);
+  const reinforcementRequests = service.getReinforcementRequests(profile.id).requests;
+  const roleOptions = Object.entries(SQUAD_ROLES).filter(([role]) => squadProfile(role, state.levels).unlocked)
+    .map(([role, definition]) => `<option value="${role}">${escapeHTML(definition.name)}</option>`).join('');
+  const reinforcementCards = reinforcementRequests.length ? reinforcementRequests.map((request, index) =>
+    `<div class="project-card"><strong>${escapeHTML(request.name)} · ${escapeHTML(SQUAD_ROLES[request.role].name)}</strong><p class="help">${request.remaining}/${request.count} still needed · expires ${formatRemaining(request.expiresAt)}</p><button data-reinforce-index="${index}" ${request.identityId === profile.id || reserve[request.role] < 1 ? 'disabled' : ''}>Donate 1 trained troop</button></div>`).join('') : '<p class="help">No open requests in this community.</p>';
+  const reinforcementHtml = `<details class="technical-details"><summary>Community reinforcements · ${reinforcementRequests.length} open</summary><p>Ask a connected member for trained troops. Each donation moves a real troop from their reserve into yours; camp space and Pro access still apply. Requests expire after 12 hours.</p><div class="row"><select id="reinforcementRole" aria-label="Troop to request">${roleOptions}</select><input id="reinforcementCount" aria-label="Number of troops to request" type="number" min="1" max="4" step="1" value="1"><button id="requestReinforcements" ${access.allowed && occupied < reserveCapacity ? '' : 'disabled'}>Request troops</button></div>${reinforcementCards}</details>`;
+  openPanel(`<h2>Camp & training</h2><p>Assign up to ${capacity} troops for Outpost Delta. ${used} assigned · ${occupied}/${reserveCapacity} camp spaces used. Drills and server-war attacks both draw from your trained reserve; surviving war troops return after their mission.</p><p class="${readiness.ready ? 'help' : 'notice warn'}">${readiness.ready ? 'Drill squad ready to deploy.' : 'Drill squad missing: ' + trainingSquadSummary(readiness.missing)}</p><p class="help">Training queue: ${escapeHTML(queue)}. Away on war duty: ${escapeHTML(returning)}. Jobs and returns finish while you are away.</p>${errorMessage ? `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>` : ''}${!access.allowed ? `<p class="notice warn">${escapeHTML(access.reason)}</p>` : ''}${rows}${reinforcementHtml}<p class="help">Ghosts move quickly, Fixers pressure the battery, Sentinels absorb fire, and Lifeline medics recover nearby allies. Unlocked kit levels apply automatically.</p><div class="row"><button id="saveTrainingLoadout" ${access.allowed ? '' : 'disabled'}>Save squad</button><button id="backToWarTable">War Table</button></div>`);
   $('saveTrainingLoadout').onclick = () => {
     const selected = Object.fromEntries([...panel.querySelectorAll('[data-training-role]')].map(input => [input.dataset.trainingRole, Number(input.value)]));
     const result = service.setTrainingLoadout(profile.id, selected);
@@ -2672,6 +2678,17 @@ function showTrainingLoadout(errorMessage = '') {
   panel.querySelectorAll('[data-train-role]').forEach(button => button.onclick = () => {
     const result = service.trainTroops(profile.id, button.dataset.trainRole, 1);
     if (result.ok) { toast(`${SQUAD_ROLES[result.role].name} training · ${formatRemaining(result.finishAt)}.`); updateHud(); }
+    showTrainingLoadout(result.ok ? '' : result.error);
+  });
+  $('requestReinforcements').onclick = () => {
+    const result = service.requestReinforcements(profile.id, $('reinforcementRole').value, Number($('reinforcementCount').value));
+    if (result.ok) toast('Troop request posted to your community camp.');
+    showTrainingLoadout(result.ok ? '' : result.error);
+  };
+  panel.querySelectorAll('[data-reinforce-index]').forEach(button => button.onclick = () => {
+    const request = reinforcementRequests[Number(button.dataset.reinforceIndex)];
+    const result = service.donateReinforcements(profile.id, request.id, 1);
+    if (result.ok) toast(`1 ${SQUAD_ROLES[result.role].name} sent to ${request.name}.`);
     showTrainingLoadout(result.ok ? '' : result.error);
   });
 }

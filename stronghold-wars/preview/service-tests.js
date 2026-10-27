@@ -381,6 +381,50 @@ export function runServiceTests() {
   assert(campService.getTrainingReadiness('iron-owner').ready && campService.getTrainingReadiness('iron-owner').reserve.assault === 4, 'replenished squad becomes deployable at the expected time');
   checks.push('personal camp training queue, Parts debit, offline completion, capacity, access and one-time drill deployment');
 
+  let reinforcementClock = 1_900_025_000_000;
+  const reinforcementStorage = new MemoryStorage();
+  let reinforcementService = new LocalGameService({ storage: reinforcementStorage, now: () => reinforcementClock });
+  assert(!reinforcementService.requestReinforcements('iron-unverified', 'assault', 1, 'reinforce-unverified').ok
+    && !reinforcementService.requestReinforcements('free-owner', 'assault', 1, 'reinforce-free').ok
+    && !reinforcementService.requestReinforcements('iron-owner', 'sentinel', 1, 'reinforce-locked').ok,
+  'community troop requests require verified Pro access and an unlocked role');
+  const troopRequest = reinforcementService.requestReinforcements('iron-owner', 'assault', 2, 'reinforce-request-1');
+  assert(troopRequest.ok && reinforcementService.requestReinforcements('iron-owner', 'assault', 2, 'reinforce-request-1').replay
+    && !reinforcementService.requestReinforcements('iron-owner', 'assault', 1, 'reinforce-request-2').ok,
+  'one active request per member is posted and replayed without duplication');
+  assert(!reinforcementService.donateReinforcements('iron-owner', troopRequest.requestId, 1, 'reinforce-self').ok
+    && !reinforcementService.donateReinforcements('violet-owner', troopRequest.requestId, 1, 'reinforce-foreign').ok
+    && !reinforcementService.donateReinforcements('iron-unverified', troopRequest.requestId, 1, 'reinforce-guest').ok,
+  'own, foreign-community and unverified donations are rejected');
+  const firstReinforcement = reinforcementService.donateReinforcements('iron-admin', troopRequest.requestId, 1, 'reinforce-donation-1');
+  assert(firstReinforcement.ok && firstReinforcement.remaining === 1
+    && reinforcementService.member('iron-admin').trainingReserve.assault === 3
+    && reinforcementService.member('iron-owner').trainingReserve.assault === 5,
+  'donation conserves one trained troop between camp reserves');
+  assert(reinforcementService.donateReinforcements('iron-admin', troopRequest.requestId, 1, 'reinforce-donation-1').replay
+    && reinforcementService.member('iron-owner').trainingReserve.assault === 5,
+  'replayed donation cannot duplicate a reinforcement');
+  reinforcementService = new LocalGameService({ storage: reinforcementStorage, now: () => reinforcementClock });
+  assert(reinforcementService.getReinforcementRequests('iron-member').requests[0].remaining === 1
+    && reinforcementService.member('iron-owner').trainingReserve.assault === 5,
+  'the shared request and recipient reserve survive reload');
+  reinforcementService.setOwnerProActive('iron-owner', false);
+  assert(!reinforcementService.donateReinforcements('iron-member', troopRequest.requestId, 1, 'reinforce-paused').ok,
+    'owner Pro pause blocks camp donations');
+  reinforcementService.setOwnerProActive('iron-owner', true);
+  assert(reinforcementService.donateReinforcements('iron-member', troopRequest.requestId, 1, 'reinforce-donation-2').remaining === 0
+    && !reinforcementService.donateReinforcements('iron-member', troopRequest.requestId, 1, 'reinforce-overfill').ok,
+  'remaining troop fills the request once and a closed request rejects more');
+  const expiringRequest = reinforcementService.requestReinforcements('iron-owner', 'assault', 1, 'reinforce-expiring');
+  reinforcementClock = expiringRequest.expiresAt;
+  assert(reinforcementService.getReinforcementRequests('iron-owner').requests.length === 0
+    && !reinforcementService.donateReinforcements('iron-admin', expiringRequest.requestId, 1, 'reinforce-too-late').ok,
+  'unfilled requests expire without moving troops');
+  reinforcementService.member('iron-owner').trainingReserve.assault = 8;
+  assert(!reinforcementService.requestReinforcements('iron-owner', 'assault', 1, 'reinforce-no-room').ok,
+    'full receiving camp cannot request troops it cannot hold');
+  checks.push('community reinforcement requests, troop conservation, expiry, access, camp capacity and replay');
+
   let orderClock = 1_900_000_000_000;
   const orderStorage = new MemoryStorage();
   let orderService = new LocalGameService({ storage: orderStorage, now: () => orderClock });
