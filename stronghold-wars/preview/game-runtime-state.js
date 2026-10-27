@@ -6,10 +6,11 @@ export function expireRevealEffects(revealEffects, now) {
   }
 }
 
-export function buildingScaffoldState({ legacyJobs = [], revealEffects = new Map(), now = Date.now() } = {}) {
+export function buildingScaffoldState({ legacyJobs = [], projects = [], revealEffects = new Map(), now = Date.now() } = {}) {
   expireRevealEffects(revealEffects, now);
   const legacyKeys = new Set(legacyJobs.map(job => job.key));
-  return Object.fromEntries(BUILDING_KEYS.map(key => [key, legacyKeys.has(key) || revealEffects.has(key)]));
+  const constructionKeys = new Set(projects.filter(project => project.status === 'constructing' && project.startedAt <= now).map(project => project.key));
+  return Object.fromEntries(BUILDING_KEYS.map(key => [key, legacyKeys.has(key) || constructionKeys.has(key) || revealEffects.has(key)]));
 }
 
 // Keeps same-community member changes presentation-neutral while making the shared

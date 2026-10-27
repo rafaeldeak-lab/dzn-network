@@ -32,7 +32,11 @@ export function runServiceTests() {
   assert(replayDonation.ok && replayDonation.replay && service.snapshot('iron-member').member.parts === partsAfterPartial, 'replayed donation action does not debit twice');
   assert(service.snapshot('iron-owner').base.levels.hq === 1, 'partial funding does not advance the Hall');
   result = service.contributeToProject('iron-admin', hallProjectId, 400, 'test-donate-final');
-  assert(result.ok && result.accepted === 400 && result.completed, 'final donation completes the project');
+  assert(result.ok && result.accepted === 400 && result.constructionStarted && !result.completed, 'final donation assigns a builder crew');
+  assert(service.snapshot('iron-owner').base.levels.hq === 1 && service.snapshot('iron-owner').base.projects.find(project => project.id === hallProjectId).status === 'constructing', 'Hall remains at its old level while the builder works');
+  assert(service.processConstructionJobs('iron-owner').length === 0, 'builder does not finish before the deadline');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 2 * 1000;
+  assert(service.processConstructionJobs('iron-owner').join(',') === 'hq', 'Hall completes at its construction deadline');
   assert(service.snapshot('iron-owner').base.levels.hq === 2, 'Hall advances exactly once on full funding');
   assert(service.snapshot('iron-member').base.levels.hq === 2, 'two members observe the same shared base');
   assert(service.snapshot('iron-owner').member.lifetimeContributed === 0, 'leadership allocation is not counted as a personal contribution');
@@ -59,7 +63,9 @@ export function runServiceTests() {
   assert(service.snapshot('iron-owner').base.treasury === 380, 'treasury allocation debits the shared unallocated balance');
   assert(service.snapshot('iron-admin').member.lifetimeContributed === 400, 'treasury allocation is not recorded as a personal donation');
   result = service.contributeToProject('iron-member', workshop.projectId, 130, 'test-workshop-final-donation');
-  assert(result.ok && result.completed && service.snapshot('iron-owner').base.levels.workshop === 2, 'personal donation completes a partially treasury-funded project exactly once');
+  assert(result.ok && result.constructionStarted && service.snapshot('iron-owner').base.levels.workshop === 1, 'personal donation starts a partially treasury-funded project');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 2 * 1000;
+  assert(service.processConstructionJobs('iron-owner').join(',') === 'workshop' && service.snapshot('iron-owner').base.levels.workshop === 2, 'Workshop advances exactly once after construction');
   const workshopParts = service.snapshot('iron-member').member.parts;
   const workshopLevel = service.snapshot('iron-owner').base.levels.workshop;
   const repeatedWorkshop = service.contributeToProject('iron-member', workshop.projectId, 130, 'test-workshop-final-donation');
@@ -71,7 +77,9 @@ export function runServiceTests() {
   const treasuryPartial = service.allocateTreasury('iron-owner', tower.projectId, 80, 'test-tower-treasury-partial');
   assert(treasuryPartial.ok && treasuryPartial.accepted === 80 && !treasuryPartial.completed, 'treasury allocation can partially fund a second project');
   const treasuryFinish = service.allocateTreasury('iron-admin', tower.projectId, 500, 'test-tower-treasury-final');
-  assert(treasuryFinish.ok && treasuryFinish.accepted === 170 && treasuryFinish.completed, 'allocation is capped to remaining project cost and completes the project');
+  assert(treasuryFinish.ok && treasuryFinish.accepted === 170 && treasuryFinish.constructionStarted, 'allocation is capped to remaining project cost and starts construction');
+  clock += GAME_CONFIG.constructionSecondsPerLevel * 2 * 1000;
+  assert(service.processConstructionJobs('iron-owner').join(',') === 'tower', 'treasury-funded tower completes after its timer');
   const towerLevel = service.snapshot('iron-owner').base.levels.tower;
   const towerTreasury = service.snapshot('iron-owner').base.treasury;
   const replayAllocation = service.allocateTreasury('iron-admin', tower.projectId, 500, 'test-tower-treasury-final');
@@ -79,6 +87,39 @@ export function runServiceTests() {
   assert(!service.allocateTreasury('iron-admin', tower.projectId, 1, 'test-tower-after-completion').ok, 'completed project rejects a second treasury allocation');
   assert(service.snapshot('iron-owner').base.treasury === 130, 'treasury allocation never makes the shared balance negative and keeps the unspent remainder');
   checks.push('treasury allocation, balance conservation, role restrictions and one-time completion');
+
+  let builderClock = 1_910_000_000_000;
+  const builderStorage = new MemoryStorage();
+  let builderService = new LocalGameService({ storage: builderStorage, now: () => builderClock });
+  builderService.community('iron-owner').saved.base.levels.hq = 2;
+  const firstBuild = builderService.approveProject('iron-owner', 'workshop', 'builder-first');
+  const secondBuild = builderService.approveProject('iron-owner', 'tower', 'builder-second');
+  assert(firstBuild.ok && secondBuild.ok && builderService.getBuilderCapacity('iron-owner') === 1, 'Hall Level 2 grants one builder crew');
+  assert(builderService.contributeToProject('iron-owner', firstBuild.projectId, 250, 'builder-fund-first').constructionStarted, 'first funded project starts');
+  assert(builderService.contributeToProject('iron-owner', secondBuild.projectId, 250, 'builder-fund-second').constructionStarted, 'second funded project enters the crew queue');
+  const builderProjects = builderService.snapshot('iron-owner').base.projects;
+  const queued = builderProjects.find(project => project.id === secondBuild.projectId);
+  assert(queued.startedAt === builderProjects.find(project => project.id === firstBuild.projectId).finishAt && queued.crewSlot === 0, 'one crew schedules projects without overlapping work');
+  assert(!buildingScaffoldState({ projects: builderProjects, now: builderClock }).tower, 'queued work has no active scaffold before its start');
+  builderClock += 40_000;
+  builderService = new LocalGameService({ storage: builderStorage, now: () => builderClock });
+  assert(builderService.snapshot('iron-owner').base.levels.workshop === 2 && builderService.snapshot('iron-owner').base.levels.tower === 1, 'refresh completes only the first due upgrade');
+  assert(buildingScaffoldState({ projects: builderService.snapshot('iron-owner').base.projects, now: builderClock }).tower, 'queued upgrade reveals its scaffold when the crew becomes free');
+  builderClock += 40_000;
+  builderService = new LocalGameService({ storage: builderStorage, now: () => builderClock });
+  assert(builderService.snapshot('iron-owner').base.levels.tower === 2 && builderService.processConstructionJobs('iron-owner').length === 0, 'offline completion runs once after refresh');
+  builderService.community('iron-owner').saved.base.levels.hq = 3;
+  builderService.member('iron-owner').parts = 1500;
+  const parallelA = builderService.approveProject('iron-owner', 'workshop', 'builder-parallel-a');
+  const parallelB = builderService.approveProject('iron-owner', 'tower', 'builder-parallel-b');
+  assert(builderService.getBuilderCapacity('iron-owner') === 2 && parallelA.ok && parallelB.ok, 'Hall Level 3 grants two crews');
+  builderService.contributeToProject('iron-owner', parallelA.projectId, 700, 'builder-parallel-fund-a');
+  builderService.contributeToProject('iron-owner', parallelB.projectId, 700, 'builder-parallel-fund-b');
+  const parallelProjects = builderService.snapshot('iron-owner').base.projects.filter(project => [parallelA.projectId, parallelB.projectId].includes(project.id));
+  assert(parallelProjects[0].startedAt === parallelProjects[1].startedAt && parallelProjects[0].crewSlot !== parallelProjects[1].crewSlot, 'two crews work in parallel');
+  builderClock += 60_000;
+  assert(builderService.processConstructionJobs('iron-owner').length === 2, 'parallel upgrades complete at the same deadline');
+  checks.push('builder capacity, queued and parallel construction, scaffold timing, offline completion and reload safety');
 
   const pinService = new LocalGameService({ storage: new MemoryStorage(), now: () => clock });
   // Seed a review fixture with four eligible approved records. The progression

@@ -44,6 +44,7 @@ export const WAR_STAGE_DEFS = Object.freeze([
 export const GAME_CONFIG = Object.freeze({
   maxLevel: 5,
   revealSeconds: 2.5,
+  constructionSecondsPerLevel: 20,
   dailySalvage: 100,
   forgeQueueBuffer: 2,
   landPlots: Object.freeze([
@@ -391,8 +392,14 @@ function normalizeLoadedState(raw) {
       id: p.id, key: p.key, targetLevel: normalizeLevel(p.targetLevel, 1), targetAmount: safeInt(p.targetAmount),
       funded: Math.min(safeInt(p.funded), safeInt(p.targetAmount)), benefit: String(p.benefit || ''),
       prerequisites: Array.isArray(p.prerequisites) ? p.prerequisites.map(String) : [],
-      status: p.status === 'completed' ? 'completed' : 'approved', pinned: Boolean(p.pinned),
+      status: p.status === 'constructing' && safeInt(p.funded) >= safeInt(p.targetAmount)
+        && safeInt(p.startedAt) >= safeInt(p.createdAt) && safeInt(p.finishAt) > safeInt(p.startedAt)
+        && Number.isSafeInteger(p.crewSlot) && p.crewSlot >= 0 && p.crewSlot < 3 ? 'constructing'
+        : ['completed', 'blocked'].includes(p.status) ? p.status : 'approved', pinned: Boolean(p.pinned),
       createdAt: safeInt(p.createdAt), completedAt: safeInt(p.completedAt),
+      crewSlot: p.status === 'constructing' ? safeInt(p.crewSlot) : 0,
+      startedAt: p.status === 'constructing' ? safeInt(p.startedAt) : 0,
+      finishAt: p.status === 'constructing' ? safeInt(p.finishAt) : 0,
       donors: Array.isArray(p.donors) ? p.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), amount: safeInt(d.amount), at: safeInt(d.at) })) : [],
     })) : [];
     normalized.nextProjectNumber = Math.max(1, safeInt(base.nextProjectNumber, 1));
@@ -553,6 +560,10 @@ export class LocalGameService {
     this.backupKey = backupKey;
     this.state = null;
     this._load();
+    for (const community of COMMUNITIES) {
+      const profile = PREVIEW_IDENTITIES.find(item => item.communityId === community.id);
+      if (profile) this.processConstructionJobs(profile.id);
+    }
     // Catch up each eligible member exactly once from the last saved clock.
     // Older saves start their production clock now, without a retroactive grant.
     for (const profile of PREVIEW_IDENTITIES) {
@@ -707,9 +718,10 @@ export class LocalGameService {
         defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
         districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
           facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades, wear: plot.wear })),
-        construction: base.projects.filter(project => project.status === 'approved').map(project => ({
+        construction: base.projects.filter(project => ['approved', 'constructing'].includes(project.status)).map(project => ({
           kind: 'building', name: GAME_CONFIG.buildings[project.key].name, key: project.key, targetLevel: project.targetLevel,
           percent: project.targetAmount > 0 ? Math.floor(project.funded / project.targetAmount * 100) : 0,
+          status: project.status, startedAt: project.startedAt || 0, finishAt: project.finishAt || 0,
         })).concat(base.landPlots.flatMap(plot => [
           plot.facilityProject ? { kind: 'facility', name: GAME_CONFIG.facilities[plot.id]?.name || 'District facility', targetLevel: plot.facilityProject.targetLevel,
             percent: Math.floor(100 * (plot.facilityProject.partsFunded + plot.facilityProject.timberFunded) / (plot.facilityProject.partsCost + plot.facilityProject.timberCost)) } : null,
@@ -1294,6 +1306,7 @@ export class LocalGameService {
 
   selectIdentity(identityId) {
     if (!this.profile(identityId)) return { ok: false, error: 'Unknown preview identity.' };
+    this.processConstructionJobs(identityId);
     this.advancePartsProduction(identityId);
     this.advanceTimberProduction(identityId);
     this.state.currentIdentityId = identityId;
@@ -1381,7 +1394,7 @@ export class LocalGameService {
     } else if (key !== 'hq' && targetLevel <= GAME_CONFIG.maxLevel && targetLevel > base.levels.hq) {
       prerequisites.push(`Command Hall must reach Level ${targetLevel} first (currently Level ${base.levels.hq}).`);
     }
-    if (base.projects.some(project => project.key === key && project.status === 'approved')) prerequisites.push('A project for this building is already approved.');
+    if (base.projects.some(project => project.key === key && ['approved', 'constructing'].includes(project.status))) prerequisites.push('A project for this building is already approved or under construction.');
     if (base.legacyJobs.some(job => job.key === key)) prerequisites.push('A previously paid legacy construction job is still finishing.');
     const definition = GAME_CONFIG.buildings[key];
     return {
@@ -2088,7 +2101,7 @@ export class LocalGameService {
     return result;
   }
 
-  _completeProject(entry, project) {
+  _completeProject(entry, project, at = this.now()) {
     const base = entry.saved.base;
     if (base.completedProjectIds.includes(project.id)) return false;
     if (base.levels[project.key] !== project.targetLevel - 1) {
@@ -2096,14 +2109,47 @@ export class LocalGameService {
       project.pinned = false;
       return false;
     }
-    if (project.key === 'workshop') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id);
+    if (project.key === 'workshop') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id, at);
     base.levels[project.key] = project.targetLevel;
     project.status = 'completed';
-    project.completedAt = this.now();
+    project.completedAt = at;
     project.pinned = false;
     base.completedProjectIds.push(project.id);
     this._recordChronicle(base, `project:${project.id}`, 'project', `${GAME_CONFIG.buildings[project.key].name} reached Level ${project.targetLevel}.`, project.completedAt);
     return true;
+  }
+
+  getBuilderCapacity(identityId = this.state.currentIdentityId) {
+    const hall = this.community(identityId)?.saved.base.levels.hq || 1;
+    return hall >= 5 ? 3 : hall >= 3 ? 2 : 1;
+  }
+
+  _startProjectConstruction(entry, project) {
+    if (project.status !== 'approved' || project.funded < project.targetAmount) return false;
+    const now = this.now();
+    const capacity = entry.saved.base.levels.hq >= 5 ? 3 : entry.saved.base.levels.hq >= 3 ? 2 : 1;
+    const available = Array.from({ length: capacity }, () => now);
+    for (const active of entry.saved.base.projects.filter(item => item.status === 'constructing')) {
+      if (active.crewSlot >= 0 && active.crewSlot < available.length) available[active.crewSlot] = Math.max(available[active.crewSlot], active.finishAt);
+    }
+    const crewSlot = available.indexOf(Math.min(...available));
+    project.status = 'constructing';
+    project.pinned = false;
+    project.crewSlot = crewSlot;
+    project.startedAt = available[crewSlot];
+    project.finishAt = project.startedAt + GAME_CONFIG.constructionSecondsPerLevel * project.targetLevel * 1000;
+    return true;
+  }
+
+  processConstructionJobs(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    if (!entry) return [];
+    const completed = [];
+    for (const project of entry.saved.base.projects.filter(item => item.status === 'constructing' && item.finishAt <= this.now()).sort((a, b) => a.finishAt - b.finishAt)) {
+      if (this._completeProject(entry, project, project.finishAt)) completed.push(project.key);
+    }
+    if (completed.length) this.save();
+    return completed;
   }
 
   contributeToProject(identityId, projectId, amount, actionId = this.newActionId('donate')) {
@@ -2127,8 +2173,8 @@ export class LocalGameService {
     member.lifetimeContributed += accepted;
     project.donors.push({ identityId, name: this.profile(identityId).name, amount: accepted, at: this.now() });
     project.donors = project.donors.slice(-8);
-    const completed = project.funded >= project.targetAmount ? this._completeProject(entry, project) : false;
-    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed, projectId };
+    const constructionStarted = this._startProjectConstruction(entry, project);
+    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed: false, constructionStarted, projectId };
     this._recordAction(base.actionRecords, actionId, result, 'project-contribution');
     this.save();
     return result;
@@ -2152,8 +2198,8 @@ export class LocalGameService {
     if (accepted < 1) return { ok: false, error: base.treasury < 1 ? 'No unallocated Treasury Parts are available.' : 'This project is already fully funded.' };
     base.treasury -= accepted;
     project.funded += accepted;
-    const completed = project.funded >= project.targetAmount ? this._completeProject(entry, project) : false;
-    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed, projectId };
+    const constructionStarted = this._startProjectConstruction(entry, project);
+    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed: false, constructionStarted, projectId };
     this._recordAction(base.actionRecords, actionId, result, 'treasury-allocation');
     this.save();
     return result;
@@ -2317,14 +2363,15 @@ export class LocalGameService {
       perSecond: this.getAccess(identityId).allowed ? GAME_CONFIG.buildings.workshop.stats[level - 1].partsPerSecond : 0 };
   }
 
-  advancePartsProduction(identityId = this.state.currentIdentityId) {
+  advancePartsProduction(identityId = this.state.currentIdentityId, timestamp = this.now()) {
     const member = this.member(identityId);
     const info = this.getProductionInfo(identityId);
     if (!member || !info) return 0;
-    const now = Math.max(0, Math.floor(Number(this.now()) || 0));
+    const now = Math.max(0, Math.floor(Number(timestamp) || 0));
     const previous = safeInt(member.productionAt);
+    if (now <= previous) return 0;
     member.productionAt = now;
-    if (!previous || now <= previous || !info.perSecond) return 0;
+    if (!previous || !info.perSecond) return 0;
     const produced = info.perSecond * Math.min(now - previous, DAY_MS) / 1000;
     const before = member.stored;
     member.stored = Math.max(before, Math.min(info.capacity, before + produced));

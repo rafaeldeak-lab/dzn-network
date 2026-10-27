@@ -1192,6 +1192,7 @@ function requestBuildingModel(key, level) {
 function applyScaffoldState(now = Date.now()) {
   const visible = buildingScaffoldState({
     legacyJobs: service.community()?.saved.base.legacyJobs || [], revealEffects,
+    projects: service.community()?.saved.base.projects || [],
     now,
   });
   for (const key of Object.keys(DEFS)) if (buildings[key]) buildings[key].scaffold.visible = Boolean(visible[key]);
@@ -1436,9 +1437,12 @@ for (let i = 0; i < 5; i++) {
 }
 function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.mesh, patrol.role, squadTier(patrol.role, state.levels)); }
 function syncPatrolOrders() {
-  const orders = service.community()?.saved.base.patrolOrders || {};
+  const base = service.community()?.saved.base;
+  const orders = base?.patrolOrders || {};
   const yardRoute = activePatrolLayout?.yardAccessible ? ['workshop', 'yard', 'camp', 'workshop'] : null;
-  for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard', patrol.role === 'engineer' ? yardRoute : null);
+  const workSite = base?.projects.filter(project => project.status === 'constructing' && project.startedAt <= Date.now()).sort((a, b) => a.finishAt - b.finishAt)[0];
+  const engineerRoute = workSite ? ['camp', workSite.key === 'hq' ? 'hall' : workSite.key, 'camp'] : yardRoute;
+  for (const patrol of patrols) setPatrolOrder(patrol.motion, orders[patrol.role] || 'standard', patrol.role === 'engineer' ? engineerRoute : null);
 }
 // One chosen commander is physically present at the bivouac while at home.
 // Its existing role route leads to a useful building and back, with the same
@@ -1851,6 +1855,13 @@ function formatRemaining(timestamp) {
   const seconds = Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
 }
+function constructionStatus(project) {
+  if (project.status === 'completed') return 'Complete';
+  if (project.status === 'constructing') return project.startedAt > Date.now()
+    ? `Crew ${project.crewSlot + 1} queued · starts in ${formatRemaining(project.startedAt)}`
+    : `Crew ${project.crewSlot + 1} building · ${formatRemaining(project.finishAt)} remaining`;
+  return 'Funding';
+}
 function startReveal(key) {
   const building = buildings[key];
   if (!building) return;
@@ -1885,7 +1896,7 @@ function showBuildingPanel(key) {
   const requirement = service.getUpgradeRequirement(service.state.currentIdentityId, key);
   const level = requirement.level;
   const legacyJob = service.community().saved.base.legacyJobs.find(job => job.key === key);
-  const activeProject = service.community().saved.base.projects.find(project => project.key === key && project.status === 'approved');
+  const activeProject = service.community().saved.base.projects.find(project => project.key === key && ['approved', 'constructing'].includes(project.status));
   const cfg = GAME_CONFIG.buildings[key];
   const currentStats = cfg.stats[level - 1];
   const nextStats = requirement.targetLevel <= GAME_CONFIG.maxLevel ? cfg.stats[requirement.targetLevel - 1] : null;
@@ -1893,11 +1904,11 @@ function showBuildingPanel(key) {
   if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
     html += `<p><b>Next · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p><b>Cost:</b> ${requirement.cost.toLocaleString()} Parts</p>`;
     if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Before upgrading</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
-    html += `<details class="technical-details"><summary>Stats and construction details</summary><p class="help">Current: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Next: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Funding completes construction immediately. A ${GAME_CONFIG.revealSeconds.toFixed(1)}s delivery and scaffold reveal follows.</p></details>`;
+    html += `<details class="technical-details"><summary>Stats and construction details</summary><p class="help">Current: ${escapeHTML(JSON.stringify(currentStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">Next: ${escapeHTML(JSON.stringify(nextStats).replace(/[{}\"]/g, '').replace(/,/g, ' · ').replace(/:/g, ' '))}</p><p class="help">A builder crew starts when funding is complete. Construction takes ${GAME_CONFIG.constructionSecondsPerLevel * requirement.targetLevel}s; a ${GAME_CONFIG.revealSeconds.toFixed(1)}s upgrade reveal follows.</p></details>`;
     if (legacyJob) html += `<p class="notice">Previously paid legacy work is preserved. Completion is due ${new Date(legacyJob.end).toLocaleTimeString()}.</p>`;
     if (activeProject) {
       const remaining = Math.max(0, activeProject.targetAmount - activeProject.funded);
-      html += `<div class="project-card ${activeProject.pinned ? 'pinned' : ''}"><strong>${activeProject.pinned ? '★ PRIORITY · ' : ''}Approved · L${activeProject.targetLevel}</strong><p>Funded ${activeProject.funded.toLocaleString()} / ${activeProject.targetAmount.toLocaleString()} Parts · ${remaining.toLocaleString()} remaining</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, activeProject.funded / activeProject.targetAmount * 100)}%"></div></div><div class="row"><button id="projectDetailsBtn">Open project funding</button></div></div>`;
+      html += `<div class="project-card ${activeProject.pinned ? 'pinned' : ''}"><strong>${activeProject.pinned ? '★ PRIORITY · ' : ''}<span data-build-timer="${activeProject.id}">${escapeHTML(constructionStatus(activeProject))}</span> · L${activeProject.targetLevel}</strong><p>Funded ${activeProject.funded.toLocaleString()} / ${activeProject.targetAmount.toLocaleString()} Parts · ${remaining.toLocaleString()} remaining</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, activeProject.funded / activeProject.targetAmount * 100)}%"></div></div><div class="row"><button id="projectDetailsBtn">${activeProject.status === 'approved' ? 'Open project funding' : 'View construction'}</button></div></div>`;
     } else if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
       if (isLeadership()) html += `<div class="row"><button id="approveProjectBtn" ${requirement.ok ? '' : 'disabled'}>Approve L${requirement.targetLevel} project</button></div>`;
       else html += `<p class="notice">Only the community owner/admin can approve this upgrade. Members can fund it after approval.</p>`;
@@ -1919,6 +1930,17 @@ function showBuildingPanel(key) {
 function projectById(projectId) {
   return service.community()?.saved.base.projects.find(project => project.id === projectId) || null;
 }
+function refreshConstructionTimers() {
+  document.querySelectorAll('[data-build-timer]').forEach(label => {
+    const project = projectById(label.dataset.buildTimer);
+    if (project) label.textContent = constructionStatus(project);
+  });
+  document.querySelectorAll('[data-public-build-finish]').forEach(label => {
+    const startedAt = Number(label.dataset.publicBuildStart);
+    const finishAt = Number(label.dataset.publicBuildFinish);
+    label.textContent = startedAt > Date.now() ? `Queued · starts in ${formatRemaining(startedAt)}` : `Under construction · ${formatRemaining(finishAt)} remaining`;
+  });
+}
 function showProjectsPanel() {
   selectedKey = null;
   updateBuildingList();
@@ -1931,14 +1953,14 @@ function showProjectsPanel() {
   const base = service.community().saved.base;
   const projects = [...base.projects].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt);
   const role = isLeadership() ? 'Leadership can approve and pin up to three priorities, and allocate only existing unallocated treasury.' : 'Members can contribute personal Parts to any approved project. Members cannot approve, pin, alter layouts or allocate treasury.';
-  let html = `<h2>Community Projects</h2><p>One shared Command Compound for <b>${escapeHTML(service.getCommunityInfo().name)}</b>.</p><p>Unallocated shared Treasury: <b>${base.treasury.toLocaleString()} Parts</b>. It is not project funding until leadership assigns it.</p><p class="help">${escapeHTML(role)}</p>`;
+  let html = `<h2>Community Projects</h2><p>One shared Command Compound for <b>${escapeHTML(service.getCommunityInfo().name)}</b>.</p><p>${service.getBuilderCapacity()} builder ${service.getBuilderCapacity() === 1 ? 'crew' : 'crews'} · Hall Level ${base.levels.hq}.</p><p>Unallocated shared Treasury: <b>${base.treasury.toLocaleString()} Parts</b>. It is not project funding until leadership assigns it.</p><p class="help">${escapeHTML(role)}</p>`;
   if (projects.length) html += projects.map(project => {
     const complete = project.status === 'completed';
     const label = `${GAME_CONFIG.buildings[project.key].name} · Upgrade to Level ${project.targetLevel} · Current Level ${base.levels[project.key]}`;
     const rem = Math.max(0, project.targetAmount - project.funded);
     const myLifetime = service.member().lifetimeContributed;
     const donorList = project.donors.slice(-4).map(donor => `${escapeHTML(donor.name)} +${donor.amount}`).join(' · ') || 'No personal donors yet';
-    return `<article class="project-card ${project.pinned ? 'pinned' : ''}"><strong>${project.pinned ? '★ PRIORITY · ' : ''}${escapeHTML(label)}${complete ? ' · COMPLETE' : ''}</strong><p>${escapeHTML(project.benefit)}</p><p>Target ${project.targetAmount.toLocaleString()} · funded ${project.funded.toLocaleString()} · remaining ${rem.toLocaleString()} Parts</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, project.funded / project.targetAmount * 100)}%"></div></div><p>Prerequisites: ${project.prerequisites.length ? project.prerequisites.map(escapeHTML).join(' · ') : 'validated at approval'}</p><p>Recent donors: ${donorList}</p><p>Your lifetime contributions: ${myLifetime.toLocaleString()} Parts · persisted with this community</p><div class="row"><button data-project-details="${project.id}">${complete ? 'View completed project' : 'Fund project'}</button>${isLeadership() && !complete ? `<button data-project-pin="${project.id}" data-pinned="${project.pinned}">${project.pinned ? 'Unpin priority' : 'Pin priority'}</button>` : ''}</div></article>`;
+    return `<article class="project-card ${project.pinned ? 'pinned' : ''}"><strong>${project.pinned ? '★ PRIORITY · ' : ''}${escapeHTML(label)} · <span data-build-timer="${project.id}">${escapeHTML(constructionStatus(project))}</span></strong><p>${escapeHTML(project.benefit)}</p><p>Target ${project.targetAmount.toLocaleString()} · funded ${project.funded.toLocaleString()} · remaining ${rem.toLocaleString()} Parts</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, project.funded / project.targetAmount * 100)}%"></div></div><p>Prerequisites: ${project.prerequisites.length ? project.prerequisites.map(escapeHTML).join(' · ') : 'validated at approval'}</p><p>Recent donors: ${donorList}</p><p>Your lifetime contributions: ${myLifetime.toLocaleString()} Parts · persisted with this community</p><div class="row"><button data-project-details="${project.id}">${complete ? 'View completed project' : project.status === 'constructing' ? 'View construction' : 'Fund project'}</button>${isLeadership() && project.status === 'approved' ? `<button data-project-pin="${project.id}" data-pinned="${project.pinned}">${project.pinned ? 'Unpin priority' : 'Pin priority'}</button>` : ''}</div></article>`;
   }).join('');
   else html += '<p class="notice">No projects approved yet. Select a building, review its requirements and ask an owner/admin to approve the next upgrade.</p>';
   html += `<div class="row"><button id="closeBtn">Close</button></div>`;
@@ -1964,7 +1986,8 @@ function showProjectFundingPanel(projectId, errorMessage = '') {
   let html = `<h2>${project.pinned ? '★ Priority · ' : ''}${escapeHTML(GAME_CONFIG.buildings[project.key].name)} · Upgrade to Level ${project.targetLevel}</h2><p><b>Current building level:</b> Level ${base.levels[project.key]}</p><p>${escapeHTML(project.benefit)}</p><p>Prerequisites: ${project.prerequisites.length ? project.prerequisites.map(escapeHTML).join(' · ') : 'Validated when approved'}</p><p>Project target <b>${project.targetAmount.toLocaleString()}</b> · funded <b>${project.funded.toLocaleString()}</b> · remaining <b>${remaining.toLocaleString()}</b> Parts</p><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, project.funded / project.targetAmount * 100)}%"></div></div><p>Your personal Parts: ${member.parts.toLocaleString()} · your lifetime contributions: ${member.lifetimeContributed.toLocaleString()}</p><p>Recent project donors</p><ul>${donors}</ul>`;
   if (errorMessage) html += `<p class="notice warn" role="status">${escapeHTML(errorMessage)}</p>`;
   if (!access.allowed) html += `<p class="notice warn">${escapeHTML(access.reason)}</p>`;
-  else if (complete) html += '<p class="notice">Fully funded and completed once. The new level is active immediately.</p>';
+  else if (complete) html += '<p class="notice">Construction complete. The new level is active.</p>';
+  else if (project.status === 'constructing') html += `<p class="notice"><span data-build-timer="${project.id}">${escapeHTML(constructionStatus(project))}</span>. The builder returns to the camp when this upgrade is complete.</p>`;
   else {
     html += `<div class="row"><label class="field-label" for="donationAmount">Personal donation</label><input id="donationAmount" type="number" min="1" step="1" value="${Math.min(50, Math.max(1, Math.min(member.parts, remaining)))}" aria-label="Personal Parts to contribute"><button id="donateProjectBtn">Contribute Parts</button></div><p class="help">Positive whole number only. The service caps the accepted amount to your balance and the project’s remaining cost.</p>`;
     if (leadership) html += `<div class="row"><label class="field-label" for="allocationAmount">Leadership treasury allocation</label><input id="allocationAmount" type="number" min="1" step="1" value="${Math.min(50, Math.max(1, Math.min(base.treasury, remaining)))}" aria-label="Treasury Parts to allocate"><button id="allocateBtn">Assign unallocated Treasury</button></div><p class="help">Unallocated now: ${base.treasury.toLocaleString()} Parts. Treasury allocation does not count as personal contributions.</p>`;
@@ -1976,16 +1999,16 @@ function showProjectFundingPanel(projectId, errorMessage = '') {
   if ($('donateProjectBtn')) $('donateProjectBtn').onclick = () => {
     const result = service.contributeToProject(service.state.currentIdentityId, projectId, Number($('donationAmount').value));
     if (!result.ok) { showProjectFundingPanel(projectId, result.error); return; }
-    if (result.completed && !result.replay) startReveal(project.key);
+    if (result.constructionStarted && !result.replay) { applyScaffoldState(); syncPatrolOrders(); }
     beep(520);
-    toast(`Accepted ${result.accepted} Parts${result.completed ? ' · project complete' : ` · ${result.remaining} remaining`}`);
+    toast(`Accepted ${result.accepted} Parts${result.constructionStarted ? ' · builder crew assigned' : ` · ${result.remaining} remaining`}`);
     showProjectFundingPanel(projectId);
   };
   if ($('allocateBtn')) $('allocateBtn').onclick = () => {
     const result = service.allocateTreasury(service.state.currentIdentityId, projectId, Number($('allocationAmount').value));
     if (!result.ok) { showProjectFundingPanel(projectId, result.error); return; }
-    if (result.completed && !result.replay) startReveal(project.key);
-    toast(`Assigned ${result.accepted} Treasury Parts${result.completed ? ' · project complete' : ` · ${result.remaining} remaining`}`);
+    if (result.constructionStarted && !result.replay) { applyScaffoldState(); syncPatrolOrders(); }
+    toast(`Assigned ${result.accepted} Treasury Parts${result.constructionStarted ? ' · builder crew assigned' : ` · ${result.remaining} remaining`}`);
     showProjectFundingPanel(projectId);
   };
 }
@@ -2405,7 +2428,20 @@ function showLandPanel(focusPlotId = null) {
   });
 }
 
+let activeBuilderSiteId = null;
 function checkUpgrades() {
+  const constructionCompleted = service.processConstructionJobs();
+  for (const key of constructionCompleted) {
+    startReveal(key);
+    syncPatrolOrders();
+    toast(`${DEFS[key].name} construction complete · Level ${state.levels[key]}`);
+    if (selectedKey === key) showBuildingPanel(key);
+  }
+  const workSite = service.community()?.saved.base.projects.find(project => project.status === 'constructing' && project.startedAt <= Date.now());
+  if ((workSite?.id || null) !== activeBuilderSiteId) {
+    activeBuilderSiteId = workSite?.id || null;
+    syncPatrolOrders();
+  }
   const completed = service.processLegacyJobs();
   for (const key of completed) {
     refreshBuilding(key);
@@ -3564,7 +3600,7 @@ function showWorldMap() {
     const construction = selected.construction.find(project => project.key === key);
     return `<div class="world-building ${construction ? 'constructing' : ''}"><img src="${escapeHTML(asset.png)}" alt="${escapeHTML(GAME_CONFIG.buildings[key].name)} Level ${level}${construction ? ', under construction' : ''}"><strong>${escapeHTML(GAME_CONFIG.buildings[key].name)} · L${level}${construction ? ' · ⚒' : ''}</strong></div>`;
   }).join('');
-  const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ SCAFFOLDING · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p>${project.percent}% funded · construction completes when the approved target is met.</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
+  const construction = selected.construction.length ? selected.construction.map(project => `<div class="world-construction"><strong>⚒ ${project.status === 'constructing' ? 'BUILDING' : 'FUNDING'} · ${escapeHTML(project.name)} → L${project.targetLevel}</strong><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, project.percent))}%"></div></div><p ${project.status === 'constructing' ? `data-public-build-start="${project.startedAt}" data-public-build-finish="${project.finishAt}"` : ''}>${project.status === 'constructing' ? project.startedAt > Date.now() ? `Queued · starts in ${formatRemaining(project.startedAt)}` : `Under construction · ${formatRemaining(project.finishAt)} remaining` : `${project.percent}% funded`}</p></div>`).join('') : '<p class="help">No approved work is under construction.</p>';
   const districts = selected.districts.map(district => `${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === district.id)?.name || district.id)}: ${escapeHTML(district.status)}${district.status !== 'claimed' ? ` · ${district.treesRemaining} trees` : district.facilityLevel ? ` · facility L${district.facilityLevel}${district.wear ? ` · battle wear ${district.wear}/${BATTLE_WEAR_RULES.maxSeverity}` : ''}` : ''}`).join('<br>');
   const visibleKits = Object.entries(SQUAD_ROLES).map(([role, definition]) => `<span class="world-kit"><b>${escapeHTML(definition.name)}</b> · ${squadUnlocked(role, selected.buildings) ? `gear L${squadTier(role, selected.buildings)}` : `locked · Hall L${definition.unlockHall} / ${escapeHTML(GAME_CONFIG.buildings[definition.source].name)} L${definition.unlockSource}`}</span>`).join('');
   const visibleDefenders = Object.entries(DEFENDER_CONCEPTS).map(([role, definition]) => {
@@ -4585,9 +4621,9 @@ renderer.setAnimationLoop(time => {
   const dt = Math.min(0.1, timer.getDelta());
   elapsed += dt;
 
+  checkUpgrades();
   service.advancePartsProduction();
   service.advanceTimberProduction();
-  checkUpgrades();
 
   animated.radars.forEach(r => {
     r.rotation.y += dt * 1.5;
@@ -4694,6 +4730,7 @@ renderer.setAnimationLoop(time => {
     forgeTimer = 0;
     refreshForgePanel();
     refreshWarTableTimers();
+    refreshConstructionTimers();
   }
   saveTimer += dt;
   if (saveTimer >= 5) {

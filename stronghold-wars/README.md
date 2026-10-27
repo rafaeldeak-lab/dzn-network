@@ -6,7 +6,7 @@ https://rosebud.ai/edit/57892787-5e89-4c9b-bb59-dde128e859ae.
 
 ## Current boundary
 
-The [user-supplied Apex expansion addendum](briefs/apex-expansion.md) is appended to the existing shared-base plan. [Gameplay coverage](GAMEPLAY_COVERAGE.md) tracks the playable local loops and the remaining milestones. The current local preview includes an Operations Board with three selectable DZN commanders, a bounded PvE salvage extraction with a rapid pickup or hazardous full-cargo hold, temporary Field Upgrades, finite recovery, community signals, saved after-action field records and an evidence-backed personal showcase. It reuses the existing army and resources. A spatial mission arena remains separate work. These missions are browser-local and never submit live war, membership or reward records.
+The [user-supplied Apex expansion addendum](briefs/apex-expansion.md) is appended to the existing shared-base plan. [Gameplay coverage](GAMEPLAY_COVERAGE.md) tracks the playable local loops and the remaining milestones. The current local preview includes an Operations Board with three selectable DZN commanders, a bounded PvE salvage extraction with a rapid pickup or hazardous full-cargo hold, temporary Field Upgrades, finite recovery, community signals, saved after-action field records and an evidence-backed personal showcase. It reuses the existing army and resources. The Outpost Ember mission arena is playable in 3D. These missions are browser-local and never submit live war, membership or reward records.
 
 The game service in `preview/game-service.js` uses fictional communities and
 browser local storage. Its owner, admin, member, Pro, and membership checks are
@@ -26,6 +26,21 @@ wall segments, timed war objectives, and revised 3D Lumber Yard and squad
 models. These remain fictional browser-saved gameplay. The real DZN bootstrap
 below is still read-only; no live server member can change a base or start a
 war through the DZN backend yet.
+
+## Builder crews and construction
+
+Funding a Command Hall, Workshop, Arc Battery or Communications upgrade now
+assigns a builder crew. Hall Levels 1–2 provide one crew, Levels 3–4 provide
+two, and Level 5 provides three. When every crew is busy, the next fully funded
+project waits for the earliest free crew. Each target level takes 20 seconds
+per level in this accelerated preview. Its previous building level remains
+active during construction; scaffolding and a project timer show the work in
+progress, and the existing upgrade celebration plays at completion. The 3D
+Fixer walks between the camp and the current work site while on its ordinary
+role route. Projects and deadlines survive refresh and finish once, even when
+the player was away. The public world preview shows funding, queued work and
+construction separately. District facilities and supply routes still complete
+when fully funded; they do not use these builder crews yet.
 
 ## Base layout and timed war objectives
 
