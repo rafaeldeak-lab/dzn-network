@@ -2,7 +2,7 @@
 // A live game must validate the same rules on its authoritative server.
 export const GRID_STEP = 2;
 export const CORE_DEFAULTS = Object.freeze({
-  hq: [0, 0], workshop: [-8, 4], tower: [8, 6], comms: [6, -8],
+  hq: [0, 0], workshop: [-8, 4], tower: [8, 6], comms: [6, -8], depot: [-8, -4],
 });
 export const DISTRICT_DEFAULTS = Object.freeze({
   'timberline-depot': [-22, -4], 'ridgewatch-range': [22, -4],

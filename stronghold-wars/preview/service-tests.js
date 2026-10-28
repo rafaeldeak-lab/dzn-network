@@ -48,6 +48,43 @@ export function runServiceTests() {
   assert(service.snapshot('iron-owner').base.levels.hq === hallLevelAfterFunding, 'a completed project cannot advance the building a second time');
   checks.push('project approval, partial and replayed donations, exact one-time completion, shared Hall level and donor totals');
 
+  let depotClock = 1_915_000_000_000;
+  const depotStorage = new MemoryStorage();
+  let depotService = new LocalGameService({ storage: depotStorage, now: () => depotClock });
+  depotService.community('iron-owner').saved.base.levels.hq = 2;
+  const depotYardPlot = depotService.community('iron-owner').saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
+  depotYardPlot.status = 'claimed'; depotYardPlot.treesRemaining = 0; depotYardPlot.facilityLevel = 1;
+  const depotMember = depotService.member('iron-member');
+  depotMember.stored = 500; depotMember.timberStored = 30;
+  depotMember.productionAt = depotClock; depotMember.timberProductionAt = depotClock;
+  assert(depotService.getProductionInfo('iron-member').capacity === 500 && depotService.getTimberProductionInfo('iron-member').capacity === 30, 'Level 1 depot preserves existing production caps');
+  assert(!depotService.approveProject('iron-member', 'depot', 'depot-member-approve').ok, 'ordinary members cannot approve depot construction');
+  const depotProject = depotService.approveProject('iron-owner', 'depot', 'depot-owner-approve');
+  assert(depotProject.ok && depotService.getUpgradeRequirement('iron-owner', 'depot').prerequisites.length > 0, 'owner approves one Hall-gated depot upgrade');
+  const depotFund = depotService.contributeToProject('iron-member', depotProject.projectId, 350, 'depot-member-fund');
+  assert(depotFund.ok && depotFund.constructionStarted && depotService.snapshot('iron-member').base.levels.depot === 1, 'member funding schedules depot without granting capacity early');
+  assert(depotService.contributeToProject('iron-member', depotProject.projectId, 350, 'depot-member-fund').replay, 'depot funding action is idempotent');
+  depotClock += 40_000;
+  assert(depotService.processConstructionJobs('iron-owner').includes('depot'), 'builder completes the depot at its deadline');
+  assert(depotService.getProductionInfo('iron-member').capacity === 1000 && depotService.getTimberProductionInfo('iron-member').capacity === 70, 'shared depot expands both personal production stores for every member');
+  assert(depotMember.stored === 500 && depotMember.timberStored === 30, 'elapsed production is settled against the old capacity before the upgrade');
+  depotClock += 30_000;
+  depotService.advancePartsProduction('iron-member'); depotService.advanceTimberProduction('iron-member');
+  assert(depotMember.stored > 500 && depotMember.timberStored > 30, 'production continues into the new space after construction');
+  depotService.save();
+  depotService = new LocalGameService({ storage: depotStorage, now: () => depotClock });
+  assert(depotService.snapshot('iron-owner').base.levels.depot === 2 && depotService.getProductionInfo('iron-member').capacity === 1000, 'depot level and capacity persist across reload');
+  const legacyDepotSave = JSON.parse(depotStorage.getItem(SERVICE_STORAGE_KEY));
+  delete legacyDepotSave.communities['iron-pines'].base.levels.depot;
+  delete legacyDepotSave.communities['iron-pines'].base.layout.structures.depot;
+  legacyDepotSave.communities['iron-pines'].base.layout.walls = [{ id: 'wall-1', x: -8, z: -4, level: 1 }];
+  legacyDepotSave.communities['iron-pines'].base.blueprints = [{ slot: 1, name: 'Old defence', savedAt: depotClock, structures: { ...legacyDepotSave.communities['iron-pines'].base.layout.structures }, walls: [{ id: 'wall-1', x: -8, z: -4 }] }];
+  const migratedDepot = new LocalGameService({ storage: new MemoryStorage({ [SERVICE_STORAGE_KEY]: JSON.stringify(legacyDepotSave) }), now: () => depotClock });
+  const migratedLayout = migratedDepot.snapshot('iron-owner').base.layout;
+  assert(migratedLayout.walls.length === 1 && migratedLayout.walls[0].x === -8 && migratedLayout.walls[0].z === -4 && !(migratedLayout.structures.depot.x === -8 && migratedLayout.structures.depot.z === -4), 'adding the depot to an old save preserves its existing wall');
+  assert(migratedDepot.getBlueprints('iron-owner')[0].ready, 'old blueprints gain a collision-free depot position without replacing the saved defence');
+  checks.push('Supply Depot approval, shared builder completion, capacity timing, save migration and old wall/blueprint preservation');
+
   const hallGate = service.getUpgradeRequirement('iron-owner', 'hq');
   assert(!hallGate.ok && hallGate.prerequisites.length === 3, 'Hall 3 is gated by all three support buildings at Level 2');
   assert(!service.approveProject('iron-member', 'workshop', 'test-member-cannot-approve').ok, 'members cannot approve projects');
@@ -674,10 +711,10 @@ export function runServiceTests() {
   const legacyReveal = new Map([['tower', clock + 1_000]]);
   assert(buildingScaffoldState({ legacyJobs: [{ key: 'tower' }], revealEffects: legacyReveal, now: clock + 2_000 }).tower, 'legacy timed construction keeps its scaffold after a reveal deadline');
   assert(!buildingScaffoldState({ legacyJobs: [], revealEffects: legacyReveal, now: clock + 2_000 }).tower, 'completed legacy construction removes its scaffold once no job or reveal remains');
-  const sameCommunity = reconcileBuildingSnapshot('iron-pines', 'iron-pines', { hq: 2, workshop: 1, tower: 1, comms: 1 }, { hq: 2, workshop: 1, tower: 1, comms: 1 });
-  const switchedCommunity = reconcileBuildingSnapshot('iron-pines', 'violet-ridge', { hq: 1, workshop: 1, tower: 1, comms: 1 }, sameCommunity.levels);
+  const sameCommunity = reconcileBuildingSnapshot('iron-pines', 'iron-pines', { hq: 2, workshop: 1, tower: 1, comms: 1, depot: 1 }, { hq: 2, workshop: 1, tower: 1, comms: 1, depot: 1 });
+  const switchedCommunity = reconcileBuildingSnapshot('iron-pines', 'violet-ridge', { hq: 1, workshop: 1, tower: 1, comms: 1, depot: 1 }, sameCommunity.levels);
   assert(!sameCommunity.communityChanged && sameCommunity.changedKeys.length === 0, 'same-community identity switch retains the shared base meshes');
-  assert(switchedCommunity.communityChanged && switchedCommunity.changedKeys.length === 4 && switchedCommunity.levels.hq === 1, 'cross-community switch reconciles every displayed building to that community level snapshot');
+  assert(switchedCommunity.communityChanged && switchedCommunity.changedKeys.length === 5 && switchedCommunity.levels.hq === 1, 'cross-community switch reconciles every displayed building to that community level snapshot');
   checks.push('automatic scaffold reveal expiry, legacy scaffold reconciliation and same-/cross-community presentation reconciliation');
 
   let warClock = clock + 5_000;

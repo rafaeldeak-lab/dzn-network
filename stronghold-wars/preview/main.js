@@ -23,6 +23,7 @@ const DEFS = {
   workshop: { name: 'Workshop / Forge', pos: [-9, 4] },
   tower: { name: 'Arc Battery', pos: [8, 6] },
   comms: { name: 'Communications', pos: [6, -8] },
+  depot: { name: 'DZN Supply Depot', pos: [-8, -4] },
 };
 let activePatrolNodes = PATROL_NODES;
 let activePatrolLayout = null;
@@ -988,7 +989,84 @@ let renderedBuildingLevels = {};
 
 function buildModel(key, level) {
   const g = new THREE.Group();
-  if (key === 'hq') {
+  if (key === 'depot') {
+    const armor = new THREE.MeshStandardMaterial({ color: 0x35413b, metalness: .52, roughness: .61 });
+    const inset = new THREE.MeshStandardMaterial({ color: 0x202a27, metalness: .42, roughness: .69 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0x633882, metalness: .51, roughness: .54 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x70786c, metalness: .66, roughness: .47 });
+    const light = new THREE.MeshStandardMaterial({ color: 0x82c955, emissive: 0x5b9a27, emissiveIntensity: .65, metalness: .16 });
+    const base = cyl(g, 2.75, 2.9, .35, MAT.concrete, 0, 0, 0, 12);
+    base.receiveShadow = true;
+    cyl(g, 2.55, 2.7, .2, armor, 0, .35, 0, 12);
+    for (let i = 0; i < 12; i++) {
+      const angle = (i + .5) * Math.PI / 6;
+      const foot = box(g, .3, .3, .44, steel, Math.sin(angle) * 2.66, .2, Math.cos(angle) * 2.66);
+      foot.rotation.y = angle;
+    }
+    const drums = level === 1 ? [[0, 0]] : [[-1.12, 0], [1.12, 0]];
+    const height = 1.8 + level * .38;
+    for (const [x, z] of drums) {
+      cyl(g, level === 1 ? 1.34 : 1.03, level === 1 ? 1.42 : 1.1, height, armor, x, .55, z, 12);
+      cyl(g, level === 1 ? 1.36 : 1.05, level === 1 ? 1.36 : 1.05, .1, trim, x, .55 + height * .68, z, 12);
+      cyl(g, level === 1 ? 1.38 : 1.08, level === 1 ? 1.38 : 1.08, .16, inset, x, .55 + height, z, 12);
+      cyl(g, level === 1 ? 1.03 : .79, level === 1 ? 1.03 : .79, .045, steel, x, .75 + height, z, 12);
+      cyl(g, level === 1 ? .73 : .54, level === 1 ? .73 : .54, .055, inset, x, .79 + height, z, 12);
+      const lock = new THREE.Mesh(new THREE.TorusGeometry(level === 1 ? .66 : .49, .035, 6, 20), light);
+      lock.rotation.x = Math.PI / 2;
+      lock.position.set(x, .83 + height, z);
+      g.add(lock);
+      for (const angle of [0, Math.PI / 3, Math.PI * 2 / 3, Math.PI, Math.PI * 4 / 3, Math.PI * 5 / 3]) {
+        const rib = new THREE.Mesh(new THREE.CylinderGeometry(.055, .055, height * .76, 6), steel);
+        rib.position.set(x + Math.cos(angle) * (level === 1 ? 1.39 : 1.07), .55 + height * .5, z + Math.sin(angle) * (level === 1 ? 1.39 : 1.07));
+        rib.castShadow = true;
+        g.add(rib);
+      }
+      for (const y of [.93, 1.5]) {
+        const strap = new THREE.Mesh(new THREE.TorusGeometry(level === 1 ? 1.38 : 1.07, .055, 6, 24), steel);
+        strap.rotation.x = Math.PI / 2;
+        strap.position.set(x, y, z);
+        g.add(strap);
+      }
+    }
+    // A visible loading entrance, side canisters and protective frame give the
+    // smallest depot a recognizable silhouette at the normal strategy zoom.
+    box(g, 1.65, 1.45, .38, steel, 0, .6, 1.66);
+    box(g, 1.4, 1.16, .4, inset, 0, .65, 1.9);
+    box(g, .14, .94, .43, trim, -.46, .68, 2.13);
+    box(g, .14, .94, .43, trim, .46, .68, 2.13);
+    box(g, .5, .13, .1, light, 0, 1.48, 2.15);
+    box(g, .13, .45, .1, steel, .48, .82, 2.16);
+    for (const x of [-2.16, 2.16]) {
+      cyl(g, .34, .4, 1.15, armor, x, .52, .9, 10);
+      cyl(g, .35, .35, .1, trim, x, 1.63, .9, 10);
+      box(g, .42, .16, .12, light, x, 1.4, 1.27);
+      box(g, .72, .22, .5, inset, x, .22, 2.02);
+    }
+    if (level >= 3) {
+      for (const x of [-2.15, 2.15]) {
+        cyl(g, .53, .64, 1.35 + level * .16, armor, x, .54, -.8, 10);
+        cyl(g, .54, .54, .12, light, x, 1.85 + level * .16, -.8, 10);
+      }
+      box(g, 4.5, .19, .24, MAT.metal, 0, 2.35 + level * .3, -.55);
+    }
+    if (level >= 4) {
+      for (const x of [-1.1, 1.1]) {
+        const hatch = new THREE.Mesh(new THREE.TorusGeometry(.67, .12, 8, 24), trim);
+        hatch.rotation.x = Math.PI / 2;
+        hatch.position.set(x, .55 + height + .27, 0);
+        g.add(hatch);
+      }
+      cyl(g, .06, .08, 2.2, MAT.metal, 2.15, 2.2, -1.1, 8);
+      const beacon = cyl(g, .18, .18, .28, light, 2.15, 4.4, -1.1, 10);
+      beacon.name = 'depot_beacon';
+    }
+    if (level >= 5) {
+      const shield = new THREE.Mesh(new THREE.TorusGeometry(2.7, .09, 8, 32), light);
+      shield.rotation.x = Math.PI / 2;
+      shield.position.y = .55;
+      g.add(shield);
+    }
+  } else if (key === 'hq') {
     box(g, 6, 0.5, 6, MAT.concrete);
     box(g, 5, 2.5, 5, MAT.olive, 0, 0.5);
     box(g, 5.2, 0.3, 5.2, MAT.dark, 0, 3);
@@ -1182,6 +1260,17 @@ function requestBuildingModel(key, level) {
   const building = buildings[key];
   const asset = getBuildingAsset(key, level);
   if (!building || !asset || fallback2D) return;
+  if (!asset.glb) {
+    if (building.modelLevel !== level || building.modelAssetPath) {
+      const previous = building.model;
+      building.model = buildModel(key, level);
+      building.group.add(building.model);
+      if (previous) building.group.remove(previous);
+      building.modelLevel = level;
+      building.modelAssetPath = null;
+    }
+    return;
+  }
   if (building.modelAssetPath === asset.glb && building.modelLevel === level) return;
   const requestToken = ++building.loadToken;
   const requestCommunity = service.profile()?.communityId;
@@ -1861,13 +1950,13 @@ function updateHud() {
   $('treasury').textContent = access.allowed ? `🏦 ${Math.floor(state.treasury)} Unallocated` : '🏦 Locked';
   $('collectBtn').textContent = `Collect +${Math.floor(state.stored)}`;
   const production = service.getProductionInfo();
-  $('collectBtn').title = production ? `Workshop / Forge: ${Math.floor(production.stored)}/${production.capacity} Parts stored · ${production.perSecond} Parts/sec. ${production.perSecond ? 'Production continues while away until storage is full.' : 'Production is paused until this community has access.'}` : '';
+  $('collectBtn').title = production ? `Workshop / Forge: ${Math.floor(production.stored)}/${production.capacity} Parts stored · ${production.perSecond} Parts/sec. Upgrade the Supply Depot to hold more. ${production.perSecond ? 'Production continues while away until storage is full.' : 'Production is paused until this community has access.'}` : '';
   $('collectBtn').disabled = !access.allowed || state.stored < 1;
   $('muteBtn').textContent = state.muted ? '🔇' : '🔊';
   const yard = service.community()?.saved.base.landPlots.find(plot => plot.id === 'timberline-depot');
   const yardProduction = service.getTimberProductionInfo();
   $('yardBtn').textContent = yard?.facilityLevel ? `🪵 Yard L${yard.facilityLevel}${Math.floor(yardProduction?.stored || 0) ? ` · ${Math.floor(yardProduction.stored)} ready` : ''}` : state.levels.hq < 2 ? '🪵 Lumber Yard · Hall L2' : '🪵 Lumber Yard';
-  $('yardBtn').title = yardProduction?.level ? `${Math.floor(yardProduction.stored)}/${yardProduction.capacity} Timber stored · ${yardProduction.perMinute} Timber/min. Open the Yard to collect.` : 'Clear and claim Timberline Depot, then fund its Lumber Yard.';
+  $('yardBtn').title = yardProduction?.level ? `${Math.floor(yardProduction.stored)}/${yardProduction.capacity} Timber stored · ${yardProduction.perMinute} Timber/min. Upgrade the Supply Depot to hold more.` : 'Clear and claim Timberline Depot, then fund its Lumber Yard.';
   updatePreviewCard();
   updateBuildingList();
 }
@@ -1921,6 +2010,11 @@ function showBuildingPanel(key) {
   const currentStats = cfg.stats[level - 1];
   const nextStats = requirement.targetLevel <= GAME_CONFIG.maxLevel ? cfg.stats[requirement.targetLevel - 1] : null;
   let html = `<h2>${escapeHTML(def.name)} · Level ${level}/5</h2><p><span class="dim">Now:</span> ${escapeHTML(requirement.currentBenefit)}</p>`;
+  if (key === 'depot') {
+    const parts = service.getProductionInfo();
+    const timber = service.getTimberProductionInfo();
+    html += `<p class="notice">Your production stores: ${Math.floor(parts?.stored || 0)}/${parts?.capacity || 0} Parts · ${Math.floor(timber?.stored || 0)}/${timber?.capacity || 0} Timber. This shared building adds capacity for every eligible member after construction finishes.</p>`;
+  }
   if (requirement.targetLevel <= GAME_CONFIG.maxLevel) {
     html += `<p><b>Next · Level ${requirement.targetLevel}:</b> ${escapeHTML(requirement.nextBenefit)}</p><p><b>Cost:</b> ${requirement.cost.toLocaleString()} Parts</p>`;
     if (requirement.prerequisites.length) html += `<div class="notice warn"><b>Before upgrading</b>${requirement.prerequisites.map(item => `<p>• ${escapeHTML(item)}</p>`).join('')}</div>`;
@@ -2592,7 +2686,7 @@ function showLayoutPanel(errorMessage = '') {
       ? layoutPending.end.x === x && layoutPending.end.z === z
       : rowCells(layoutPending.start || layoutPending.end, layoutPending.end)?.some(cell => cell.x === x && cell.z === z));
     const label = structure ? (GAME_CONFIG.buildings[structure]?.name || GAME_CONFIG.facilities[structure]?.name || structure) : wall ? `Wall Level ${wall.level}` : occupied.has(key) ? 'Reserved building or camp space' : 'Empty grid space';
-    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''} ${preview ? 'preview' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'AB' : structure === 'comms' ? 'CM' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
+    cells.push(`<button class="layout-cell ${occupied.has(key) ? 'occupied' : ''} ${wall ? 'wall' : ''} ${chosen ? 'chosen' : ''} ${preview ? 'preview' : ''}" data-layout-x="${x}" data-layout-z="${z}" title="${escapeHTML(label)} · ${x}, ${z}" aria-label="${escapeHTML(label)} at ${x}, ${z}" ${owner ? '' : 'disabled'}>${structure ? escapeHTML(structure === 'hq' ? 'HQ' : structure === 'workshop' ? 'FG' : structure === 'tower' ? 'AB' : structure === 'comms' ? 'CM' : structure === 'depot' ? 'DP' : 'YD') : wall ? `W${wall.level}` : ''}</button>`);
   }
   const stageHint = layoutPending ? 'Check the highlighted cells and confirm below.' : layoutStart ? `Start ${layoutStart.x}, ${layoutStart.z} chosen. Pick the end cell.` : layoutMode === 'move-wall' ? 'Select an existing wall, then its destination.' : layoutMode.endsWith('row') ? 'Pick the first and last cells of a straight row.' : 'Pick one cell on the grid.';
   const zoneOptions = GAME_CONFIG.landPlots.filter(plot => claimed.has(plot.id)).map(plot => `<option value="${plot.id}">${escapeHTML(plot.name)}</option>`).join('');
@@ -2611,7 +2705,7 @@ function showLayoutPanel(errorMessage = '') {
     <p class="help" role="status">${stageHint}</p>
     ${quote ? `<div class="layout-preview ${quote.error ? 'warn' : ''}" role="status"><strong>${escapeHTML(quote.summary || layoutModes[layoutPending.mode])}</strong>${quote.error ? `<p>${escapeHTML(quote.error)}</p>` : '<p>Preview only. Your resources are spent after you confirm.</p>'}<div class="row"><button id="layoutConfirm" ${quote.error || !owner ? 'disabled' : ''}>Confirm ${escapeHTML(layoutModes[layoutPending.mode].toLowerCase())}</button><button id="layoutDiscard">Change selection</button></div></div>` : ''}
     <div class="layout-scroll"><div class="layout-grid" style="grid-template-columns:repeat(${columns},36px)" aria-label="${escapeHTML(layoutZone)} build grid">${cells.join('')}</div></div>
-    <div class="layout-key"><span>HQ Hall</span><span>FG Forge</span><span>AB Arc Battery</span><span>CM Comms</span><span>YD District</span><span>W# Wall level</span></div>
+    <div class="layout-key"><span>HQ Hall</span><span>FG Forge</span><span>AB Arc Battery</span><span>CM Comms</span><span>DP Supply Depot</span><span>YD District</span><span>W# Wall level</span></div>
     <p class="help">Each cell is 2 metres. Moving is free. Walls and upgrades use personal Parts and Timber; the finished base is shared with your server.</p>
     <div class="row"><button id="layoutCancelStart" ${layoutStart ? '' : 'disabled'}>Clear start</button><button id="closeBtn">Done</button></div>`);
   const layoutScroller = panel.querySelector('.layout-scroll');
@@ -3931,7 +4025,7 @@ function buildWarBaseVisual(side) {
     warBaseGroup.add(model);
     if (key === 'tower') warTurretRig = model.userData.turretRig;
     const asset = getBuildingAsset(key, side.base.levels[key]);
-    if (asset) loadBuildingTemplate(asset.glb).then(template => {
+    if (asset?.glb) loadBuildingTemplate(asset.glb).then(template => {
       if (token !== warDefenderToken) return;
       const detailed = normalizeBuildingClone(template, key, side.base.levels[key]);
       detailed.position.copy(model.position);

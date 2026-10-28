@@ -1,4 +1,4 @@
-export const BUILDING_KEYS = Object.freeze(['hq', 'workshop', 'tower', 'comms']);
+export const BUILDING_KEYS = Object.freeze(['hq', 'workshop', 'tower', 'comms', 'depot']);
 
 export function expireRevealEffects(revealEffects, now) {
   for (const [key, deadline] of revealEffects) {

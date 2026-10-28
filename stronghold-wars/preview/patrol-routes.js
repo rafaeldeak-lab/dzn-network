@@ -1,17 +1,17 @@
-// Walkable links around the four buildings. Stops are outside their footprints.
+// Walkable links around the compound buildings. Stops are outside their footprints.
 // The camp is the squad's home until a dedicated Barracks plot exists.
 import { cellKey, footprintCells } from './layout-grid.js';
 import { BUILDING_ASSETS } from './building-assets.js';
 export const PATROL_NODES = Object.freeze({
   camp: [-4, -12], westSouth: [-9, -8], westLane: [-15, 0], westNorth: [-15, 10],
   yard: [-17, -4],
-  workshop: [-9, 9], northWest: [-5, 12], hall: [0, 6],
+  workshop: [-9, 9], depot: [-8, -9], northWest: [-5, 12], hall: [0, 6],
   northEast: [5, 12], tower: [8, 11], eastNorth: [14, 11], eastLane: [14, 0],
   comms: [10, -10], southEast: [6, -13], southLane: [0, -13],
 });
 
 const links = [
-  ['camp', 'westSouth'], ['westSouth', 'westLane'], ['westLane', 'westNorth'], ['westNorth', 'workshop'],
+  ['camp', 'westSouth'], ['camp', 'depot'], ['depot', 'hall'], ['westSouth', 'westLane'], ['westLane', 'westNorth'], ['westNorth', 'workshop'],
   ['workshop', 'northWest'], ['northWest', 'hall'], ['hall', 'northEast'],
   ['northEast', 'tower'], ['tower', 'eastNorth'], ['eastNorth', 'eastLane'], ['eastLane', 'comms'],
   ['comms', 'southEast'], ['southEast', 'southLane'], ['southLane', 'camp'],
@@ -55,7 +55,7 @@ export function patrolNodesForLayout(layout) {
   const occupied = new Set();
   for (const point of Object.values(layout?.structures || {})) for (const cell of footprintCells(point.x, point.z)) occupied.add(cell);
   for (const wall of layout?.walls || []) occupied.add(cellKey(wall.x, wall.z));
-  for (const [stop, key] of [['hall', 'hq'], ['workshop', 'workshop'], ['tower', 'tower'], ['comms', 'comms']]) {
+  for (const [stop, key] of [['hall', 'hq'], ['workshop', 'workshop'], ['tower', 'tower'], ['comms', 'comms'], ['depot', 'depot']]) {
     const point = layout?.structures?.[key];
     if (!point) continue;
     const choices = [4, 6, 8, 10].flatMap(radius => [

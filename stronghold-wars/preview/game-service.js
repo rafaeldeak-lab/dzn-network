@@ -101,6 +101,13 @@ export const GAME_CONFIG = Object.freeze({
       stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ trainingRewardPercent: level * 20 }))),
       benefits: Object.freeze([20, 40, 60, 80, 100].map(value => `Training reward +${value}%`)),
     }),
+    depot: Object.freeze({
+      name: 'DZN Supply Depot', kind: 'support', costs: Object.freeze([0, 350, 900, 1900, 3800]),
+      stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ extraPartsStorage: (level - 1) * 500, extraTimberStorage: (level - 1) * 40 }))),
+      benefits: Object.freeze([1, 2, 3, 4, 5].map(level => level === 1
+        ? 'Secure supply lockers; standard Parts and Timber capacity'
+        : `+${(level - 1) * 500} Parts and +${(level - 1) * 40} Timber storage for every member`)),
+    }),
   }),
   districts: Object.freeze([
     Object.freeze({ name: 'Command Compound', hall: 1, status: 'Available now' }),
@@ -167,7 +174,7 @@ function normalizedTrainingLoadout(counts, levels) {
 
 function emptyBase(treasury = 200) {
   return {
-    levels: { hq: 1, workshop: 1, tower: 1, comms: 1 },
+    levels: { hq: 1, workshop: 1, tower: 1, comms: 1, depot: 1 },
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
     reinforcementRequests: [],
@@ -224,6 +231,13 @@ function createRecoveryState() {
 
 function normalizeLevel(value, fallback = 1) {
   return Math.min(GAME_CONFIG.maxLevel, Math.max(1, safeInt(value, fallback) || 1));
+}
+
+function chooseDepotPosition(layout, claimed, preferred = null) {
+  const candidates = [preferred, { x: CORE_DEFAULTS.depot[0], z: CORE_DEFAULTS.depot[1] }];
+  for (let z = -10; z <= 10; z += 2)
+    for (let x = -12; x <= 12; x += 2) candidates.push({ x, z });
+  return candidates.find(point => point && !validateLayoutPosition(layout, claimed, 'depot', point.x, point.z)) || null;
 }
 
 function migrateLegacySave(legacy) {
@@ -471,6 +485,9 @@ function normalizeLoadedState(raw) {
       ? base.repairPriority : normalized.landPlots.find(plot => plot.wear > 0)?.id || null;
     const claimed = new Set(normalized.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
     const savedLayout = base.layout && typeof base.layout === 'object' ? base.layout : {};
+    // Place a newly introduced depot after restoring the existing structures
+    // and walls. Older saved layouts keep every paid wall where it was.
+    delete normalized.layout.structures.depot;
     for (const key of Object.keys(normalized.layout.structures)) {
       const point = savedLayout.structures?.[key];
       if (isGridCell(point?.x, point?.z) && !validateLayoutPosition(normalized.layout, claimed, key, point.x, point.z))
@@ -485,6 +502,8 @@ function normalizeLoadedState(raw) {
       normalized.layout.walls.push({ id: wall.id, x: wall.x, z: wall.z, level });
       wallIds.add(wall.id);
     }
+    normalized.layout.structures.depot = chooseDepotPosition(normalized.layout, claimed, savedLayout.structures?.depot)
+      || { x: CORE_DEFAULTS.depot[0], z: CORE_DEFAULTS.depot[1] };
     normalized.layout.nextWallNumber = Math.max(1, safeInt(savedLayout.nextWallNumber, 1), ...normalized.layout.walls.map(wall => Number(wall.id.slice(5)) + 1));
     const blueprintSlots = new Set();
     normalized.blueprints = (Array.isArray(base.blueprints) ? base.blueprints : []).filter(item => {
@@ -511,7 +530,7 @@ function normalizeLoadedState(raw) {
       productionAt: safeInt(saved.productionAt),
       salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt), nextTimberClaimAt: safeInt(saved.nextTimberClaimAt),
       timber: safeInt(saved.timber),
-      timberStored: Number.isFinite(Number(saved.timberStored)) ? Math.max(0, Math.min(110, Number(saved.timberStored))) : 0,
+      timberStored: Number.isFinite(Number(saved.timberStored)) ? Math.max(0, Number(saved.timberStored)) : 0,
       timberProductionAt: safeInt(saved.timberProductionAt),
       lifetimeContributed: safeInt(saved.lifetimeContributed),
       forgeJobs: Array.isArray(saved.forgeJobs) ? saved.forgeJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.forgeRecipes.some(r => r.id === j.recipeId)).map(j => ({
@@ -1747,11 +1766,17 @@ export class LocalGameService {
     const structures = {};
     for (const key of Object.keys(current.structures)) {
       const point = blueprint.structures?.[key];
+      if (key === 'depot' && !point) continue;
       if (!isGridCell(point?.x, point?.z)) return { error: 'This blueprint has an invalid building position.' };
       structures[key] = { x: point.x, z: point.z };
     }
     const candidate = { structures, walls: current.walls.map(wall => ({ ...wall, x: positions.get(wall.id).x, z: positions.get(wall.id).z })), nextWallNumber: current.nextWallNumber };
     const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    if (!structures.depot) {
+      const point = chooseDepotPosition(candidate, claimed, current.structures.depot);
+      if (!point) return { error: 'No free compound space for the Supply Depot. Move a wall and save this plan again.' };
+      structures.depot = point;
+    }
     for (const [key, point] of Object.entries(structures)) {
       if (key in DISTRICT_DEFAULTS && !claimed.has(key)) continue;
       const error = validateLayoutPosition(candidate, claimed, key, point.x, point.z);
@@ -2112,7 +2137,8 @@ export class LocalGameService {
       project.pinned = false;
       return false;
     }
-    if (project.key === 'workshop') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id, at);
+    if (project.key === 'workshop' || project.key === 'depot') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id, at);
+    if (project.key === 'depot') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advanceTimberProduction(member.id, at);
     base.levels[project.key] = project.targetLevel;
     project.status = 'completed';
     project.completedAt = at;
@@ -2397,7 +2423,7 @@ export class LocalGameService {
     const member = this.member(identityId);
     if (!entry || !member) return null;
     const level = entry.saved.base.levels.workshop;
-    return { stored: member.stored, capacity: 500 + (level - 1) * 250,
+    return { stored: member.stored, capacity: 500 + (level - 1) * 250 + ((entry.saved.base.levels.depot || 1) - 1) * 500,
       perSecond: this.getAccess(identityId).allowed ? GAME_CONFIG.buildings.workshop.stats[level - 1].partsPerSecond : 0 };
   }
 
@@ -2422,7 +2448,7 @@ export class LocalGameService {
     if (!entry || !member) return null;
     const plot = entry.saved.base.landPlots.find(item => item.id === 'timberline-depot');
     const level = plot?.status === 'claimed' ? plot.facilityLevel : 0;
-    return { level, stored: member.timberStored, capacity: level ? 30 + (level - 1) * 20 : 0,
+    return { level, stored: member.timberStored, capacity: level ? 30 + (level - 1) * 20 + ((entry.saved.base.levels.depot || 1) - 1) * 40 : 0,
       perMinute: level && this.getAccess(identityId).allowed ? level * 2 : 0 };
   }
 

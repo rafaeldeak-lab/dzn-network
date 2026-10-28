@@ -26,6 +26,11 @@ for (const line of manifest) {
 let pairs = 0;
 for (const [key, definition] of Object.entries(BUILDING_ASSETS)) {
   if (definition.levels.length !== 5) throw new Error(`${key} does not have five levels`);
+  if (key === 'depot') {
+    if (definition.levels.some((level, index) => level.glb !== null || !level.png.startsWith('data:image/svg+xml,') || !decodeURIComponent(level.png).includes(`L${index + 1}`)))
+      throw new Error('The original five-stage 3D Supply Depot needs a distinct fallback illustration at every level.');
+    continue;
+  }
   for (const [index, level] of definition.levels.entries()) {
     for (const [format, signature] of [['glb', 'glTF'], ['png', '\x89PNG']]) {
       const path = level[format];
@@ -356,6 +361,13 @@ movedPatrolLayout.walls.push({ id: 'wall-1', x: 0, z: 6, level: 1 });
 const movedStops = patrolNodesForLayout(movedPatrolLayout);
 const wallDetour = walkablePatrolPath([0, 4], [0, 10], movedPatrolLayout);
 if (movedStops.workshop[0] !== -10 || !wallDetour || wallDetour.length < 2 || wallDetour.some(point => point[0] === 0 && point[1] === 6)) throw new Error('Moved buildings and placed walls must change the squad walking route.');
+const depotConstruction = setPatrolOrder(createPatrolMotion('engineer'), 'standard', ['camp', 'depot', 'camp']);
+const depotVisits = new Set();
+for (let frame = 0; frame < 4200; frame++) {
+  stepPatrolMotion(depotConstruction, .05, movedStops, movedPatrolLayout);
+  if (!depotConstruction.route.length && depotConstruction.wait > 0) depotVisits.add(depotConstruction.node);
+}
+if (!depotVisits.has('depot') || !depotVisits.has('camp')) throw new Error('Fixer must reach the Supply Depot build site and return to camp.');
 const walledHallLayout = defaultLayout();
 for (const [x, z] of [[0, 4], [4, 0], [-4, 0], [0, -4]]) walledHallLayout.walls.push({ id: `wall-${x}-${z}`, x, z, level: 1 });
 const walledHallStop = patrolNodesForLayout(walledHallLayout).hall;
