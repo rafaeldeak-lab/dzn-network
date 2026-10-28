@@ -12,6 +12,7 @@
     "/leaderboards/*",
     "/player",
     "/player/*",
+    "/player-hub",
     "/players",
     "/players/*",
     "/owner",

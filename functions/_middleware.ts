@@ -12,6 +12,10 @@ const protectedAppPagePrefixes = [
   "/test",
 ];
 
+const legacyPageRedirects: Record<string, string> = {
+  "/player-hub": "/player",
+};
+
 export const onRequest: PagesFunction = async ({ request, env, next }) => {
   const url = new URL(request.url);
   if (isManagedPagesPreviewHost(url.hostname)) {
@@ -19,6 +23,12 @@ export const onRequest: PagesFunction = async ({ request, env, next }) => {
       status: 404,
       headers: { "cache-control": "no-store" },
     });
+  }
+  const legacyRedirectPath = legacyPageRedirects[url.pathname];
+  if (legacyRedirectPath && isPageNavigationMethod(request.method)) {
+    const target = new URL(legacyRedirectPath, url.origin);
+    target.search = url.search;
+    return redirect(`${target.pathname}${target.search}`);
   }
   if (!isProtectedAppPagePath(url.pathname) || !isPageNavigationMethod(request.method)) {
     return next();

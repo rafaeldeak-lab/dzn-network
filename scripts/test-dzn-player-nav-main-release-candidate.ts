@@ -7,6 +7,7 @@ const playerHomeSource = readFileSync("components/player/player-home.tsx", "utf8
 const siteHeaderSource = readFileSync("components/site-header.tsx", "utf8");
 const middlewareSource = readFileSync("functions/_middleware.ts", "utf8");
 const routesPatchSource = readFileSync("scripts/patch-pages-routes.mjs", "utf8");
+const staticRoutesSource = readFileSync("public/_routes.json", "utf8");
 const publicAccessPolicyDoc = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 const authMeSource = readFileSync("functions/api/auth/me.ts", "utf8");
 const packageSource = readFileSync("package.json", "utf8");
@@ -41,8 +42,13 @@ assert.equal(starterHeaderBlock.includes("{ href: \"/player\", label: \"Player H
 assert.equal(proHeaderBlock.includes("{ href: \"/player\", label: \"Player Hub\", active: \"player\", icon: User }"), true);
 
 assert.equal(middlewareSource.includes("\"/player\""), true, "Player pages must be protected by the page middleware.");
+assert.equal(middlewareSource.includes('"/player-hub": "/player"'), true, "The legacy Player Hub URL must redirect to the canonical player route.");
+assert.equal(middlewareSource.includes("const legacyRedirectPath = legacyPageRedirects[url.pathname];"), true, "Legacy Player Hub redirects must run before protected-route sign-in handling.");
 assert.equal(routesPatchSource.includes("\"/player\""), true, "Exact player route must be included in Pages functions routing.");
 assert.equal(routesPatchSource.includes("\"/player/*\""), true, "Nested player routes must be included in Pages functions routing.");
+assert.equal(routesPatchSource.includes("\"/player-hub\""), true, "The legacy Player Hub URL must invoke the Pages middleware redirect.");
+assert.equal(staticRoutesSource.includes('"/player-hub"'), true, "The checked-in Pages route manifest must include the legacy Player Hub redirect.");
+
 assert.equal(publicAccessPolicyDoc.includes("`/player`"), true);
 assert.equal(publicAccessPolicyDoc.includes("`/player/profile`"), true);
 assert.equal(publicAccessPolicyDoc.includes("including the personal Player Hub"), true);

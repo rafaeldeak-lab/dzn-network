@@ -74,7 +74,7 @@
     "test:public-profile-discovery-linking": "tsx scripts/test-public-profile-discovery-linking.ts",
     "test:player-hub-event-relevance": "tsx scripts/test-player-hub-event-relevance.ts",
     "test:player-saved-servers": "tsx scripts/test-player-saved-servers.ts",
-    "test:dzn-player-nav-main-release-candidate": "tsx scripts/test-dzn-player-nav-main-release-candidate.ts",
+    "test:dzn-player-nav-main-release-candidate": "tsx scripts/test-dzn-player-nav-main-release-candidate.ts && tsx --test scripts/test-player-hub-legacy-redirect.ts",
     "test:adm-parser": "tsx scripts/test-adm-parser.ts",
     "test:adm-import-pipeline": "tsx scripts/test-adm-import-pipeline.ts",
     "test:queued-adm-job-progress": "tsx scripts/test-queued-adm-job-progress.ts",
