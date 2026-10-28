@@ -6,6 +6,7 @@ const protectedAppPagePrefixes = [
   "/dashboard",
   "/dzn-pulse",
   "/events",
+  "/owner",
   "/player",
   "/seasons",
   "/setup",

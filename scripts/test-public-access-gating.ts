@@ -26,7 +26,11 @@ assert.equal(isProtectedAppPagePath("/servers/profile"), false, "Public server p
 assert.equal(isProtectedAppPagePath("/leaderboards"), false, "Public leaderboard previews must be reachable before Discord login.");
 assert.equal(isProtectedAppPagePath("/dashboard"), true, "Dashboard routes must remain authenticated.");
 assert.equal(isProtectedAppPagePath("/player/profile"), true, "Personal player routes must remain authenticated.");
-assert.equal(isProtectedAppPagePath("/owner"), false, "Owner functions enforce their own stricter authorization boundary.");
+assert.equal(
+  isProtectedAppPagePath("/owner"),
+  true,
+  "Every owner page must begin with the shared login gate; individual owner functions can add stricter authorization where required.",
+);
 
 async function assertRecentActivityIgnoresSyncRows() {
   const sqlite = new DatabaseSync(":memory:");
