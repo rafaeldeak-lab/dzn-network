@@ -39,7 +39,10 @@ assert.doesNotMatch(
 );
 
 assert.match(playerHome, /My Profile/, "Player Hub UI must render the profile panel.");
-assert.match(playerHome, /My Server Stats/, "Player Hub UI must render current-user statistics.");
+assert.match(playerHome, /My Player Stats/, "Player Hub UI must render current-user statistics.");
+assert.match(playerHome, /aria-label="Player statistics"/, "Player Hub stats must be labelled as the player's aggregate stats.");
+assert.match(playerHome, /CompactStat label="Total deaths"/, "Player Hub must distinguish total recorded deaths from leaderboard PvP deaths.");
+assert.match(playerHome, /Player leaderboard K\/D uses PvP deaths only/, "Player Hub must explain the leaderboard death scope.");
 assert.match(playerHome, /profile\.public_profile_status === "published" && profile\.public_profile_href/, "Public view actions require a confirmed published profile.");
 assert.match(playerHome, /hasStats && progression\.gameplay_totals\.kills !== null/, "Missing totals must not display as zero activity.");
 assert.match(playerHome, /onSaved=\{refreshProfileSummary\}/, "Saving privacy settings must refresh the hub summary.");

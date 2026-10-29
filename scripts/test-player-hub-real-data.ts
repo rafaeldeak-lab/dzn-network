@@ -48,7 +48,7 @@ assert.match(playerHome, /event\.relevance\.label/, "Player Hub UI must render s
 assert.match(playerHome, /event\.relevance\.reasons/, "Player Hub UI must render suggested event relevance reasons from the private API payload.");
 assert.match(playerHome, /presentation-only/, "Player Hub UI must explain event suggestions remain presentation-only.");
 assert.match(playerHome, /My Profile/, "Player Hub UI must show private profile summaries.");
-assert.match(playerHome, /My Server Stats/, "Player Hub UI must show current-user statistics.");
+assert.match(playerHome, /My Player Stats/, "Player Hub UI must show current-user statistics.");
 assert.match(playerHome, /href: "\/games"/, "Player Hub UI must link authenticated players to the Games Hub.");
 assert.match(playerHome, /title: "Games Hub"/, "Player Hub UI must provide a named Games Hub action.");
 assert.match(playerHome, /website-only progression/, "Games Hub navigation must keep progression separate from competitive systems.");

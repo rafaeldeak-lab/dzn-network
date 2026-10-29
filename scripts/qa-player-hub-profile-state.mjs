@@ -113,7 +113,7 @@ if (process.argv.includes("--serve")) {
         for (const routePath of ["/player", "/player/profile"]) {
           await page.goto(`${origin}${routePath}#profile-summary`, { waitUntil: "networkidle" });
           const panel = page.locator("#profile-summary");
-          await panel.getByRole("heading", { name: "My Server Stats" }).waitFor();
+          await panel.getByRole("heading", { name: "My Player Stats" }).waitFor();
           assert.match(await panel.innerText(), new RegExp(messages[publicState].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
           assert.equal(await panel.getByRole("link", { name: "View public profile", exact: true }).count(), publicState === "published" ? 1 : 0);
           const metrics = await panel.getByLabel("Server statistics").innerText();

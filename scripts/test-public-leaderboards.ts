@@ -7,6 +7,11 @@ import { rankServers } from "../functions/_lib/server-ranking";
 import { formatPublicServerName } from "../lib/public-display-text";
 import type { Env } from "../functions/_lib/types";
 
+const leaderboardPage = readFileSync("app/leaderboards/page.tsx", "utf8");
+assert.match(leaderboardPage, /headers=\{\["Rank", "Player", "Server", "Kills", "PvP deaths", "PvP K\/D", "Longest"\]\}/, "Player leaderboard tables must identify competitive PvP death and K/D scopes.");
+assert.match(leaderboardPage, /headers=\{\["Rank", "Server", "Mode", "Players", "Kills", "Total deaths", "K\/D \(total\)", "Score"\]\}/, "Server leaderboard summaries must identify total-death scope.");
+assert.match(leaderboardPage, /headers=\{\["Rank", "Server", "Mode", "Players", "Kills", "K\/D \(total\)", "Score"\]\}/, "Full server ranking must identify total-death K/D scope.");
+
 type SqliteRow = Record<string, unknown>;
 type SqliteDatabase = {
   exec(sql: string): void;

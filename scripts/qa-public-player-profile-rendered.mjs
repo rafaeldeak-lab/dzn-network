@@ -9,7 +9,7 @@ const PORT_OFFSET = process.pid % 1000;
 const NEXT_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_PORT ?? 30000 + PORT_OFFSET);
 const CHROME_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_CHROME_PORT ?? 32000 + PORT_OFFSET);
 const BASE_URL = `http://127.0.0.1:${NEXT_PORT}`;
-const OUT_DIR = path.join(ROOT, "docs", "qa", "public-player-profile-viewer-qa-20260901");
+const OUT_DIR = path.resolve(process.env.DZN_PUBLIC_PROFILE_QA_OUTPUT ?? path.join(ROOT, "docs", "qa", "public-player-profile-viewer-qa-20260901"));
 const SCREENSHOT_DIR = path.join(OUT_DIR, "screenshots");
 const CHROME_USER_DATA = path.join(tmpdir(), `dzn-public-player-profile-qa-${Date.now()}`);
 
@@ -31,6 +31,9 @@ const scenarios = {
       "Rafael DZN",
       "Discord connected",
       "Gameplay Summary",
+      "Total deaths",
+      "K/D (total)",
+      "Competitive player leaderboards use PvP deaths for K/D.",
       "Pandora Network",
       "Published Sections",
       "Earned Progression",

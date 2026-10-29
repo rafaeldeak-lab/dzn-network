@@ -1289,16 +1289,17 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
                   <Activity aria-hidden="true" className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-black uppercase text-white">My Server Stats</h3>
+                  <h3 className="text-sm font-black uppercase text-white">My Player Stats</h3>
                   <p className="text-xs font-semibold leading-5 text-slate-300">{progression.message}</p>
                 </div>
               </div>
-              <dl aria-label="Server statistics" className="mt-2.5 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-cyan-300/18 bg-white/10 sm:grid-cols-4">
+              <dl aria-label="Player statistics" className="mt-2.5 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-cyan-300/18 bg-white/10 sm:grid-cols-4">
                 <CompactStat label="Kills" value={hasStats && progression.gameplay_totals.kills !== null ? String(progression.gameplay_totals.kills) : "--"} />
-                <CompactStat label="Deaths" value={hasStats && progression.gameplay_totals.deaths !== null ? String(progression.gameplay_totals.deaths) : "--"} />
+                <CompactStat label="Total deaths" value={hasStats && progression.gameplay_totals.deaths !== null ? String(progression.gameplay_totals.deaths) : "--"} />
                 <CompactStat label="Suicides" value={hasStats && progression.gameplay_totals.suicides !== null ? String(progression.gameplay_totals.suicides) : "--"} />
                 <CompactStat label="Longest" value={hasStats && progression.gameplay_totals.longest_kill_distance !== null ? formatDistance(progression.gameplay_totals.longest_kill_distance) : "--"} />
               </dl>
+              {hasStats ? <p className="mt-2 text-[0.7rem] font-semibold leading-4 text-slate-400">Total deaths include recorded PvP, environment, and suicide deaths. Player leaderboard K/D uses PvP deaths only.</p> : null}
               {progression.featured_server ? (
                 <Link
                   href={`/servers/profile?slug=${encodeURIComponent(progression.featured_server.public_slug)}`}
@@ -1312,7 +1313,7 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
                       {progression.featured_server.server_type} - {progression.featured_server.platform ?? "Platform TBA"} - {progression.featured_server.map_name ?? "Map TBA"}
                     </span>
                     <span className="mt-0.5 block text-[0.7rem] font-semibold text-slate-300">
-                      {progression.featured_server.kills} kills / {progression.featured_server.deaths} deaths / {formatDistance(progression.featured_server.longest_kill_distance)} longest
+                      {progression.featured_server.kills} kills / {progression.featured_server.deaths} total deaths / {formatDistance(progression.featured_server.longest_kill_distance)} longest
                     </span>
                   </span>
                   <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500 transition group-hover:text-cyan-100" />

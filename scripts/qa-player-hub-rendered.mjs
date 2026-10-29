@@ -49,7 +49,9 @@ const scenarios = {
       "These suggestions are private to your Player Hub and stay presentation-only.",
       "My Profile",
       "Games Hub",
-      "My Server Stats",
+      "My Player Stats",
+      "Total deaths",
+      "Player leaderboard K/D uses PvP deaths only.",
       "421m",
       "Not available yet",
       "Your public profile is switched off.",
@@ -227,7 +229,7 @@ async function main() {
             const panel = document.getElementById('profile-summary');
             return {
               publicLink: [...panel.querySelectorAll('a')].some(a => a.textContent.includes('View public profile')),
-              missingTotals: (panel.querySelector('[aria-label="Server statistics"]')?.textContent.match(/--/g) ?? []).length
+              missingTotals: (panel.querySelector('[aria-label="Player statistics"]')?.textContent.match(/--/g) ?? []).length
             };
           })()`,
           returnByValue: true,
@@ -282,8 +284,8 @@ async function main() {
 async function startNext() {
   const command = process.platform === "win32" ? "cmd.exe" : "npm";
   const args = process.platform === "win32"
-    ? ["/d", "/s", "/c", `npm run dev -- --hostname 127.0.0.1 --port ${NEXT_PORT}`]
-    : ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
+    ? ["/d", "/s", "/c", `npm run dev -- --webpack --hostname 127.0.0.1 --port ${NEXT_PORT}`]
+    : ["run", "dev", "--", "--webpack", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
   const child = spawn(command, args, {
     cwd: ROOT,
     env: {
