@@ -7,6 +7,7 @@ output GLB, and optional preview PNG after `--`.
 import re
 import sys
 
+import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
@@ -43,6 +44,29 @@ bpy.context.view_layer.update()
 low, high = world_bounds(shell)
 if not 6.49 <= high.x - low.x <= 6.51 or abs(low.z) > 0.02:
     raise RuntimeError(f'Unusable shell bounds: {tuple(low)} {tuple(high)}')
+
+# The L3 generated cage closed the entire front portal as one textured sheet.
+# Remove only the sheet inside the steel portal so the retained working saw
+# remains visible. Keep the structural side posts and roof above this window.
+if level == 3:
+    removed = 0
+    for obj in shell:
+        if obj.type != 'MESH':
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        portal_faces = []
+        for face in bm.faces:
+            position = obj.matrix_world @ face.calc_center_median()
+            if abs(position.x) < 1.85 and position.y < -1.45 and 0.24 < position.z < 1.92:
+                portal_faces.append(face)
+        removed += len(portal_faces)
+        bmesh.ops.delete(bm, geom=portal_faces, context='FACES')
+        bm.to_mesh(obj.data)
+        bm.free()
+    if removed < 50:
+        raise RuntimeError(f'Expected a front cage sheet, removed only {removed} faces')
+    print('DZN_OPEN_BAY_REMOVED_FACES', removed)
 
 bpy.ops.import_scene.gltf(filepath=old_yard)
 old_objects = set(bpy.context.scene.objects) - set(shell)
@@ -84,6 +108,9 @@ for root in roots:
             if obj.type == 'MESH':
                 obj.data.materials.clear()
                 obj.data.materials.append(roller_finish)
+    elif root.name == 'elite_yard_beacon':
+        # The new roof is lower than the former L5 kit; seat its signal lamp.
+        root.location.z -= 2.16
 bpy.context.view_layer.update()
 print('DZN_MACHINE_BOUNDS', {root.name: [list(v) for v in world_bounds([root] + root.children_recursive)]
                              for root in roots})

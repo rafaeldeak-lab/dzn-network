@@ -97,19 +97,42 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
 }
 console.log(`Additional district facilities verified: ${facilityNames.length} original GLBs across four five-level families.`);
 const meshyYardManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/meshy-pilot-manifest.json'), 'utf8'));
-const meshyYard = meshyYardManifest.asset;
-if (meshyYardManifest.stage !== 'level-1-pilot' || meshyYardManifest.generation.quotedCredits > meshyYardManifest.generation.approvedPilotCeiling)
-  throw new Error('Meshy Timberline pilot has an invalid generation receipt.');
-const meshyYardBytes = readFileSync(join(root, ...meshyYard.file.split('/')));
-if (meshyYardBytes.toString('ascii', 0, 4) !== 'glTF' || meshyYardBytes.readUInt32LE(8) !== meshyYardBytes.length
-  || meshyYardBytes.length !== meshyYard.bytes || createHash('sha256').update(meshyYardBytes).digest('hex') !== meshyYard.sha256)
-  throw new Error('Meshy Timberline GLB integrity failed.');
-const meshyYardJsonLength = meshyYardBytes.readUInt32LE(12);
-const meshyYardGltf = JSON.parse(meshyYardBytes.toString('utf8', 20, 20 + meshyYardJsonLength));
-const meshyYardNodes = new Set(meshyYardGltf.nodes?.map(node => node.name));
-if (!meshyYardGltf.meshes?.length || !meshyYardGltf.images?.length || !meshyYard.movingNodes.every(name => meshyYardNodes.has(name)))
-  throw new Error('Meshy Timberline pilot lost its textured shell or animated machinery.');
-console.log('Meshy DZN Timberline Level 1 pilot GLB and separate moving machinery verified.');
+const meshyGeneration = meshyYardManifest.generation;
+if (meshyYardManifest.stage !== 'five-level-series' || meshyGeneration.quotedCreditsTotal !== 5 * meshyGeneration.quotedCreditsPerLevel
+  || meshyGeneration.quotedCreditsPerLevel > meshyGeneration.approvedPilotCeiling
+  || 4 * meshyGeneration.quotedCreditsPerLevel > meshyGeneration.approvedAdditionalCeiling)
+  throw new Error('Meshy Timberline series has an invalid generation receipt.');
+if (Object.keys(meshyYardManifest.assets).length !== 5) throw new Error('Meshy Timberline must have five levels.');
+const meshyYardHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `timberline_l0${level}`, entry = meshyYardManifest.assets[name];
+  if (!entry || entry.file !== `assets/models/facilities/timberline_meshy_l0${level}.glb`
+    || !/^[a-f0-9]{64}$/.test(entry.sourceSha256) || !/^[a-f0-9]{64}$/.test(entry.referenceSha256))
+    throw new Error(`Meshy Timberline Level ${level} has an incomplete provenance record.`);
+  for (const [file, expected] of [
+    [`timberline-l0${level}-meshy-source.glb`, entry.sourceSha256],
+    [`dzn-timberline-l0${level}-reference.png`, entry.referenceSha256],
+  ]) {
+    const source = readFileSync(join(root, '..', 'source-art', 'meshy', file));
+    if (createHash('sha256').update(source).digest('hex') !== expected)
+      throw new Error(`Meshy Timberline Level ${level} source integrity failed: ${file}`);
+  }
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length
+    || bytes.length !== entry.bytes || hash !== entry.sha256 || meshyYardHashes.has(hash))
+    throw new Error(`Meshy Timberline Level ${level} GLB integrity failed.`);
+  meshyYardHashes.add(hash);
+  const jsonLength = bytes.readUInt32LE(12);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
+  const nodes = new Set(gltf.nodes?.map(node => node.name));
+  const movingParts = ['saw_rotor', 'saw_carriage', 'conveyor_roller_0', 'conveyor_roller_10', 'conveyor_roller_20', 'conveyor_roller_30',
+    ...(level >= 2 ? ['hydraulic_sorter'] : []), ...(level >= 3 ? ['loading_crane_hook'] : []),
+    ...(level >= 4 ? ['auto_feed_motor'] : []), ...(level >= 5 ? ['elite_yard_beacon'] : [])];
+  if (!gltf.meshes?.length || !gltf.images?.length || movingParts.some(part => !nodes.has(part)))
+    throw new Error(`Meshy Timberline Level ${level} lost its textured shell or moving machinery.`);
+}
+console.log('Five distinct textured DZN Timberline GLBs and separate moving machinery verified.');
 const wallManifest = JSON.parse(readFileSync(join(root, 'assets/models/walls/manifest.json'), 'utf8'));
 if (Object.keys(wallManifest.assets).length !== 5) throw new Error('Five wall stages are required.');
 const wallHashes = new Set();

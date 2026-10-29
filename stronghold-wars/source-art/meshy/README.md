@@ -2,11 +2,11 @@
 
 The reference `dzn-timberline-l01-reference.png` is an original DZN concept
 generated for this game's Level 1 yard. SHA-256:
-`823a3c4eb95e6cdaeecbfe87358c7239cab33d5592c43fffc14b8bb5ae91b2adb`.
+`823a3c4eb95e6cdaebcfe87358c7239cab33d5592c43fffc14b8bb5ae91b2adb`.
 It is a design reference, not a playable 3D model. The Level 1 Meshy shell
 has been normalized with separate moving machinery and checked in the running
-game. The existing `timberline_v4` kit remains the load fallback for Level 1
-and the active art for Levels 2-5 until each replacement passes review.
+game. The existing `timberline_v4` kit remains the load fallback for all five
+levels.
 
 ## Original concept prompt
 
@@ -68,15 +68,14 @@ materials corrected it in the game. The final Blender review image is
 `review/meshy-yard-l01-final.png`.
 
 The quick no-credit Level 2-5 derivatives failed visual review because the
-added equipment looked like plain boxes. They are rejected. Give each later
-level its own distinct reference and model after a new credit limit is agreed.
+added equipment looked like plain boxes. They were rejected. Each later level
+now has its own distinct image-guided Meshy model.
 
-## Level 2-5 reference set (concepts only)
+## Level 2-5 reference set
 
-These original image references are ready for image-guided modeling. They are
-not playable meshes, and no further Meshy generation is implied by their
-presence. Each keeps the Level 1 roof, colour language, and open cutting bay
-while adding a readable, mechanically plausible upgrade:
+These original image references drove the accepted image-guided models. Each
+keeps the Level 1 roof, colour language, and open cutting bay while adding a
+readable, mechanically plausible upgrade:
 
 | Level | Reference | SHA-256 | New visible equipment |
 | --- | --- | --- | --- |
@@ -86,14 +85,19 @@ while adding a readable, mechanically plausible upgrade:
 | 5 | `dzn-timberline-l05-reference.png` | `041c92680d7dc11c243941861b59ec229361c827390376a7e7b3f886f0e1d28c` | Twin exhaust stacks, crane safety platform and control core |
 
 The generated concept art is a geometry reference. Some small fascia lettering
-is malformed, so remove that lettering from any accepted mesh and apply an
-accurate DZN badge during Blender normalization. Keep the powered feed,
-guarded saw and crane as separate moving pieces if they are represented in
-the game. A static generated mesh alone does not satisfy those animations.
+is malformed and does not count as an accurate DZN badge. The accepted meshes
+use the existing separate moving saw, carriage, rollers and level-specific
+machinery. The generated shell itself is static; a full mechanical rig and
+clean branded fascia remain visual follow-up work.
 
-For each level, use its matching image with Meshy image-to-3D Smart Topology,
-texturing on, roughly 15,000 target polygons and a private generation. Keep
-the initial result only if its visible shape matches the reference and its
-real game-camera view passes inspection. Normalize to the existing Timberline
-plot, retain the original yard as a load fallback, and replace one level at a
-time after the owner approves an additional numeric credit ceiling.
+Each level used its matching image with Meshy image-to-3D Smart Topology,
+texturing on, a 15,000 target polygon setting and a private generation. The
+five jobs were quoted at 15 existing Meshy credits each: the 15-credit pilot
+fit the approved 25-credit ceiling, and the four additional 15-credit jobs
+used the separately approved 60-credit ceiling. No credits were purchased.
+The actual five GLBs each load in the browser review gallery with a textured
+shell, four rollers and saw rotor. Level 3's first output blocked the cutting
+bay; Blender removed only that front sheet. Level 5's reused beacon was seated
+on the new roof. See `preview/assets/models/facilities/meshy-pilot-manifest.json`
+for source, reference and final checksums. The actual game uses the existing
+Timberline plot and falls back to the older kit if an asset fails to load.
