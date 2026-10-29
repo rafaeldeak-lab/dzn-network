@@ -64,11 +64,21 @@ assert.match(lockerPreview, /Wildcard calling cards/);
 assert.match(lockerPreview, /Profile frame collection/);
 assert.match(lockerPreview, /Identity loadout previews/);
 assert.match(lockerPreview, /Server showcase treatments/);
+assert.match(lockerPreview, /Badge vault previews/);
+assert.match(lockerPreview, /3D badge/);
 assert.match(lockerPreview, /Preview only · no payment/);
 assert.match(lockerPreview, /rewards-locker-preview-v1\.webp/);
 assert.match(lockerPreview, /role="tablist"/);
 assert.match(lockerPreview, /role="tabpanel"/);
 assert.equal(lockerPreview.includes("fetch("), false, "The visual Store preview must not start checkout, grants, or Store API activity.");
+
+for (const assetName of ["apex-reputation-v1.webp", "warlord-v1.webp", "season-crown-v1.webp", "community-signal-v1.webp"]) {
+  const assetPath = path.join(root, "public", "store", "catalogue", "badges", assetName);
+  assert.equal(existsSync(assetPath), true, `The ${assetName} 3D badge artwork should exist.`);
+  assert.equal(statSync(assetPath).size < 250_000, true, `The ${assetName} 3D badge artwork should remain web-friendly.`);
+  const { data, info } = await sharp(assetPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.equal(data[(info.width - 1) * 4 + 3], 0, `${assetName} should retain a transparent badge edge.`);
+}
 
 const page = readFileSync(path.join(root, "app", "store", "page.tsx"), "utf8");
 assert.match(page, /Reward collections, cosmetics, and fair competition/);

@@ -3,7 +3,7 @@
 import { ArrowRight, Check, Crown, LockKeyhole, MessageCircle, Palette, ShieldCheck, Sparkles, UserRound, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-type LockerCollectionKey = "wildcards" | "frames" | "identity" | "showcase";
+type LockerCollectionKey = "wildcards" | "badges" | "frames" | "identity" | "showcase";
 
 type LockerCollection = {
   key: LockerCollectionKey;
@@ -20,6 +20,13 @@ const LOCKER_COLLECTIONS: LockerCollection[] = [
     eyebrow: "Calling card concepts",
     title: "Wildcard calling cards",
     detail: "A rotating set of profile-card treatments for players who want their public identity to feel more personal. These are visual concepts only until the player cosmetic catalogue is published.",
+  },
+  {
+    key: "badges",
+    label: "Badges",
+    eyebrow: "3D reward asset library",
+    title: "Badge vault previews",
+    detail: "High-detail 3D reward art for future award paths and premium public presentation. A visual asset is not an unlock: each design still needs a real achievement rule, tracking source and fulfilment decision.",
   },
   {
     key: "frames",
@@ -58,6 +65,13 @@ const FRAME_PREVIEWS = [
   { key: "fire", title: "Fireline", detail: "Combat visual treatment", source: "/frames/fire-animated.svg", accent: "#ef4444" },
   { key: "ice", title: "Winter signal", detail: "Seasonal visual treatment", source: "/frames/ice-animated.svg", accent: "#93c5fd" },
   { key: "space", title: "Deep space", detail: "Future catalogue concept", source: "/frames/space-animated.svg", accent: "#a78bfa" },
+] as const;
+
+const BADGE_PREVIEWS = [
+  { key: "apex", title: "Apex reputation", detail: "Prestige reward concept", source: "/store/catalogue/badges/apex-reputation-v1.webp", accent: "border-cyan-300/35 bg-cyan-300/[0.06]", status: "Future rule" },
+  { key: "warlord", title: "Warlord forge", detail: "Combat reward concept", source: "/store/catalogue/badges/warlord-v1.webp", accent: "border-orange-300/35 bg-orange-300/[0.06]", status: "Future rule" },
+  { key: "crown", title: "Season crown", detail: "Seasonal reward concept", source: "/store/catalogue/badges/season-crown-v1.webp", accent: "border-violet-300/35 bg-violet-300/[0.06]", status: "Future rule" },
+  { key: "community", title: "Signal relay", detail: "Community reward concept", source: "/store/catalogue/badges/community-signal-v1.webp", accent: "border-emerald-300/35 bg-emerald-300/[0.06]", status: "Future rule" },
 ] as const;
 
 const LOADOUTS: ReadonlyArray<{ title: string; detail: string; icon: LucideIcon; accent: string }> = [
@@ -126,6 +140,7 @@ export function LockerPreview({ compact = false }: { compact?: boolean }) {
 
           <div id="locker-preview-panel" role="tabpanel" aria-labelledby={`locker-tab-${selected.key}`} className="min-w-0">
             {selected.key === "wildcards" ? <WildcardCollection /> : null}
+            {selected.key === "badges" ? <BadgeCollection /> : null}
             {selected.key === "frames" ? <FrameCollection /> : null}
             {selected.key === "identity" ? <IdentityCollection /> : null}
             {selected.key === "showcase" ? <ShowcaseCollection /> : null}
@@ -134,6 +149,23 @@ export function LockerPreview({ compact = false }: { compact?: boolean }) {
       </div>
     </section>
   );
+}
+
+function BadgeCollection() {
+  return <div className="grid gap-4 sm:grid-cols-2">
+    {BADGE_PREVIEWS.map((badge) => <article key={badge.key} className={`group relative min-h-64 overflow-hidden border p-5 shadow-[0_18px_35px_rgba(0,0,0,0.24)] ${badge.accent}`}>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.12),transparent_44%),linear-gradient(145deg,rgba(8,12,26,0.94),rgba(3,6,13,0.99))]" />
+      <div className="relative flex h-full flex-col justify-between">
+        <div className="flex items-start justify-between gap-3"><span className="border border-white/15 bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-200">3D badge</span><span className="border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{badge.status}</span></div>
+        <div className="pointer-events-none absolute inset-x-0 top-7 bottom-14 grid place-items-center">
+          {/* The source assets are transparent WebP decals; Next image optimisation adds no value to a decorative, lazy-loaded catalogue preview. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={badge.source} alt="" width={330} height={330} loading="lazy" decoding="async" className="h-48 w-48 object-contain drop-shadow-[0_22px_22px_rgba(0,0,0,0.55)] transition duration-500 group-hover:scale-105" />
+        </div>
+        <div className="relative mt-auto border-t border-white/10 pt-3"><h5 className="text-lg font-black uppercase text-white">{badge.title}</h5><p className="mt-1 text-xs font-semibold uppercase tracking-wide text-zinc-300">{badge.detail} · not grantable</p></div>
+      </div>
+    </article>)}
+  </div>;
 }
 
 function WildcardCollection() {
