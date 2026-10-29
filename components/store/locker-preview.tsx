@@ -52,10 +52,10 @@ const LOCKER_COLLECTIONS: LockerCollection[] = [
 ];
 
 const WILDCARDS = [
-  { title: "Night Watch", label: "Signal black", position: "76% 34%", tone: "from-violet-950/90 via-slate-950/82 to-slate-950/88" },
-  { title: "Storm Relay", label: "Violet strike", position: "47% 15%", tone: "from-indigo-950/88 via-violet-950/76 to-slate-950/90" },
-  { title: "Outpost Gold", label: "Lantern line", position: "86% 52%", tone: "from-amber-950/88 via-slate-950/78 to-slate-950/92" },
-  { title: "Last Signal", label: "Ice light", position: "68% 74%", tone: "from-cyan-950/90 via-slate-950/80 to-indigo-950/90" },
+  { title: "Night Watch", label: "Signal black", source: "/store/catalogue/wildcards/night-watch-v1.webp", tone: "from-slate-950/76 via-slate-950/20 to-violet-950/68" },
+  { title: "Storm Relay", label: "Violet strike", source: "/store/catalogue/wildcards/storm-relay-v1.webp", tone: "from-indigo-950/72 via-violet-950/15 to-slate-950/74" },
+  { title: "Outpost Gold", label: "Lantern line", source: "/store/catalogue/wildcards/outpost-gold-v1.webp", tone: "from-amber-950/74 via-slate-950/20 to-slate-950/76" },
+  { title: "Last Signal", label: "Ice light", source: "/store/catalogue/wildcards/last-signal-v1.webp", tone: "from-cyan-950/76 via-slate-950/18 to-indigo-950/74" },
 ] as const;
 
 const FRAME_PREVIEWS = [
@@ -172,7 +172,7 @@ function WildcardCollection() {
   return <div className="grid gap-4 sm:grid-cols-2">
     {WILDCARDS.map((card) => <article key={card.title} className="relative min-h-52 overflow-hidden border border-violet-200/20 bg-[#0a0e1b] p-5 shadow-[0_18px_35px_rgba(0,0,0,0.24)]">
       <div className={`absolute inset-0 bg-gradient-to-br ${card.tone}`} />
-      <div className="absolute inset-0 opacity-55" style={{ backgroundImage: "url('/store/catalogue/rewards-locker-preview-v1.webp')", backgroundPosition: card.position, backgroundSize: "180% auto" }} />
+      <div className="absolute inset-0 opacity-90" style={{ backgroundImage: `url('${card.source}')`, backgroundPosition: "center", backgroundSize: "cover" }} />
       <div className="relative flex h-full flex-col justify-between">
         <div className="flex items-start justify-between gap-3"><span className="border border-violet-100/35 bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-violet-100">Wildcard</span><Sparkles className="h-5 w-5 text-violet-100" aria-hidden="true" /></div>
         <div><p className="text-xs font-black uppercase tracking-[0.18em] text-violet-100/90">{card.label}</p><h5 className="mt-1 text-2xl font-black uppercase text-white">{card.title}</h5><p className="mt-2 text-xs font-bold uppercase tracking-wide text-zinc-200">Concept preview · account cosmetic</p></div>

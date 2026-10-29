@@ -72,6 +72,15 @@ assert.match(lockerPreview, /role="tablist"/);
 assert.match(lockerPreview, /role="tabpanel"/);
 assert.equal(lockerPreview.includes("fetch("), false, "The visual Store preview must not start checkout, grants, or Store API activity.");
 
+for (const assetName of ["night-watch-v1.webp", "storm-relay-v1.webp", "outpost-gold-v1.webp", "last-signal-v1.webp"]) {
+  const assetPath = path.join(root, "public", "store", "catalogue", "wildcards", assetName);
+  assert.equal(existsSync(assetPath), true, `The ${assetName} Wildcard artwork should exist.`);
+  assert.equal(statSync(assetPath).size < 250_000, true, `The ${assetName} Wildcard artwork should remain web-friendly.`);
+  const metadata = await sharp(assetPath).metadata();
+  assert.equal(metadata.width, 1280, `${assetName} should use the intended calling-card width.`);
+  assert.equal(metadata.height, 720, `${assetName} should use the intended calling-card height.`);
+}
+
 for (const assetName of ["apex-reputation-v1.webp", "warlord-v1.webp", "season-crown-v1.webp", "community-signal-v1.webp"]) {
   const assetPath = path.join(root, "public", "store", "catalogue", "badges", assetName);
   assert.equal(existsSync(assetPath), true, `The ${assetName} 3D badge artwork should exist.`);
