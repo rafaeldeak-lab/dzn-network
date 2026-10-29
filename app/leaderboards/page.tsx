@@ -323,6 +323,9 @@ export default function LeaderboardsPage() {
 
   const totalKills = useMemo(() => payload.top_servers.reduce((total: number, server) => total + server.kills, 0), [payload.top_servers]);
   const totalPlayers = payload.top_players.length;
+  const playerRankingSummary = payload.is_locked
+    ? { label: "Player rankings", value: "Locked" }
+    : { label: "Ranked Players", value: String(totalPlayers) };
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
   const initialError = loadState === "error_initial";
   const directoryBaseReady = loadState !== "loading_initial" && !initialError;
@@ -456,7 +459,7 @@ export default function LeaderboardsPage() {
               <div className="leaderboard-ref-stats leaderboard-reference-stat-grid dzn-leaderboard-stat-grid">
                 <StatCard icon={RadioTower} label="Servers Ranked" value={String(payload.top_servers.length)} tone="violet" />
                 <StatCard icon={Skull} label="Kills Tracked" value={formatNumber(totalKills)} tone="cyan" />
-                <StatCard icon={Users} label="Ranked Players" value={String(totalPlayers)} tone="orange" />
+                <StatCard icon={Users} label={playerRankingSummary.label} value={playerRankingSummary.value} tone="orange" />
                 <StatCard icon={Crosshair} label="Longest Kill" value={formatDistance(longestKill)} tone="red" />
               </div>
             ) : null}
