@@ -81,7 +81,7 @@ const LOADOUTS: ReadonlyArray<{ title: string; detail: string; icon: LucideIcon;
 ];
 
 export function LockerPreview({ compact = false }: { compact?: boolean }) {
-  const [selectedKey, setSelectedKey] = useState<LockerCollectionKey>("wildcards");
+  const [selectedKey, setSelectedKey] = useState<LockerCollectionKey>("badges");
   const selected = useMemo(() => LOCKER_COLLECTIONS.find((collection) => collection.key === selectedKey) ?? LOCKER_COLLECTIONS[0], [selectedKey]);
 
   if (compact) {
