@@ -1,6 +1,7 @@
-import { Award, Check, Crown, LockKeyhole, Palette, Server, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { Check, Crown, Server, ShieldCheck, Sparkles } from "lucide-react";
 
 import { BadgeIcon } from "@/components/badges/server-visuals";
+import { LockerPreview } from "@/components/store/locker-preview";
 import { BADGE_RULE_BY_CODE, type BadgeRule } from "@/lib/badges/rules";
 import { getBadgeCabinetArtworkUrl, toVisualBadge } from "@/lib/badges/visuals";
 
@@ -23,14 +24,18 @@ const SERVER_REWARD_CODES = [
   "winter_champion",
 ] as const;
 
-const INDIVIDUAL_COLLECTION = [
-  { title: "Profile identity", detail: "Account-bound profile themes and frames", icon: Palette },
-  { title: "Calling cards", detail: "Public profile presentation cosmetics", icon: Award },
-  { title: "Chat cosmetics", detail: "Non-competitive visual expression", icon: UserRound },
-];
+const FUTURE_REWARD_CODES = [
+  "community_favourite",
+  "headhunter",
+  "hot_streak",
+  "team_player",
+  "loot_master",
+  "event_champion",
+] as const;
 
 export function RewardsCabinet() {
   const serverRewards = SERVER_REWARD_CODES.map((code) => BADGE_RULE_BY_CODE[code]).filter(Boolean);
+  const futureRewards = FUTURE_REWARD_CODES.map((code) => BADGE_RULE_BY_CODE[code]).filter(Boolean);
 
   return (
     <section id="rewards" aria-labelledby="rewards-title" className="border-b border-white/10 bg-[#060a14]">
@@ -62,6 +67,22 @@ export function RewardsCabinet() {
           </div>
         </div>
 
+        <section aria-labelledby="reward-blueprints" className="mt-10 border border-violet-300/20 bg-violet-300/[0.035] p-5 sm:p-6">
+          <div className="flex flex-col gap-4 border-b border-violet-200/15 pb-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-black uppercase text-violet-200">Reward design archive</p>
+              <h3 id="reward-blueprints" className="mt-1 text-2xl font-black uppercase">Future award blueprints</h3>
+              <p className="mt-2 text-sm font-semibold leading-6 text-zinc-300">These designs have real DZN visual assets and documented future rules, but their tracking sources are not live. They cannot be earned, bought, or assigned today.</p>
+            </div>
+            <span className="w-fit border border-violet-300/30 bg-violet-300/10 px-3 py-2 text-xs font-black uppercase text-violet-100">Concepts, not active rewards</span>
+          </div>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {futureRewards.map((rule) => (
+              <RewardCard key={rule.badgeCode} rule={rule} statusOverride="Future rule" />
+            ))}
+          </div>
+        </section>
+
         <div className="mt-12 grid gap-6 xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)]">
           <section aria-labelledby="pro-presentation" className="border border-cyan-300/20 bg-[#080d1a] p-5 sm:p-6">
             <div className="flex items-start gap-4">
@@ -79,35 +100,16 @@ export function RewardsCabinet() {
             </div>
           </section>
 
-          <section aria-labelledby="individual-collection" className="relative overflow-hidden border border-amber-300/25 bg-[#100f13] p-5 sm:p-6">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/rewards/cabinet/player-compass-cutout-2d.webp" alt="" width={384} height={384} className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 object-contain opacity-35" />
-            <div className="relative">
-              <div className="flex items-start gap-4">
-                <span className="grid h-11 w-11 shrink-0 place-items-center border border-amber-300/30 bg-amber-300/10 text-amber-100"><LockKeyhole className="h-5 w-5" aria-hidden="true" /></span>
-                <div>
-                  <p className="text-xs font-black uppercase text-amber-200">Individual collection</p>
-                  <h3 id="individual-collection" className="mt-1 text-2xl font-black uppercase">Planned Store rewards</h3>
-                </div>
-              </div>
-              <p className="mt-5 max-w-md text-sm font-semibold leading-6 text-zinc-300">Automatic player medal tracking is not live yet. The public Store has no published catalogue, so none of these account cosmetics can be bought or unlocked today.</p>
-              <ul className="mt-5 space-y-3">
-                {INDIVIDUAL_COLLECTION.map(({ title, detail, icon: Icon }) => (
-                  <li key={title} className="flex items-center gap-3 border-t border-white/10 pt-3">
-                    <Icon className="h-4 w-4 shrink-0 text-amber-200" aria-hidden="true" />
-                    <span><strong className="font-black text-white">{title}</strong><span className="block text-sm font-semibold text-zinc-400">{detail}</span></span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
+          <LockerPreview compact />
         </div>
+
+        <LockerPreview />
       </div>
     </section>
   );
 }
 
-function RewardCard({ rule }: { rule: BadgeRule }) {
+function RewardCard({ rule, statusOverride }: { rule: BadgeRule; statusOverride?: string }) {
   const badge = toVisualBadge({
     key: rule.badgeCode,
     name: rule.name,
@@ -121,7 +123,7 @@ function RewardCard({ rule }: { rule: BadgeRule }) {
     <article className="dzn-reward-card group relative min-h-[320px] overflow-hidden border border-white/10 bg-[#090e1c] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
       <div className="relative z-10 flex items-start justify-between gap-4">
         <BadgeIcon badge={badge} size="lg" className="shrink-0" />
-        <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{rewardStatus(rule)}</span>
+        <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{statusOverride ?? rewardStatus(rule)}</span>
       </div>
       {cabinetArtwork ? (
         <span className="dzn-reward-card__art" aria-hidden="true">

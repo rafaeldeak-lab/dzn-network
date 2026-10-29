@@ -32,11 +32,11 @@ for (const assetUrl of liveCabinetAssets) {
   }
 }
 for (const futureOnlyCode of ["community_favourite", "headhunter", "hot_streak", "team_player", "loot_master", "event_champion"]) {
-  assert.equal(cabinet.includes(futureOnlyCode), false, `Future-only reward must not be presented as a live Store reward: ${futureOnlyCode}`);
+  assert.match(cabinet, new RegExp(`\\b${futureOnlyCode}\\b`), `Expected future reward blueprint: ${futureOnlyCode}`);
 }
-assert.match(cabinet, /Automatic player medal tracking is not live yet\./);
+assert.match(cabinet, /Future award blueprints/);
+assert.match(cabinet, /cannot be earned, bought, or assigned today/);
 assert.match(cabinet, /No paid competitive advantage/);
-assert.match(cabinet, /player-compass-cutout-2d\.webp/);
 assert.match(cabinet, /src=\{cabinetArtwork\}/);
 assert.match(cabinet, /dzn-reward-card__art/);
 assert.match(cabinet, /dzn-reward-card__copy/);
@@ -55,6 +55,30 @@ const storefront = readFileSync(path.join(root, "components", "store", "storefro
 assert.match(storefront, /import \{ RewardsCabinet \} from "@\/components\/store\/rewards-cabinet"/);
 assert.match(storefront, /<RewardsCabinet \/>/);
 assert.ok(storefront.indexOf("<RewardsCabinet />") < storefront.indexOf('aria-labelledby="store-products"'), "Rewards Cabinet must appear before the Store catalogue.");
+
+const lockerPreview = readFileSync(path.join(root, "components", "store", "locker-preview.tsx"), "utf8");
+const lockerArtwork = path.join(root, "public", "store", "catalogue", "rewards-locker-preview-v1.webp");
+assert.equal(existsSync(lockerArtwork), true, "The Store locker preview artwork should exist.");
+assert.equal(statSync(lockerArtwork).size < 300_000, true, "The Store locker preview artwork should remain web-friendly.");
+assert.match(lockerPreview, /Wildcard calling cards/);
+assert.match(lockerPreview, /Profile frame collection/);
+assert.match(lockerPreview, /Identity loadout previews/);
+assert.match(lockerPreview, /Server showcase treatments/);
+assert.match(lockerPreview, /Badge vault previews/);
+assert.match(lockerPreview, /3D badge/);
+assert.match(lockerPreview, /Preview only · no payment/);
+assert.match(lockerPreview, /rewards-locker-preview-v1\.webp/);
+assert.match(lockerPreview, /role="tablist"/);
+assert.match(lockerPreview, /role="tabpanel"/);
+assert.equal(lockerPreview.includes("fetch("), false, "The visual Store preview must not start checkout, grants, or Store API activity.");
+
+for (const assetName of ["apex-reputation-v1.webp", "warlord-v1.webp", "season-crown-v1.webp", "community-signal-v1.webp"]) {
+  const assetPath = path.join(root, "public", "store", "catalogue", "badges", assetName);
+  assert.equal(existsSync(assetPath), true, `The ${assetName} 3D badge artwork should exist.`);
+  assert.equal(statSync(assetPath).size < 250_000, true, `The ${assetName} 3D badge artwork should remain web-friendly.`);
+  const { data, info } = await sharp(assetPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.equal(data[(info.width - 1) * 4 + 3], 0, `${assetName} should retain a transparent badge edge.`);
+}
 
 const page = readFileSync(path.join(root, "app", "store", "page.tsx"), "utf8");
 assert.match(page, /Reward collections, cosmetics, and fair competition/);
