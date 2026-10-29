@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -918,6 +918,33 @@ export function runServiceTests() {
       { lane: 'west', objective: 'hq', method: 'breach' }).replay,
   'a Depot strike weakens the next attack, carries through reload, and never takes personal stock or duplicates an attack');
   checks.push('Supply Depot war target, guarded recon tradeoff, frozen legacy target gate and safe stock');
+  const batteryMax = 180 + corridorFixture.base.levels.tower * 70;
+  const relayMax = 180 + corridorFixture.base.levels.comms * 70;
+  const intactSystems = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, systemsVersion: 2, tactics: flankPlan });
+  const halfBattery = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, systemsVersion: 2, tactics: flankPlan,
+    conditionAtLaunch: { objectives: { tower: Math.floor(batteryMax / 2) }, walls: {} } });
+  const offlineBattery = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, systemsVersion: 2, tactics: flankPlan,
+    conditionAtLaunch: { objectives: { tower: 0 }, walls: {} } });
+  const legacyIntactBattery = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: flankPlan });
+  const legacyBattery = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: flankPlan,
+    conditionAtLaunch: { objectives: { tower: 0 }, walls: {} } });
+  const remainingSquadHealth = report => report.squad.reduce((total, unit) => total + unit.remainingHealth, 0);
+  assert(!intactSystems.batterySuppressed && halfBattery.batterySuppressed && !halfBattery.batteryOffline && offlineBattery.batteryOffline
+    && remainingSquadHealth(halfBattery) > remainingSquadHealth(intactSystems)
+    && remainingSquadHealth(offlineBattery) > remainingSquadHealth(halfBattery)
+    && JSON.stringify(legacyBattery.squad) === JSON.stringify(legacyIntactBattery.squad),
+  'later strikes face half Arc Battery fire below half integrity and no turret fire when it is destroyed, while saved old combat keeps its original shots');
+  const relayPlan = evaluateWarPlan(corridorFixture, 'recon', { lane: 'south', objective: 'hq', method: 'flank' });
+  const clearRecon = simulateWarCombat(combatAttacker, corridorFixture, { tactic: 'recon', systemsVersion: 2, tactics: relayPlan, combatBaseScore: 40 });
+  const jammedRecon = simulateWarCombat(combatAttacker, corridorFixture, { tactic: 'recon', systemsVersion: 2, tactics: relayPlan, combatBaseScore: 40,
+    conditionAtLaunch: { objectives: { comms: Math.floor(relayMax / 2) }, walls: {} } });
+  const jammedAssault = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, systemsVersion: 2,
+    conditionAtLaunch: { objectives: { comms: Math.floor(relayMax / 2) }, walls: {} } });
+  assert(relayPlan.ok && !clearRecon.relayJammed && jammedRecon.relayJammed && jammedRecon.signalBonus === 5
+    && jammedRecon.score === clearRecon.score + 5 && jammedAssault.signalBonus === 0
+    && warSystemStatus(corridorFixture, { objectives: { tower: 0, comms: Math.floor(relayMax / 2) } }).batteryOffline,
+  'a damaged relay grants a bounded Recon-only opening from the launch condition, without changing the active strike or an Assault score');
+  checks.push('Arc Battery suppression, disabled turret, Recon relay opening and legacy combat compatibility');
   const carryStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
   const carryService = new LocalGameService({ storage: carryStorage, now: () => warClock });
   const carryCapacity = lockedWar.snapshots.challenger.stats.squadSize;
@@ -930,6 +957,10 @@ export function runServiceTests() {
   assert(firstStrike.ok && secondStrike.ok && secondStrike.damage.objective.startingHealth === firstStrike.damage.objective.remainingHealth
     && carryService.getWarCondition(challenge.warId, 'violet-ridge').objectives.tower === secondStrike.damage.objective.remainingHealth,
   'two distinct roster members attack the same weakened building without resetting its health');
+  assert(firstStrike.damage.objective.remainingHealth <= firstStrike.damage.objective.maxHealth / 2
+    && !firstStrike.damage.batterySuppressed && secondStrike.damage.batterySuppressed
+    && carryService.getWar(challenge.warId).attacks[1].systemsVersion === 2,
+  'the first Arc Battery strike creates a suppressed turret for the second deployed roster member');
   const laterFirstOrder = carryService.issueWarFieldOrder('iron-owner', challenge.warId, firstStrike.attackId, 'contact', 'focus', 'carry-later-order');
   assert(laterFirstOrder.ok && JSON.stringify(carryService.getWar(challenge.warId).attacks[1].damage) === JSON.stringify(secondStrike.damage),
   'a delayed order on the first strike does not retroactively change the second strike');
@@ -937,6 +968,20 @@ export function runServiceTests() {
   assert(JSON.stringify(persistedCarry[1].damage) === JSON.stringify(secondStrike.damage)
     && persistedCarry[1].conditionAtLaunch.objectives.tower === firstStrike.damage.objective.remainingHealth,
   'the second strike keeps its launch condition and exact hit report across a browser reload');
+  const relayStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const relayService = new LocalGameService({ storage: relayStorage, now: () => warClock });
+  relayService.member('iron-owner').trainingReserve.recon = carryCapacity;
+  relayService.member('iron-admin').trainingReserve.recon = carryCapacity;
+  relayService.save();
+  const relayFirst = relayService.submitWarAttack('iron-owner', challenge.warId, 'recon', 'relay-first',
+    { lane: 'south', objective: 'comms', method: 'flank', squad: { recon: carryCapacity } });
+  const relaySecond = relayService.submitWarAttack('iron-admin', challenge.warId, 'recon', 'relay-second',
+    { lane: 'south', objective: 'hq', method: 'flank', squad: { recon: carryCapacity } });
+  const relayReload = new LocalGameService({ storage: relayStorage, now: () => warClock }).getWar(challenge.warId).attacks;
+  assert(relayFirst.ok && relayFirst.damage.objective.remainingHealth <= relayFirst.damage.objective.maxHealth / 2
+    && relaySecond.ok && relaySecond.damage.relayJammed && relaySecond.damage.signalBonus === 5
+    && relaySecond.feedback.includes('jammed Communications relay') && relayReload[1].damage.signalBonus === 5,
+  'a Recon squad jams Communications, giving a later roster member a saved five-point signal opening');
   checks.push('shared-war consecutive strikes, frozen carry-over and save reload');
   checks.push('snapshot-driven spatial combat, wall absorption, upgraded turret attrition, medic healing and field-order tradeoffs');
   const attackerStats = lockedWar.snapshots.challenger.base.levels;

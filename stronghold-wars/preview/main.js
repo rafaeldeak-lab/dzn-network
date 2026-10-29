@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -2907,12 +2907,17 @@ function renderWarRecord(war, currentCommunityId, currentIdentity) {
   } else if (war.state === 'active') {
     const myCap = myAttacks.length >= WAR_RULES.maxAttacksPerSide;
     const canAttack = isParticipant && readiness.eligible && hasRoster && !alreadyAttacked && !myCap && Date.now() <= war.attackEndsAt;
+    const enemyCondition = service.getWarCondition(war.id, enemySide.communityId);
+    const enemySystems = warSystemStatus(enemySide, enemyCondition);
+    const enemyStatus = [enemySystems.batteryOffline ? 'Arc Battery offline' : enemySystems.batterySuppressed ? 'Arc Battery suppressed' : '',
+      enemySystems.relayJammed ? 'Communications jammed' : ''].filter(Boolean);
     const resumableAttack = war.attacks.find(attack => attack.identityId === currentIdentity.id && attack.tactics?.plan
       && (attack.orders?.length || 0) < 2 && !attack.returnedAt && Date.now() <= Math.min(war.attackEndsAt, attack.at + 45_000));
     actions = `<div class="war-scoreboard"><div><span>${escapeHTML(challenger.name)}</span><strong>${war.score[war.challengerCommunityId] || 0}</strong></div><span>VS</span><div><span>${escapeHTML(defender.name)}</span><strong>${war.score[war.defenderCommunityId] || 0}</strong></div></div>
       <p class="help">Attacks ${challengerCount}/${WAR_RULES.maxAttacksPerSide} · ${defenderCount}/${WAR_RULES.maxAttacksPerSide} · closes in <span data-war-countdown="${war.attackEndsAt}" data-war-mode="attack">${formatRemaining(war.attackEndsAt)}</span></p>
       <p class="help">Your locked home defence: ${escapeHTML(WAR_DEFENCE_ORDERS[homeDefence].name)}. Opposing order is revealed on deployment.</p>
       <p><b>Locked attacker base:</b> ${escapeHTML(warSnapshotLine(currentSide))}</p><p><b>Locked defence:</b> ${escapeHTML(warSnapshotLine(enemySide))}</p>
+      ${enemyStatus.length ? `<p class="notice">Rival systems at last strike: ${escapeHTML(enemyStatus.join(' · '))}. The next squad can use this opening.</p>` : ''}
       <div class="row"><div class="war-tactic"><strong>ASSAULT · direct push</strong><p>Warden kit can add up to +${currentSide.stats.assaultKit.scoreBonus} score and shield ${currentSide.stats.assaultKit.casualtyShield} losses${currentSide.stats.assaultKit.reinforcementRole ? ' with a selected Sentinel' : ''}${currentSide.stats.assaultKit.supportRole ? ' and selected Lifeline' : ''}. Ridgewatch adds 2 per level; enemy barricades reduce Assault by 3 each.</p></div><div class="war-tactic"><strong>RECON · signal sweep</strong><p>Ghost kit can add up to +${currentSide.stats.reconKit.scoreBonus} score and shield ${currentSide.stats.reconKit.casualtyShield} losses${currentSide.stats.reconKit.supportRole ? ' with a selected Lifeline' : ''}. Signal Relay adds 2 per level; enemy barricades reduce Recon by 1 each. Defence Works reduces both tactics by 2 per level.</p></div></div>
       ${canAttack ? `<p class="help">Choose a route, target and approach before committing your one attack. The locked wall layout changes the risk and score.</p><div class="row"><button data-war-attack="assault" data-war-id="${escapeHTML(war.id)}">Plan Assault</button><button data-war-attack="recon" data-war-id="${escapeHTML(war.id)}">Plan Recon</button></div>` : `<p class="notice ${readiness.eligible ? '' : 'warn'}">${!readiness.eligible ? escapeHTML(readiness.unmetGates.join(' ')) : !hasRoster ? 'This identity was not on the verified pre-war roster.' : alreadyAttacked ? 'Your roster member has already deployed once.' : myCap ? 'Your community has used its two-attack cap.' : 'Attack window closed.'}</p>`}
       ${resumableAttack && readiness.eligible ? `<div class="row"><button data-war-resume="${escapeHTML(resumableAttack.attackId)}" data-war-id="${escapeHTML(war.id)}">Resume attack · ${resumableAttack.orders?.length || 0}/2 field orders</button></div>` : ''}
@@ -3862,13 +3867,13 @@ function disposeWarBolt(bolt) {
   bolt.impact.material.dispose();
 }
 
-function spawnArcBolt(origin, aim, bolts) {
+function spawnArcBolt(origin, aim, bolts, power = 1) {
   const direction = aim.clone().sub(origin);
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.065, direction.length(), 8),
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035 * power, 0.065 * power, direction.length(), 8),
     new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.95, depthWrite: false }));
   beam.position.copy(origin).addScaledVector(direction, 0.5);
   beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-  const impact = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
+  const impact = new THREE.Mesh(new THREE.SphereGeometry(0.22 * power, 10, 8),
     new THREE.MeshBasicMaterial({ color: 0xc5ff75, transparent: true, opacity: 0.8, depthWrite: false }));
   impact.position.copy(aim);
   scene.add(beam, impact);
@@ -4123,8 +4128,11 @@ function showWarPlanner(warId, tactic) {
   const depotHealth = conditionAtLaunch.objectives.depot;
   const supplyDisrupted = defender.base.depotRaidable !== false && Number.isFinite(depotHealth)
     && depotHealth * 100 <= (180 + defender.base.levels.depot * 70) * SUPPLY_DISRUPTION.thresholdPercent;
+  const systems = warSystemStatus(defender, conditionAtLaunch);
+  const systemWarnings = [systems.batteryOffline ? 'ARC BATTERY OFFLINE · no turret volleys' : systems.batterySuppressed ? `ARC BATTERY SUPPRESSED · turret fire ${WAR_SYSTEMS.batteryFirePercent}%` : '',
+    systems.relayJammed ? `RELAY JAMMED · Recon gains +${WAR_SYSTEMS.reconSignalBonus} points` : ''].filter(Boolean);
   const brokenWalls = Object.values(conditionAtLaunch.walls).filter(health => health === 0).length;
-  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. The accepted base positions are locked; earlier battle damage carries into this strike. Confirming sends trained troops away and spends your one deployment.</p>${weakened || brokenWalls ? `<p class="notice">Current fortifications: ${escapeHTML(weakened || 'Buildings intact')}${brokenWalls ? ` · ${brokenWalls} wall ${brokenWalls === 1 ? 'breach' : 'breaches'} already open` : ''}</p>` : ''}${supplyDisrupted ? `<p class="notice">SUPPLY LINE DISRUPTED · Defender counterfire is ${SUPPLY_DISRUPTION.counterfirePercent}% for this strike.</p>` : ''}<div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(objectives, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><p class="help">A Ghost-led recon strike can disrupt the Depot for war points. If the Depot ends a strike at half health or lower, the next strike faces 15% less counterfire. The defending owner can choose Secure the supply line during preparation. Raids never take a member's stored Parts or Timber.</p><details class="war-squad-picker" open><summary>Deploy your squad · ${capacity} frozen Hall slots</summary><div class="war-squad-grid">${squadRows}</div><p id="warSquadStatus" class="help" role="status"></p></details><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanTrain">Camp & training</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">Fixers help cut defended walls, Ghosts reward covered flanks, Sentinels cover the battery and Lifeline medics reduce losses. Surviving troops return; losses must be retrained. Kit tiers are locked at acceptance. This war remains a local preview.</p>`);
+  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. The accepted base positions are locked; earlier battle damage carries into this strike. Confirming sends trained troops away and spends your one deployment.</p>${weakened || brokenWalls ? `<p class="notice">Current fortifications: ${escapeHTML(weakened || 'Buildings intact')}${brokenWalls ? ` · ${brokenWalls} wall ${brokenWalls === 1 ? 'breach' : 'breaches'} already open` : ''}</p>` : ''}${supplyDisrupted ? `<p class="notice">SUPPLY LINE DISRUPTED · Defender counterfire is ${SUPPLY_DISRUPTION.counterfirePercent}% for this strike.</p>` : ''}${systemWarnings.map(message => `<p class="notice">${escapeHTML(message)}</p>`).join('')}<div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(objectives, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><p class="help">Destroying the Arc Battery stops its fire in later strikes; below half health it fires at half strength. A damaged relay adds ${WAR_SYSTEMS.reconSignalBonus} Recon points in later strikes. The Depot can cut all counterfire by 15%. These effects combine from the condition at launch; they never change personal stock.</p><details class="war-squad-picker" open><summary>Deploy your squad · ${capacity} frozen Hall slots</summary><div class="war-squad-grid">${squadRows}</div><p id="warSquadStatus" class="help" role="status"></p></details><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanTrain">Camp & training</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">Fixers help cut defended walls, Ghosts reward covered flanks, Sentinels cover the battery and Lifeline medics reduce losses. Surviving troops return; losses must be retrained. Kit tiers are locked at acceptance. This war remains a local preview.</p>`);
   const squadInputs = [...panel.querySelectorAll('[data-war-squad]')];
   const select = () => ({ lane: $('warPlanLane').value, objective: $('warPlanObjective').value, method: $('warPlanMethod').value,
     squad: Object.fromEntries(squadInputs.map(input => [input.dataset.warSquad, Number(input.value)])) });
@@ -4194,6 +4202,18 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     defenceBeacon.userData.warMarker = true;
     warBaseGroup.add(defenceBeacon);
   }
+  const systemRings = [];
+  for (const [key, active, color] of [['tower', damage.batterySuppressed, 0xff925e], ['comms', damage.relayJammed, 0x78caff]]) {
+    if (!active) continue;
+    const point = defendingSide.base.layout.structures[key];
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.5, 2.72, 40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(point.x, 0.19, point.z);
+    ring.userData.warMarker = true;
+    warBaseGroup.add(ring);
+    systemRings.push(ring);
+  }
   for (const building of Object.values(buildings)) building.group.visible = false;
   outpostBlocks.forEach(block => { block.visible = false; });
   const squadSize = attackingSide.stats.squadSize;
@@ -4246,14 +4266,14 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     troops.push({ mesh: troop, role, roleRing, healthBar: makeWarHealthBar(), lastDamageAt: 0, path, phase: i * 0.45, lag: role === 'medic' ? 0.08 : role === 'sentinel' ? 0.04 : 0,
       nextAction: 4.4 + i * 0.11, withdrawn: damage.ok ? damage.squad[i]?.withdrawn : i >= squadSize - result.casualties });
   }
-  warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, objectiveHealthBar: makeWarHealthBar(1.35),
+  warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, objectiveMarker, systemRings, objectiveHealthBar: makeWarHealthBar(1.35),
     lastObjectiveHitAt: 0, lastWallHitAt: {}, objectiveDownShown: false, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false,
     orders: [...(result.orders || [])], orderView: '', coverUntil: 0, previousCameraOffset: cameraOffset.clone() };
   scene.add(warFillLight, warKeyLight, warKeyLight.target);
   warHud.hidden = false;
   warHud.style.maxWidth = 'min(355px,calc(100vw - 24px))';
   const roster = [...new Set(troops.map(troop => troop.role))].map(role => `<span style="color:#${WAR_ROLE_COLOURS[role].toString(16).padStart(6, '0')}">● ${WAR_ROLE_LABELS[role]} ${troops.filter(troop => troop.role === role).length}</span>`).join(' · ');
-  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div><div class="war-damage-status" style="color:#b8efc9;font-weight:650;line-height:1.4;margin-top:5px" aria-live="off"></div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}${damage.supplyDisrupted ? '<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">SUPPLY LINE DISRUPTED · COUNTERFIRE -15%</div>' : ''}`;
+  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div><div class="war-damage-status" style="color:#b8efc9;font-weight:650;line-height:1.4;margin-top:5px" aria-live="off"></div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}${damage.supplyDisrupted ? '<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">SUPPLY LINE DISRUPTED · COUNTERFIRE -15%</div>' : ''}${damage.batteryOffline ? '<div style="color:#ffb68b;font-weight:650;line-height:1.4;margin-top:5px">ARC BATTERY OFFLINE · NO TURRET FIRE</div>' : damage.batterySuppressed ? '<div style="color:#ffb68b;font-weight:650;line-height:1.4;margin-top:5px">ARC BATTERY SUPPRESSED · HALF FIRE</div>' : ''}${damage.signalBonus ? `<div style="color:#a8d8ff;font-weight:650;line-height:1.4;margin-top:5px">RELAY JAMMED · RECON +${damage.signalBonus}</div>` : ''}`;
   warBattle.damageStatus = warHud.querySelector('.war-damage-status');
   updateWarDamage(warBattle, 0);
   warOrders.hidden = false;
@@ -4358,6 +4378,10 @@ function updateWarBattle(dt) {
     warBattle.defenceBeacon.scale.setScalar(1 + Math.sin(warBattle.time * 4) * 0.09);
     warBattle.defenceBeacon.material.opacity = 0.65 + Math.sin(warBattle.time * 4) * 0.2;
   }
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) for (const [index, ring] of warBattle.systemRings.entries()) {
+    ring.scale.setScalar(1 + Math.sin(warBattle.time * 3.2 + index) * 0.08);
+    ring.material.opacity = 0.56 + Math.sin(warBattle.time * 3.2 + index) * 0.13;
+  }
   const activeCount = warBattle.damage?.squad?.filter(track => warHealthAt(track, progress) > 0).length ?? warBattle.squadSize - warBattle.result.casualties;
   warHud.querySelector('.war-progress').textContent = `${warBattle.tactic.toUpperCase()} · ${tactics?.laneName || 'West treeline'} → ${tactics?.objectiveName || 'Command Hall'} · ${progress < 0.27 ? 'APPROACH' : progress < 0.48 ? tactics?.breachedWallIds.length ? 'BREACH' : 'COVER' : progress < 0.7 ? 'ADVANCE' : progress < 0.84 ? 'TARGET PUSH' : 'WITHDRAWAL'} · ${activeCount}/${warBattle.squadSize} press on · ${Math.max(0, Math.ceil(warBattle.duration - warBattle.time))}s`;
   for (const [index, troop] of warBattle.troops.entries()) {
@@ -4414,11 +4438,13 @@ function updateWarBattle(dt) {
     return !nearest || distance < nearest.distance ? { mesh: troop.mesh, distance } : nearest;
   }, null)?.mesh;
   warBattle.shotClock = Math.min(1.2, warBattle.shotClock + dt);
-  const fire = Boolean(target && progress < 0.94 && warBattle.time >= warBattle.coverUntil && warBattle.shotClock >= 0.8);
-  const aim = target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-  if (stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire)) {
+  const batteryOffline = Boolean(warBattle.damage?.batteryOffline);
+  const fire = Boolean(!batteryOffline && target && progress < 0.94 && warBattle.time >= warBattle.coverUntil && warBattle.shotClock >= 0.8);
+  const aim = batteryOffline ? null : target?.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+  if (!batteryOffline && stepArcBattery(warTurretRig, dt, warBattle.time, aim, fire)) {
     warBattle.shotClock = 0;
-    spawnArcBolt(warTurretRig.muzzle.getWorldPosition(new THREE.Vector3()), aim, warBattle.bolts);
+    spawnArcBolt(warTurretRig.muzzle.getWorldPosition(new THREE.Vector3()), aim, warBattle.bolts,
+      warBattle.damage?.batterySuppressed ? 0.65 : 1);
   }
   updateArcBolts(warBattle.bolts, dt);
   updateWarEffects(warBattle, dt);

@@ -335,6 +335,7 @@ function normalizeWarRecord(war) {
       tactic, at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
       baseScore: safeInt(a.baseScore ?? a.score), baseCasualties: safeInt(a.baseCasualties ?? a.casualties),
       combatVersion: a.combatVersion === 2 ? 2 : 1, combatBaseScore: safeInt(a.combatBaseScore),
+      systemsVersion: a.systemsVersion === 2 ? 2 : 1,
       orders: Array.isArray(a.orders) ? a.orders.filter(order => evaluateWarFieldOrder(tactic, order?.phase, order?.command).ok)
         .filter((order, index, all) => all.findIndex(item => item.phase === order.phase) === index)
         .slice(0, 2).map(order => ({ ...evaluateWarFieldOrder(tactic, order.phase, order.command), at: safeInt(order.at) })) : [],
@@ -1168,7 +1169,7 @@ export class LocalGameService {
     const returnAt = now + WAR_RULES.squadReturnMs;
     const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
       defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
-      combatVersion: tactics?.ok ? 2 : 1, combatBaseScore: score,
+      combatVersion: tactics?.ok ? 2 : 1, combatBaseScore: score, systemsVersion: tactics?.ok ? 2 : 1,
       baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [], conditionAtLaunch };
     attack.damage = attack.combatVersion === 2 ? simulateWarCombat(attacker, defender, attack) : buildWarDamageReport(attacker, defender, attack);
     if (!attack.damage.ok) return attack.damage;
@@ -1177,6 +1178,9 @@ export class LocalGameService {
       attack.casualties = attack.baseCasualties = attack.damage.casualties;
       attack.feedback += ` The locked battle dealt ${attack.damage.objective.maxHealth - attack.damage.objective.remainingHealth}/${attack.damage.objective.maxHealth} objective damage, broke ${attack.damage.walls.filter(wall => !wall.remainingHealth).length}/${attack.damage.walls.length} route walls and withdrew ${attack.casualties}/${attacker.stats.squadSize} troops, scoring ${attack.score}.`;
       if (attack.damage.supplyDisrupted) attack.feedback += ' The previously damaged Depot reduced defender counterfire by 15% for this strike.';
+      if (attack.damage.batteryOffline) attack.feedback += ' The Arc Battery was offline at launch; it fired no volleys.';
+      else if (attack.damage.batterySuppressed) attack.feedback += ' The damaged Arc Battery fired at half strength.';
+      if (attack.damage.signalBonus) attack.feedback += ` The jammed Communications relay gave the Recon squad +${attack.damage.signalBonus} points.`;
     }
     if (squad) {
       const member = this.member(identityId);

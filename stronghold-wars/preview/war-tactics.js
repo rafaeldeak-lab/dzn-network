@@ -10,6 +10,7 @@ export const WAR_OBJECTIVES = Object.freeze({
   hq: 'Command Hall', tower: 'Arc Battery', comms: 'Communications', depot: 'DZN Supply Depot',
 });
 export const SUPPLY_DISRUPTION = Object.freeze({ thresholdPercent: 50, counterfirePercent: 85 });
+export const WAR_SYSTEMS = Object.freeze({ thresholdPercent: 50, batteryFirePercent: 50, reconSignalBonus: 5 });
 export const WAR_METHODS = Object.freeze({ breach: 'Cut through', flank: 'Flank under cover' });
 export const WAR_FIELD_ORDERS = Object.freeze({
   contact: Object.freeze({ focus: 'Focus fire', smoke: 'Smoke advance' }),
@@ -55,6 +56,20 @@ const whole = (value, maximum) => clamp(Math.floor(Number(value) || 0), 0, maxim
 const objectiveMaxHealth = (defender, key) => 180 + clamp(whole(defender.base.levels[key], 5), 1, 5) * 70;
 const wallMaxHealth = wall => 55 + clamp(whole(wall.level, 5), 1, 5) * 35;
 const savedHealth = (value, maximum) => Number.isFinite(value) ? whole(value, maximum) : maximum;
+
+// A system's damage matters only to a later strike. The current strike uses
+// its launch condition, and saved v2 attacks keep their original battle rules.
+export function warSystemStatus(defender, condition) {
+  const batteryMax = objectiveMaxHealth(defender, 'tower');
+  const relayMax = objectiveMaxHealth(defender, 'comms');
+  const batteryHealth = savedHealth(condition?.objectives?.tower, batteryMax);
+  const relayHealth = savedHealth(condition?.objectives?.comms, relayMax);
+  return {
+    batterySuppressed: batteryHealth * 100 <= batteryMax * WAR_SYSTEMS.thresholdPercent,
+    batteryOffline: batteryHealth === 0,
+    relayJammed: relayHealth * 100 <= relayMax * WAR_SYSTEMS.thresholdPercent,
+  };
+}
 
 // Store only damaged IDs from the accepted base. A later strike takes this
 // snapshot at launch, so field orders never rewrite a strike already launched.
@@ -203,6 +218,8 @@ export function simulateWarCombat(attacker, defender, attack) {
   const depotHealthAtLaunch = savedHealth(attack.conditionAtLaunch?.objectives?.depot, depotMaxHealth);
   const supplyDisrupted = defender.base.depotRaidable !== false
     && depotHealthAtLaunch * 100 <= depotMaxHealth * SUPPLY_DISRUPTION.thresholdPercent;
+  const systems = attack.systemsVersion === 2 ? warSystemStatus(defender, attack.conditionAtLaunch) :
+    { batterySuppressed: false, batteryOffline: false, relayJammed: false };
   const defencePower = (19 + d.hq * 5 + d.tower * 8 + fortification * 1.4
     + whole(attack.defenderPenalty, 40) * 1.6 + whole(attack.defenceOrderPenalty, 20) * 2.2)
     * (supplyDisrupted ? SUPPLY_DISRUPTION.counterfirePercent / 100 : 1);
@@ -232,7 +249,9 @@ export function simulateWarCombat(attacker, defender, attack) {
       const unit = nearest(point, wave);
       if (!unit) break;
       const profile = squadProfile(unit.role, attacker.base.levels);
-      const raw = defencePower * (index ? 0.39 : 0.61) * cover * exitCover * pressure;
+      const batteryPower = systems.batteryOffline ? 0 : systems.batterySuppressed ? WAR_SYSTEMS.batteryFirePercent / 100 : 1;
+      const raw = defencePower * (index ? 0.39 : 0.61 * batteryPower) * cover * exitCover * pressure;
+      if (index === 0 && systems.batteryOffline) continue;
       const armour = profile.armour * (index ? 0.35 : 0.5);
       applyHit(unit, Math.max(2, raw - armour), at + 0.015 + index * 0.004);
     }
@@ -247,8 +266,10 @@ export function simulateWarCombat(attacker, defender, attack) {
   const casualties = squad.filter(unit => unit.withdrawn).length;
   const breached = walls.filter(wall => wall.startingHealth > 0 && wall.remainingHealth === 0).length;
   const damageFraction = (objective.startingHealth - objective.remainingHealth) / objective.maxHealth;
-  const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2), 0, 100);
-  return { ok: true, version: 2, score, casualties, squad, objective, walls, supplyDisrupted };
+  const signalBonus = systems.relayJammed && attack.tactic === 'recon' ? WAR_SYSTEMS.reconSignalBonus : 0;
+  const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2 + signalBonus), 0, 100);
+  return { ok: true, version: 2, score, casualties, squad, objective, walls, supplyDisrupted,
+    batterySuppressed: systems.batterySuppressed, batteryOffline: systems.batteryOffline, relayJammed: systems.relayJammed, signalBonus };
 }
 
 const point = pair => ({ x: pair[0], z: pair[1] });
