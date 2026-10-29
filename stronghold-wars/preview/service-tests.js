@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warDefenderPosts, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -867,6 +867,9 @@ export function runServiceTests() {
   };
   const plainAssault = simulateWarCombat(specialistAttacker, corridorFixture, specialistInput);
   const guardianFixture = specialistFixture('guardian');
+  assert(warDefenderPosts(guardianFixture).length === 1 && warDefenderPosts(guardianFixture)[0].range === 10
+    && warDefenderPosts(guardianFixture)[0].post === 'hall',
+    'the planner and resolver share the same frozen defender post and reach');
   const guardianAssault = simulateWarCombat(specialistAttacker, guardianFixture, specialistInput);
   const legacyGuardian = simulateWarCombat(specialistAttacker, guardianFixture, { ...specialistInput, defenderCombatVersion: 1 });
   assert(guardianAssault.version === 3 && guardianAssault.defenderEvents.some(event => event.role === 'guardian')

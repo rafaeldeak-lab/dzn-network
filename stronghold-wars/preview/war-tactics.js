@@ -12,6 +12,7 @@ export const WAR_OBJECTIVES = Object.freeze({
 });
 export const SUPPLY_DISRUPTION = Object.freeze({ thresholdPercent: 50, counterfirePercent: 85 });
 export const WAR_SYSTEMS = Object.freeze({ thresholdPercent: 50, batteryFirePercent: 50, reconSignalBonus: 5 });
+export const WAR_DEFENDER_RANGES = Object.freeze({ guardian: 10, aegis: 12, trapper: 9, hound: 11 });
 export const WAR_METHODS = Object.freeze({ breach: 'Cut through', flank: 'Flank under cover' });
 export const WAR_FIELD_ORDERS = Object.freeze({
   contact: Object.freeze({ focus: 'Focus fire', smoke: 'Smoke advance' }),
@@ -117,6 +118,18 @@ export function warStandingWalls(layout, condition, report, progress = 0) {
 const objectiveMaxHealth = (defender, key) => 180 + clamp(whole(defender.base.levels[key], 5), 1, 5) * 70;
 const wallMaxHealth = wall => 55 + clamp(whole(wall.level, 5), 1, 5) * 35;
 const savedHealth = (value, maximum) => Number.isFinite(value) ? whole(value, maximum) : maximum;
+
+export function warDefenderPosts(defender) {
+  if (!defender?.base?.layout) return [];
+  const nodes = patrolNodesForLayout(defender.base.layout);
+  return Object.entries(WAR_DEFENDER_RANGES).flatMap(([role, range]) => {
+    const assigned = defender.base.defenders?.[role];
+    const node = DEFENDER_POST_NODES[assigned?.post];
+    const position = nodes[node];
+    const level = whole(assigned?.level, 5);
+    return position && level ? [{ role, level, post: assigned.post, x: position[0], z: position[1], range }] : [];
+  });
+}
 
 // A system's damage matters only to a later strike. The current strike uses
 // its launch condition, and saved v2 attacks keep their original battle rules.
@@ -276,20 +289,13 @@ export function simulateWarCombat(attacker, defender, attack) {
   // Only newly launched battles use spatial specialist abilities. Earlier
   // accepted attacks must continue to resolve with their original rules.
   const specialistCombat = attack.defenderCombatVersion === 2;
-  const postNodes = specialistCombat ? patrolNodesForLayout(defender.base.layout) : null;
-  const specialists = Object.fromEntries(['guardian', 'aegis', 'trapper', 'hound'].map(role => {
-    const assigned = defender.base.defenders?.[role];
-    const node = DEFENDER_POST_NODES[assigned?.post];
-    const position = postNodes?.[node];
-    return [role, specialistCombat && position && whole(assigned.level, 5)
-      ? { level: whole(assigned.level, 5), post: assigned.post, x: position[0], z: position[1] } : null];
-  }));
+  const specialists = Object.fromEntries((specialistCombat ? warDefenderPosts(defender) : []).map(post => [post.role, post]));
   const defenderEvents = [];
-  const inRange = (role, unit, wave, radius) => {
+  const inRange = (role, unit, wave) => {
     const post = specialists[role];
     if (!post || !unit || unit.remainingHealth <= 0) return false;
     const position = targetPosition(unit.slot, wave);
-    return (post.x - position.x) ** 2 + (post.z - position.z) ** 2 <= radius ** 2;
+    return (post.x - position.x) ** 2 + (post.z - position.z) ** 2 <= post.range ** 2;
   };
   const d = defender.base.levels;
   const fortification = whole(defender.stats?.fortification, 50);
@@ -319,13 +325,13 @@ export function simulateWarCombat(attacker, defender, attack) {
       if (withdrawal === 'pursue' && wave >= 4 && !wall) amount *= 1.3;
       if (withdrawal === 'cover' && wave >= 4) amount *= 0.75;
       const target = wall || objective;
-      if (target.remainingHealth > 0 && attack.tactic === 'assault' && inRange('guardian', unit, wave, 10)) {
+      if (target.remainingHealth > 0 && attack.tactic === 'assault' && inRange('guardian', unit, wave)) {
         const blocked = Math.round(amount * (0.12 + specialists.guardian.level * 0.035));
         amount -= blocked;
         if (blocked && !defenderEvents.some(event => event.role === 'guardian' && event.wave === wave))
           defenderEvents.push({ role: 'guardian', wave, at, slot: unit.slot, post: specialists.guardian.post, amount: blocked });
       }
-      if (target.remainingHealth > 0 && attack.tactic === 'recon' && inRange('aegis', unit, wave, 12)) {
+      if (target.remainingHealth > 0 && attack.tactic === 'recon' && inRange('aegis', unit, wave)) {
         const blocked = Math.round(amount * (0.15 + specialists.aegis.level * 0.04));
         amount -= blocked;
         if (blocked && !defenderEvents.some(event => event.role === 'aegis' && event.wave === wave))
@@ -346,11 +352,11 @@ export function simulateWarCombat(attacker, defender, attack) {
       const armour = profile.armour * (index ? 0.35 : 0.5);
       applyHit(unit, Math.max(2, raw - armour), at + 0.015 + index * 0.004);
     }
-    for (const [role, radius, activeWave] of [['trapper', 9, wave % 2 === 0], ['hound', 11, wave >= 2 && wave % 2 === 0]]) {
+    for (const [role, activeWave] of [['trapper', wave % 2 === 0], ['hound', wave >= 2 && wave % 2 === 0]]) {
       const post = specialists[role];
       if (!post || !activeWave) continue;
       const unit = nearest(post, wave);
-      if (!inRange(role, unit, wave, radius)) continue;
+      if (!inRange(role, unit, wave)) continue;
       const before = unit.remainingHealth;
       applyHit(unit, role === 'trapper' ? 4 + post.level * 2 : 5 + post.level * 2, at + (role === 'trapper' ? 0.021 : 0.023));
       const dealt = before - unit.remainingHealth;
