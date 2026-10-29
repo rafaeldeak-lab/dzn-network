@@ -95,6 +95,9 @@ assert.match(component, /className="relative self-start shrink-0"/, "The mobile 
 assert.match(component, /<DiscordAvatar displayName=\{data\.display_name\} initial=\{initial\} url=\{data\.discord_profile\.avatar_url\} discordVisible size="compact" \/>/, "The connected Discord panel must reuse the consent-aware avatar proxy rather than replacing a public avatar with an initial.");
 assert.match(component, /size === "compact" \? "text-lg sm:text-lg" : "text-4xl sm:text-5xl"/, "The compact connected-account panel must not render the hero-sized initial when an avatar is absent or fails to load.");
 assert.match(component, /totals\?\.kills \? "Flawless" : "--"/, "A positive-kill, zero-death public record must be presented as Flawless rather than as a false decimal ratio.");
+assert.match(component, /MetricCard label="Total deaths"/, "Public profiles must identify aggregate recorded deaths as total deaths.");
+assert.match(component, /MetricCard label="K\/D \(total\)"/, "Public profile K\/D must identify the total-death scope.");
+assert.match(component, /Competitive player leaderboards use PvP deaths for K\/D/, "Public profiles must explain why competitive leaderboard K\/D can differ from total-profile K\/D.");
 assert.match(component, /data\.discord_profile\.visible && data\.discord_profile\.connected \? \([\s\S]*Account connected[\s\S]*\) : <HiddenCopy \/>/, "Discord connection details must be replaced with privacy-safe hidden copy when identity visibility is off.");
 assert.doesNotMatch(component, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Public profile UI must not store share history or track analytics.");
 assert.doesNotMatch(component, /fetch\([^)]*(?:checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|competitive_events|leaderboards)/i, "Public profile UI must not call Store/payment/owner/review/event/competitive routes.");

@@ -112,8 +112,8 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
 
       <section aria-label="Public gameplay statistics" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="Kills" value={gameplay.kills} icon={<Crosshair aria-hidden="true" className="h-5 w-5" />} tone="cyan" />
-        <MetricCard label="Deaths" value={gameplay.deaths} icon={<Activity aria-hidden="true" className="h-5 w-5" />} tone="rose" />
-        <MetricCard label="K/D ratio" value={gameplay.status === "available" ? kd : "--"} icon={<Radio aria-hidden="true" className="h-5 w-5" />} tone="violet" />
+        <MetricCard label="Total deaths" value={gameplay.deaths} icon={<Activity aria-hidden="true" className="h-5 w-5" />} tone="rose" />
+        <MetricCard label="K/D (total)" value={gameplay.status === "available" ? kd : "--"} icon={<Radio aria-hidden="true" className="h-5 w-5" />} tone="violet" />
         <MetricCard label="Longest kill" value={gameplay.longest} icon={<Trophy aria-hidden="true" className="h-5 w-5" />} tone="gold" />
         <MetricCard label="Public servers" value={gameplay.publicServers} icon={<Server aria-hidden="true" className="h-5 w-5" />} tone="emerald" />
         <MetricCard label="Last seen" value={gameplay.status === "available" ? formatShortDate(data.sections.gameplay_summary.last_seen_at) : "--"} icon={<CalendarDays aria-hidden="true" className="h-5 w-5" />} tone="blue" />
@@ -123,17 +123,20 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         <div className="space-y-4">
           <ProfileBand icon={<Activity aria-hidden="true" className="h-5 w-5" />} title="Gameplay Summary" visible={data.sections.gameplay_summary.visible}>
             {gameplay.status !== "hidden" ? gameplay.status === "available" ? (
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="space-y-3">
+                <p className="text-xs font-semibold leading-5 text-slate-300">Total deaths include recorded PvP, environment, and suicide deaths. Competitive player leaderboards use PvP deaths for K/D.</p>
+                <div className="grid gap-2 sm:grid-cols-3">
                 <DetailTile label="Linked public servers" value={gameplay.publicServers} />
                 <DetailTile label="Suicides" value={gameplay.suicides} />
                 <DetailTile label="Last activity" value={formatDate(data.sections.gameplay_summary.last_seen_at)} />
+              </div>
               </div>
             ) : <TruthfulEmpty message={gameplay.message} /> : <HiddenCopy />}
           </ProfileBand>
           <ProfileBand icon={<Server aria-hidden="true" className="h-5 w-5" />} title="Featured Server" visible={data.sections.featured_server.visible}>
             {data.sections.featured_server.server ? (
               <Link href={data.sections.featured_server.server.href} className="group grid gap-4 border-l-2 border-cyan-300 bg-[#06111f]/80 p-4 transition hover:bg-[#081a2c] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div><p className="text-lg font-black uppercase text-white group-hover:text-cyan-100">{data.sections.featured_server.server.server_name}</p><p className="mt-1 text-xs font-bold uppercase text-cyan-200">{data.sections.featured_server.server.server_type} / {data.sections.featured_server.server.platform ?? "Platform TBA"} / {publicMapLabel(data.sections.featured_server.server.map_name)}</p><p className="mt-3 text-sm font-semibold text-slate-300">{data.sections.featured_server.server.kills} kills / {data.sections.featured_server.server.deaths} deaths / {formatDistance(data.sections.featured_server.server.longest_kill_distance)} longest</p></div>
+                <div><p className="text-lg font-black uppercase text-white group-hover:text-cyan-100">{data.sections.featured_server.server.server_name}</p><p className="mt-1 text-xs font-bold uppercase text-cyan-200">{data.sections.featured_server.server.server_type} / {data.sections.featured_server.server.platform ?? "Platform TBA"} / {publicMapLabel(data.sections.featured_server.server.map_name)}</p><p className="mt-3 text-sm font-semibold text-slate-300">{data.sections.featured_server.server.kills} kills / {data.sections.featured_server.server.deaths} total deaths / {formatDistance(data.sections.featured_server.server.longest_kill_distance)} longest</p></div>
                 <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-300/40 px-3 text-xs font-black uppercase text-cyan-100">View Server</span>
               </Link>
             ) : <HiddenCopy />}

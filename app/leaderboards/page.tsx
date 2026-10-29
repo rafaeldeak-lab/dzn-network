@@ -399,7 +399,7 @@ export default function LeaderboardsPage() {
   }, [activeDirectory, activeDirectoryMode, directoryBaseReady, directoryReloadNonce, payload.is_locked]);
 
   const playerContent = payload.is_locked ? (
-    <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />
+    <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, PvP kills, PvP deaths, PvP K/D, and personal records." />
   ) : (
     <LeaderboardTable
       title="Top Players"
@@ -407,7 +407,7 @@ export default function LeaderboardsPage() {
       empty="No ranked players yet."
       actionLabel="Browse full ranking"
       actionHref="#full-player-ranking-title"
-      headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+      headers={["Rank", "Player", "Server", "Kills", "PvP deaths", "PvP K/D", "Longest"]}
       rankValues={payload.top_players.map((player) => player.rank)}
       rows={payload.top_players.map((player, index) => [
         `#${player.rank}`,
@@ -495,7 +495,7 @@ export default function LeaderboardsPage() {
                     empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
                     actionLabel="Browse full ranking"
                     actionHref="#full-server-ranking-title"
-                    headers={["Rank", "Server", "Mode", "Players", "Kills", "Deaths", "K/D", "Score"]}
+                    headers={["Rank", "Server", "Mode", "Players", "Kills", "Total deaths", "K/D (total)", "Score"]}
                     rankValues={filteredServers.map((server) => server.rank)}
                     rows={filteredServers.map((server) => [
                       `#${server.rank}`,
@@ -514,7 +514,7 @@ export default function LeaderboardsPage() {
                       icon={RadioTower}
                       searchLabel="Search ranked servers"
                       searchPlaceholder="Search a server or mode"
-                      headers={["Rank", "Server", "Mode", "Players", "Kills", "K/D", "Score"]}
+                      headers={["Rank", "Server", "Mode", "Players", "Kills", "K/D (total)", "Score"]}
                       rows={directoryServers.map((server) => [
                         `#${server.rank}`,
                         <ServerLink key="server" slug={server.slug} label={server.server_name} />,
@@ -551,7 +551,7 @@ export default function LeaderboardsPage() {
                     icon={Users}
                     searchLabel="Search ranked players"
                     searchPlaceholder="Search a player or server"
-                    headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+                    headers={["Rank", "Player", "Server", "Kills", "PvP deaths", "PvP K/D", "Longest"]}
                     rows={directoryPlayers.map((player, index) => [
                       `#${player.rank}`,
                       <PlayerName key="player" name={player.player_name} index={index} href={player.public_profile_href} avatarUrl={player.public_profile_avatar_url} />,
