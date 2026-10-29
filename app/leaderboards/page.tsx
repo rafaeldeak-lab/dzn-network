@@ -344,6 +344,30 @@ export default function LeaderboardsPage() {
     const term = directorySearch.trim().toLowerCase();
     return directoryPayload.top_players.filter((player) => !term || [player.player_name, player.server_name].some((value) => value.toLowerCase().includes(term)));
   }, [directoryPayload, directorySearch]);
+  const serverPodium = useMemo(() => filteredServers.slice(0, 3).map((server) => ({
+    id: server.server_id,
+    rank: server.rank,
+    label: server.server_name,
+    detail: `${server.mode} · ${formatNumber(server.unique_players ?? 0)} players`,
+    href: server.slug ? `/servers/profile?slug=${encodeURIComponent(server.slug)}` : null,
+    primaryLabel: "Kills",
+    primaryValue: formatNumber(server.kills),
+    secondaryLabel: "K/D total",
+    secondaryValue: formatKd(server),
+  })), [filteredServers]);
+  const playerPodium = useMemo(() => payload.top_players.slice(0, 3).map((player, index) => ({
+    id: `${player.rank}-${player.player_name}`,
+    rank: player.rank,
+    label: player.player_name,
+    detail: player.server_name,
+    href: safePublicProfileHref(player.public_profile_href),
+    avatarUrl: safePublicProfileAvatarUrl(player.public_profile_avatar_url),
+    avatarIndex: index,
+    primaryLabel: "PvP kills",
+    primaryValue: formatNumber(player.kills),
+    secondaryLabel: "PvP K/D",
+    secondaryValue: formatKd(player),
+  })), [payload.top_players]);
 
   useEffect(() => {
     if (!activeDirectory || !directoryBaseReady || payload.is_locked) {
@@ -471,46 +495,68 @@ export default function LeaderboardsPage() {
 
         {!loading && !initialError ? (
           <div className="leaderboard-ref-board-shell pb-4">
-            <LeaderboardBoardSwitcher activeBoard={activeBoard} onChange={setActiveBoard} />
+            <section className="leaderboard-ref-command-deck" aria-label="Leaderboard controls">
+              <div className="leaderboard-ref-command-copy">
+                <p>Browse the network</p>
+                <h2>{activeBoard === "servers" ? "Server command board" : activeBoard === "players" ? "Player command board" : "Record command board"}</h2>
+              </div>
+              <div className="leaderboard-ref-command-controls">
+                <LeaderboardBoardSwitcher activeBoard={activeBoard} onChange={setActiveBoard} />
+                {activeBoard === "servers" ? (
+                  <LeaderboardModeSwitcher
+                    activeMode={activeMode}
+                    onChange={(mode) => {
+                      if (mode === activeMode) {
+                        if (serverModeError) setReloadNonce((value) => value + 1);
+                        return;
+                      }
+                      setServerModeError("");
+                      setActiveMode(mode);
+                    }}
+                  />
+                ) : (
+                  <p className="leaderboard-ref-command-status">
+                    {activeBoard === "players"
+                      ? payload.is_locked ? "Sign in to view player-ranking detail." : "Browse confirmed player activity across connected servers."
+                      : payload.is_locked ? "Sign in to view player record detail." : "Browse confirmed distance records and personal bests."}
+                  </p>
+                )}
+              </div>
+            </section>
 
             {activeBoard === "servers" ? (
               <div id="leaderboard-servers-panel" role="tabpanel" className="leaderboard-ref-board-view" data-board-view="servers">
-                <LeaderboardModeSwitcher
-                  activeMode={activeMode}
-                  onChange={(mode) => {
-                    if (mode === activeMode) {
-                      if (serverModeError) setReloadNonce((value) => value + 1);
-                      return;
-                    }
-                    setServerModeError("");
-                    setActiveMode(mode);
-                  }}
-                />
                 {modeTransitionLoading ? (
                   <LoadingGrid />
                 ) : serverModeError ? (
                   <MessagePanel message={serverModeError} onRetry={() => setReloadNonce((value) => value + 1)} />
                 ) : (
                   <>
-                    <LeaderboardTable
-                    title="Top Servers"
-                    icon={RadioTower}
-                    empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
-                    actionLabel="Browse full ranking"
-                    actionHref="#full-server-ranking-title"
-                    headers={["Rank", "Server", "Mode", "Players", "Kills", "Total deaths", "K/D (total)", "Score"]}
-                    rankValues={filteredServers.map((server) => server.rank)}
-                    rows={filteredServers.map((server) => [
-                      `#${server.rank}`,
-                      <ServerLink key="server" slug={server.slug} label={server.server_name} />,
-                      <ModeBadge key="mode" mode={server.mode} />,
-                      formatNumber(server.unique_players ?? 0),
-                      formatNumber(server.kills),
-                      formatNumber(server.deaths),
-                      formatKd(server),
-                      <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
-                    ])}
-                    />
+                    <div className="leaderboard-ref-primary-grid">
+                      <LeaderboardTable
+                      title="Top Servers"
+                      icon={RadioTower}
+                      empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
+                      actionLabel="Browse full ranking"
+                      actionHref="#full-server-ranking-title"
+                      headers={["Rank", "Server", "Mode", "Players", "Kills", "Total deaths", "K/D (total)", "Score"]}
+                      rankValues={filteredServers.map((server) => server.rank)}
+                      rows={filteredServers.map((server) => [
+                        `#${server.rank}`,
+                        <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                        <ModeBadge key="mode" mode={server.mode} />,
+                        formatNumber(server.unique_players ?? 0),
+                        formatNumber(server.kills),
+                        formatNumber(server.deaths),
+                        formatKd(server),
+                        <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
+                      ])}
+                      />
+                      <aside className="leaderboard-ref-live-sidecar" aria-label="Server leaderboard highlights">
+                        <LeaderboardPodium title="Server podium" eyebrow="Current leaders" items={serverPodium} />
+                        <LeaderboardRecordSummary locked={payload.is_locked} bestOverall={payload.best_overall_kill} latestKill={payload.latest_kill} onViewRecords={() => setActiveBoard("records")} />
+                      </aside>
+                    </div>
                     {!payload.is_locked ? (
                     <FullLeaderboardDirectory
                       title="Full Server Ranking"
@@ -547,7 +593,19 @@ export default function LeaderboardsPage() {
 
             {activeBoard === "players" ? (
               <div id="leaderboard-players-panel" role="tabpanel" className="leaderboard-ref-board-view leaderboard-ref-area--players" data-board-view="players">
-                {playerContent}
+                <div className="leaderboard-ref-primary-grid">
+                  {playerContent}
+                  <aside className="leaderboard-ref-live-sidecar" aria-label="Player leaderboard highlights">
+                    <LeaderboardPodium
+                      title="Player podium"
+                      eyebrow={payload.is_locked ? "Protected ranking" : "Current leaders"}
+                      items={payload.is_locked ? [] : playerPodium}
+                      locked={payload.is_locked}
+                      lockedText="Sign in with Discord to view the current player podium."
+                    />
+                    <LeaderboardRecordSummary locked={payload.is_locked} bestOverall={payload.best_overall_kill} latestKill={payload.latest_kill} onViewRecords={() => setActiveBoard("records")} />
+                  </aside>
+                </div>
                 {!payload.is_locked ? (
                   <FullLeaderboardDirectory
                     title="Full Player Ranking"
@@ -597,7 +655,7 @@ export default function LeaderboardsPage() {
           </div>
         ) : null}
 
-        {!initialError ? <ServerWarsTeaser /> : null}
+        {!initialError ? <div className="leaderboard-ref-wars"><ServerWarsTeaser /></div> : null}
 
         {!initialError ? (
           <AdvancedShowcaseSection payload={advancedPayload} loading={advancedLoading} error={advancedError} />
@@ -637,6 +695,124 @@ function LeaderboardBoardSwitcher({
         </button>
       ))}
     </div>
+  );
+}
+
+type LeaderboardPodiumItem = {
+  id: string;
+  rank: number;
+  label: string;
+  detail: string;
+  href: string | null;
+  avatarUrl?: string | null;
+  avatarIndex?: number;
+  primaryLabel: string;
+  primaryValue: string;
+  secondaryLabel: string;
+  secondaryValue: string;
+};
+
+function LeaderboardPodium({
+  title,
+  eyebrow,
+  items,
+  locked = false,
+  lockedText,
+}: {
+  title: string;
+  eyebrow: string;
+  items: LeaderboardPodiumItem[];
+  locked?: boolean;
+  lockedText?: string;
+}) {
+  return (
+    <section className="leaderboard-ref-podium leaderboard-ref-panel" aria-label={title}>
+      <div className="leaderboard-ref-podium-head">
+        <div>
+          <p>{eyebrow}</p>
+          <h3>{title}</h3>
+        </div>
+        <Trophy aria-hidden="true" />
+      </div>
+      {locked ? (
+        <div className="leaderboard-ref-podium-locked">
+          <Lock aria-hidden="true" />
+          <p>{lockedText ?? "Sign in to view this ranked data."}</p>
+          <Link href="/login?returnTo=/leaderboards">Login to unlock <ArrowRight aria-hidden="true" /></Link>
+        </div>
+      ) : items.length ? (
+        <ol className="leaderboard-ref-podium-list">
+          {items.map((item, index) => {
+            const content = (
+              <>
+                <span className={`leaderboard-ref-podium-rank leaderboard-ref-podium-rank--${rankTone(index)}`}>#{item.rank}</span>
+                {item.avatarUrl ? <PlayerAvatar name={item.label} index={item.avatarIndex ?? index} avatarUrl={item.avatarUrl} /> : null}
+                <span className="leaderboard-ref-podium-copy">
+                  <strong>{item.label}</strong>
+                  <small>{item.detail}</small>
+                </span>
+                <span className="leaderboard-ref-podium-metric">
+                  <small>{item.primaryLabel}</small>
+                  <b>{item.primaryValue}</b>
+                </span>
+                <span className="leaderboard-ref-podium-metric leaderboard-ref-podium-metric--secondary">
+                  <small>{item.secondaryLabel}</small>
+                  <b>{item.secondaryValue}</b>
+                </span>
+                {item.href ? <ArrowRight aria-hidden="true" /> : null}
+              </>
+            );
+
+            return (
+              <li key={item.id} className={`leaderboard-ref-podium-item leaderboard-ref-podium-item--${rankTone(index)}`}>
+                {item.href ? <Link href={item.href} prefetch={false} aria-label={`View ${item.label}`}>{content}</Link> : <div>{content}</div>}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="leaderboard-ref-podium-empty">No current ranking entries match this view.</p>
+      )}
+    </section>
+  );
+}
+
+function LeaderboardRecordSummary({
+  locked,
+  bestOverall,
+  latestKill,
+  onViewRecords,
+}: {
+  locked: boolean;
+  bestOverall: Omit<LongestKill, "rank"> | null;
+  latestKill: Omit<LongestKill, "rank"> | null;
+  onViewRecords: () => void;
+}) {
+  return (
+    <section className="leaderboard-ref-record-summary leaderboard-ref-panel" aria-labelledby="leaderboard-record-summary-title">
+      <div className="leaderboard-ref-record-summary-head">
+        <div>
+          <p>Distance records</p>
+          <h3 id="leaderboard-record-summary-title">Record highlights</h3>
+        </div>
+        <Crosshair aria-hidden="true" />
+      </div>
+      {locked ? (
+        <p className="leaderboard-ref-record-summary-locked">Player record detail is available after Discord login.</p>
+      ) : (
+        <dl>
+          <div>
+            <dt>Best overall</dt>
+            <dd>{bestOverall ? formatDistance(bestOverall.distance) : "Awaiting data"}</dd>
+          </div>
+          <div>
+            <dt>Latest confirmed</dt>
+            <dd>{latestKill ? formatDistance(latestKill.distance) : "Awaiting data"}</dd>
+          </div>
+        </dl>
+      )}
+      <button type="button" onClick={onViewRecords}>View records <ArrowRight aria-hidden="true" /></button>
+    </section>
   );
 }
 
