@@ -857,6 +857,48 @@ export function runServiceTests() {
     && JSON.stringify(cutCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, combatInput))
     && cutCombat.squad.filter(unit => unit.withdrawn).length === cutCombat.casualties,
   'accepted snapshots and a selected route resolve the same troop losses, wall health and score every time');
+  const specialistAttacker = JSON.parse(JSON.stringify(combatAttacker));
+  specialistAttacker.stats.squadSize = 3;
+  const specialistInput = { ...combatInput, tactics: flankPlan, squad: null, defenderCombatVersion: 2 };
+  const specialistFixture = role => {
+    const fixture = JSON.parse(JSON.stringify(corridorFixture));
+    fixture.base.defenders = { [role]: { level: 3, post: 'hall' } };
+    return fixture;
+  };
+  const plainAssault = simulateWarCombat(specialistAttacker, corridorFixture, specialistInput);
+  const guardianFixture = specialistFixture('guardian');
+  const guardianAssault = simulateWarCombat(specialistAttacker, guardianFixture, specialistInput);
+  const legacyGuardian = simulateWarCombat(specialistAttacker, guardianFixture, { ...specialistInput, defenderCombatVersion: 1 });
+  assert(guardianAssault.version === 3 && guardianAssault.defenderEvents.some(event => event.role === 'guardian')
+    && guardianAssault.objective.remainingHealth > plainAssault.objective.remainingHealth
+    && JSON.stringify(legacyGuardian) === JSON.stringify(simulateWarCombat(specialistAttacker, corridorFixture, { ...specialistInput, defenderCombatVersion: 1 })),
+  'assigned Guardian absorbs real Assault volleys while a saved older attack keeps its original outcome');
+  const reconPlan = evaluateWarPlan(corridorFixture, 'recon', { lane: 'west', objective: 'hq', method: 'flank' });
+  const reconInput = { ...specialistInput, tactic: 'recon', tactics: reconPlan, squad: null };
+  const plainRecon = simulateWarCombat(specialistAttacker, corridorFixture, reconInput);
+  const aegisRecon = simulateWarCombat(specialistAttacker, specialistFixture('aegis'), reconInput);
+  assert(aegisRecon.defenderEvents.some(event => event.role === 'aegis')
+    && aegisRecon.objective.remainingHealth > plainRecon.objective.remainingHealth
+    && !simulateWarCombat(specialistAttacker, specialistFixture('aegis'), specialistInput).defenderEvents.length,
+  'assigned Aegis intercepts Recon volleys but has no Assault intercept');
+  for (const role of ['trapper', 'hound']) {
+    const defended = simulateWarCombat(specialistAttacker, specialistFixture(role), specialistInput);
+    assert(defended.defenderEvents.some(event => event.role === role)
+      && defended.squad.reduce((sum, unit) => sum + unit.remainingHealth, 0)
+        < plainAssault.squad.reduce((sum, unit) => sum + unit.remainingHealth, 0)
+      && JSON.stringify(defended) === JSON.stringify(simulateWarCombat(specialistAttacker, specialistFixture(role), specialistInput)),
+    `${role} post adds bounded, repeatable hits to troops actually in range`);
+  }
+  const reserveFixture = specialistFixture('guardian');
+  reserveFixture.base.defenders.guardian.post = null;
+  assert(!simulateWarCombat(specialistAttacker, reserveFixture, specialistInput).defenderEvents.length,
+    'a specialist without an assigned post cannot affect the battle');
+  const distantFixture = specialistFixture('guardian');
+  distantFixture.base.layout.structures.tower = { x: 15, z: 14 };
+  distantFixture.base.defenders.guardian.post = 'tower';
+  assert(!simulateWarCombat(specialistAttacker, distantFixture, specialistInput).defenderEvents.length,
+    'a posted Guardian outside the locked assault route cannot block its volleys');
+  checks.push('spatial Guardian, Aegis, Trapper and Hound hits, recorded replay cues and legacy combat isolation');
   assert(cutCombat.squad.every(unit => unit.remainingHealth >= 0 && unit.remainingHealth <= unit.maxHealth
     && unit.hits.reduce((total, hit) => total + hit.damage, unit.remainingHealth) === unit.maxHealth)
     && [...cutCombat.walls, cutCombat.objective].every(target => target.remainingHealth >= 0 && target.remainingHealth <= target.maxHealth
@@ -1085,7 +1127,7 @@ export function runServiceTests() {
     && warService.getTrainingReadiness('iron-admin').away.length === 1
     && !warService.trainTroops('iron-admin', 'assault', 5, 'overfilled-away-camp').ok,
   'a war deployment moves the exact trained roster into occupied away camp spaces');
-  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical planning points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition planning points') && ironRecon.damage.version === 2,
+  assert(ironRecon.tactics?.plan.lane === 'south' && ironRecon.tactics?.plan.objective === 'comms' && ironRecon.feedback.includes('tactical planning points') && ironRecon.squad?.counts.engineer === 2 && ironRecon.feedback.includes('composition planning points') && ironRecon.damage.version === 3,
     'a committed route, objective and chosen squad change the actual battle score and explanation');
   assert(ironRecon.defenceOrder === 'signals' && ironRecon.defenceOrderActive && ironRecon.defenceOrderPenalty === 4
     && ironRecon.feedback.includes('Protect the relay') && violetRecon.defenceOrder === 'reserve' && violetRecon.defenceOrderActive
@@ -1094,7 +1136,7 @@ export function runServiceTests() {
     `a prepared relay defence reduces the same frozen route's score without improving attacker survival (${unguardedRecon.score}/${ironRecon.score} points, ${unguardedRecon.casualties}/${ironRecon.casualties} losses)`);
   const liveContact = warService.issueWarFieldOrder('iron-admin', challenge.warId, ironRecon.attackId, 'contact', 'focus', 'v2-contact');
   const liveWithdrawal = warService.issueWarFieldOrder('iron-admin', challenge.warId, ironRecon.attackId, 'withdrawal', 'cover', 'v2-withdrawal');
-  assert(liveContact.ok && liveWithdrawal.ok && liveWithdrawal.damage.version === 2
+  assert(liveContact.ok && liveWithdrawal.ok && liveWithdrawal.damage.version === 3
     && liveWithdrawal.totalScore === withdrawalOrder.score + liveWithdrawal.score
     && liveWithdrawal.damage.score === liveWithdrawal.score && liveWithdrawal.damage.casualties === liveWithdrawal.casualties,
   'the live field commands rerun hit-based combat and commit only their score difference to the shared war');

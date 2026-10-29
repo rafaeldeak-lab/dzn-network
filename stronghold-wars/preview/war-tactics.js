@@ -1,6 +1,7 @@
 // A frozen local war snapshot is the only input to a tactical order. The
 // browser preview never reads the defender's subsequently edited live base.
 import { SQUAD_ROLES, squadProfile } from './squad-assets.js';
+import { DEFENDER_POST_NODES, patrolNodesForLayout } from './patrol-routes.js';
 export const WAR_LANES = Object.freeze({
   west: Object.freeze({ name: 'West treeline', start: [-22, 0], entry: [-16, 0] }),
   south: Object.freeze({ name: 'South ridge', start: [0, 22], entry: [0, 16] }),
@@ -272,6 +273,24 @@ export function simulateWarCombat(attacker, defender, attack) {
     const position = targetPosition(unit.slot, wave);
     return { unit, distance: (point.x - position.x) ** 2 + (point.z - position.z) ** 2 };
   }).sort((a, b) => a.distance - b.distance || a.unit.slot - b.unit.slot)[0]?.unit;
+  // Only newly launched battles use spatial specialist abilities. Earlier
+  // accepted attacks must continue to resolve with their original rules.
+  const specialistCombat = attack.defenderCombatVersion === 2;
+  const postNodes = specialistCombat ? patrolNodesForLayout(defender.base.layout) : null;
+  const specialists = Object.fromEntries(['guardian', 'aegis', 'trapper', 'hound'].map(role => {
+    const assigned = defender.base.defenders?.[role];
+    const node = DEFENDER_POST_NODES[assigned?.post];
+    const position = postNodes?.[node];
+    return [role, specialistCombat && position && whole(assigned.level, 5)
+      ? { level: whole(assigned.level, 5), post: assigned.post, x: position[0], z: position[1] } : null];
+  }));
+  const defenderEvents = [];
+  const inRange = (role, unit, wave, radius) => {
+    const post = specialists[role];
+    if (!post || !unit || unit.remainingHealth <= 0) return false;
+    const position = targetPosition(unit.slot, wave);
+    return (post.x - position.x) ** 2 + (post.z - position.z) ** 2 <= radius ** 2;
+  };
   const d = defender.base.levels;
   const fortification = whole(defender.stats?.fortification, 50);
   const depotMaxHealth = objectiveMaxHealth(defender, 'depot');
@@ -300,6 +319,18 @@ export function simulateWarCombat(attacker, defender, attack) {
       if (withdrawal === 'pursue' && wave >= 4 && !wall) amount *= 1.3;
       if (withdrawal === 'cover' && wave >= 4) amount *= 0.75;
       const target = wall || objective;
+      if (target.remainingHealth > 0 && attack.tactic === 'assault' && inRange('guardian', unit, wave, 10)) {
+        const blocked = Math.round(amount * (0.12 + specialists.guardian.level * 0.035));
+        amount -= blocked;
+        if (blocked && !defenderEvents.some(event => event.role === 'guardian' && event.wave === wave))
+          defenderEvents.push({ role: 'guardian', wave, at, slot: unit.slot, post: specialists.guardian.post, amount: blocked });
+      }
+      if (target.remainingHealth > 0 && attack.tactic === 'recon' && inRange('aegis', unit, wave, 12)) {
+        const blocked = Math.round(amount * (0.15 + specialists.aegis.level * 0.04));
+        amount -= blocked;
+        if (blocked && !defenderEvents.some(event => event.role === 'aegis' && event.wave === wave))
+          defenderEvents.push({ role: 'aegis', wave, at, slot: unit.slot, post: specialists.aegis.post, amount: blocked });
+      }
       applyHit(target, amount, at + unit.slot * 0.0001);
     }
     const cover = contact === 'smoke' && wave >= 2 ? 0.6 : 1;
@@ -315,6 +346,16 @@ export function simulateWarCombat(attacker, defender, attack) {
       const armour = profile.armour * (index ? 0.35 : 0.5);
       applyHit(unit, Math.max(2, raw - armour), at + 0.015 + index * 0.004);
     }
+    for (const [role, radius, activeWave] of [['trapper', 9, wave % 2 === 0], ['hound', 11, wave >= 2 && wave % 2 === 0]]) {
+      const post = specialists[role];
+      if (!post || !activeWave) continue;
+      const unit = nearest(post, wave);
+      if (!inRange(role, unit, wave, radius)) continue;
+      const before = unit.remainingHealth;
+      applyHit(unit, role === 'trapper' ? 4 + post.level * 2 : 5 + post.level * 2, at + (role === 'trapper' ? 0.021 : 0.023));
+      const dealt = before - unit.remainingHealth;
+      if (dealt) defenderEvents.push({ role, wave, at: at + (role === 'trapper' ? 0.021 : 0.023), slot: unit.slot, post: post.post, amount: dealt });
+    }
     const medic = squad.find(unit => unit.role === 'medic' && unit.remainingHealth > 0);
     if (medic && wave >= 1) {
       const wounded = squad.filter(unit => unit.remainingHealth > 0 && unit.remainingHealth < unit.maxHealth)
@@ -328,7 +369,8 @@ export function simulateWarCombat(attacker, defender, attack) {
   const damageFraction = (objective.startingHealth - objective.remainingHealth) / objective.maxHealth;
   const signalBonus = systems.relayJammed && attack.tactic === 'recon' ? WAR_SYSTEMS.reconSignalBonus : 0;
   const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2 + signalBonus), 0, 100);
-  return { ok: true, version: 2, score, casualties, squad, objective, walls, supplyDisrupted,
+  return { ok: true, version: specialistCombat ? 3 : 2, score, casualties, squad, objective, walls, supplyDisrupted,
+    ...(specialistCombat ? { defenderEvents } : {}),
     batterySuppressed: systems.batterySuppressed, batteryOffline: systems.batteryOffline, relayJammed: systems.relayJammed, signalBonus };
 }
 

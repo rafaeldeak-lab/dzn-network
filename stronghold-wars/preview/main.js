@@ -4447,9 +4447,24 @@ function updateWarBattle(dt) {
       defender.snareField.scale.setScalar(1 + threat * (0.4 + Math.sin(warBattle.time * 8) * 0.2));
       defender.snareField.material.opacity = threat * (0.2 + Math.sin(warBattle.time * 8) * 0.08);
     }
-    // These cues replay the locked defensive outcome; they never add a second
-    // score or hit outside the deterministic combat report.
-    if (nearest && threat > 0.35 && progress > 0.32 && progress < 0.84 && warBattle.time >= defender.nextCue) {
+    // Newly launched battles show only the specialist actions that actually
+    // changed their locked damage report. Older saved attacks keep their cues.
+    if (Array.isArray(warBattle.damage?.defenderEvents)) {
+      defender.playedEvents ||= new Set();
+      for (const [index, event] of warBattle.damage.defenderEvents.entries()) {
+        if (event.role !== defender.role || event.at > progress || defender.playedEvents.has(index)) continue;
+        defender.playedEvents.add(index);
+        const target = warBattle.troops[event.slot]?.mesh;
+        if (!target) continue;
+        if (event.role === 'guardian') spawnWarPulse(warBattle, target.position, 0xc084fc, 1.5);
+        else if (event.role === 'aegis') {
+          const drone = defender.limbs?.left_drone || defender.model || defender.mesh;
+          const origin = drone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.25, 0));
+          spawnWarTrace(warBattle, origin, target.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
+        } else if (event.role === 'trapper') spawnWarPulse(warBattle, target.position, 0xafff52, 1.1);
+        else if (event.role === 'hound') spawnWarPulse(warBattle, target.position, 0xb7ff72, 0.68);
+      }
+    } else if (nearest && threat > 0.35 && progress > 0.32 && progress < 0.84 && warBattle.time >= defender.nextCue) {
       defender.nextCue = warBattle.time + (defender.role === 'aegis' ? 1.4 : 1.8);
       if (defender.role === 'guardian' && nearest.distance < 9) spawnWarPulse(warBattle, defender.mesh.position, 0xc084fc, 1.9);
       else if (defender.role === 'aegis') {
