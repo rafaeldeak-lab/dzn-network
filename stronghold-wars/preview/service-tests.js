@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warReplayTravel, warTurnToward, stepWarRoute } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -960,6 +960,18 @@ export function runServiceTests() {
     && secondHoundStep.x === 1 && Math.abs(secondHoundStep.z - 1) < 0.001 && secondHoundStep.waypoints.length === 0,
   'troops turn and fully return without a route jump while a pursuing Hound advances along bounded waypoints');
   checks.push('continuous war squad withdrawal, smooth facing and bounded Hound route motion');
+  const carriedTarget = { maxHealth: 100, startingHealth: 35,
+    hits: [{ at: 0.4, damage: 10 }, { at: 0.8, damage: 25 }] };
+  const carriedWalls = { walls: [{ id: 'old' }, { id: 'route' }, { id: 'intact' }] };
+  const launchCondition = { walls: { old: 0, route: 25 } };
+  const routeDamage = { walls: [{ id: 'route', ...carriedTarget }] };
+  assert(warReplayHealth(carriedTarget, 0) === 35 && warReplayHealth(carriedTarget, 0.5) === 25
+    && warReplayHealth(carriedTarget, 1) === 0
+    && warReplayHealth({ maxHealth: 100, hits: [{ at: 0.4, damage: 10 }] }, 0.5) === 90
+    && warStandingWalls(carriedWalls, launchCondition, routeDamage, 0).map(wall => wall.id).join(',') === 'route,intact'
+    && warStandingWalls(carriedWalls, launchCondition, routeDamage, 1).map(wall => wall.id).join(',') === 'intact',
+  'war replay starts from carried building health and opens wall routes only after their recorded destruction');
+  checks.push('carried battle health, already broken walls and timed route openings');
   const carryStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
   const carryService = new LocalGameService({ storage: carryStorage, now: () => warClock });
   const carryCapacity = lockedWar.snapshots.challenger.stats.squadSize;

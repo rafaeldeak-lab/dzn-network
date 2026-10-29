@@ -99,6 +99,20 @@ export function stepWarRoute(position, waypoints, speed, deltaSeconds) {
   return { x, z, waypoints: waypoints.slice(index), yaw, moved };
 }
 
+export function warReplayHealth(track, progress) {
+  if (!track) return 0;
+  const maximum = Math.max(0, Number(track.maxHealth) || 0);
+  const starting = Number.isFinite(track.startingHealth) ? clamp(track.startingHealth, 0, maximum) : maximum;
+  const damage = (track.hits || []).filter(hit => hit.at <= progress).reduce((total, hit) => total + hit.damage, 0);
+  return clamp(starting - damage, 0, maximum);
+}
+
+export function warStandingWalls(layout, condition, report, progress = 0) {
+  const tracks = new Map((report?.walls || []).map(wall => [wall.id, wall]));
+  return (layout?.walls || []).filter(wall => condition?.walls?.[wall.id] !== 0
+    && (!tracks.has(wall.id) || warReplayHealth(tracks.get(wall.id), progress) > 0));
+}
+
 const objectiveMaxHealth = (defender, key) => 180 + clamp(whole(defender.base.levels[key], 5), 1, 5) * 70;
 const wallMaxHealth = wall => 55 + clamp(whole(wall.level, 5), 1, 5) * 35;
 const savedHealth = (value, maximum) => Number.isFinite(value) ? whole(value, maximum) : maximum;

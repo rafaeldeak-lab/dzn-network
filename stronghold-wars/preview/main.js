@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute } from './war-tactics.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -3973,7 +3973,7 @@ function disposeWarHealthBar(bar) {
 }
 
 function warHealthAt(track, progress) {
-  return Math.max(0, track.maxHealth - track.hits.filter(hit => hit.at <= progress).reduce((sum, hit) => sum + hit.damage, 0));
+  return warReplayHealth(track, progress);
 }
 
 function updateWarDamage(battle, progress) {
@@ -4018,7 +4018,7 @@ function updateWarDamage(battle, progress) {
   battle.damageStatus.textContent = `SQUAD ${activeTroops}/${report.squad.length} · ${objective.name.toUpperCase()} ${Math.round(warHealthAt(objective, progress) / objective.maxHealth * 100)}% · WALLS ${brokenWalls}/${report.walls.length}`;
 }
 
-function buildWarBaseVisual(side) {
+function buildWarBaseVisual(side, condition = null) {
   clearWarBaseVisuals();
   const token = warDefenderToken;
   const animationCounts = { radars: animated.radars.length, lights: animated.lights.length, chimneys: animated.chimneys.length };
@@ -4045,7 +4045,7 @@ function buildWarBaseVisual(side) {
       if (key === 'tower') warTurretRig = detailed.userData.turretRig;
     }).catch(error => console.warn(`War base ${key} model could not load; retaining fallback.`, error));
   }
-  for (const wall of side.base.layout?.walls || []) wallModel(wall.level).then(template => {
+  for (const wall of warStandingWalls(side.base.layout, condition)) wallModel(wall.level).then(template => {
     if (token !== warDefenderToken || !template) return;
     const segment = template.clone(true);
     segment.position.set(wall.x, .09, wall.z);
@@ -4064,7 +4064,7 @@ function buildWarBaseVisual(side) {
   animated.lights.length = animationCounts.lights;
   animated.chimneys.length = animationCounts.chimneys;
   warBaseGroup.visible = true;
-  const postNodes = patrolNodesForLayout(side.base.layout);
+  const postNodes = patrolNodesForLayout({ ...side.base.layout, walls: warStandingWalls(side.base.layout, condition) });
   for (const [role, defender] of Object.entries(side.base.defenders || {})) {
     const node = DEFENDER_POST_NODES[defender.post];
     if (!defender.level || !node) continue;
@@ -4183,8 +4183,10 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   const war = service.getWar(warId);
   const defendingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
   const attackingSide = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+  const acceptedAttack = war.attacks.find(attack => attack.attackId === result.attackId) || result;
+  const conditionAtLaunch = acceptedAttack.conditionAtLaunch || null;
   const damage = result.damage?.ok ? result.damage : buildWarDamageReport(attackingSide, defendingSide, result);
-  buildWarBaseVisual(defendingSide);
+  buildWarBaseVisual(defendingSide, conditionAtLaunch);
   const objective = defendingSide.base.layout.structures[result.tactics.plan.objective];
   const objectiveMarker = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.45, 40),
     new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.65, depthWrite: false, side: THREE.DoubleSide }));
@@ -4225,8 +4227,10 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   const dx = second.x - first.x, dz = second.z - first.z;
   const length = Math.hypot(dx, dz) || 1;
   const across = { x: -dz / length, z: dx / length };
-  const cutWallIds = new Set((damage.ok ? damage.walls : []).filter(wall => wall.remainingHealth === 0).map(wall => wall.id));
-  const walkLayout = { ...defendingSide.base.layout, walls: defendingSide.base.layout.walls.filter(wall => !cutWallIds.has(wall.id)) };
+  const initialWalkLayout = { ...defendingSide.base.layout,
+    walls: warStandingWalls(defendingSide.base.layout, conditionAtLaunch) };
+  const walkLayout = { ...defendingSide.base.layout,
+    walls: warStandingWalls(defendingSide.base.layout, conditionAtLaunch, damage, 1) };
   const standKey = result.tactics.plan.objective === 'hq' ? 'hall' : result.tactics.plan.objective;
   const stand = patrolNodesForLayout(walkLayout)[standKey];
   const clearStand = ([x, z]) => x >= -17 && x <= 17 && z >= -15 && z <= 15
@@ -4251,7 +4255,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     const spread = column * 1.12;
     const entry = [second.x + across.x * spread, second.z + across.z * spread];
     const via = middleIsClear ? middle : null;
-    const firstLeg = via ? walkablePatrolPath(entry, [via.x, via.z], walkLayout) : [];
+    const firstLeg = via ? walkablePatrolPath(entry, [via.x, via.z], initialWalkLayout) : [];
     const lastLeg = walkablePatrolPath(firstLeg?.at(-1) || entry, standSlots[i % standSlots.length] || stand, walkLayout);
     const walk = lastLeg ? [...(firstLeg || []), ...lastLeg] : null;
     const path = (walk ? [[first.x + across.x * spread, first.z + across.z * spread], entry, ...walk] : route.map(point => [point.x + across.x * spread, point.z + across.z * spread]))
@@ -4268,7 +4272,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
     troops.push({ mesh: troop, role, roleRing, healthBar: makeWarHealthBar(), lastDamageAt: 0, path, phase: i * 0.45, lag: role === 'medic' ? 0.08 : role === 'sentinel' ? 0.04 : 0,
       nextAction: 4.4 + i * 0.11, withdrawn: damage.ok ? damage.squad[i]?.withdrawn : i >= squadSize - result.casualties });
   }
-  warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, walkLayout, objectiveMarker, systemRings, objectiveHealthBar: makeWarHealthBar(1.35),
+  warBattle = { warId, tactic, result, damage, defenderName: defendingSide.name, defenderSnapshot: defendingSide, conditionAtLaunch, objectiveMarker, systemRings, objectiveHealthBar: makeWarHealthBar(1.35),
     lastObjectiveHitAt: 0, lastWallHitAt: {}, objectiveDownShown: false, defenceBeacon, squadSize, troops, time: 0, duration: 12, smokeTimer: 0, shotClock: 0, bolts: [], effects: [], breachShown: false,
     orders: [...(result.orders || [])], orderView: '', coverUntil: 0, previousCameraOffset: cameraOffset.clone() };
   scene.add(warFillLight, warKeyLight, warKeyLight.target);
@@ -4423,7 +4427,9 @@ function updateWarBattle(dt) {
       const offset = pursuing && gap > 1.4 ? (gap - 1.4) / gap : pursuing ? 0 : 1;
       const goal = { x: current.x + (target.x - current.x) * offset, z: current.z + (target.z - current.z) * offset };
       if (warBattle.time >= defender.nextRepath) {
-        defender.chasePath = walkablePatrolPath([current.x, current.z], [goal.x, goal.z], warBattle.walkLayout) || [];
+        const liveLayout = { ...warBattle.defenderSnapshot.base.layout,
+          walls: warStandingWalls(warBattle.defenderSnapshot.base.layout, warBattle.conditionAtLaunch, warBattle.damage, progress) };
+        defender.chasePath = walkablePatrolPath([current.x, current.z], [goal.x, goal.z], liveLayout) || [];
         defender.nextRepath = warBattle.time + 0.45;
       }
       const step = stepWarRoute(current, defender.chasePath, pursuing ? 4.2 : 4.7, dt);
