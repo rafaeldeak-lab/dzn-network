@@ -288,6 +288,8 @@ function normalizeWarRecord(war) {
       const status = saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild';
       return { id: config.id, status, barricades: status === 'claimed' ? Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) : 0, facilityLevel: status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.facilityLevel)) : 0 };
     });
+    const depotRaidable = typeof source?.base?.depotRaidable === 'boolean' ? source.base.depotRaidable
+      : isGridCell(source?.base?.layout?.structures?.depot?.x, source?.base?.layout?.structures?.depot?.z);
     const structures = defaultLayout().structures;
     for (const key of Object.keys(structures)) {
       const point = source?.base?.layout?.structures?.[key];
@@ -305,7 +307,7 @@ function normalizeWarRecord(war) {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
-      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders, layout: { structures, walls } },
+      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders, depotRaidable, layout: { structures, walls } },
       stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -856,7 +858,7 @@ export class LocalGameService {
     const defenders = Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
-      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders, layout: { structures, walls } },
+      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders, depotRaidable: true, layout: { structures, walls } },
       stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
         assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
         assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
@@ -1174,6 +1176,7 @@ export class LocalGameService {
       attack.score = attack.baseScore = attack.damage.score;
       attack.casualties = attack.baseCasualties = attack.damage.casualties;
       attack.feedback += ` The locked battle dealt ${attack.damage.objective.maxHealth - attack.damage.objective.remainingHealth}/${attack.damage.objective.maxHealth} objective damage, broke ${attack.damage.walls.filter(wall => !wall.remainingHealth).length}/${attack.damage.walls.length} route walls and withdrew ${attack.casualties}/${attacker.stats.squadSize} troops, scoring ${attack.score}.`;
+      if (attack.damage.supplyDisrupted) attack.feedback += ' The previously damaged Depot reduced defender counterfire by 15% for this strike.';
     }
     if (squad) {
       const member = this.member(identityId);

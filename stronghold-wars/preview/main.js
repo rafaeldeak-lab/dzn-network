@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
+import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, evaluateWarPlan, buildWarDamageReport } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
 const service = new LocalGameService();
@@ -4019,6 +4019,7 @@ function buildWarBaseVisual(side) {
   const animationCounts = { radars: animated.radars.length, lights: animated.lights.length, chimneys: animated.chimneys.length };
   warBaseGroup.position.set(OUTPOST.x, 0, OUTPOST.z);
   for (const [key, building] of Object.entries(DEFS)) {
+    if (key === 'depot' && side.base.depotRaidable === false) continue;
     const model = buildModel(key, side.base.levels[key]);
     const point = side.base.layout?.structures?.[key];
     model.position.set(point?.x ?? building.pos[0], 0.05, point?.z ?? building.pos[1]);
@@ -4091,7 +4092,7 @@ function warPlanMapHTML(defender, tactics) {
   const breached = new Set(tactics.breachedWallIds);
   const route = tactics.route.map(point => map(point)).join(' ');
   const walls = (defender.base.layout.walls || []).map(wall => `<rect x="${160 + wall.x * 5 - 5}" y="${130 + wall.z * 5 - 5}" width="10" height="10" rx="2" fill="${breached.has(wall.id) ? '#ffab70' : '#87928b'}"><title>${escapeHTML(wall.id)} · tier ${wall.level}</title></rect>`).join('');
-  const structures = Object.entries(defender.base.layout.structures).filter(([key]) => WAR_OBJECTIVES[key]).map(([key, position]) => `<g><circle cx="${160 + position.x * 5}" cy="${130 + position.z * 5}" r="${key === tactics.plan.objective ? 13 : 10}" fill="${key === tactics.plan.objective ? '#c084fc' : '#284b3a'}" stroke="#bde8c7" stroke-width="2"/><text x="${160 + position.x * 5}" y="${134 + position.z * 5}" text-anchor="middle" fill="#fff" font-size="11" font-weight="bold">${key === 'hq' ? 'H' : key === 'tower' ? 'T' : 'C'}</text></g>`).join('');
+  const structures = Object.entries(defender.base.layout.structures).filter(([key]) => WAR_OBJECTIVES[key] && (key !== 'depot' || defender.base.depotRaidable !== false)).map(([key, position]) => `<g><circle cx="${160 + position.x * 5}" cy="${130 + position.z * 5}" r="${key === tactics.plan.objective ? 13 : 10}" fill="${key === tactics.plan.objective ? '#c084fc' : '#284b3a'}" stroke="#bde8c7" stroke-width="2"/><text x="${160 + position.x * 5}" y="${134 + position.z * 5}" text-anchor="middle" fill="#fff" font-size="11" font-weight="bold">${{ hq: 'H', tower: 'T', comms: 'C', depot: 'D' }[key]}</text></g>`).join('');
   return `<svg class="war-plan-map" viewBox="0 0 320 260" role="img" aria-label="Locked defending base with selected attack route, buildings and wall segments"><rect x="0" y="0" width="320" height="260" fill="#102019"/><path d="M75 45 L245 45 L245 215 L75 215 Z" fill="#263d31" stroke="#8a9c82" stroke-width="2"/><path d="M88 58 L232 58 L232 202 L88 202 Z" fill="none" stroke="#4b7258" stroke-dasharray="4 5"/>${walls}${structures}<polyline points="${route}" fill="none" stroke="#c084fc" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${160 + tactics.route[0].x * 5}" cy="${130 + tactics.route[0].z * 5}" r="7" fill="#8cff9b" stroke="#102019" stroke-width="2"/></svg>`;
 }
 
@@ -4117,9 +4118,13 @@ function showWarPlanner(warId, tactic) {
     return `<label>${escapeHTML(definition.name)} <small>${kit.unlocked ? `Ready ${reserve[role] || 0} · L${kit.tier} · ${kit.ability}` : 'Locked at war acceptance'}</small><input type="number" data-war-squad="${role}" min="0" max="${capacity}" step="1" value="${defaultCounts[role]}" ${kit.unlocked ? '' : 'disabled'}></label>`;
   }).join('');
   const options = (values, selected) => Object.entries(values).map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${escapeHTML(typeof label === 'string' ? label : label.name)}</option>`).join('');
+  const objectives = defender.base.depotRaidable === false ? Object.fromEntries(Object.entries(WAR_OBJECTIVES).filter(([key]) => key !== 'depot')) : WAR_OBJECTIVES;
   const weakened = Object.entries(conditionAtLaunch.objectives).map(([key, health]) => `${WAR_OBJECTIVES[key]} ${Math.round(health / (180 + defender.base.levels[key] * 70) * 100)}%`).join(' · ');
+  const depotHealth = conditionAtLaunch.objectives.depot;
+  const supplyDisrupted = defender.base.depotRaidable !== false && Number.isFinite(depotHealth)
+    && depotHealth * 100 <= (180 + defender.base.levels.depot * 70) * SUPPLY_DISRUPTION.thresholdPercent;
   const brokenWalls = Object.values(conditionAtLaunch.walls).filter(health => health === 0).length;
-  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. The accepted base positions are locked; earlier battle damage carries into this strike. Confirming sends trained troops away and spends your one deployment.</p>${weakened || brokenWalls ? `<p class="notice">Current fortifications: ${escapeHTML(weakened || 'Buildings intact')}${brokenWalls ? ` · ${brokenWalls} wall ${brokenWalls === 1 ? 'breach' : 'breaches'} already open` : ''}</p>` : ''}<div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(WAR_OBJECTIVES, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><details class="war-squad-picker" open><summary>Deploy your squad · ${capacity} frozen Hall slots</summary><div class="war-squad-grid">${squadRows}</div><p id="warSquadStatus" class="help" role="status"></p></details><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanTrain">Camp & training</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">Fixers help cut defended walls, Ghosts reward covered flanks, Sentinels cover the battery and Lifeline medics reduce losses. Surviving troops return; losses must be retrained. Kit tiers are locked at acceptance. This war remains a local preview.</p>`);
+  openPanel(`<h2>${tactic === 'assault' ? 'Assault' : 'Recon'} tactical order</h2><p>Choose how your squad enters ${escapeHTML(defender.name)}. The accepted base positions are locked; earlier battle damage carries into this strike. Confirming sends trained troops away and spends your one deployment.</p>${weakened || brokenWalls ? `<p class="notice">Current fortifications: ${escapeHTML(weakened || 'Buildings intact')}${brokenWalls ? ` · ${brokenWalls} wall ${brokenWalls === 1 ? 'breach' : 'breaches'} already open` : ''}</p>` : ''}${supplyDisrupted ? `<p class="notice">SUPPLY LINE DISRUPTED · Defender counterfire is ${SUPPLY_DISRUPTION.counterfirePercent}% for this strike.</p>` : ''}<div class="war-plan-controls"><label>Entry route<select id="warPlanLane">${options(WAR_LANES, 'west')}</select></label><label>Objective<select id="warPlanObjective">${options(objectives, tactic === 'assault' ? 'tower' : 'comms')}</select></label><label>Approach<select id="warPlanMethod">${options(WAR_METHODS, 'flank')}</select></label></div><p class="help">A Ghost-led recon strike can disrupt the Depot for war points. If the Depot ends a strike at half health or lower, the next strike faces 15% less counterfire. The defending owner can choose Secure the supply line during preparation. Raids never take a member's stored Parts or Timber.</p><details class="war-squad-picker" open><summary>Deploy your squad · ${capacity} frozen Hall slots</summary><div class="war-squad-grid">${squadRows}</div><p id="warSquadStatus" class="help" role="status"></p></details><div id="warPlanPreview"></div><div class="row"><button id="warPlanConfirm">Confirm deployment</button><button id="warPlanTrain">Camp & training</button><button id="warPlanCancel">Return to War Table</button></div><p class="help">Fixers help cut defended walls, Ghosts reward covered flanks, Sentinels cover the battery and Lifeline medics reduce losses. Surviving troops return; losses must be retrained. Kit tiers are locked at acceptance. This war remains a local preview.</p>`);
   const squadInputs = [...panel.querySelectorAll('[data-war-squad]')];
   const select = () => ({ lane: $('warPlanLane').value, objective: $('warPlanObjective').value, method: $('warPlanMethod').value,
     squad: Object.fromEntries(squadInputs.map(input => [input.dataset.warSquad, Number(input.value)])) });
@@ -4180,8 +4185,8 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   let defenceBeacon = null;
   if (result.defenceOrderActive) {
     const beaconPoint = result.defenceOrder === 'perimeter' ? result.tactics.route[2]
-      : defendingSide.base.layout.structures[result.defenceOrder === 'battery' ? 'tower' : result.defenceOrder === 'signals' ? 'comms' : 'hq'];
-    const beaconColour = { perimeter: 0xffbc6c, battery: 0xc084fc, signals: 0x8ed0ff, reserve: 0x70f0b0 }[result.defenceOrder];
+      : defendingSide.base.layout.structures[result.defenceOrder === 'battery' ? 'tower' : result.defenceOrder === 'signals' ? 'comms' : result.defenceOrder === 'supply' ? 'depot' : 'hq'];
+    const beaconColour = { perimeter: 0xffbc6c, battery: 0xc084fc, signals: 0x8ed0ff, supply: 0xffd16c, reserve: 0x70f0b0 }[result.defenceOrder];
     defenceBeacon = new THREE.Mesh(new THREE.RingGeometry(2.05, 2.32, 40),
       new THREE.MeshBasicMaterial({ color: beaconColour, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
     defenceBeacon.rotation.x = -Math.PI / 2;
@@ -4248,7 +4253,7 @@ function playWarAttack(warId, tactic, result, resumed = false) {
   warHud.hidden = false;
   warHud.style.maxWidth = 'min(355px,calc(100vw - 24px))';
   const roster = [...new Set(troops.map(troop => troop.role))].map(role => `<span style="color:#${WAR_ROLE_COLOURS[role].toString(16).padStart(6, '0')}">● ${WAR_ROLE_LABELS[role]} ${troops.filter(troop => troop.role === role).length}</span>`).join(' · ');
-  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div><div class="war-damage-status" style="color:#b8efc9;font-weight:650;line-height:1.4;margin-top:5px" aria-live="off"></div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}`;
+  warHud.innerHTML = `<div class="war-progress"></div><div style="font-weight:500;line-height:1.5;margin-top:5px">${roster}</div><div class="war-damage-status" style="color:#b8efc9;font-weight:650;line-height:1.4;margin-top:5px" aria-live="off"></div>${result.defenceOrderActive ? `<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">HOME DEFENCE · ${escapeHTML(WAR_DEFENCE_ORDERS[result.defenceOrder].name)}</div>` : ''}${damage.supplyDisrupted ? '<div style="color:#ffdb9b;font-weight:650;line-height:1.4;margin-top:5px">SUPPLY LINE DISRUPTED · COUNTERFIRE -15%</div>' : ''}`;
   warBattle.damageStatus = warHud.querySelector('.war-damage-status');
   updateWarDamage(warBattle, 0);
   warOrders.hidden = false;

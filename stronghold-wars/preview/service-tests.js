@@ -723,7 +723,7 @@ export function runServiceTests() {
   for (const communityId of ['iron-pines', 'violet-ridge']) {
     const community = warService.state.communities[communityId];
     community.proActive = true;
-    community.base.levels = { hq: 3, workshop: 2, tower: 2, comms: 2 };
+    community.base.levels = { ...community.base.levels, hq: 3, workshop: 2, tower: 2, comms: 2 };
   }
   warService.save();
   const startingReadiness = warService.getWarReadiness('iron-pines', 'iron-owner');
@@ -788,8 +788,11 @@ export function runServiceTests() {
   const perimeterEffect = evaluateWarDefenceOrder('perimeter', 'assault', { method: 'breach', objective: 'hq' });
   const batteryEffect = evaluateWarDefenceOrder('battery', 'assault', { method: 'flank', objective: 'tower' });
   const signalEffect = evaluateWarDefenceOrder('signals', 'recon', { method: 'flank', objective: 'comms' });
+  const supplyEffect = evaluateWarDefenceOrder('supply', 'recon', { method: 'flank', objective: 'depot' });
   const reserveEffect = evaluateWarDefenceOrder('reserve', 'assault', null, 2);
   assert(perimeterEffect.scorePenalty === 4 && batteryEffect.scorePenalty === 5 && signalEffect.casualtyPressure === 1
+    && supplyEffect.scorePenalty === 5 && supplyEffect.casualtyPressure === 1
+    && !evaluateWarDefenceOrder('supply', 'recon', { method: 'flank', objective: 'comms' }).active
     && reserveEffect.exposureShield === 6 && !evaluateWarDefenceOrder('reserve', 'assault', null, 0).active
     && !evaluateWarDefenceOrder('perimeter', 'assault', { method: 'flank', objective: 'hq' }).active,
     'specialist defences counter only their chosen threat and home reserve protects an exposed base');
@@ -802,6 +805,22 @@ export function runServiceTests() {
   const breachPlan = evaluateWarPlan(corridorFixture, 'assault', { lane: 'west', objective: 'hq', method: 'breach' });
   const flankPlan = evaluateWarPlan(corridorFixture, 'assault', { lane: 'west', objective: 'hq', method: 'flank' });
   const clearLane = evaluateWarPlan(corridorFixture, 'assault', { lane: 'south', objective: 'hq', method: 'breach' });
+  const supplyPlan = evaluateWarPlan(corridorFixture, 'recon', { lane: 'south', objective: 'depot', method: 'flank' });
+  const oldWarFixture = JSON.parse(JSON.stringify(corridorFixture));
+  oldWarFixture.base.depotRaidable = false;
+  assert(lockedWar.snapshots.defender.base.depotRaidable && supplyPlan.ok && supplyPlan.objectiveName === 'DZN Supply Depot'
+    && supplyPlan.scoreDelta > evaluateWarPlan(corridorFixture, 'assault', { lane: 'south', objective: 'depot', method: 'flank' }).scoreDelta
+    && !evaluateWarPlan(oldWarFixture, 'recon', { lane: 'south', objective: 'depot', method: 'flank' }).ok,
+  'the Depot is a frozen recon target only for wars accepted with that building');
+  const oldSnapshotStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const oldSnapshotService = new LocalGameService({ storage: oldSnapshotStorage, now: () => warClock });
+  delete oldSnapshotService.state.wars[0].snapshots.defender.base.layout.structures.depot;
+  delete oldSnapshotService.state.wars[0].snapshots.defender.base.depotRaidable;
+  oldSnapshotService.save();
+  const migratedOldSnapshot = new LocalGameService({ storage: oldSnapshotStorage, now: () => warClock }).getWar(challenge.warId);
+  assert(migratedOldSnapshot.snapshots.defender.base.depotRaidable === false
+    && !evaluateWarPlan(migratedOldSnapshot.snapshots.defender, 'recon', { lane: 'south', objective: 'depot', method: 'flank' }).ok,
+  'loading an accepted pre-Depot war retains its original target set');
   assert(breachPlan.ok && breachPlan.wallPressure === 3 && breachPlan.breachedWallIds[0] === 'wall-1' && breachPlan.route.length === 4, 'a locked placed wall appears on the west assault corridor and supplies a breach waypoint');
   assert(flankPlan.ok && flankPlan.breachedWallIds.length === 0 && flankPlan.casualtyDelta < breachPlan.casualtyDelta && clearLane.wallPressure === 0, 'flanking avoids the cut and another lane avoids the placed wall');
   assert(!evaluateWarPlan(corridorFixture, 'assault', { lane: 'teleport', objective: 'hq', method: 'breach' }).ok, 'unknown tactical routes cannot be submitted');
@@ -824,6 +843,16 @@ export function runServiceTests() {
   const combatInput = { tactic: 'assault', tactics: breachPlan, squad: specialistArmy, combatBaseScore: 45, defenderPenalty: 0, defenceOrderPenalty: 0, orders: [] };
   const cutCombat = simulateWarCombat(combatAttacker, corridorFixture, combatInput);
   const flankCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: flankPlan });
+  const depotHalfHealth = Math.floor((180 + corridorFixture.base.levels.depot * 70) / 2);
+  const disruptedCombat = simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput,
+    conditionAtLaunch: { objectives: { depot: depotHalfHealth }, walls: {} } });
+  const oldWarCombat = simulateWarCombat(combatAttacker, oldWarFixture, { ...combatInput,
+    conditionAtLaunch: { objectives: { depot: 0 }, walls: {} } });
+  assert(!cutCombat.supplyDisrupted && disruptedCombat.supplyDisrupted && !oldWarCombat.supplyDisrupted
+    && disruptedCombat.casualties <= cutCombat.casualties && disruptedCombat.score >= cutCombat.score
+    && JSON.stringify(disruptedCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput,
+      conditionAtLaunch: { objectives: { depot: depotHalfHealth }, walls: {} } })),
+  'a Depot already at half health weakens the next strike’s counterfire, never retroactively or in old wars');
   assert(cutCombat.ok && cutCombat.version === 2 && cutCombat.walls.length === 1 && flankCombat.walls.length === 0
     && JSON.stringify(cutCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, combatInput))
     && cutCombat.squad.filter(unit => unit.withdrawn).length === cutCombat.casualties,
@@ -863,6 +892,32 @@ export function runServiceTests() {
     && JSON.stringify(followCombat) === JSON.stringify(simulateWarCombat(combatAttacker, corridorFixture, { ...combatInput, tactics: followPlan, conditionAtLaunch: priorCondition })),
   'cumulative fortification condition and a launched strike replay deterministically');
   checks.push('persistent war objective and wall condition, fresh-damage scoring, bounded snapshot and deterministic replay');
+  const depotWarStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
+  const depotWarService = new LocalGameService({ storage: depotWarStorage, now: () => warClock });
+  const depotCapacity = lockedWar.snapshots.challenger.stats.squadSize;
+  depotWarService.member('iron-owner').trainingReserve.assault = depotCapacity;
+  depotWarService.member('iron-admin').trainingReserve.assault = depotCapacity;
+  depotWarService.save();
+  const defenderBeforeDepotRaid = depotWarService.snapshot('violet-owner').member;
+  const depotStrike = depotWarService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'depot-strike-once',
+    { lane: 'south', objective: 'depot', method: 'flank', squad: { assault: depotCapacity } });
+  const followUpStrike = depotWarService.submitWarAttack('iron-admin', challenge.warId, 'assault', 'depot-follow-up',
+    { lane: 'south', objective: 'hq', method: 'flank', squad: { assault: depotCapacity } });
+  const defenderAfterDepotRaid = depotWarService.snapshot('violet-owner').member;
+  const persistedDepotWar = new LocalGameService({ storage: depotWarStorage, now: () => warClock });
+  assert(depotStrike.ok && depotStrike.damage.objective.key === 'depot'
+    && depotStrike.damage.objective.remainingHealth <= depotStrike.damage.objective.maxHealth / 2
+    && followUpStrike.ok && followUpStrike.damage.supplyDisrupted && followUpStrike.feedback.includes('reduced defender counterfire')
+    && depotWarService.getWarCondition(challenge.warId, 'violet-ridge').objectives.depot === depotStrike.damage.objective.remainingHealth
+    && persistedDepotWar.getWar(challenge.warId).attacks[0].damage.objective.remainingHealth === depotStrike.damage.objective.remainingHealth
+    && persistedDepotWar.getWar(challenge.warId).attacks[1].damage.supplyDisrupted
+    && persistedDepotWar.getWar(challenge.warId).snapshots.defender.base.depotRaidable
+    && defenderAfterDepotRaid.parts === defenderBeforeDepotRaid.parts
+    && defenderAfterDepotRaid.timber === defenderBeforeDepotRaid.timber
+    && depotWarService.submitWarAttack('iron-owner', challenge.warId, 'assault', 'depot-strike-once',
+      { lane: 'west', objective: 'hq', method: 'breach' }).replay,
+  'a Depot strike weakens the next attack, carries through reload, and never takes personal stock or duplicates an attack');
+  checks.push('Supply Depot war target, guarded recon tradeoff, frozen legacy target gate and safe stock');
   const carryStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
   const carryService = new LocalGameService({ storage: carryStorage, now: () => warClock });
   const carryCapacity = lockedWar.snapshots.challenger.stats.squadSize;

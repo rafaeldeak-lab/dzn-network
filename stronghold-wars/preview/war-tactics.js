@@ -7,8 +7,9 @@ export const WAR_LANES = Object.freeze({
   east: Object.freeze({ name: 'East service road', start: [22, 0], entry: [16, 0] }),
 });
 export const WAR_OBJECTIVES = Object.freeze({
-  hq: 'Command Hall', tower: 'Arc Battery', comms: 'Communications',
+  hq: 'Command Hall', tower: 'Arc Battery', comms: 'Communications', depot: 'DZN Supply Depot',
 });
+export const SUPPLY_DISRUPTION = Object.freeze({ thresholdPercent: 50, counterfirePercent: 85 });
 export const WAR_METHODS = Object.freeze({ breach: 'Cut through', flank: 'Flank under cover' });
 export const WAR_FIELD_ORDERS = Object.freeze({
   contact: Object.freeze({ focus: 'Focus fire', smoke: 'Smoke advance' }),
@@ -19,6 +20,7 @@ export const WAR_DEFENCE_ORDERS = Object.freeze({
   perimeter: Object.freeze({ name: 'Hold the perimeter', detail: 'Wall guards punish a cut-through assault.' }),
   battery: Object.freeze({ name: 'Guard the Arc Battery', detail: 'Concentrated fire protects the Arc Battery objective.' }),
   signals: Object.freeze({ name: 'Protect the relay', detail: 'Signal jammers disrupt reconnaissance and Communications strikes.' }),
+  supply: Object.freeze({ name: 'Secure the supply line', detail: 'Depot guards counter strikes aimed at the shared supply cache; personal stock remains safe.' }),
   reserve: Object.freeze({ name: 'Keep a home reserve', detail: 'A ready squad reduces the opening left by away scouts and attackers.' }),
 });
 
@@ -28,10 +30,11 @@ export function evaluateWarDefenceOrder(order, tactic, plan, awaySquads = 0) {
   const active = order === 'perimeter' && plan?.method === 'breach'
     || order === 'battery' && plan?.objective === 'tower'
     || order === 'signals' && (tactic === 'recon' || plan?.objective === 'comms')
+    || order === 'supply' && plan?.objective === 'depot'
     || order === 'reserve' && awaySquads > 0;
   return {
     ok: true, order, name: WAR_DEFENCE_ORDERS[order].name, active: Boolean(active),
-    scorePenalty: active && order !== 'reserve' ? order === 'battery' ? 5 : 4 : 0,
+    scorePenalty: active && order !== 'reserve' ? ['battery', 'supply'].includes(order) ? 5 : 4 : 0,
     casualtyPressure: active && order !== 'reserve' ? 1 : 0,
     exposureShield: active && order === 'reserve' ? 6 : 0,
   };
@@ -196,8 +199,13 @@ export function simulateWarCombat(attacker, defender, attack) {
   }).sort((a, b) => a.distance - b.distance || a.unit.slot - b.unit.slot)[0]?.unit;
   const d = defender.base.levels;
   const fortification = whole(defender.stats?.fortification, 50);
-  const defencePower = 19 + d.hq * 5 + d.tower * 8 + fortification * 1.4
-    + whole(attack.defenderPenalty, 40) * 1.6 + whole(attack.defenceOrderPenalty, 20) * 2.2;
+  const depotMaxHealth = objectiveMaxHealth(defender, 'depot');
+  const depotHealthAtLaunch = savedHealth(attack.conditionAtLaunch?.objectives?.depot, depotMaxHealth);
+  const supplyDisrupted = defender.base.depotRaidable !== false
+    && depotHealthAtLaunch * 100 <= depotMaxHealth * SUPPLY_DISRUPTION.thresholdPercent;
+  const defencePower = (19 + d.hq * 5 + d.tower * 8 + fortification * 1.4
+    + whole(attack.defenderPenalty, 40) * 1.6 + whole(attack.defenceOrderPenalty, 20) * 2.2)
+    * (supplyDisrupted ? SUPPLY_DISRUPTION.counterfirePercent / 100 : 1);
   for (let wave = 0; wave < 6; wave++) {
     const at = [0.32, 0.42, 0.52, 0.62, 0.72, 0.82][wave];
     const active = squad.filter(unit => unit.remainingHealth > 0);
@@ -206,7 +214,10 @@ export function simulateWarCombat(attacker, defender, attack) {
       const profile = squadProfile(unit.role, attacker.base.levels);
       const wall = walls.find(segment => segment.remainingHealth > 0);
       let amount = profile.damage * (wall ? unit.role === 'engineer' ? 0.85 : 0.48 : 0.51);
-      if (!wall && attack.tactic === 'recon' && objectiveKey === 'comms' && unit.role === 'recon') amount *= 1.32;
+      if (!wall && attack.tactic === 'recon' && unit.role === 'recon') {
+        if (objectiveKey === 'comms') amount *= 1.32;
+        else if (objectiveKey === 'depot') amount *= 1.22;
+      }
       if (!wall && attack.tactics.plan.method === 'flank') amount *= 0.82;
       if (contact === 'focus' && wave >= 2 && !wall) amount *= 1.24;
       if (withdrawal === 'pursue' && wave >= 4 && !wall) amount *= 1.3;
@@ -237,7 +248,7 @@ export function simulateWarCombat(attacker, defender, attack) {
   const breached = walls.filter(wall => wall.startingHealth > 0 && wall.remainingHealth === 0).length;
   const damageFraction = (objective.startingHealth - objective.remainingHealth) / objective.maxHealth;
   const score = clamp(Math.round(whole(attack.combatBaseScore, 100) + damageFraction * 19 + breached * 2 - casualties * 2), 0, 100);
-  return { ok: true, version: 2, score, casualties, squad, objective, walls };
+  return { ok: true, version: 2, score, casualties, squad, objective, walls, supplyDisrupted };
 }
 
 const point = pair => ({ x: pair[0], z: pair[1] });
@@ -254,6 +265,8 @@ export function evaluateWarPlan(defender, tactic, input, condition = null) {
     return { ok: false, error: 'Choose a valid entry, objective and approach.' };
   }
   const plan = { lane: input.lane, objective: input.objective, method: input.method };
+  if (plan.objective === 'depot' && defender.base.depotRaidable === false)
+    return { ok: false, error: 'The locked base predates the Supply Depot objective. Choose another target.' };
   const lane = WAR_LANES[plan.lane];
   const entry = point(lane.entry);
   const targetSource = defender.base.layout.structures?.[plan.objective];
@@ -266,11 +279,12 @@ export function evaluateWarPlan(defender, tactic, input, condition = null) {
   const wallPressure = clamp(corridor.reduce((sum, hit) => sum + hit.wall.level, 0), 0, 12);
   const breachedWallIds = plan.method === 'breach' ? corridor.slice(0, 4).map(hit => hit.wall.id) : [];
   const nearbyBattery = distanceToSegment(defender.base.layout.structures.tower, entry, target).distance <= 7;
-  const objectiveScore = plan.objective === 'hq' ? 4 : plan.objective === 'tower' && tactic === 'assault' ? 3 : plan.objective === 'comms' && tactic === 'recon' ? 3 : 0;
+  const objectiveScore = plan.objective === 'hq' ? 4 : plan.objective === 'tower' && tactic === 'assault' ? 3
+    : plan.objective === 'comms' && tactic === 'recon' ? 3 : plan.objective === 'depot' && tactic === 'recon' ? 4 : 0;
   const methodScore = plan.method === 'breach' ? (tactic === 'assault' ? 5 : 2) - wallPressure * 2 : 1 - Math.ceil(wallPressure / 2);
   const scoreDelta = clamp(objectiveScore + methodScore, -12, 9);
   const casualtyDelta = clamp((plan.method === 'breach' ? 1 + Math.ceil(wallPressure / 3) : -1)
-    + (nearbyBattery && plan.objective !== 'tower' ? 1 : 0) + (plan.objective === 'hq' ? 1 : 0), -1, 5);
+    + (nearbyBattery && plan.objective !== 'tower' ? 1 : 0) + (['hq', 'depot'].includes(plan.objective) ? 1 : 0), -1, 5);
   const middle = corridor[0] && plan.method === 'breach'
     ? { x: corridor[0].wall.x, z: corridor[0].wall.z }
     : plan.method === 'flank'
