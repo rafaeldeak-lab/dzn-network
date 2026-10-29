@@ -725,6 +725,18 @@ async function sceneryModel(name) {
 
 async function facilityModel(name) {
   const key = `facility/${name}`;
+  // Pilot the owner's Meshy Timberline shell only at Level 1. The existing
+  // animated saw and rollers were preserved inside this GLB; keep the original
+  // procedural yard as a load fallback and for the remaining upgrade tiers.
+  if (name === 'timberline_l01' && !sceneryTemplates.has(key)) {
+    sceneryTemplates.set(key, gltfLoader.loadAsync('assets/models/facilities/timberline_meshy_l01.glb?v=meshy-yard-20261029-rough')
+      .then(gltf => gltf.scene)
+      .catch(error => {
+        console.warn('Meshy Timberline pilot could not load; using the original animated yard.', error);
+        return gltfLoader.loadAsync('assets/models/facilities/timberline_v4_l01.glb?v=timberline-motion-20261023').then(gltf => gltf.scene);
+      }));
+  }
+  if (sceneryTemplates.has(key)) return sceneryTemplates.get(key);
   const assetName = name.startsWith('timberline_l0') ? name.replace('timberline_', 'timberline_v4_') : name;
   if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/facilities/${assetName}.glb?v=timberline-motion-20261023`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);

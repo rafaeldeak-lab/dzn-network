@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "stage": "level-1-pilot",
+  "provenance": "Owner-approved Meshy Pro image-to-3D Smart Topology generation from the original DZN Timberline reference, with the pre-existing animated saw and conveyor machinery preserved in Blender.",
+  "license": "Private owner-account generation; usage subject to Meshy terms",
+  "generation": {
+    "model": "Meshy T2.5",
+    "targetPolygons": 15000,
+    "texture": true,
+    "quotedCredits": 15,
+    "approvedPilotCeiling": 25,
+    "sourceDownload": "Meshy_AI_Neon_Timber_Depot_1029172950_texture.glb",
+    "sourceSha256": "0f5b735e528adb959578a781d891e36b13dde5bac43ab8b0ede3b97314aa82c6",
+    "referenceSha256": "823a3c4eb95e6cdaeecbfe87358c7239cab33d5592c43fffc14b8bb5ae91b2adb"
+  },
+  "asset": {
+    "file": "assets/models/facilities/timberline_meshy_l01.glb",
+    "bytes": 4250876,
+    "sha256": "94df69a356abe3d7e3a5525dc0a272b6ac605d53ed6bd03dbf4aae3f8e7430fd",
+    "dimensionsMetres": [
+      6.5,
+      3.133,
+      4.83
+    ],
+    "movingNodes": [
+      "saw_rotor",
+      "saw_carriage",
+      "conveyor_roller_0",
+      "conveyor_roller_10",
+      "conveyor_roller_20",
+      "conveyor_roller_30"
+    ]
+  }
+}

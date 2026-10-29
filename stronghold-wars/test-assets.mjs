@@ -96,6 +96,20 @@ for (const [name, entry] of Object.entries(facilityManifest.assets)) {
   if (!Array.isArray(entry.dimensions) || entry.dimensions.some(dimension => !Number.isFinite(dimension) || dimension <= 0)) throw new Error(`Invalid facility model bounds: ${name}`);
 }
 console.log(`Additional district facilities verified: ${facilityNames.length} original GLBs across four five-level families.`);
+const meshyYardManifest = JSON.parse(readFileSync(join(root, 'assets/models/facilities/meshy-pilot-manifest.json'), 'utf8'));
+const meshyYard = meshyYardManifest.asset;
+if (meshyYardManifest.stage !== 'level-1-pilot' || meshyYardManifest.generation.quotedCredits > meshyYardManifest.generation.approvedPilotCeiling)
+  throw new Error('Meshy Timberline pilot has an invalid generation receipt.');
+const meshyYardBytes = readFileSync(join(root, ...meshyYard.file.split('/')));
+if (meshyYardBytes.toString('ascii', 0, 4) !== 'glTF' || meshyYardBytes.readUInt32LE(8) !== meshyYardBytes.length
+  || meshyYardBytes.length !== meshyYard.bytes || createHash('sha256').update(meshyYardBytes).digest('hex') !== meshyYard.sha256)
+  throw new Error('Meshy Timberline GLB integrity failed.');
+const meshyYardJsonLength = meshyYardBytes.readUInt32LE(12);
+const meshyYardGltf = JSON.parse(meshyYardBytes.toString('utf8', 20, 20 + meshyYardJsonLength));
+const meshyYardNodes = new Set(meshyYardGltf.nodes?.map(node => node.name));
+if (!meshyYardGltf.meshes?.length || !meshyYardGltf.images?.length || !meshyYard.movingNodes.every(name => meshyYardNodes.has(name)))
+  throw new Error('Meshy Timberline pilot lost its textured shell or animated machinery.');
+console.log('Meshy DZN Timberline Level 1 pilot GLB and separate moving machinery verified.');
 const wallManifest = JSON.parse(readFileSync(join(root, 'assets/models/walls/manifest.json'), 'utf8'));
 if (Object.keys(wallManifest.assets).length !== 5) throw new Error('Five wall stages are required.');
 const wallHashes = new Set();
