@@ -1,9 +1,8 @@
 import { Check, Crown, Server, ShieldCheck, Sparkles } from "lucide-react";
 
-import { BadgeIcon } from "@/components/badges/server-visuals";
 import { LockerPreview } from "@/components/store/locker-preview";
 import { BADGE_RULE_BY_CODE, type BadgeRule } from "@/lib/badges/rules";
-import { getBadgeCabinetArtworkUrl, toVisualBadge } from "@/lib/badges/visuals";
+import { getBadgeCabinetArtworkUrl } from "@/lib/badges/visuals";
 
 const SERVER_REWARD_CODES = [
   "bronze",
@@ -110,19 +109,12 @@ export function RewardsCabinet() {
 }
 
 function RewardCard({ rule, statusOverride }: { rule: BadgeRule; statusOverride?: string }) {
-  const badge = toVisualBadge({
-    key: rule.badgeCode,
-    name: rule.name,
-    category: rule.category,
-    description: rule.requirementDescription,
-    permanent: rule.isPermanent,
-  });
   const cabinetArtwork = getBadgeCabinetArtworkUrl(rule.badgeCode, rule.category, rule.name);
 
   return (
     <article className="dzn-reward-card group relative min-h-[320px] overflow-hidden border border-white/10 bg-[#090e1c] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
       <div className="relative z-10 flex items-start justify-between gap-4">
-        <BadgeIcon badge={badge} size="lg" className="shrink-0" />
+        <span className="border border-cyan-300/25 bg-cyan-300/[0.06] px-2 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100">Award artwork</span>
         <span className="border border-white/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{statusOverride ?? rewardStatus(rule)}</span>
       </div>
       {cabinetArtwork ? (

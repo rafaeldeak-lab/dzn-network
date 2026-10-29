@@ -24,9 +24,9 @@ const LOCKER_COLLECTIONS: LockerCollection[] = [
   {
     key: "badges",
     label: "Badges",
-    eyebrow: "3D reward asset library",
+    eyebrow: "Reward art library",
     title: "Badge vault previews",
-    detail: "High-detail 3D reward art for future award paths and premium public presentation. A visual asset is not an unlock: each design still needs a real achievement rule, tracking source and fulfilment decision.",
+    detail: "High-detail badge artwork for future award paths and premium public presentation. A visual asset is not an unlock: each design still needs a real achievement rule, tracking source and fulfilment decision.",
   },
   {
     key: "frames",
@@ -52,10 +52,10 @@ const LOCKER_COLLECTIONS: LockerCollection[] = [
 ];
 
 const WILDCARDS = [
-  { title: "Night Watch", label: "Signal black", position: "76% 34%", tone: "from-violet-950/90 via-slate-950/82 to-slate-950/88" },
-  { title: "Storm Relay", label: "Violet strike", position: "47% 15%", tone: "from-indigo-950/88 via-violet-950/76 to-slate-950/90" },
-  { title: "Outpost Gold", label: "Lantern line", position: "86% 52%", tone: "from-amber-950/88 via-slate-950/78 to-slate-950/92" },
-  { title: "Last Signal", label: "Ice light", position: "68% 74%", tone: "from-cyan-950/90 via-slate-950/80 to-indigo-950/90" },
+  { title: "Night Watch", label: "Signal black", source: "/store/catalogue/wildcards/night-watch-v1.webp", accent: "amber", rarity: "Legendary" },
+  { title: "Storm Relay", label: "Violet strike", source: "/store/catalogue/wildcards/storm-relay-v1.webp", accent: "violet", rarity: "Epic" },
+  { title: "Outpost Gold", label: "Lantern line", source: "/store/catalogue/wildcards/outpost-gold-v1.webp", accent: "amber", rarity: "Rare" },
+  { title: "Last Signal", label: "Ice light", source: "/store/catalogue/wildcards/last-signal-v1.webp", accent: "cyan", rarity: "Epic" },
 ] as const;
 
 const FRAME_PREVIEWS = [
@@ -156,7 +156,7 @@ function BadgeCollection() {
     {BADGE_PREVIEWS.map((badge) => <article key={badge.key} className={`group relative min-h-64 overflow-hidden border p-5 shadow-[0_18px_35px_rgba(0,0,0,0.24)] ${badge.accent}`}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.12),transparent_44%),linear-gradient(145deg,rgba(8,12,26,0.94),rgba(3,6,13,0.99))]" />
       <div className="relative flex h-full flex-col justify-between">
-        <div className="flex items-start justify-between gap-3"><span className="border border-white/15 bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-200">3D badge</span><span className="border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{badge.status}</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="border border-white/15 bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-200">Badge artwork</span><span className="border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">{badge.status}</span></div>
         <div className="pointer-events-none absolute inset-x-0 top-7 bottom-14 grid place-items-center">
           {/* The source assets are transparent WebP decals; Next image optimisation adds no value to a decorative, lazy-loaded catalogue preview. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -170,12 +170,15 @@ function BadgeCollection() {
 
 function WildcardCollection() {
   return <div className="grid gap-4 sm:grid-cols-2">
-    {WILDCARDS.map((card) => <article key={card.title} className="relative min-h-52 overflow-hidden border border-violet-200/20 bg-[#0a0e1b] p-5 shadow-[0_18px_35px_rgba(0,0,0,0.24)]">
-      <div className={`absolute inset-0 bg-gradient-to-br ${card.tone}`} />
-      <div className="absolute inset-0 opacity-55" style={{ backgroundImage: "url('/store/catalogue/rewards-locker-preview-v1.webp')", backgroundPosition: card.position, backgroundSize: "180% auto" }} />
-      <div className="relative flex h-full flex-col justify-between">
-        <div className="flex items-start justify-between gap-3"><span className="border border-violet-100/35 bg-black/30 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-violet-100">Wildcard</span><Sparkles className="h-5 w-5 text-violet-100" aria-hidden="true" /></div>
-        <div><p className="text-xs font-black uppercase tracking-[0.18em] text-violet-100/90">{card.label}</p><h5 className="mt-1 text-2xl font-black uppercase text-white">{card.title}</h5><p className="mt-2 text-xs font-bold uppercase tracking-wide text-zinc-200">Concept preview · account cosmetic</p></div>
+    {WILDCARDS.map((card) => <article key={card.title} className={`group relative aspect-[16/10] overflow-hidden bg-[#060914] p-2 shadow-[0_18px_35px_rgba(0,0,0,0.34)] ${card.accent === "amber" ? "border-2 border-amber-300/75" : card.accent === "violet" ? "border-2 border-violet-300/75" : "border-2 border-cyan-300/75"}`}>
+      <div className="absolute inset-0 opacity-95" style={{ backgroundImage: `url('${card.source}')`, backgroundPosition: "center", backgroundSize: "cover" }} />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,5,12,0.7),transparent_34%,rgba(2,5,12,0.3)_58%,rgba(2,5,12,0.96))]" />
+      <div className="absolute inset-[5px] border border-white/35" aria-hidden="true" />
+      <div className="absolute inset-x-4 top-3 flex items-start justify-between gap-3" aria-hidden="true"><span className="border border-amber-200/80 bg-black/70 px-2 py-1 text-[10px] font-black tracking-[0.22em] text-amber-100">DZN</span><span className="border border-white/25 bg-black/55 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-white/90">First edition</span></div>
+      <div className="absolute left-0 top-[17%] h-px w-1/4 bg-gradient-to-r from-transparent via-amber-200/90 to-transparent" aria-hidden="true" />
+      <div className="absolute bottom-3 left-4 right-4 border-t border-amber-100/45 pt-2.5">
+        <div className="flex items-end justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-100">{card.label}</p><h5 className="mt-1 text-2xl font-black uppercase leading-none text-white drop-shadow-[0_2px_0_rgba(0,0,0,0.85)]">{card.title}</h5></div><Sparkles className="mb-0.5 h-5 w-5 shrink-0 text-amber-100" aria-hidden="true" /></div>
+        <p className="mt-2 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200">{card.rarity} · account cosmetic · concept preview</p>
       </div>
     </article>)}
   </div>;

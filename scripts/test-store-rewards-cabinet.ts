@@ -42,13 +42,14 @@ assert.match(cabinet, /dzn-reward-card__art/);
 assert.match(cabinet, /dzn-reward-card__copy/);
 assert.match(cabinet, /dzn-reward-card__requirement/);
 assert.match(cabinet, /loading="lazy"/);
+assert.equal(cabinet.includes("<BadgeIcon"), false, "Each reward card must use a single artwork treatment instead of a duplicate thumbnail.");
 assert.equal(cabinet.includes("ARTWORK_BY_CODE"), false, "The Store must not maintain a stale duplicate reward artwork map.");
 assert.equal(cabinet.includes("/rewards/") && cabinet.includes(".png"), false, "Rewards Cabinet must not reference unoptimized PNG artwork.");
 assert.equal(cabinet.includes("fetch("), false, "Rewards Cabinet must not initiate a Store API request or checkout.");
 assert.match(globalStyles, /\.dzn-reward-card__art/);
-assert.match(globalStyles, /@keyframes dznRewardCabinetTurn/);
-assert.match(globalStyles, /rotateY\(360deg\)/);
-assert.match(globalStyles, /prefers-reduced-motion: no-preference/);
+assert.match(globalStyles, /\.dzn-reward-card__art img\s*\{[\s\S]*?transform: none;/);
+assert.doesNotMatch(globalStyles, /dznRewardCabinetTurn/);
+assert.doesNotMatch(globalStyles, /rotateY\(360deg\)/);
 assert.match(globalStyles, /prefers-reduced-motion: reduce/);
 
 const storefront = readFileSync(path.join(root, "components", "store", "storefront.tsx"), "utf8");
@@ -65,12 +66,23 @@ assert.match(lockerPreview, /Profile frame collection/);
 assert.match(lockerPreview, /Identity loadout previews/);
 assert.match(lockerPreview, /Server showcase treatments/);
 assert.match(lockerPreview, /Badge vault previews/);
-assert.match(lockerPreview, /3D badge/);
+assert.match(lockerPreview, /Badge artwork/);
 assert.match(lockerPreview, /Preview only · no payment/);
+assert.match(lockerPreview, /First edition/);
+assert.match(lockerPreview, /\{card\.rarity\} · account cosmetic · concept preview/);
 assert.match(lockerPreview, /rewards-locker-preview-v1\.webp/);
 assert.match(lockerPreview, /role="tablist"/);
 assert.match(lockerPreview, /role="tabpanel"/);
 assert.equal(lockerPreview.includes("fetch("), false, "The visual Store preview must not start checkout, grants, or Store API activity.");
+
+for (const assetName of ["night-watch-v1.webp", "storm-relay-v1.webp", "outpost-gold-v1.webp", "last-signal-v1.webp"]) {
+  const assetPath = path.join(root, "public", "store", "catalogue", "wildcards", assetName);
+  assert.equal(existsSync(assetPath), true, `The ${assetName} Wildcard artwork should exist.`);
+  assert.equal(statSync(assetPath).size < 250_000, true, `The ${assetName} Wildcard artwork should remain web-friendly.`);
+  const metadata = await sharp(assetPath).metadata();
+  assert.equal(metadata.width, 1280, `${assetName} should use the intended calling-card width.`);
+  assert.equal(metadata.height, 720, `${assetName} should use the intended calling-card height.`);
+}
 
 for (const assetName of ["apex-reputation-v1.webp", "warlord-v1.webp", "season-crown-v1.webp", "community-signal-v1.webp"]) {
   const assetPath = path.join(root, "public", "store", "catalogue", "badges", assetName);
