@@ -4,7 +4,7 @@ import { squadBattleStats, squadProfile, squadUnlocked, evaluateWarSquad } from 
 import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
-import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus } from './war-tactics.js';
+import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warReplayTravel, warTurnToward, stepWarRoute } from './war-tactics.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -945,6 +945,21 @@ export function runServiceTests() {
     && warSystemStatus(corridorFixture, { objectives: { tower: 0, comms: Math.floor(relayMax / 2) } }).batteryOffline,
   'a damaged relay grants a bounded Recon-only opening from the launch condition, without changing the active strike or an Assault score');
   checks.push('Arc Battery suppression, disabled turret, Recon relay opening and legacy combat compatibility');
+  const normalExit = [0, 0.7, 0.84, 1].map(at => warReplayTravel(at).fraction);
+  const earlyTurn = warReplayTravel(0.43, 0, 0.43);
+  const earlyExit = warReplayTravel(0.44, 0, 0.43);
+  const delayedStart = warReplayTravel(0.04, 0.08);
+  const turnAcrossWrap = warTurnToward(Math.PI - 0.05, -Math.PI + 0.05, 0.06);
+  const firstHoundStep = stepWarRoute({ x: 0, z: 0 }, [[1, 0], [1, 1]], 10, 0.1);
+  const secondHoundStep = stepWarRoute(firstHoundStep, firstHoundStep.waypoints, 10, 0.1);
+  assert(normalExit[0] === 0 && normalExit[1] === 1 && normalExit[2] === 1 && normalExit[3] === 0
+    && Math.abs(earlyTurn.fraction - 0.43 / 0.7) < 0.001 && earlyExit.fraction < earlyTurn.fraction
+    && earlyTurn.fraction - earlyExit.fraction < 0.02 && warReplayTravel(1, 0.08, 0.43).fraction === 0
+    && delayedStart.fraction === 0 && !delayedStart.moving && turnAcrossWrap > Math.PI
+    && Math.abs(firstHoundStep.x - 1) < 0.001 && firstHoundStep.z === 0 && firstHoundStep.waypoints.length === 1
+    && secondHoundStep.x === 1 && Math.abs(secondHoundStep.z - 1) < 0.001 && secondHoundStep.waypoints.length === 0,
+  'troops turn and fully return without a route jump while a pursuing Hound advances along bounded waypoints');
+  checks.push('continuous war squad withdrawal, smooth facing and bounded Hound route motion');
   const carryStorage = new MemoryStorage({ [SERVICE_STORAGE_KEY]: warStorage.getItem(SERVICE_STORAGE_KEY) });
   const carryService = new LocalGameService({ storage: carryStorage, now: () => warClock });
   const carryCapacity = lockedWar.snapshots.challenger.stats.squadSize;

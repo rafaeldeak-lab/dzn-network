@@ -53,6 +53,52 @@ export function evaluateWarFieldOrder(tactic, phase, command) {
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const whole = (value, maximum) => clamp(Math.floor(Number(value) || 0), 0, maximum);
+
+// Replay motion is presentation only: the accepted attack already contains its
+// score, hit times and casualties. Keep departures and returns continuous even
+// when a troop withdraws before the rest of its squad.
+export function warReplayTravel(progress, lag = 0, withdrawalAt = 0.84) {
+  const delay = clamp(Number(lag) || 0, 0, 0.3);
+  const p = clamp(((Number(progress) || 0) - delay) / (1 - delay), 0, 1);
+  const turn = clamp(((Number(withdrawalAt) || 0.84) - delay) / (1 - delay), 0.25, 0.92);
+  const outward = Math.min(1, p / 0.7);
+  const distanceAtTurn = Math.min(1, turn / 0.7);
+  return {
+    fraction: p <= turn ? outward : Math.max(0, distanceAtTurn * (1 - (p - turn) / (1 - turn))),
+    retreating: p > turn,
+    moving: p > 0 && (p < 0.7 || p > turn) && p < 1,
+  };
+}
+
+export function warTurnToward(current, target, maxStep) {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + clamp(delta, -Math.max(0, maxStep), Math.max(0, maxStep));
+}
+
+// Consume waypoints at a capped walking speed, including several short cells
+// in one frame. The caller owns pathfinding and can update the goal as a Hound
+// pursues or returns to its defensive post.
+export function stepWarRoute(position, waypoints, speed, deltaSeconds) {
+  let x = position.x, z = position.z, index = 0, moved = 0, yaw = null;
+  let budget = Math.max(0, Number(speed) || 0) * clamp(Number(deltaSeconds) || 0, 0, 0.1);
+  while (index < waypoints.length) {
+    const target = waypoints[index];
+    const dx = target[0] - x, dz = target[1] - z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.001) { index++; continue; }
+    if (budget <= 0) break;
+    const step = Math.min(distance, budget);
+    x += dx / distance * step;
+    z += dz / distance * step;
+    moved += step;
+    budget -= step;
+    yaw = Math.atan2(dx, dz);
+    if (step >= distance - 0.001) index++;
+    else break;
+  }
+  return { x, z, waypoints: waypoints.slice(index), yaw, moved };
+}
+
 const objectiveMaxHealth = (defender, key) => 180 + clamp(whole(defender.base.levels[key], 5), 1, 5) * 70;
 const wallMaxHealth = wall => 55 + clamp(whole(wall.level, 5), 1, 5) * 35;
 const savedHealth = (value, maximum) => Number.isFinite(value) ? whole(value, maximum) : maximum;
