@@ -13,6 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
+import { yardProcessState } from './yard-process.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -505,6 +506,126 @@ const buildings = {};
 const animated = { radars: [], lights: [], chimneys: [], yards: [] };
 let warTurretRig = null;
 
+function addYardPart(parent, geometry, material, x, y, z) {
+  const part = new THREE.Mesh(geometry, material);
+  part.position.set(x, y, z);
+  part.castShadow = true;
+  part.receiveShadow = true;
+  part.userData.ownedYardProcess = true;
+  parent.add(part);
+  return part;
+}
+
+function makeYardProcess(facility, level) {
+  const tier = Math.max(1, Math.min(5, level));
+  const bark = new THREE.MeshStandardMaterial({ color: 0x644023, roughness: .96 });
+  const fresh = new THREE.MeshStandardMaterial({ color: 0xc59555, roughness: .88 });
+  const plankMat = new THREE.MeshStandardMaterial({ color: 0xa8753b, roughness: .92 });
+  const dustMat = new THREE.MeshBasicMaterial({ color: 0xe6ba73, transparent: true, opacity: .76, depthWrite: false });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0x8ccf39, emissive: 0x74b825, emissiveIntensity: .65 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x303733, metalness: .72, roughness: .45 });
+  // The model's roof conceals its inner conveyor from the strategy camera.
+  // A low loading line in front makes the log-to-plank cycle legible in play.
+  for (const z of [2.15, 2.78])
+    addYardPart(facility, new THREE.BoxGeometry(4.85, .075, .075), steel, -.35, .52, z);
+  const exteriorRollers = [];
+  for (const x of [-2.25, -1.25, -.25, .75, 1.7]) {
+    const roller = addYardPart(facility, new THREE.CylinderGeometry(.09, .09, .59, 12), steel, x, .59, 2.46);
+    roller.rotation.x = Math.PI / 2;
+    exteriorRollers.push(roller);
+  }
+  const input = new THREE.Group();
+  const trunk = addYardPart(input, new THREE.CylinderGeometry(.17, .17, 1.28, 12), bark, 0, 0, 0);
+  trunk.rotation.z = Math.PI / 2;
+  for (const x of [-.64, .64]) {
+    const end = addYardPart(input, new THREE.CylinderGeometry(.171, .171, .012, 12), fresh, x, 0, 0);
+    end.rotation.z = Math.PI / 2;
+    addYardPart(input, new THREE.CylinderGeometry(.06, .06, .014, 10), bark, x + Math.sign(x) * .008, 0, 0).rotation.z = Math.PI / 2;
+  }
+  facility.add(input);
+  input.position.set(-2.65, .79, 2.46);
+
+  const output = new THREE.Group();
+  const boardCount = tier >= 4 ? 4 : tier >= 2 ? 3 : 2;
+  for (let i = 0; i < boardCount; i++)
+    addYardPart(output, new THREE.BoxGeometry(1.15, .075, .18), plankMat, 0, i * .085, (i - (boardCount - 1) / 2) * .22);
+  facility.add(output);
+  output.position.set(-.45, .74, 2.46);
+
+  const stack = new THREE.Group();
+  const layers = [];
+  for (let row = 0; row < 5; row++) {
+    const layer = new THREE.Group();
+    for (let i = 0; i < 3; i++)
+      addYardPart(layer, new THREE.BoxGeometry(.85, .095, .18), plankMat, 0, 0, (i - 1) * .22);
+    layer.position.set(0, row * .11, 0);
+    stack.add(layer);
+    layers.push(layer);
+  }
+  stack.position.set(2.2, .64, 2.46);
+  facility.add(stack);
+
+  const sawdust = [];
+  for (let i = 0; i < 12 + tier * 3; i++) {
+    const chip = addYardPart(facility, new THREE.BoxGeometry(.045, .025, .025), dustMat, -.48, .9, 2.46);
+    chip.visible = false;
+    sawdust.push(chip);
+  }
+  const lamp = addYardPart(facility, new THREE.SphereGeometry(.075, 9, 7), lampMat, -.48, 1.52, 2.46);
+  const feedWheel = tier >= 4 ? addYardPart(facility,
+    new THREE.TorusGeometry(.22, .045, 7, 18), new THREE.MeshStandardMaterial({ color: 0x333b32, metalness: .7, roughness: .35 }),
+    -2.5, 1.1, 1.5) : null;
+
+  return {
+    level: tier, phase: 0, facility, input, output, layers, sawdust, lamp, feedWheel, exteriorRollers,
+    rotor: facility.getObjectByName('saw_rotor'),
+    rollers: [0, 10, 20, 30].map(index => facility.getObjectByName(`conveyor_roller_${index}`)).filter(Boolean),
+    carriage: facility.getObjectByName('saw_carriage'),
+    hook: facility.getObjectByName('loading_crane_hook'),
+    sorter: facility.getObjectByName('hydraulic_sorter'),
+    beacon: facility.getObjectByName('elite_yard_beacon'),
+  };
+}
+
+function stepYardProcess(yard, dt, production, reducedMotion) {
+  const previous = yardProcessState(yard.level, yard.phase, production);
+  if (previous.running && !reducedMotion) yard.phase += dt;
+  const cycle = yardProcessState(yard.level, yard.phase, production);
+  const moving = cycle.running && !reducedMotion;
+  yard.input.visible = moving && (cycle.stage === 'feed' || cycle.stage === 'cut');
+  yard.input.position.x = cycle.logX;
+  yard.output.visible = moving && cycle.stage === 'sort';
+  yard.output.position.x = cycle.plankX;
+  // The finished stack is a readable inventory gauge, even with motion reduced.
+  const visibleLayers = Math.max(cycle.fill > 0 ? 1 : 0, Math.ceil(cycle.fill * 5));
+  yard.layers.forEach((layer, index) => { layer.visible = index < visibleLayers; });
+  for (let i = 0; i < yard.sawdust.length; i++) {
+    const chip = yard.sawdust[i];
+    chip.visible = cycle.sawdust && !reducedMotion;
+    if (chip.visible) {
+      const scatter = ((i * 73) % 17) / 17;
+      chip.position.set(-.48 + Math.sin(yard.phase * 28 + i * 5.2) * (.12 + scatter * .22),
+        .9 + scatter * .32, 2.46 + Math.cos(yard.phase * 19 + i * 2.4) * .28);
+      chip.rotation.y = yard.phase * 9 + i;
+    }
+  }
+  yard.lamp.material.color.setHex(cycle.light === 'stored' ? 0xffb343 : cycle.light === 'cutting' ? 0xff7545 : 0x8ccf39);
+  yard.lamp.material.emissive.copy(yard.lamp.material.color);
+  yard.lamp.material.emissiveIntensity = moving ? .8 + Math.sin(yard.phase * 8) * .2 : .35;
+  if (!moving) return;
+  if (yard.rotor) yard.rotor.rotation.z -= dt * (5.2 + yard.level * .9);
+  for (const roller of yard.rollers) roller.rotateY(dt * (1.5 + yard.level * .22));
+  for (const roller of yard.exteriorRollers) roller.rotateZ(dt * (1.5 + yard.level * .22));
+  if (yard.carriage) yard.carriage.position.z = 1.55 + (cycle.stage === 'cut' ? Math.sin(yard.phase * 55) * .075 : 0);
+  if (yard.sorter) yard.sorter.rotation.z = cycle.stage === 'sort' ? Math.sin(yard.phase * 24) * .085 : 0;
+  if (yard.hook) {
+    yard.hook.position.y = 2.54 - (cycle.stage === 'sort' ? Math.sin((cycle.phase - .53) / .35 * Math.PI) * .28 : 0);
+    yard.hook.position.x = .72 + (cycle.stage === 'sort' ? (cycle.phase - .53) / .35 * .45 : 0);
+  }
+  if (yard.feedWheel) yard.feedWheel.rotation.z += dt * (2 + yard.level * .3);
+  if (yard.beacon) yard.beacon.rotation.y += dt * .45;
+}
+
 function addArcMuzzle(mount, distance, spread = 0.16) {
   const muzzles = [-spread, spread].map(x => {
     const node = new THREE.Group();
@@ -812,6 +933,11 @@ async function reconcileLandScenery() {
       if (child.userData.ownedGhost) child.traverse(object => {
         if (object.isMesh) for (const material of [].concat(object.material)) material.dispose();
       });
+      child.traverse(object => {
+        if (!object.userData.ownedYardProcess) return;
+        object.geometry.dispose();
+        for (const material of [].concat(object.material)) material.dispose();
+      });
     }
     landScenery.clear();
     landTreePicks = [];
@@ -902,13 +1028,7 @@ async function reconcileLandScenery() {
           facility.position.set(point?.x ?? x, 0.09, point?.z ?? z);
           facility.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
           landScenery.add(facility);
-          if (config.id === 'timberline-depot') animated.yards.push({
-            rotor: facility.getObjectByName('saw_rotor'),
-            rollers: [0, 10, 20, 30].map(index => facility.getObjectByName(`conveyor_roller_${index}`)).filter(Boolean),
-            carriage: facility.getObjectByName('saw_carriage'),
-            hook: facility.getObjectByName('loading_crane_hook'),
-            phase: 0,
-          });
+          if (config.id === 'timberline-depot') animated.yards.push(makeYardProcess(facility, plot.facilityLevel));
         } else {
           const marker = models.claim_marker.clone();
           marker.position.set(x, 0.09, z);
@@ -4862,13 +4982,9 @@ renderer.setAnimationLoop(time => {
       l.flag.rotation.y = Math.sin(elapsed * 3) * 0.3;
     }
   });
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) animated.yards.forEach(yard => {
-    yard.phase += dt;
-    if (yard.rotor) yard.rotor.rotation.z -= dt * 6.2;
-    for (const roller of yard.rollers) roller.rotateY(dt * 1.9);
-    if (yard.carriage) yard.carriage.position.z = 1.55 + Math.sin(yard.phase * 1.25) * .09;
-    if (yard.hook) yard.hook.position.y = 2.54 + Math.sin(yard.phase * .8) * .12;
-  });
+  const timberProduction = service.getTimberProductionInfo();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  animated.yards.forEach(yard => stepYardProcess(yard, dt, timberProduction, reducedMotion));
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     for (const crane of animatedDistrictScaffolds) if (crane) crane.rotation.y += dt * .8;
   smokeTimer += dt;

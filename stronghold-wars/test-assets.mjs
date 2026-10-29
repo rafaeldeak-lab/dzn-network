@@ -10,8 +10,24 @@ import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/de
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
+import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
+if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
+  throw new Error('Each Timberline upgrade must run a faster visible production cycle.');
+for (let level = 1; level <= 5; level++) {
+  const production = { perMinute: level * 2, stored: 10, capacity: 100 };
+  const seconds = YARD_CYCLE_SECONDS[level - 1];
+  if (yardProcessState(level, seconds * .1, production).stage !== 'feed'
+    || yardProcessState(level, seconds * .45, production).stage !== 'cut'
+    || yardProcessState(level, seconds * .7, production).stage !== 'sort'
+    || yardProcessState(level, seconds * .95, production).stage !== 'reset'
+    || !yardProcessState(level, seconds * .45, production).sawdust)
+    throw new Error(`Timberline L${level} must visibly feed, cut, sort, then reset.`);
+  const full = yardProcessState(level, seconds * .45, { ...production, stored: 100 });
+  if (full.running || full.stage !== 'stored' || full.fill !== 1 || full.sawdust)
+    throw new Error(`Timberline L${level} must stop when storage is full.`);
+}
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();
 for (const line of manifest) {
