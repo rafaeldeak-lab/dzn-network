@@ -21,6 +21,7 @@ import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearS
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, clearWardenUpgradeReveal, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './warden-actions.js';
 import { ghostActionPose, applyGhostAction, ghostScannerPosition, clearGhostScan, stepGhostScan, clearGhostUpgradeReveal, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './ghost-actions.js';
 import { fixerActionPose, applyFixerAction, fixerToolPosition, clearFixerWork, stepFixerWork, clearFixerUpgradeReveal, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './fixer-actions.js';
+import { lifelineActionPose, applyLifelineAction, lifelineInjectorPosition, clearLifelineTriage, stepLifelineTriage, clearLifelineUpgradeReveal, startLifelineUpgradeReveal, stepLifelineUpgradeReveal } from './lifeline-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -1614,6 +1615,8 @@ function equipSoldier(soldier, role, tier) {
   clearGhostUpgradeReveal(soldier);
   clearFixerWork(soldier);
   clearFixerUpgradeReveal(soldier);
+  clearLifelineTriage(soldier);
+  clearLifelineUpgradeReveal(soldier);
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
   soldier.userData.squadTier = tier;
@@ -1628,6 +1631,7 @@ function equipSoldier(soldier, role, tier) {
   if (role === 'assault') soldier.userData.wardenFireAge = Infinity;
   if (role === 'recon') soldier.userData.ghostSignalAge = Infinity;
   if (role === 'engineer') soldier.userData.fixerBreachAge = Infinity;
+  if (role === 'medic') soldier.userData.lifelineTreatmentAge = Infinity;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -1665,6 +1669,7 @@ function equipSoldier(soldier, role, tier) {
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
       if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
       if (role === 'engineer' && previousTier && tier > previousTier) startFixerUpgradeReveal(soldier, tier);
+      if (role === 'medic' && previousTier && tier > previousTier) startLifelineUpgradeReveal(soldier, tier);
       if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1702,6 +1707,7 @@ function equipSoldier(soldier, role, tier) {
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
       if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
       if (role === 'engineer' && previousTier && tier > previousTier) startFixerUpgradeReveal(soldier, tier);
+      if (role === 'medic' && previousTier && tier > previousTier) startLifelineUpgradeReveal(soldier, tier);
     }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
@@ -1715,6 +1721,7 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   const isSentinel = soldier.userData.squadRole === 'sentinel';
   const isGhost = soldier.userData.squadRole === 'recon';
   const isFixer = soldier.userData.squadRole === 'engineer';
+  const isLifeline = soldier.userData.squadRole === 'medic';
   if (isSentinel) stepSentinelUpgradeReveal(soldier, dt, reducedMotion);
   if (soldier.userData.squadRole === 'assault') stepWardenUpgradeReveal(soldier, dt, reducedMotion);
   if (isGhost) {
@@ -1724,6 +1731,10 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (isFixer) {
     stepFixerUpgradeReveal(soldier, dt, reducedMotion);
     if (reducedMotion) stepFixerWork(soldier, 0, null, soldier.userData.squadTier, true);
+  }
+  if (isLifeline) {
+    stepLifelineUpgradeReveal(soldier, dt, reducedMotion);
+    if (reducedMotion) stepLifelineTriage(soldier, 0, false, soldier.userData.squadTier, true);
   }
   if (reducedMotion) return;
   if (isSentinel) {
@@ -1741,6 +1752,10 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (isFixer) {
     soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
     soldier.userData.fixerBreachAge = (soldier.userData.fixerBreachAge ?? Infinity) + Math.max(0, dt);
+  }
+  if (isLifeline) {
+    soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
+    soldier.userData.lifelineTreatmentAge = (soldier.userData.lifelineTreatmentAge ?? Infinity) + Math.max(0, dt);
   }
   if (soldier.userData.walkMixer) {
     const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
@@ -1766,6 +1781,11 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
       const pose = fixerActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.fixerBreachAge);
       applyFixerAction(model, pose);
       stepFixerWork(soldier, soldier.userData.actionClock, pose.task, soldier.userData.squadTier);
+    }
+    if (model && isLifeline) {
+      const pose = lifelineActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.lifelineTreatmentAge);
+      applyLifelineAction(model, pose);
+      stepLifelineTriage(soldier, soldier.userData.actionClock, pose.triage, soldier.userData.squadTier);
     }
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;
@@ -4661,7 +4681,15 @@ function animateWarRoleAction(battle, troop) {
     spawnWarPulse(battle, breach, WAR_ROLE_COLOURS.engineer, 0.75);
     troop.mesh.userData.fixerBreachAge = 0;
   } else if (troop.role === 'medic') {
-    spawnWarPulse(battle, troop.mesh.position, WAR_ROLE_COLOURS.medic, 1.9);
+    const progress = THREE.MathUtils.clamp(battle.time / battle.duration, 0, 1);
+    const ally = battle.troops.filter(candidate => candidate !== troop && !candidate.withdrawn
+      && (!battle.damage?.squad?.[battle.troops.indexOf(candidate)] || warHealthAt(battle.damage.squad[battle.troops.indexOf(candidate)], progress) > 0))
+      .sort((a, b) => a.mesh.position.distanceToSquared(troop.mesh.position) - b.mesh.position.distanceToSquared(troop.mesh.position))[0];
+    const recipient = ally?.mesh.position || troop.mesh.position;
+    const injector = lifelineInjectorPosition(troop.mesh);
+    spawnWarTrace(battle, injector, recipient.clone().add(new THREE.Vector3(0, 1, 0)), WAR_ROLE_COLOURS.medic, .025);
+    spawnWarPulse(battle, recipient, WAR_ROLE_COLOURS.medic, 1.1);
+    troop.mesh.userData.lifelineTreatmentAge = 0;
   }
 }
 
@@ -4902,7 +4930,15 @@ function updateRaid(dt) {
       if (t.userData.healClock >= 1.2) {
         const ally = raid.troops.filter(candidate => candidate.userData.hp > 0 && candidate.userData.hp < candidate.userData.combat.maxHealth && candidate.position.distanceToSquared(t.position) < 80)
           .sort((a, b) => a.userData.hp / a.userData.combat.maxHealth - b.userData.hp / b.userData.combat.maxHealth)[0];
-        if (ally) { ally.userData.hp = Math.min(ally.userData.combat.maxHealth, ally.userData.hp + 10 + combat.tier * 4); t.userData.healClock = 0; }
+        if (ally) {
+          ally.userData.hp = Math.min(ally.userData.combat.maxHealth, ally.userData.hp + 10 + combat.tier * 4);
+          t.userData.healClock = 0;
+          t.userData.lifelineTreatmentAge = 0;
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            const origin = lifelineInjectorPosition(t);
+            spawnArcBolt(origin, ally.position.clone().add(new THREE.Vector3(0, 1, 0)), raid.tracers);
+          }
+        }
       }
     }
     const dir = target.position.clone().sub(t.position).setY(0);

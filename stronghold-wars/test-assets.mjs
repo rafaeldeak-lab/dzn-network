@@ -19,6 +19,7 @@ import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, startS
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './preview/warden-actions.js';
 import { ghostActionPose, applyGhostAction, ghostScannerPosition, stepGhostScan, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './preview/ghost-actions.js';
 import { fixerActionPose, applyFixerAction, fixerToolPosition, stepFixerWork, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './preview/fixer-actions.js';
+import { lifelineActionPose, applyLifelineAction, lifelineInjectorPosition, stepLifelineTriage, startLifelineUpgradeReveal, stepLifelineUpgradeReveal } from './preview/lifeline-actions.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -259,6 +260,44 @@ for (let level = 1; level <= 5; level++) {
   stepFixerUpgradeReveal(unit, 0, true);
   if (unit.userData.fixerReveal || reveal.root.parent)
     throw new Error('Fixer upgrade reveal must stop under reduced motion.');
+}
+const lifeline = new THREE.Group();
+const lifelineModel = new THREE.Group(); lifelineModel.name = 'squad_model'; lifeline.add(lifelineModel);
+const lifelineArm = new THREE.Bone(); lifelineArm.name = 'UpperArm_R'; lifelineModel.add(lifelineArm);
+const lifelineHand = new THREE.Bone(); lifelineHand.name = 'Hand_R'; lifelineHand.position.set(.2, 1, .1); lifelineArm.add(lifelineHand);
+for (const name of ['UpperArm_L', 'Neck']) { const bone = new THREE.Bone(); bone.name = name; lifelineModel.add(bone); }
+const triage = lifelineActionPose(Math.PI / (2 * 2.4), false, 'workshop');
+if (!triage.triage || !triage.arm || lifelineActionPose(0, true, 'workshop').triage
+  || lifelineActionPose(0, false, 'comms').triage || lifelineActionPose(0, false, 'workshop', Infinity, true).triage
+  || lifelineActionPose(0, true, null, .2).treating < .7)
+  throw new Error('Lifeline should work at the Forge or camp, treat allies and respect reduced motion.');
+applyLifelineAction(lifelineModel, triage);
+const stableLifelineHand = lifelineHand.quaternion.clone();
+for (let frame = 0; frame < 600; frame++) applyLifelineAction(lifelineModel, triage);
+if (lifelineHand.quaternion.angleTo(stableLifelineHand) > 1e-5) throw new Error('Lifeline injector hand must not drift.');
+lifelineArm.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), .22);
+applyLifelineAction(lifelineModel, triage);
+if (Math.abs(lifelineArm.rotation.y) < .2 || Math.abs(lifelineArm.rotation.x) < .02)
+  throw new Error('Lifeline work must preserve the imported 3D animation.');
+lifelineArm.quaternion.identity(); applyLifelineAction(lifelineModel, lifelineActionPose(0, true, null));
+if (Math.abs(lifelineArm.rotation.x) > 1e-5) throw new Error('Lifeline must return to neutral while walking.');
+if (lifelineInjectorPosition(lifeline).distanceTo(lifelineHand.getWorldPosition(new THREE.Vector3())) < .1)
+  throw new Error('Lifeline treatment must originate from the injector hand.');
+stepLifelineTriage(lifeline, 1, true, 5);
+if (!lifeline.userData.lifelineTriage?.root.visible || lifeline.userData.lifelineTriage.motes.length !== 7)
+  throw new Error('Lifeline Level 5 should show active injector particles.');
+stepLifelineTriage(lifeline, 1, false, 5);
+if (lifeline.userData.lifelineTriage.root.visible) throw new Error('Lifeline triage must stop between posts.');
+stepLifelineTriage(lifeline, 1, true, 5, true);
+if (lifeline.userData.lifelineTriage.root.visible) throw new Error('Lifeline triage must respect reduced motion.');
+for (let level = 1; level <= 5; level++) {
+  const unit = new THREE.Group();
+  const reveal = startLifelineUpgradeReveal(unit, level);
+  if (reveal.motes.length !== 3 + level || !stepLifelineUpgradeReveal(unit, .2) || !reveal.root.parent)
+    throw new Error(`Lifeline Level ${level} should have a tier-specific reveal.`);
+  stepLifelineUpgradeReveal(unit, 0, true);
+  if (unit.userData.lifelineReveal || reveal.root.parent)
+    throw new Error('Lifeline upgrade reveal must stop under reduced motion.');
 }
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();
