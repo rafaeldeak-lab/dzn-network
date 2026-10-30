@@ -19,6 +19,7 @@ import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForge
 import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './comms-array.js';
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearSentinelUpgradeReveal, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './sentinel-actions.js';
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, clearWardenUpgradeReveal, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './warden-actions.js';
+import { ghostActionPose, applyGhostAction, ghostScannerPosition, clearGhostScan, stepGhostScan, clearGhostUpgradeReveal, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './ghost-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -1608,6 +1609,8 @@ function equipSoldier(soldier, role, tier) {
   const previousTier = soldier.userData.squadRole === role ? soldier.userData.squadTier : null;
   clearSentinelUpgradeReveal(soldier);
   clearWardenUpgradeReveal(soldier);
+  clearGhostScan(soldier);
+  clearGhostUpgradeReveal(soldier);
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
   soldier.userData.squadTier = tier;
@@ -1620,6 +1623,7 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.activeAction = null;
   if (role === 'sentinel') soldier.userData.sentinelFireAge = Infinity;
   if (role === 'assault') soldier.userData.wardenFireAge = Infinity;
+  if (role === 'recon') soldier.userData.ghostSignalAge = Infinity;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -1655,6 +1659,7 @@ function equipSoldier(soldier, role, tier) {
       soldier.userData.activeAction.play();
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
+      if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
       if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1690,6 +1695,7 @@ function equipSoldier(soldier, role, tier) {
       soldier.add(fallback);
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
+      if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
     }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
@@ -1701,8 +1707,13 @@ function makeSoldier(role, levels) {
 function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isSentinel = soldier.userData.squadRole === 'sentinel';
+  const isGhost = soldier.userData.squadRole === 'recon';
   if (isSentinel) stepSentinelUpgradeReveal(soldier, dt, reducedMotion);
   if (soldier.userData.squadRole === 'assault') stepWardenUpgradeReveal(soldier, dt, reducedMotion);
+  if (isGhost) {
+    stepGhostUpgradeReveal(soldier, dt, reducedMotion);
+    if (reducedMotion) stepGhostScan(soldier, 0, false, true);
+  }
   if (reducedMotion) return;
   if (isSentinel) {
     soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
@@ -1711,6 +1722,10 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (soldier.userData.squadRole === 'assault') {
     soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
     soldier.userData.wardenFireAge = (soldier.userData.wardenFireAge ?? Infinity) + Math.max(0, dt);
+  }
+  if (isGhost) {
+    soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
+    soldier.userData.ghostSignalAge = (soldier.userData.ghostSignalAge ?? Infinity) + Math.max(0, dt);
   }
   if (soldier.userData.walkMixer) {
     const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
@@ -1726,6 +1741,11 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
     if (model && isSentinel) {
       const pose = sentinelActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.sentinelFireAge);
       applySentinelAction(model, pose);
+    }
+    if (model && isGhost) {
+      const pose = ghostActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.ghostSignalAge);
+      applyGhostAction(model, pose);
+      stepGhostScan(soldier, soldier.userData.actionClock, pose.scanning);
     }
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;
@@ -4612,7 +4632,8 @@ function animateWarRoleAction(battle, troop) {
     troop.mesh.userData.sentinelFireAge = 0;
   } else if (troop.role === 'recon') {
     spawnWarPulse(battle, troop.mesh.position, WAR_ROLE_COLOURS.recon, 1.25);
-    spawnWarTrace(battle, origin, target, WAR_ROLE_COLOURS.recon, 0.016);
+    spawnWarTrace(battle, ghostScannerPosition(troop.mesh), target, WAR_ROLE_COLOURS.recon, 0.016);
+    troop.mesh.userData.ghostSignalAge = 0;
   } else if (troop.role === 'engineer') {
     const breachPoint = battle.result.tactics?.breachedWallIds.length ? battle.result.tactics.route[2] : null;
     const breach = breachPoint ? new THREE.Vector3(OUTPOST.x + breachPoint.x, 0, OUTPOST.z + breachPoint.z) : troop.path[troop.path.length - 1];

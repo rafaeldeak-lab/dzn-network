@@ -17,6 +17,7 @@ import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal
 import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './preview/comms-array.js';
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './preview/sentinel-actions.js';
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './preview/warden-actions.js';
+import { ghostActionPose, applyGhostAction, ghostScannerPosition, stepGhostScan, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './preview/ghost-actions.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -174,6 +175,50 @@ for (let level = 1; level <= 5; level++) {
   stepWardenUpgradeReveal(soldier, 0, true);
   if (soldier.userData.wardenReveal || reveal.root.parent)
     throw new Error('Warden upgrade reveal must stop under reduced motion.');
+}
+const ghost = new THREE.Group();
+const ghostModel = new THREE.Group(); ghostModel.name = 'squad_model'; ghost.add(ghostModel);
+const ghostSpine = new THREE.Bone(); ghostSpine.name = 'Spine'; ghostModel.add(ghostSpine);
+const ghostNeck = new THREE.Bone(); ghostNeck.name = 'Neck'; ghostSpine.add(ghostNeck);
+const ghostHand = new THREE.Bone(); ghostHand.name = 'Hand_R'; ghostHand.position.set(.2, 1, .1); ghostSpine.add(ghostHand);
+const ghostSweep = ghostActionPose(Math.PI / (2 * .65), false, 'comms');
+const ghostPing = ghostActionPose(1, true, null, .275);
+if (!ghostSweep.scanning || ghostSweep.yaw < .14 || ghostActionPose(0, false, 'camp').scanning
+  || ghostActionPose(0, true, 'comms').scanning || ghostPing.signal < .49
+  || ghostActionPose(1, false, 'comms', .275, true).scanning)
+  throw new Error('Ghost should sweep at Communications, signal in battle and respect reduced motion.');
+applyGhostAction(ghostModel, ghostSweep);
+const stableGhostHand = ghostHand.quaternion.clone();
+for (let frame = 0; frame < 600; frame++) applyGhostAction(ghostModel, ghostSweep);
+if (ghostHand.quaternion.angleTo(stableGhostHand) > 1e-5 || Math.abs(ghostNeck.rotation.y) > .2)
+  throw new Error('Ghost scanner hand and lookout pose must remain bounded.');
+ghostHand.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), .24);
+applyGhostAction(ghostModel, ghostSweep);
+if (Math.abs(ghostHand.rotation.y) < .2 || Math.abs(ghostHand.rotation.x) < .03)
+  throw new Error('Ghost scanner action must preserve the imported walk animation.');
+ghostHand.quaternion.identity();
+applyGhostAction(ghostModel, ghostSweep);
+const scanner = ghostScannerPosition(ghost);
+if (scanner.distanceTo(ghostHand.getWorldPosition(new THREE.Vector3())) < .08)
+  throw new Error('Ghost signal should originate from the held scanner.');
+stepGhostScan(ghost, 1.8, true);
+if (!ghost.userData.ghostScan?.ring.visible || ghost.userData.ghostScan.ring.scale.x < 2)
+  throw new Error('Ghost should project a visible scan at Communications.');
+stepGhostScan(ghost, 2, false);
+if (ghost.userData.ghostScan.ring.visible) throw new Error('Ghost scan should stop while leaving its post.');
+stepGhostScan(ghost, 2, true, true);
+if (ghost.userData.ghostScan.ring.visible) throw new Error('Ghost scan should respect reduced motion.');
+applyGhostAction(ghostModel, ghostActionPose(0, true, null));
+if (Math.abs(ghostSpine.rotation.y) > 1e-5 || Math.abs(ghostNeck.rotation.y) > 1e-5 || Math.abs(ghostHand.rotation.x) > 1e-5)
+  throw new Error('Ghost should return to its neutral walk pose.');
+for (let level = 1; level <= 5; level++) {
+  const soldier = new THREE.Group();
+  const reveal = startGhostUpgradeReveal(soldier, level);
+  if (reveal.signals.length !== 4 + level || !stepGhostUpgradeReveal(soldier, .2) || !reveal.root.parent)
+    throw new Error(`Ghost Level ${level} should have a tier-specific reveal.`);
+  stepGhostUpgradeReveal(soldier, 0, true);
+  if (soldier.userData.ghostReveal || reveal.root.parent)
+    throw new Error('Ghost reveal must stop under reduced motion.');
 }
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();
