@@ -15,6 +15,7 @@ import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js'
 import { facilityMotion } from './preview/facility-motion.js';
 import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './preview/forge-workshop.js';
 import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './preview/comms-array.js';
+import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './preview/sentinel-actions.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -103,6 +104,43 @@ for (let level = 1; level <= 5; level++) {
 }
 if (!facilityMotion(1, 0, true).moving || facilityMotion(1, 0, true, true).moving)
   throw new Error('Other facility motion must respect reduced-motion settings.');
+const guard = sentinelActionPose(Math.PI / (2 * .68), false, 'tower');
+const transit = sentinelActionPose(2, true, 'tower');
+const shot = sentinelActionPose(2, false, 'tower', .17);
+const still = sentinelActionPose(2, false, 'tower', .17, true);
+if (!guard.braced || guard.scan < .2 || transit.braced || transit.scan || shot.recoil < .08
+  || still.scan || still.recoil || still.lean) throw new Error('Sentinel must scan while guarding, brace for a shot, and respect reduced motion.');
+const soldierRoot = new THREE.Group();
+const soldierModel = new THREE.Group(); soldierModel.name = 'squad_model'; soldierRoot.add(soldierModel);
+const spine = new THREE.Bone(); spine.name = 'Spine'; soldierModel.add(spine);
+const chest = new THREE.Bone(); chest.name = 'Chest'; spine.add(chest);
+const neck = new THREE.Bone(); neck.name = 'Neck'; chest.add(neck);
+const right = new THREE.Bone(); right.name = 'Hand_R'; right.position.set(.3, 0, 0); chest.add(right);
+const left = new THREE.Bone(); left.name = 'Hand_L'; left.position.set(-.3, 0, 0); chest.add(left);
+const gripBefore = right.getWorldPosition(new THREE.Vector3()).distanceTo(left.getWorldPosition(new THREE.Vector3()));
+applySentinelAction(soldierModel, shot);
+const gripAfter = right.getWorldPosition(new THREE.Vector3()).distanceTo(left.getWorldPosition(new THREE.Vector3()));
+const muzzle = sentinelMuzzlePosition(soldierRoot);
+if (Math.abs(gripBefore - gripAfter) > 1e-6 || !spine.rotation.y || !neck.rotation.y || !chest.rotation.x
+  || muzzle.distanceTo(right.getWorldPosition(new THREE.Vector3())) < .3)
+  throw new Error('Sentinel guard and recoil must keep both hands together and launch fire from the weapon hand.');
+const firstScan = spine.quaternion.clone();
+for (let frame = 0; frame < 600; frame++) applySentinelAction(soldierModel, shot);
+if (spine.quaternion.angleTo(firstScan) > 1e-5 || Math.abs(chest.rotation.x) > .12
+  || Math.abs(right.getWorldPosition(new THREE.Vector3()).distanceTo(left.getWorldPosition(new THREE.Vector3())) - gripBefore) > 1e-5)
+  throw new Error('Sentinel pose offsets must remain bounded through a long guard shift.');
+applySentinelAction(soldierModel, transit);
+if (Math.abs(spine.rotation.y) > 1e-5 || Math.abs(neck.rotation.y) > 1e-5 || Math.abs(chest.rotation.x) > 1e-5)
+  throw new Error('Sentinel must return to the neutral walk posture after firing.');
+for (let level = 1; level <= 5; level++) {
+  const soldier = new THREE.Group();
+  const reveal = startSentinelUpgradeReveal(soldier, level);
+  if (reveal.sparks.length !== 5 + level || !stepSentinelUpgradeReveal(soldier, .2)
+    || !reveal.root.parent || !stepSentinelUpgradeReveal(soldier, .1, false))
+    throw new Error(`Sentinel Level ${level} upgrade should have a visible tier-specific reveal.`);
+  stepSentinelUpgradeReveal(soldier, 0, true);
+  if (soldier.userData.sentinelReveal || reveal.root.parent) throw new Error('Sentinel upgrade reveal must stop under reduced motion.');
+}
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();
 for (const line of manifest) {

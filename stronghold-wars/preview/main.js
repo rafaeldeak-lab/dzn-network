@@ -17,6 +17,7 @@ import { yardProcessState } from './yard-process.js';
 import { facilityMotion } from './facility-motion.js';
 import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './forge-workshop.js';
 import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './comms-array.js';
+import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearSentinelUpgradeReveal, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './sentinel-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -1603,6 +1604,8 @@ function bindSquadEquipment(model, role) {
 function equipSoldier(soldier, role, tier) {
   const path = squadAsset(role, tier);
   if (soldier.userData.squadAsset === path) return;
+  const previousTier = soldier.userData.squadRole === role ? soldier.userData.squadTier : null;
+  clearSentinelUpgradeReveal(soldier);
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
   soldier.userData.squadTier = tier;
@@ -1613,6 +1616,7 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.walkAction = null;
   soldier.userData.idleAction = null;
   soldier.userData.activeAction = null;
+  if (role === 'sentinel') soldier.userData.sentinelFireAge = Infinity;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -1646,6 +1650,7 @@ function equipSoldier(soldier, role, tier) {
       soldier.userData.idleAction = idleClip ? mixer.clipAction(idleClip) : null;
       soldier.userData.activeAction = soldier.userData.idleAction || soldier.userData.walkAction;
       soldier.userData.activeAction.play();
+      if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
       if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1674,6 +1679,7 @@ function equipSoldier(soldier, role, tier) {
       fallback.name = 'squad_model';
       bindSquadEquipment(fallback, role);
       soldier.add(fallback);
+      if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
     }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
@@ -1683,7 +1689,14 @@ function makeSoldier(role, levels) {
   return soldier;
 }
 function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isSentinel = soldier.userData.squadRole === 'sentinel';
+  if (isSentinel) stepSentinelUpgradeReveal(soldier, dt, reducedMotion);
+  if (reducedMotion) return;
+  if (isSentinel) {
+    soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
+    soldier.userData.sentinelFireAge = (soldier.userData.sentinelFireAge ?? Infinity) + Math.max(0, dt);
+  }
   if (soldier.userData.walkMixer) {
     const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
     if (nextAction && nextAction !== soldier.userData.activeAction) {
@@ -1704,6 +1717,10 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
           limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forward));
         }
       }
+    }
+    if (model && isSentinel) {
+      const pose = sentinelActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.sentinelFireAge);
+      applySentinelAction(model, pose);
     }
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;
@@ -4129,6 +4146,14 @@ function spawnWarTrace(battle, from, to, colour, width = 0.028) {
   scene.add(mesh);
   battle.effects.push({ mesh, life: 0, duration: 0.18, kind: 'trace' });
 }
+function spawnSentinelMuzzle(battle, position) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(.16, 0),
+    new THREE.MeshBasicMaterial({ color: WAR_ROLE_COLOURS.sentinel, transparent: true, opacity: .95, depthWrite: false, blending: THREE.AdditiveBlending }));
+  mesh.position.copy(position);
+  scene.add(mesh);
+  battle.effects.push({ mesh, life: 0, duration: .14, kind: 'trace' });
+}
 function updateWarEffects(battle, dt) {
   for (let i = battle.effects.length - 1; i >= 0; i--) {
     const effect = battle.effects[i];
@@ -4572,8 +4597,10 @@ function animateWarRoleAction(battle, troop) {
   const origin = troop.mesh.position.clone().add(new THREE.Vector3(0, 1.15, 0));
   if (troop.role === 'assault') spawnWarTrace(battle, origin, target, WAR_ROLE_COLOURS.assault);
   else if (troop.role === 'sentinel') {
-    spawnWarTrace(battle, origin, target, WAR_ROLE_COLOURS.sentinel, 0.05);
-    spawnWarPulse(battle, troop.mesh.position, WAR_ROLE_COLOURS.sentinel, 0.65);
+    const muzzle = sentinelMuzzlePosition(troop.mesh);
+    spawnWarTrace(battle, muzzle, target, WAR_ROLE_COLOURS.sentinel, 0.05);
+    spawnSentinelMuzzle(battle, muzzle);
+    troop.mesh.userData.sentinelFireAge = 0;
   } else if (troop.role === 'recon') {
     spawnWarPulse(battle, troop.mesh.position, WAR_ROLE_COLOURS.recon, 1.25);
     spawnWarTrace(battle, origin, target, WAR_ROLE_COLOURS.recon, 0.016);
