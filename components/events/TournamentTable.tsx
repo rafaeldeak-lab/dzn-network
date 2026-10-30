@@ -8,6 +8,15 @@ import { EventStatusBadge } from "./EventStatusBadge";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
 export function TournamentTable({ events }: { events: CompetitiveEvent[] }) {
+  if (!events.length) {
+    return (
+      <section className="border border-dashed border-violet-300/26 bg-[radial-gradient(circle_at_16%_0%,rgba(124,58,237,0.12),transparent_32%),rgba(5,9,21,0.84)] p-7 text-center">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-200">Nothing published yet</p>
+        <h2 className="mt-2 text-2xl font-black uppercase text-white">The official tournament board is waiting for its first verified entry.</h2>
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-400">Filters remain ready for real schedules. When an authorised organiser publishes a competition, its actual date, server count, category and status will appear here.</p>
+      </section>
+    );
+  }
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-[#050915]/90">
       <table className="w-full border-collapse text-left text-sm">

@@ -2,6 +2,7 @@ import { Lock, Radio, Zap } from "lucide-react";
 
 import type { EventMatch } from "./event-data";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
+import { ServerMark } from "./ServerMark";
 
 export function ChallengeBattleCard({ match, locked = true }: { match: EventMatch; locked?: boolean }) {
   return (
@@ -22,15 +23,15 @@ export function ChallengeBattleCard({ match, locked = true }: { match: EventMatc
         </div>
       </div>
       <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="text-[10px] font-black uppercase text-cyan-200">Blue Side</div>
-          <div className="mt-1 text-sm font-black uppercase text-white">{match.left_server.server_name}</div>
+          <div className="mt-1 flex items-center gap-2"><ServerMark name={match.left_server.server_name} iconUrl={match.left_server.guild_icon_url} /><div className="truncate text-sm font-black uppercase text-white">{match.left_server.server_name}</div></div>
           <div className="mt-2 font-mono text-2xl font-black text-cyan-100">{match.left_score}</div>
         </div>
-        <Zap className="h-5 w-5 text-violet-200" />
-        <div className="text-right">
+        <Zap aria-hidden="true" className="h-5 w-5 text-violet-200" />
+        <div className="min-w-0 text-right">
           <div className="text-[10px] font-black uppercase text-orange-200">Orange Side</div>
-          <div className="mt-1 text-sm font-black uppercase text-white">{match.right_server.server_name}</div>
+          <div className="mt-1 flex items-center justify-end gap-2"><div className="truncate text-sm font-black uppercase text-white">{match.right_server.server_name}</div><ServerMark name={match.right_server.server_name} iconUrl={match.right_server.guild_icon_url} /></div>
           <div className="mt-2 font-mono text-2xl font-black text-orange-100">{match.right_score}</div>
         </div>
       </div>

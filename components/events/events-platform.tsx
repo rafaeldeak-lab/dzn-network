@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- static trophy art is intentionally served directly on Cloudflare Pages. */
+
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -27,12 +29,9 @@ import {
 
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 import {
-  fallbackActivity,
   fallbackEventDetail,
   fallbackEventsPayload,
-  fallbackMatches,
   fallbackServerEvents,
-  fallbackServers,
   type CompetitiveEvent,
   type EventActivity,
   type EventDetailPayload,
@@ -42,7 +41,6 @@ import {
 } from "./event-data";
 import { cn, eventImageStyle, formatDate, formatNumber } from "./event-format";
 import { BracketView } from "./BracketView";
-import { ChallengeBattleCard } from "./ChallengeBattleCard";
 import { ClientTimeUntil } from "./ClientTimeUntil";
 import { EventFilterPanel } from "./EventFilterPanel";
 import { EventHero } from "./EventHero";
@@ -54,6 +52,7 @@ import { PremiumLockedCard } from "./PremiumLockedCard";
 import { SeasonBanner } from "./SeasonBanner";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 import { ServerEventProfile } from "./ServerEventProfile";
+import { ServerMark } from "./ServerMark";
 import { TournamentTable } from "./TournamentTable";
 import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 import {
@@ -226,7 +225,7 @@ export function EventCreatePage() {
         subtitle="Official DZN events are creator-managed. Use Event Control for creator-only official creation."
         action={<EventActionLink href="/events">Events Hub</EventActionLink>}
       />
-      <EventTabs active="CTF Tournaments" />
+      <EventTabs active="Tournaments" />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <form onSubmit={submit} className="space-y-5 rounded-xl border border-white/10 bg-white/[0.035] p-5 shadow-[0_30px_110px_rgba(0,0,0,0.32)]">
           <div className="grid gap-4 md:grid-cols-2">
@@ -347,23 +346,23 @@ export function EventsHubPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload("/api/events?limit=24", fallback);
   const liveActivity = useLiveEventActivity();
-  const active = data.events.filter((event) => event.status === "live");
-  const upcoming = data.events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status));
+  const betaMode = data.source === "display_fallback";
+  const active = betaMode ? [] : data.events.filter((event) => event.status === "live");
+  const upcoming = betaMode ? [] : data.events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status));
   const featured = (active[0] ?? upcoming[0] ?? data.events[0]) ?? null;
-  const usingDisplayFallback = data.source === "display_fallback";
   return (
     <EventsShell>
       <EventHero />
-      <EventTabs active="CTF Tournaments" />
+      <EventTabs active="Overview" />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <FeaturedEventStage event={featured} />
-        <LiveEventsRail events={active.slice(0, 3)} />
+        {betaMode ? <CompetitionCentreLaunchPanel /> : <FeaturedEventStage event={featured} />}
+        {betaMode ? <CompetitionLaunchRadar /> : <LiveEventsRail events={active.slice(0, 3)} />}
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_320px]">
         <UpcomingEventsPanel events={upcoming.slice(0, 3)} />
-        <BracketPreviewPanel event={featured} matches={usingDisplayFallback ? fallbackMatches : []} />
-        <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : liveActivity} />
+        <BracketPreviewPanel event={betaMode ? null : featured} matches={[]} />
+        <LiveActivityFeed activity={liveActivity} />
       </div>
       <NetworkEventStats summary={data.summary} />
       <ServerWarsTeaser />
@@ -373,6 +372,52 @@ export function EventsHubPage() {
         <PremiumLockedCard title="SAME CATEGORY ONLY" message="Deathmatch can only fight Deathmatch, PvP can only fight PvP, and every join and match API enforces the same rule." />
       </div>
     </EventsShell>
+  );
+}
+
+function CompetitionCentreLaunchPanel() {
+  return (
+    <section data-featured-event className="relative min-h-[360px] overflow-hidden border border-violet-300/34 bg-[radial-gradient(circle_at_65%_12%,rgba(124,58,237,0.26),transparent_30%),linear-gradient(115deg,rgba(4,8,22,0.98),rgba(9,11,30,0.9))] p-6 shadow-[0_28px_90px_rgba(0,0,0,0.34)] sm:p-7">
+      <img src="/media/competition-centre/season-trophy-v1.png" alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[-14%] right-[-3%] h-[118%] max-w-[54%] object-contain opacity-80 motion-safe:animate-[pulse_8s_ease-in-out_infinite]" />
+      <div className="relative flex min-h-[312px] max-w-2xl flex-col justify-between">
+        <div className="flex flex-wrap gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-violet-300/36 bg-violet-500/16 px-3 py-1.5 text-[10px] font-black uppercase text-violet-50"><Trophy className="h-3.5 w-3.5" />Competition Centre beta</span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/28 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-black uppercase text-cyan-100"><ShieldCheck className="h-3.5 w-3.5" />Verified data only</span>
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">The next season is built to be earned</p>
+          <h2 className="mt-2 max-w-xl text-3xl font-black uppercase text-white sm:text-5xl">Prepare your server. Build its legacy.</h2>
+          <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-300">The competition stack is in active beta. Official schedules, real brackets, connected-server marks and earned rewards appear here only when a verified organiser publishes them.</p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <EventActionLink href="/events/suggest">Suggest a competition</EventActionLink>
+            <EventActionLink href="/seasons">Explore seasons</EventActionLink>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CompetitionLaunchRadar() {
+  const stages = [
+    ["01", "Connect", "A real public server and Discord mark."],
+    ["02", "Verify", "Category-safe entries and published rules."],
+    ["03", "Compete", "Live brackets only after an official launch."],
+  ];
+  return (
+    <section data-live-events className="relative overflow-hidden border border-cyan-300/20 bg-[#050915]/94 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.28)]">
+      <div className="flex items-center gap-2 text-sm font-black uppercase text-white"><span className="h-2 w-2 rounded-full bg-amber-300" />Launch radar</div>
+      <p className="mt-2 text-xs leading-5 text-zinc-400">No live competition is published yet. This path turns on as verified organisers start opening events.</p>
+      <div className="mt-5 space-y-3">
+        {stages.map(([number, title, detail], index) => (
+          <div key={title} className="relative grid grid-cols-[32px_1fr] gap-3">
+            {index < stages.length - 1 ? <span aria-hidden="true" className="absolute left-[15px] top-8 h-8 w-px bg-gradient-to-b from-violet-300/55 to-cyan-300/20" /> : null}
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-300/28 bg-violet-500/12 text-[10px] font-black text-violet-100">{number}</span>
+            <div className="pb-3"><p className="text-xs font-black uppercase text-white">{title}</p><p className="mt-1 text-[11px] leading-5 text-zinc-500">{detail}</p></div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -557,7 +602,7 @@ export function EventsTournamentsPage() {
   return (
     <EventsShell>
       <HeaderLine title="EVENTS" subtitle="Search and filter DZN tournaments by status, category, type, and date." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Events Hub</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
-      <EventTabs active={status === "active" || status === "live" ? "Active" : status === "completed" || status === "ended" ? "Completed" : status === "upcoming" ? "Upcoming" : "CTF Tournaments"} />
+      <EventTabs active={status === "active" || status === "live" ? "Live" : status === "upcoming" ? "Upcoming" : "Tournaments"} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
         <main className="space-y-4">
@@ -616,7 +661,7 @@ export function EventDetailPage({ slug: slugProp }: { slug?: string } = {}) {
             {data.registered_servers.slice(0, 6).map((server) => (
               <div key={server.registration_id} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="font-black uppercase text-white">{server.server_name}</div>
+                  <div className="flex min-w-0 items-center gap-2"><ServerMark name={server.server_name} iconUrl={server.guild_icon_url} /><div className="truncate font-black uppercase text-white">{server.server_name}</div></div>
                   <ServerCategoryBadge category={server.category} label={server.category_label} compact />
                 </div>
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -647,14 +692,10 @@ export function EventBracketPage({ slug: slugProp }: { slug?: string } = {}) {
       <div className="grid gap-5 xl:grid-cols-[1fr_260px]">
         <BracketView matches={data.matches} category={data.event.category} categoryLabel={data.event.category_label} />
         <aside className="space-y-4">
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-            <h2 className="text-sm font-black uppercase text-white">Champions</h2>
-            {["Season 1", "Season 0", "Season -1"].map((season, index) => (
-              <div key={season} className="mt-3 flex items-center justify-between rounded-md border border-white/8 bg-black/24 p-3 text-xs">
-                <span className="text-zinc-400">{season}</span>
-                <span className="font-black text-white">{fallbackServers[index]?.server_name ?? "TBD"}</span>
-              </div>
-            ))}
+          <div className="rounded-lg border border-amber-300/20 bg-[radial-gradient(circle_at_78%_20%,rgba(251,191,36,0.14),transparent_34%),rgba(255,255,255,0.035)] p-4">
+            <img src="/media/competition-centre/season-trophy-v1.png" alt="" aria-hidden="true" className="mx-auto h-24 w-24 object-contain motion-safe:animate-[pulse_7s_ease-in-out_infinite]" />
+            <h2 className="mt-2 text-center text-sm font-black uppercase text-white">Champion record</h2>
+            <p className="mt-2 text-center text-xs leading-5 text-zinc-400">Season winners appear only after an official event is completed and its results are finalised.</p>
           </div>
           <PremiumLockedCard title="Share Bracket" message="Full bracket exports and share cards are premium event tools." />
         </aside>
@@ -666,17 +707,15 @@ export function EventBracketPage({ slug: slugProp }: { slug?: string } = {}) {
 export function EventsChallengesPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
+  const betaMode = data.source === "display_fallback";
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
+      <HeaderLine title="CHALLENGES" subtitle="Purpose-built goals, seasonal routes and real-server results — published only when an organiser opens them." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">Competition Centre</EventActionLink><EventActionLink href="/events/suggest">Suggest a challenge</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
-          <PulseFeaturedMatchup match={fallbackMatches[0] ?? null} />
-          <div className="grid gap-4 lg:grid-cols-2">
-            {fallbackMatches.slice(0, 4).map((match) => <ChallengeBattleCard key={match.id} match={match} locked={data.teaserMode} />)}
-          </div>
-          <LeaderboardTeaser rows={fallbackServers} locked={data.teaserMode} />
+          {betaMode ? <ChallengeLaunchPreview /> : <TournamentTable events={data.events} />}
+          {betaMode ? <ChallengeProgression /> : null}
         </main>
         <aside className="space-y-5">
           <PremiumLockedCard title="CROSS-SERVER MATCHING" message="Cross-server matching is a Pro platform feature." />
@@ -688,10 +727,42 @@ export function EventsChallengesPage() {
               </div>
             ))}
           </div>
-          <LiveActivityFeed activity={fallbackActivity} />
+          <LiveActivityFeed activity={[]} />
         </aside>
       </div>
     </EventsShell>
+  );
+}
+
+function ChallengeLaunchPreview() {
+  const steps = [
+    ["Daily objective", "A verified action creates progress for an eligible connected server."],
+    ["Server milestone", "Category-safe thresholds unlock the next visible route."],
+    ["Season reward", "A real, finalised result earns a recordable trophy or award."],
+  ];
+  return (
+    <section className="relative overflow-hidden border border-cyan-300/22 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.16),transparent_32%),rgba(5,9,21,0.94)] p-6 sm:p-7">
+      <img src="/media/competition-centre/season-trophy-v1.png" alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[-32%] right-[-3%] h-[130%] max-w-[42%] object-contain opacity-45 motion-safe:animate-[pulse_8s_ease-in-out_infinite]" />
+      <div className="relative max-w-2xl">
+        <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1.5 text-[10px] font-black uppercase text-amber-100">Challenge design in beta</span>
+        <h2 className="mt-4 text-3xl font-black uppercase text-white">Earn the route. Don&apos;t buy the result.</h2>
+        <p className="mt-3 text-sm leading-6 text-zinc-300">The planned challenge system awards visible progression from verified activity. There are no demo winners, fabricated countdowns or synthetic scorecards here.</p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          {steps.map(([title, detail], index) => <div key={title} className="rounded-lg border border-white/10 bg-black/24 p-3"><span className="text-[10px] font-black text-cyan-200">0{index + 1}</span><h3 className="mt-2 text-xs font-black uppercase text-white">{title}</h3><p className="mt-2 text-[11px] leading-5 text-zinc-500">{detail}</p></div>)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChallengeProgression() {
+  return (
+    <section className="border border-violet-300/20 bg-violet-500/[0.06] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Reward ladder</p><h2 className="mt-1 text-xl font-black uppercase text-white">Progression that stays attached to real records</h2></div><Link href="/store#rewards" className="text-[10px] font-black uppercase text-cyan-100">View reward catalogue <ArrowRight className="ml-1 inline h-3.5 w-3.5" /></Link></div>
+      <div className="mt-4 grid gap-2 md:grid-cols-3">
+        {["Participation record", "Verified milestone", "Finalised season award"].map((label, index) => <div key={label} className="flex items-center gap-3 border border-white/10 bg-black/24 p-3"><span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-violet-300/30 bg-violet-500/14 text-xs font-black text-violet-100">{index + 1}</span><span className="text-xs font-black uppercase text-zinc-100">{label}</span></div>)}
+      </div>
+    </section>
   );
 }
 
@@ -756,6 +827,11 @@ function EventsShell({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.18),transparent_32%),radial-gradient(circle_at_82%_18%,rgba(14,165,233,0.12),transparent_30%),linear-gradient(180deg,#02030a,#050816_48%,#02030a)]" />
         <div className="relative grid min-h-screen lg:grid-cols-[220px_1fr]">
           <aside className="hidden border-r border-white/8 bg-black/28 p-4 backdrop-blur-xl lg:block">
+            <div className="mb-5 border-b border-white/8 pb-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">DZN</p>
+              <p className="mt-1 text-lg font-black uppercase text-white">Competition</p>
+              <p className="mt-1 text-[10px] font-semibold uppercase text-zinc-500">Verified records only</p>
+            </div>
             <nav className="space-y-1">
               {nav.map((item) => {
                 const active = isSidebarItemActive(pathname, item.href);
@@ -828,7 +904,7 @@ function useEventsPayload(endpoint: string, fallback: EventsPayload) {
       .then((payload) => {
         if (latest.current !== requestId) return;
         if (payload.ok && Array.isArray(payload.events)) {
-          setData(payload.events.length ? payload : fallback);
+          setData(payload);
           setLoadState("loaded");
         }
       })
@@ -873,10 +949,13 @@ function useEventDetail(slug: string) {
         if (payload.ok && payload.event) {
           setData(payload);
           setLoadState("loaded");
+          return;
         }
+        setData(fallback);
+        setLoadState("loaded");
       })
       .catch(() => setLoadState("stale"));
-  }, [slug]);
+  }, [fallback, slug]);
   return { data, loadState };
 }
 
@@ -890,10 +969,13 @@ function useServerEvents(slug: string) {
         if (payload.ok && payload.server) {
           setData(payload);
           setLoadState("loaded");
+          return;
         }
+        setData(fallback);
+        setLoadState("loaded");
       })
       .catch(() => setLoadState("stale"));
-  }, [slug]);
+  }, [fallback, slug]);
   return { data, loadState };
 }
 
@@ -921,55 +1003,6 @@ function HeaderLine({ title, subtitle, action }: { title: string; subtitle: stri
       </div>
       {action}
     </section>
-  );
-}
-
-function PulseFeaturedMatchup({ match }: { match: EventMatch | null }) {
-  const pulse = usePulseContextOptional();
-  if (!pulse?.enabled || !match) return null;
-  return (
-    <article className="overflow-hidden rounded-xl border border-violet-300/24 bg-[#050812] shadow-[0_28px_110px_rgba(0,0,0,0.34)]">
-      <div className="relative grid min-h-[260px] lg:grid-cols-[1fr_auto_1fr]">
-        <PulseMatchSide tone="blue" label="Blue Side" name={match.left_server.server_name} score={match.left_score} />
-        <div className="relative z-10 flex flex-col items-center justify-center border-y border-white/10 bg-black/34 px-5 py-4 lg:border-x lg:border-y-0">
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-black uppercase text-white">VS</span>
-          <p className="mt-4 text-[10px] font-black uppercase text-zinc-500">Ends In</p>
-          <p className="mt-1 font-mono text-lg font-black text-white"><ClientTimeUntil value={match.ends_at} /></p>
-        </div>
-        <PulseMatchSide tone="orange" label="Orange Side" name={match.right_server.server_name} score={match.right_score} alignRight />
-      </div>
-      <div className="grid gap-3 border-t border-white/10 p-4 text-xs sm:grid-cols-4">
-        <PulseSpotlightStat label="Roster" value="Verified" />
-        <PulseSpotlightStat label="Metric" value="Tally Live" />
-        <PulseSpotlightStat label="Mode" value={match.category_label} />
-        <Link href="/events/dzn-season-1/bracket" className="inline-flex min-h-10 items-center justify-center rounded-lg border border-violet-300/32 bg-violet-500/18 px-4 text-[10px] font-black uppercase text-white">
-          View Match Details
-        </Link>
-      </div>
-    </article>
-  );
-}
-
-function PulseMatchSide({ tone, label, name, score, alignRight = false }: { tone: "blue" | "orange"; label: string; name: string; score: number; alignRight?: boolean }) {
-  const blue = tone === "blue";
-  return (
-    <div className={`relative min-h-[180px] overflow-hidden ${blue ? "bg-cyan-500/10" : "bg-orange-500/10"}`}>
-      <div className={`absolute inset-0 ${blue ? "bg-[radial-gradient(circle_at_20%_28%,rgba(34,211,238,0.32),transparent_42%),linear-gradient(90deg,rgba(5,8,18,0.24),rgba(5,8,18,0.84))]" : "bg-[radial-gradient(circle_at_80%_28%,rgba(249,115,22,0.32),transparent_42%),linear-gradient(270deg,rgba(5,8,18,0.24),rgba(5,8,18,0.84))]"}`} />
-      <div className={`relative z-10 flex h-full min-h-[180px] flex-col justify-center p-5 ${alignRight ? "items-end text-right" : ""}`}>
-        <p className={`text-[10px] font-black uppercase ${blue ? "text-cyan-200" : "text-orange-200"}`}>{label}</p>
-        <h3 className="mt-2 text-2xl font-black uppercase text-white">{name}</h3>
-        <p className={`mt-3 font-mono text-5xl font-black ${blue ? "text-cyan-100" : "text-orange-100"}`}>{formatNumber(score)}</p>
-      </div>
-    </div>
-  );
-}
-
-function PulseSpotlightStat({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/30 p-3">
-      <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
-      <p className="mt-1 text-sm font-black uppercase text-white">{value}</p>
-    </div>
   );
 }
 
@@ -1022,7 +1055,7 @@ function StaleNotice({ state, source }: { state: LoadState; source: string }) {
   const label = state === "loading"
     ? "Syncing live data"
     : source === "display_fallback"
-      ? "Demo data shown until live events are created"
+      ? "Competition Centre beta — no verified event is published yet"
       : "Showing last-known event data";
   return (
     <div className="flex">

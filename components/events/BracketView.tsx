@@ -3,6 +3,7 @@ import { Crown, Trophy } from "lucide-react";
 import type { EventMatch } from "./event-data";
 import { cn } from "./event-format";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
+import { ServerMark } from "./ServerMark";
 
 export function BracketView({ matches, category, categoryLabel }: { matches: EventMatch[]; category: string; categoryLabel: string }) {
   const rounds = [1, 2, 3].map((round) => matches.filter((match) => match.round_number === round));
@@ -56,17 +57,17 @@ export function BracketView({ matches, category, categoryLabel }: { matches: Eve
 function BracketMatch({ match }: { match: EventMatch }) {
   return (
     <div className={cn("rounded-lg border p-3", match.match_status === "live" ? "border-violet-300/36 bg-violet-500/12" : match.match_status === "completed" ? "border-emerald-300/24 bg-emerald-500/8" : "border-white/10 bg-white/[0.03]")}>
-      <BracketTeam name={match.left_server.server_name} score={match.left_score} winner={match.winner_server_id === match.left_server.server_id} />
+      <BracketTeam name={match.left_server.server_name} iconUrl={match.left_server.guild_icon_url} score={match.left_score} winner={match.winner_server_id === match.left_server.server_id} />
       <div className="my-2 h-px bg-white/10" />
-      <BracketTeam name={match.right_server.server_name} score={match.right_score} winner={match.winner_server_id === match.right_server.server_id} />
+      <BracketTeam name={match.right_server.server_name} iconUrl={match.right_server.guild_icon_url} score={match.right_score} winner={match.winner_server_id === match.right_server.server_id} />
     </div>
   );
 }
 
-function BracketTeam({ name, score, winner }: { name: string; score: number; winner: boolean }) {
+function BracketTeam({ name, iconUrl, score, winner }: { name: string; iconUrl?: string | null; score: number; winner: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className={cn("truncate text-xs font-bold", winner ? "text-white" : "text-zinc-400")}>{name}</span>
+      <span className={cn("flex min-w-0 items-center gap-2 text-xs font-bold", winner ? "text-white" : "text-zinc-400")}><ServerMark name={name} iconUrl={iconUrl} className="h-6 w-6" /><span className="truncate">{name}</span></span>
       <span className={cn("font-mono text-sm font-black", winner ? "text-amber-100" : "text-zinc-500")}>{score}</span>
     </div>
   );

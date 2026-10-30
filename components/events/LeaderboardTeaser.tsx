@@ -4,6 +4,7 @@ import type { EventServer } from "./event-data";
 import { formatNumber } from "./event-format";
 import { PremiumLockedCard } from "./PremiumLockedCard";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
+import { ServerMark } from "./ServerMark";
 
 export function LeaderboardTeaser({ rows, locked = true, title = "TOP 10 MASTER TEASER" }: { rows: EventServer[]; locked?: boolean; title?: string }) {
   return (
@@ -35,7 +36,7 @@ export function LeaderboardTeaser({ rows, locked = true, title = "TOP 10 MASTER 
             {rows.slice(0, 10).map((row, index) => (
               <tr key={row.registration_id ?? row.server_id} className="border-t border-white/8 text-zinc-200">
                 <td className="px-3 py-3 font-mono text-zinc-500">{row.rank ?? index + 1}</td>
-                <td className="px-3 py-3 font-black text-white">{row.server_name}</td>
+                <td className="px-3 py-3 font-black text-white"><span className="flex items-center gap-2"><ServerMark name={row.server_name} iconUrl={row.guild_icon_url} className="h-7 w-7" /><span className="truncate">{row.server_name}</span></span></td>
                 <td className="px-3 py-3"><ServerCategoryBadge category={row.category} label={row.category_label} compact /></td>
                 <td className="px-3 py-3 text-right font-mono font-black text-cyan-100">{formatNumber(row.score)}</td>
                 <td className="hidden px-3 py-3 text-right font-mono text-zinc-400 sm:table-cell">{row.wins}-{row.losses}</td>

@@ -27,7 +27,7 @@ try {
       });
 
       await page.goto(`${origin}/events`, { waitUntil: "networkidle", timeout: 45_000 });
-      await page.getByRole("heading", { name: "Events & Tournaments", exact: true }).waitFor();
+      await page.getByRole("heading", { name: "Competition Centre", exact: true }).waitFor();
       await page.locator("[data-featured-event]").waitFor();
       const layout = await page.evaluate(() => {
         const rect = (selector) => {
@@ -49,7 +49,7 @@ try {
 
       assert.equal(layout.overflow, false, `Events hub overflows at ${width}px`);
       assert.ok(layout.hero && layout.hero.height >= 250, `Hero is missing or collapsed at ${width}px`);
-      assert.ok(layout.heroImage.includes("server-wars-banner-concept.webp"), "Hero battlefield artwork did not load");
+      assert.ok(layout.heroImage.includes("competition-centre-hero-v1.png"), "Competition Centre hero artwork did not load");
       assert.ok(layout.featured && layout.live && layout.upcoming && layout.stats, "A primary event section is missing");
       assert.ok(layout.featured.top >= layout.hero.bottom, "Featured event must follow the hero");
       assert.ok(layout.stats.top > layout.upcoming.top, "Network totals must follow the event workspace");

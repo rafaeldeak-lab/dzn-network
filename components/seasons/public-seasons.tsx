@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- static trophy art is intentionally served directly on Cloudflare Pages. */
+
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Activity, CalendarDays, ChevronRight, Crown, Medal, ShieldCheck, Swords, Trophy } from "lucide-react";
@@ -111,6 +113,7 @@ export function SeasonsIndexPage() {
   }, []);
 
   const grouped = useMemo(() => groupSeasons(payload), [payload]);
+  const hasPublishedSeasons = grouped.active.length + grouped.upcoming.length + grouped.completed.length > 0;
 
   return (
     <SeasonsShell>
@@ -124,6 +127,7 @@ export function SeasonsIndexPage() {
       {state === "loading" ? <LoadingCards /> : null}
       {state !== "loading" ? (
         <div className="grid gap-6">
+          {!hasPublishedSeasons ? <SeasonLaunchPanel /> : null}
           <SeasonGroup title="Active Seasons" empty="No active seasons are running right now." seasons={grouped.active} />
           <SeasonGroup title="Upcoming Seasons" empty="No upcoming seasons are scheduled yet." seasons={grouped.upcoming} />
           <SeasonGroup title="Completed Seasons" empty="Completed seasons will appear here after results are finalized." seasons={grouped.completed} />
@@ -207,7 +211,7 @@ function SeasonsShell({ children }: { children: ReactNode }) {
               Servers
             </Link>
             <Link href="/events" className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white sm:inline-flex">
-              Events
+              Competition Centre
             </Link>
             <Link href="/seasons" className="rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_26px_rgba(139,92,246,0.35)] transition hover:bg-violet-400">
               Seasons
@@ -222,12 +226,39 @@ function SeasonsShell({ children }: { children: ReactNode }) {
 
 function SeasonHero({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return (
-    <section className="py-12">
-      <p className="inline-flex rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-xs font-black uppercase tracking-normal text-violet-100">
-        {eyebrow}
-      </p>
-      <h1 className="mt-5 max-w-4xl text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">{title}</h1>
-      <p className="mt-4 max-w-3xl text-lg leading-8 text-zinc-300">{text}</p>
+    <section className="relative my-3 min-h-[340px] overflow-hidden border border-violet-300/25 bg-[url('/media/competition-centre/competition-centre-hero-v1.png')] bg-cover bg-center px-6 py-10 shadow-[0_28px_90px_rgba(0,0,0,0.34)] sm:px-9 sm:py-12">
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,3,10,0.97),rgba(2,3,10,0.83)_47%,rgba(2,3,10,0.38))]" />
+      <img src="/media/competition-centre/season-trophy-v1.png" alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[-28%] right-[-2%] hidden h-[122%] max-w-[42%] object-contain opacity-75 motion-safe:animate-[pulse_8s_ease-in-out_infinite] md:block" />
+      <div className="relative max-w-3xl">
+        <p className="inline-flex rounded-full border border-violet-300/30 bg-violet-500/16 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-violet-100">
+          {eyebrow}
+        </p>
+        <p className="mt-4 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">DZN competition centre</p>
+        <h1 className="mt-2 max-w-4xl text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">{title}</h1>
+        <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-200 sm:text-lg sm:leading-8">{text}</p>
+        <p className="mt-6 inline-flex rounded-md border border-amber-300/28 bg-amber-500/10 px-3 py-2 text-[10px] font-black uppercase text-amber-100">Beta notice — standings and awards appear only after verified snapshots are published.</p>
+      </div>
+    </section>
+  );
+}
+
+function SeasonLaunchPanel() {
+  const stages = [
+    ["Connect", "A public server joins the network with its real Discord identity."],
+    ["Snapshot", "Eligible same-category activity is captured into a season record."],
+    ["Finalise", "Only confirmed standings create a champion record and award."],
+  ];
+  return (
+    <section className="relative overflow-hidden border border-amber-300/24 bg-[radial-gradient(circle_at_84%_10%,rgba(251,191,36,0.14),transparent_26%),rgba(8,10,23,0.94)] p-6 shadow-[0_22px_70px_rgba(0,0,0,0.26)]">
+      <img src="/media/competition-centre/season-trophy-v1.png" alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[-38%] right-[-1%] h-[145%] max-w-[30%] object-contain opacity-45 motion-safe:animate-[pulse_8s_ease-in-out_infinite]" />
+      <div className="relative max-w-3xl">
+        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-100">Season progression</p>
+        <h2 className="mt-2 text-2xl font-black uppercase text-white">The next crown has not been awarded yet.</h2>
+        <p className="mt-3 text-sm leading-6 text-zinc-300">The Season system is ready for verified records, but no active or scheduled season has been published. This avoids displaying invented winners or placeholder scores.</p>
+        <div className="mt-6 grid gap-3 md:grid-cols-3">
+          {stages.map(([title, detail], index) => <div key={title} className="rounded-lg border border-white/10 bg-black/26 p-4"><span className="text-xs font-black text-cyan-200">0{index + 1}</span><h3 className="mt-2 text-sm font-black uppercase text-white">{title}</h3><p className="mt-2 text-xs leading-5 text-zinc-500">{detail}</p></div>)}
+        </div>
+      </div>
     </section>
   );
 }

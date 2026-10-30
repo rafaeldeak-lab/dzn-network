@@ -316,12 +316,19 @@ includesAll(detailUi, [
   "Official DZN events are creator-managed",
   "/events/suggest",
   "eventMatchesStatusFilter",
-  "Demo data shown until live events are created",
+  "Competition Centre beta",
+  "no verified event is published yet",
   "Deathmatch can only fight Deathmatch",
   "ServerCategoryBadge",
+  "CompetitionCentreLaunchPanel",
+  "ChallengeLaunchPreview",
 ]);
+assert.equal(detailUi.includes("Pandora DayZ"), false, "Competition pages must not retain invented fallback communities.");
+assert.equal(detailUi.includes("Nuke Town"), false, "Competition pages must not retain invented fallback scorecards.");
 assert.equal(source("components/events/EventHero.tsx").includes('href="/events/suggest"'), true, "Public Events CTA must route to the suggestion board.");
 assert.equal(source("components/events/EventTabs.tsx").includes("/events/tournaments?status=active"), true, "Active tab must use the active status alias.");
+assert.equal(source("functions/_lib/events.ts").includes("Pandora DayZ"), false, "The public events API must not fabricate named fallback communities.");
+assert.equal(source("functions/_lib/events.ts").includes("Nuke Town"), false, "The public events API must not fabricate fallback brackets.");
 assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is a Pro platform feature."), false, "Challenge cards should not repeat the full Pro lock sentence.");
 assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO FEATURE"), true);
 assert.equal(source("components/events/LeaderboardTeaser.tsx").includes("TOP 10 MASTER TEASER"), true);

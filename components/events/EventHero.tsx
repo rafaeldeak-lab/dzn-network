@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Brackets, Lightbulb, ShieldCheck, Sparkles, Trophy, Users } from "lucide-react";
+import { ArrowLeft, Brackets, CalendarClock, Lightbulb, ShieldCheck, Sparkles, Trophy, Users } from "lucide-react";
 
 import type { CompetitiveEvent } from "./event-data";
 import { eventImageStyle, formatNumber } from "./event-format";
@@ -10,26 +10,26 @@ import { ServerCategoryBadge } from "./ServerCategoryBadge";
 export function EventHero({ event, detail = false }: { event?: CompetitiveEvent | null; detail?: boolean }) {
   if (!detail) {
     return (
-      <section data-events-hero className="relative min-h-[250px] overflow-hidden border-y border-cyan-300/18 bg-[url('/media/server-wars-showdown/server-wars-banner-concept.webp')] bg-cover bg-center shadow-[0_24px_80px_rgba(0,0,0,0.38)] sm:min-h-[290px]">
+      <section data-events-hero className="relative min-h-[300px] overflow-hidden border border-violet-300/26 bg-[url('/media/competition-centre/competition-centre-hero-v1.png')] bg-cover bg-center shadow-[0_28px_90px_rgba(0,0,0,0.42)] sm:min-h-[350px]">
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(1,5,15,0.97)_0%,rgba(1,5,15,0.76)_48%,rgba(1,5,15,0.3)_74%,rgba(1,5,15,0.72)_100%)]" />
         <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,transparent,#02030a)]" />
-        <div className="relative flex min-h-[250px] flex-col justify-end px-5 py-7 sm:min-h-[290px] sm:px-8">
+        <div className="relative flex min-h-[300px] flex-col justify-end px-5 py-7 sm:min-h-[350px] sm:px-8">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase text-cyan-200">
-              <Sparkles className="h-4 w-4" />
-              Survive · Compete · Belong
+            <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
+              <span className="inline-flex items-center gap-2 rounded-full border border-violet-300/35 bg-violet-500/16 px-3 py-1.5"><Sparkles className="h-3.5 w-3.5" />Competition centre</span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/28 bg-amber-500/10 px-3 py-1.5 text-amber-100"><CalendarClock className="h-3.5 w-3.5" />Beta season tools</span>
             </div>
-            <h1 className="mt-2 text-4xl font-black uppercase text-white sm:text-6xl">Events &amp; Tournaments</h1>
-            <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-zinc-200 sm:text-base">Join verified DayZ competitions, follow live brackets, and build a history your community can prove.</p>
+            <h1 className="mt-3 text-4xl font-black uppercase text-white sm:text-6xl">Competition Centre</h1>
+            <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-zinc-200 sm:text-base">One network. Every verified event. A clear home for real brackets, earned season rewards, and category-safe competition.</p>
             <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-[10px] font-black uppercase text-zinc-200">
-              <span className="inline-flex items-center gap-2"><Users className="h-4 w-4 text-cyan-300" />Real communities</span>
-              <span className="inline-flex items-center gap-2"><Trophy className="h-4 w-4 text-amber-300" />Verified results</span>
+              <span className="inline-flex items-center gap-2"><Users className="h-4 w-4 text-cyan-300" />Connected communities</span>
+              <span className="inline-flex items-center gap-2"><Trophy className="h-4 w-4 text-amber-300" />Earned rewards</span>
               <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" />Category-safe play</span>
             </div>
           </div>
           <Link href="/events/suggest" className="mt-6 inline-flex w-fit items-center justify-center gap-2 rounded-md border border-cyan-300/45 bg-cyan-400/16 px-4 py-2.5 text-xs font-black uppercase text-white transition hover:bg-cyan-400/26">
             <Lightbulb className="h-4 w-4" />
-            Suggest Competition
+            Shape the launch
           </Link>
         </div>
       </section>
