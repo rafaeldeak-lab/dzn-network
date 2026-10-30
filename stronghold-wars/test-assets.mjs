@@ -16,6 +16,7 @@ import { facilityMotion } from './preview/facility-motion.js';
 import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './preview/forge-workshop.js';
 import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './preview/comms-array.js';
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './preview/sentinel-actions.js';
+import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './preview/warden-actions.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -140,6 +141,39 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Sentinel Level ${level} upgrade should have a visible tier-specific reveal.`);
   stepSentinelUpgradeReveal(soldier, 0, true);
   if (soldier.userData.sentinelReveal || reveal.root.parent) throw new Error('Sentinel upgrade reveal must stop under reduced motion.');
+}
+const warden = new THREE.Group();
+const wardenModel = new THREE.Group(); wardenModel.name = 'squad_model'; warden.add(wardenModel);
+const wardenSpine = new THREE.Bone(); wardenSpine.name = 'Spine'; wardenModel.add(wardenSpine);
+const wardenChest = new THREE.Bone(); wardenChest.name = 'Chest'; wardenSpine.add(wardenChest);
+for (const name of ['UpperArm_R', 'Forearm_R', 'UpperArm_L', 'Forearm_L']) {
+  const bone = new THREE.Bone(); bone.name = name; wardenChest.add(bone);
+}
+const wardenHand = new THREE.Bone(); wardenHand.name = 'Hand_R'; wardenHand.position.set(.25, 1, 0); wardenChest.add(wardenHand);
+const wardenGuard = wardenActionPose(Math.PI / (2 * .55), false);
+const wardenFire = wardenActionPose(0, false, .16);
+if (wardenGuard.scan < .12 || wardenActionPose(0, true).scan || wardenFire.recoil < .07
+  || wardenActionPose(0, false, .16, true).recoil) throw new Error('Warden must scan, fire and respect reduced motion.');
+applyWardenAction(wardenModel, wardenFire);
+const arm = wardenModel.getObjectByName('UpperArm_R');
+const stableArm = arm.quaternion.clone();
+for (let frame = 0; frame < 600; frame++) applyWardenAction(wardenModel, wardenFire);
+if (arm.quaternion.angleTo(stableArm) > 1e-5 || Math.abs(wardenChest.rotation.x) > .1)
+  throw new Error('Warden arm pose and recoil must remain bounded during a long guard shift.');
+const wardenMuzzle = wardenMuzzlePosition(warden);
+if (wardenMuzzle.distanceTo(wardenHand.getWorldPosition(new THREE.Vector3())) < .4)
+  throw new Error('Warden shot should originate ahead of the right rifle hand.');
+applyWardenAction(wardenModel, wardenActionPose(0, true));
+if (Math.abs(wardenSpine.rotation.y) > 1e-5 || Math.abs(wardenChest.rotation.x) > 1e-5)
+  throw new Error('Warden should return to its neutral walk posture after firing.');
+for (let level = 1; level <= 5; level++) {
+  const soldier = new THREE.Group();
+  const reveal = startWardenUpgradeReveal(soldier, level);
+  if (reveal.sparks.length !== 6 + level || !stepWardenUpgradeReveal(soldier, .2) || !reveal.root.parent)
+    throw new Error(`Warden Level ${level} should have a tier-specific upgrade reveal.`);
+  stepWardenUpgradeReveal(soldier, 0, true);
+  if (soldier.userData.wardenReveal || reveal.root.parent)
+    throw new Error('Warden upgrade reveal must stop under reduced motion.');
 }
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();

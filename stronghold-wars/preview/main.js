@@ -18,6 +18,7 @@ import { facilityMotion } from './facility-motion.js';
 import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './forge-workshop.js';
 import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './comms-array.js';
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearSentinelUpgradeReveal, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './sentinel-actions.js';
+import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, clearWardenUpgradeReveal, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './warden-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -1606,6 +1607,7 @@ function equipSoldier(soldier, role, tier) {
   if (soldier.userData.squadAsset === path) return;
   const previousTier = soldier.userData.squadRole === role ? soldier.userData.squadTier : null;
   clearSentinelUpgradeReveal(soldier);
+  clearWardenUpgradeReveal(soldier);
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
   soldier.userData.squadTier = tier;
@@ -1617,6 +1619,7 @@ function equipSoldier(soldier, role, tier) {
   soldier.userData.idleAction = null;
   soldier.userData.activeAction = null;
   if (role === 'sentinel') soldier.userData.sentinelFireAge = Infinity;
+  if (role === 'assault') soldier.userData.wardenFireAge = Infinity;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -1651,6 +1654,7 @@ function equipSoldier(soldier, role, tier) {
       soldier.userData.activeAction = soldier.userData.idleAction || soldier.userData.walkAction;
       soldier.userData.activeAction.play();
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
+      if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
       if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1663,7 +1667,12 @@ function equipSoldier(soldier, role, tier) {
         model.add(carbine);
         model.updateMatrixWorld(true);
         const hand = model.getObjectByName('Hand_R');
-        if (hand) hand.attach(carbine);
+        if (hand) {
+          hand.attach(carbine);
+          // The generated weapon root sits away from its grip. Centre that
+          // root on the glove after parenting so it stays in the hand.
+          carbine.position.set(0, 0, 0);
+        }
         else console.warn('DZN Warden rig has no right hand for its carbine.');
       }).catch(weaponError => console.warn('DZN Warden carbine could not load.', weaponError));
     }
@@ -1680,6 +1689,7 @@ function equipSoldier(soldier, role, tier) {
       bindSquadEquipment(fallback, role);
       soldier.add(fallback);
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
+      if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
     }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
@@ -1692,10 +1702,15 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isSentinel = soldier.userData.squadRole === 'sentinel';
   if (isSentinel) stepSentinelUpgradeReveal(soldier, dt, reducedMotion);
+  if (soldier.userData.squadRole === 'assault') stepWardenUpgradeReveal(soldier, dt, reducedMotion);
   if (reducedMotion) return;
   if (isSentinel) {
     soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
     soldier.userData.sentinelFireAge = (soldier.userData.sentinelFireAge ?? Infinity) + Math.max(0, dt);
+  }
+  if (soldier.userData.squadRole === 'assault') {
+    soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
+    soldier.userData.wardenFireAge = (soldier.userData.wardenFireAge ?? Infinity) + Math.max(0, dt);
   }
   if (soldier.userData.walkMixer) {
     const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
@@ -1706,18 +1721,8 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
     }
     soldier.userData.walkMixer.update(Math.max(0, dt) * (pace > 0.05 ? pace : (soldier.userData.idleAction ? 1 : 0)));
     const model = soldier.getObjectByName('squad_model');
-    if (model && soldier.userData.squadRole === 'assault') {
-      // The image-guided Warden arrived with a loose arm gait. Keep both hands
-      // forward around the rifle while the imported leg walk still plays.
-      for (const [name, forward, across, tuck] of [['UpperArm_R', .62, -.35, -.6], ['Forearm_R', .45, -.1, -.35], ['UpperArm_L', .7, .35, .6], ['Forearm_L', .28, .1, .35]]) {
-        const limb = model.getObjectByName(name);
-        if (limb) {
-          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tuck));
-          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), across));
-          limb.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forward));
-        }
-      }
-    }
+    if (model && soldier.userData.squadRole === 'assault') applyWardenAction(model,
+      wardenActionPose(soldier.userData.actionClock, pace > .05, soldier.userData.wardenFireAge));
     if (model && isSentinel) {
       const pose = sentinelActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.sentinelFireAge);
       applySentinelAction(model, pose);
@@ -4595,7 +4600,11 @@ function animateWarRoleAction(battle, troop) {
   troop.nextAction = battle.time + (troop.role === 'medic' ? 2 : troop.role === 'sentinel' ? 1.4 : 1.1);
   const target = battle.objectiveMarker.position.clone().add(OUTPOST).add(new THREE.Vector3(0, 1.2, 0));
   const origin = troop.mesh.position.clone().add(new THREE.Vector3(0, 1.15, 0));
-  if (troop.role === 'assault') spawnWarTrace(battle, origin, target, WAR_ROLE_COLOURS.assault);
+  if (troop.role === 'assault') {
+    const muzzle = wardenMuzzlePosition(troop.mesh);
+    spawnWarTrace(battle, muzzle, target, WAR_ROLE_COLOURS.assault);
+    troop.mesh.userData.wardenFireAge = 0;
+  }
   else if (troop.role === 'sentinel') {
     const muzzle = sentinelMuzzlePosition(troop.mesh);
     spawnWarTrace(battle, muzzle, target, WAR_ROLE_COLOURS.sentinel, 0.05);
