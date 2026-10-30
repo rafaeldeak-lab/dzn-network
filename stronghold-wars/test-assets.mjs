@@ -18,6 +18,7 @@ import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } 
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './preview/sentinel-actions.js';
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './preview/warden-actions.js';
 import { ghostActionPose, applyGhostAction, ghostScannerPosition, stepGhostScan, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './preview/ghost-actions.js';
+import { fixerActionPose, applyFixerAction, fixerToolPosition, stepFixerWork, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './preview/fixer-actions.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -219,6 +220,45 @@ for (let level = 1; level <= 5; level++) {
   stepGhostUpgradeReveal(soldier, 0, true);
   if (soldier.userData.ghostReveal || reveal.root.parent)
     throw new Error('Ghost reveal must stop under reduced motion.');
+}
+const fixer = new THREE.Group();
+const fixerModel = new THREE.Group(); fixerModel.name = 'squad_model'; fixer.add(fixerModel);
+const fixerArm = new THREE.Bone(); fixerArm.name = 'UpperArm_L'; fixerModel.add(fixerArm);
+const fixerHand = new THREE.Bone(); fixerHand.name = 'Hand_L'; fixerHand.position.set(.2, 1, .1); fixerArm.add(fixerHand);
+for (const name of ['UpperArm_R', 'Neck']) { const bone = new THREE.Bone(); bone.name = name; fixerModel.add(bone); }
+const yardAction = fixerActionPose(Math.PI / (2 * 3.4), false, 'yard');
+const forgeAction = fixerActionPose(Math.PI / (2 * 4.6), false, 'workshop');
+if (yardAction.task !== 'yard' || forgeAction.task !== 'workshop' || !yardAction.arm || !forgeAction.hand
+  || fixerActionPose(0, true, 'yard').task || fixerActionPose(0, false, 'camp').task
+  || fixerActionPose(0, false, 'yard', Infinity, true).task || fixerActionPose(0, true, null, .3).breach < .5)
+  throw new Error('Fixer should work at the yard and Forge, signal a breach and respect reduced motion.');
+applyFixerAction(fixerModel, yardAction);
+const stableFixerHand = fixerHand.quaternion.clone();
+for (let frame = 0; frame < 600; frame++) applyFixerAction(fixerModel, yardAction);
+if (fixerHand.quaternion.angleTo(stableFixerHand) > 1e-5) throw new Error('Fixer tool hand must not drift.');
+fixerArm.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), .24);
+applyFixerAction(fixerModel, fixerActionPose(Math.PI * 1.5 / 3.4, false, 'yard'));
+if (Math.abs(fixerArm.rotation.y) < .2 || Math.abs(fixerArm.rotation.x) < .15)
+  throw new Error('Fixer work motion must preserve the imported 3D walk pose.');
+fixerArm.quaternion.identity(); applyFixerAction(fixerModel, fixerActionPose(0, true, null));
+if (Math.abs(fixerArm.rotation.x) > 1e-5) throw new Error('Fixer arm must return to neutral while walking.');
+if (fixerToolPosition(fixer).distanceTo(fixerHand.getWorldPosition(new THREE.Vector3())) < .1)
+  throw new Error('Fixer war cue should originate from the held tool.');
+stepFixerWork(fixer, 1, 'yard', 5);
+if (!fixer.userData.fixerWork?.root.visible || fixer.userData.fixerWork.particles.length !== 7)
+  throw new Error('Fixer Level 5 should show wood chips while working at the yard.');
+stepFixerWork(fixer, 1, null, 5);
+if (fixer.userData.fixerWork.root.visible) throw new Error('Fixer work cue should stop between buildings.');
+stepFixerWork(fixer, 1, 'workshop', 5, true);
+if (fixer.userData.fixerWork.root.visible) throw new Error('Fixer work cue should respect reduced motion.');
+for (let level = 1; level <= 5; level++) {
+  const unit = new THREE.Group();
+  const reveal = startFixerUpgradeReveal(unit, level);
+  if (reveal.sparks.length !== 3 + level || !stepFixerUpgradeReveal(unit, .2) || !reveal.root.parent)
+    throw new Error(`Fixer Level ${level} should have a tier-specific reveal.`);
+  stepFixerUpgradeReveal(unit, 0, true);
+  if (unit.userData.fixerReveal || reveal.root.parent)
+    throw new Error('Fixer upgrade reveal must stop under reduced motion.');
 }
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();

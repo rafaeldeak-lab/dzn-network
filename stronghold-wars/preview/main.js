@@ -20,6 +20,7 @@ import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startC
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearSentinelUpgradeReveal, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './sentinel-actions.js';
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, clearWardenUpgradeReveal, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './warden-actions.js';
 import { ghostActionPose, applyGhostAction, ghostScannerPosition, clearGhostScan, stepGhostScan, clearGhostUpgradeReveal, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './ghost-actions.js';
+import { fixerActionPose, applyFixerAction, fixerToolPosition, clearFixerWork, stepFixerWork, clearFixerUpgradeReveal, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './fixer-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -1611,6 +1612,8 @@ function equipSoldier(soldier, role, tier) {
   clearWardenUpgradeReveal(soldier);
   clearGhostScan(soldier);
   clearGhostUpgradeReveal(soldier);
+  clearFixerWork(soldier);
+  clearFixerUpgradeReveal(soldier);
   soldier.userData.squadAsset = path;
   soldier.userData.squadRole = role;
   soldier.userData.squadTier = tier;
@@ -1624,6 +1627,7 @@ function equipSoldier(soldier, role, tier) {
   if (role === 'sentinel') soldier.userData.sentinelFireAge = Infinity;
   if (role === 'assault') soldier.userData.wardenFireAge = Infinity;
   if (role === 'recon') soldier.userData.ghostSignalAge = Infinity;
+  if (role === 'engineer') soldier.userData.fixerBreachAge = Infinity;
   soldier.clear();
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x020503, transparent: true, opacity: 0.28, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
@@ -1660,6 +1664,7 @@ function equipSoldier(soldier, role, tier) {
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
       if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
+      if (role === 'engineer' && previousTier && tier > previousTier) startFixerUpgradeReveal(soldier, tier);
       if (role !== 'assault') return;
       loadAnimatedSquad('assets/models/squads-v6/warden_carbine.glb').then(weapon => {
         if (soldier.userData.loadToken !== token || soldier.userData.squadAsset !== path) return;
@@ -1696,6 +1701,7 @@ function equipSoldier(soldier, role, tier) {
       if (role === 'sentinel' && previousTier && tier > previousTier) startSentinelUpgradeReveal(soldier, tier);
       if (role === 'assault' && previousTier && tier > previousTier) startWardenUpgradeReveal(soldier, tier);
       if (role === 'recon' && previousTier && tier > previousTier) startGhostUpgradeReveal(soldier, tier);
+      if (role === 'engineer' && previousTier && tier > previousTier) startFixerUpgradeReveal(soldier, tier);
     }).catch(fallbackError => console.warn('DZN Warden fallback model could not load.', fallbackError));
   });
 }
@@ -1708,11 +1714,16 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isSentinel = soldier.userData.squadRole === 'sentinel';
   const isGhost = soldier.userData.squadRole === 'recon';
+  const isFixer = soldier.userData.squadRole === 'engineer';
   if (isSentinel) stepSentinelUpgradeReveal(soldier, dt, reducedMotion);
   if (soldier.userData.squadRole === 'assault') stepWardenUpgradeReveal(soldier, dt, reducedMotion);
   if (isGhost) {
     stepGhostUpgradeReveal(soldier, dt, reducedMotion);
     if (reducedMotion) stepGhostScan(soldier, 0, false, true);
+  }
+  if (isFixer) {
+    stepFixerUpgradeReveal(soldier, dt, reducedMotion);
+    if (reducedMotion) stepFixerWork(soldier, 0, null, soldier.userData.squadTier, true);
   }
   if (reducedMotion) return;
   if (isSentinel) {
@@ -1726,6 +1737,10 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
   if (isGhost) {
     soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
     soldier.userData.ghostSignalAge = (soldier.userData.ghostSignalAge ?? Infinity) + Math.max(0, dt);
+  }
+  if (isFixer) {
+    soldier.userData.actionClock = (soldier.userData.actionClock || 0) + Math.max(0, dt);
+    soldier.userData.fixerBreachAge = (soldier.userData.fixerBreachAge ?? Infinity) + Math.max(0, dt);
   }
   if (soldier.userData.walkMixer) {
     const nextAction = pace > 0.05 ? soldier.userData.walkAction : soldier.userData.idleAction;
@@ -1746,6 +1761,11 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
       const pose = ghostActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.ghostSignalAge);
       applyGhostAction(model, pose);
       stepGhostScan(soldier, soldier.userData.actionClock, pose.scanning);
+    }
+    if (model && isFixer) {
+      const pose = fixerActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.fixerBreachAge);
+      applyFixerAction(model, pose);
+      stepFixerWork(soldier, soldier.userData.actionClock, pose.task, soldier.userData.squadTier);
     }
     if (model) model.position.y = pace ? Math.abs(Math.sin(phase)) * .015 : Math.sin(phase * .5) * .006;
     return;
@@ -4637,8 +4657,9 @@ function animateWarRoleAction(battle, troop) {
   } else if (troop.role === 'engineer') {
     const breachPoint = battle.result.tactics?.breachedWallIds.length ? battle.result.tactics.route[2] : null;
     const breach = breachPoint ? new THREE.Vector3(OUTPOST.x + breachPoint.x, 0, OUTPOST.z + breachPoint.z) : troop.path[troop.path.length - 1];
-    spawnWarTrace(battle, origin, breach.clone().add(new THREE.Vector3(0, 0.75, 0)), WAR_ROLE_COLOURS.engineer, 0.042);
+    spawnWarTrace(battle, fixerToolPosition(troop.mesh), breach.clone().add(new THREE.Vector3(0, 0.75, 0)), WAR_ROLE_COLOURS.engineer, 0.042);
     spawnWarPulse(battle, breach, WAR_ROLE_COLOURS.engineer, 0.75);
+    troop.mesh.userData.fixerBreachAge = 0;
   } else if (troop.role === 'medic') {
     spawnWarPulse(battle, troop.mesh.position, WAR_ROLE_COLOURS.medic, 1.9);
   }
