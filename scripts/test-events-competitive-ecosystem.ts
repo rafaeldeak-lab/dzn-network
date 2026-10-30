@@ -24,6 +24,29 @@ function includesAll(file: string, snippets: string[]) {
   }
 }
 
+function assertActivityPayload(payload: unknown, message: string): asserts payload is { source: string; activity: unknown[] } {
+  if (typeof payload !== "object" || payload === null) throw new Error(message);
+  if (!("source" in payload) || !("activity" in payload) || !Array.isArray(payload.activity)) throw new Error(message);
+}
+
+function assertEventNotFoundPayload(payload: unknown, message: string): asserts payload is { status: number; errorCode: string } {
+  if (typeof payload !== "object" || payload === null) throw new Error(message);
+  if (!("status" in payload) || !("errorCode" in payload)) throw new Error(message);
+}
+
+function assertServerProfilePayload(payload: unknown, message: string): asserts payload is { source: string; server: { server_id: string } } {
+  if (typeof payload !== "object" || payload === null) throw new Error(message);
+  if (!("source" in payload) || !("server" in payload) || typeof payload.server !== "object" || payload.server === null || !("server_id" in payload.server)) throw new Error(message);
+}
+
+function assertEventDetailPayload(payload: unknown, message: string): asserts payload is {
+  source: string;
+  registered_servers: Array<{ server_id: string; guild_icon_url?: string | null }>;
+} {
+  if (typeof payload !== "object" || payload === null) throw new Error(message);
+  if (!("source" in payload) || !("registered_servers" in payload) || !Array.isArray(payload.registered_servers)) throw new Error(message);
+}
+
 assert.equal(normalizeServerCategory("DM"), "deathmatch");
 assert.equal(normalizeServerCategory("PvP Only"), "pvp");
 assert.equal(normalizeServerCategory("PvE Only"), "pve");
@@ -381,12 +404,15 @@ async function main() {
   const activePayload = await getEventsListPayload({} as Env, null, { status: "active", limit: 50 });
   assert.equal(activePayload.events.every((event) => event.status === "live"), true, "Active filter must only show live events.");
   const unavailableFeed = await getLiveEventFeedPayload({} as Env);
+  assertActivityPayload(unavailableFeed, "An unavailable event store must return an activity payload.");
   assert.equal(unavailableFeed.source, "display_fallback", "An unavailable event store must expose an empty activity feed.");
   assert.deepEqual(unavailableFeed.activity, [], "An unavailable event store must not fabricate activity.");
   const unavailableDetail = await getEventDetailPayload({} as Env, null, "missing-event");
+  assertEventNotFoundPayload(unavailableDetail, "A missing event must return an event-not-found payload.");
   assert.equal(unavailableDetail.status, 404, "A missing event must remain a not-found response when event storage is unavailable.");
   assert.equal(unavailableDetail.errorCode, "EVENT_NOT_FOUND");
   const unavailableServerProfile = await getServerEventsProfilePayload({} as Env, "missing-server", null);
+  assertServerProfilePayload(unavailableServerProfile, "An unavailable event store must return a neutral server-profile payload.");
   assert.equal(unavailableServerProfile.source, "display_fallback", "An unavailable event store must return the server-profile beta state.");
   assert.equal(unavailableServerProfile.server.server_id, "missing-server");
   assert.equal(buildChallengePhaseTemplates("pvp_pve", "capture_the_flag").length, 6, "72h PvP/PvE CTF should create six phase templates.");
@@ -493,20 +519,24 @@ async function assertD1BackedEventSummaries() {
     assert.equal(live.summary.registered_servers, 1, "Filtered totals include only matching event registrations.");
 
     const missingDetail = await getEventDetailPayload(env, null, "not-a-real-event");
+    assertEventNotFoundPayload(missingDetail, "Unknown event slugs must return an event-not-found payload.");
     assert.equal(missingDetail.status, 404, "Unknown event slugs must not receive a synthetic event detail response.");
     assert.equal(missingDetail.errorCode, "EVENT_NOT_FOUND");
 
     const emptyFeed = await getLiveEventFeedPayload(env);
+    assertActivityPayload(emptyFeed, "A ready event store must return an activity payload.");
     assert.equal(emptyFeed.source, "display_fallback", "A ready event store with no activity must return an empty public feed.");
     assert.deepEqual(emptyFeed.activity, [], "A ready event store with no activity must not invent feed rows.");
 
     const missingServerProfile = await getServerEventsProfilePayload(env, "not-a-real-server", null);
+    assertServerProfilePayload(missingServerProfile, "Unknown servers must return the neutral competition-profile payload.");
     assert.equal(missingServerProfile.source, "display_fallback", "Unknown servers must receive the neutral competition-profile state.");
     assert.equal(missingServerProfile.server.server_id, "not-a-real-server");
 
     await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
       .bind("registration-live-b", "event-live", "server-b", timestamp).run();
     const detail = await getEventDetailPayload(env, null, "live-cup");
+    assertEventDetailPayload(detail, "Published events must return the public event-detail payload.");
     assert.equal(detail.source, "live");
     assert.equal(detail.registered_servers.length, 2, "Published event details must include registered real servers.");
     assert.equal(
