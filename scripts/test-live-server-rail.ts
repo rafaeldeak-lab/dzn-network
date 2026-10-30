@@ -153,6 +153,14 @@ assert.deepEqual(zeroPlayerPayload.items?.map(({ currentPlayers, maxPlayers, pla
   { currentPlayers: 0, maxPlayers: 10, playerCountStatus: "fresh" },
 ], "Zero online players is valid live data and must not be converted into a syncing state.");
 
+const unavailablePlayerResponse = await invokeRail({
+  DB: createRailDb([{ ...duplicateRow, current_players: 0, max_players: 10, player_count_status: "unavailable" }]),
+});
+const unavailablePlayerPayload = await unavailablePlayerResponse.json() as { items?: Array<{ currentPlayers: number | null; maxPlayers: number | null; playerCountStatus?: string }> };
+assert.deepEqual(unavailablePlayerPayload.items?.map(({ currentPlayers, maxPlayers, playerCountStatus }) => ({ currentPlayers, maxPlayers, playerCountStatus })), [
+  { currentPlayers: null, maxPlayers: 10, playerCountStatus: "unavailable" },
+], "A syncing player count must not be published as a real zero-player result.");
+
 const namespaceCollisionResponse = await invokeRail({
   DB: createRailDb([
           { ...duplicateRow, id: "service-owner", nitrado_service_id: "12345", public_slug: "service-owner" },

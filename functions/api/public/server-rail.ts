@@ -244,15 +244,18 @@ async function readRailViewCounts(env: Env, serverIds: string[]) {
 
 function toRailItem(row: RailRow, viewCounts: Map<string, number>) {
   const listingPlanKey = normalizeListingPlanKey(row.plan_key, row.subscription_status);
+  const playerCountStatus = row.player_count_status ?? "unknown";
   return {
     id: row.id,
     slug: row.public_slug,
     name: formatPublicServerName(row.server_name),
     logoUrl: row.guild_icon_url,
     category: row.server_type ?? "DayZ",
-    currentPlayers: numberOrNull(row.current_players),
+    // A last-seen number is not a live player count. Keep it out of the public
+    // response unless the shared status contract confirms it is fresh.
+    currentPlayers: playerCountStatus === "fresh" ? numberOrNull(row.current_players) : null,
     maxPlayers: numberOrNull(row.max_players),
-    playerCountStatus: row.player_count_status ?? "unknown",
+    playerCountStatus,
     ratingAverage: numberOrNull(row.average_rating),
     reviewCount: Number(row.review_count ?? 0),
     viewsLast7Days: viewCounts.get(row.id) ?? 0,
