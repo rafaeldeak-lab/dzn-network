@@ -192,7 +192,8 @@ assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events
 assert.equal(eventsPage.includes("enableAccountDecisionPopups"), false, "The events provider must defer account-decision popups to the visible global header.");
 assert.equal(eventsPage.includes("PulseEventsSidebarItem"), true, "Events sidebar must include a feature-gated Pulse item.");
 assert.equal(eventsPage.includes("PulseEventSpotlight"), true, "Events page must include a feature-gated visual enhancement.");
-assert.equal(eventsPage.includes("PulseFeaturedMatchup"), true, "Challenges page must include a feature-gated matchup card.");
+assert.equal(eventsPage.includes("ChallengeLaunchPreview"), true, "Challenges page must show the beta progression panel before verified matches are published.");
+assert.equal(eventsPage.includes("PulseFeaturedMatchup"), false, "Challenges page must not manufacture a feature-gated matchup before a verified match exists.");
 assert.equal(/<Link[^>]+href=["']\/["'][\s\S]{0,120}<DznLogo/.test(eventsPage), false, "Events pages must not wrap DznLogo in Link because DznLogo already renders an anchor.");
 assert.equal(eventsPage.includes("shortClientTimeUntil"), false, "Events pages must not render Date.now-based relative labels during hydration.");
 assert.equal(eventCountdown.includes("useState(() => Date.now())"), false, "Event detail countdown must not compute Date.now during the first render.");
@@ -202,7 +203,7 @@ assert.equal(clientTimeUntil.includes("setMounted(true)"), false, "Event relativ
 assert.equal(eventCountdown.includes("window.setTimeout(update, 0)"), true, "Event countdowns must schedule the first dynamic update after hydration.");
 assert.equal(eventCountdown.includes("setMounted(true)"), false, "Event countdowns must not call setState synchronously inside effects.");
 assert.equal(eventData.includes("Date.now()"), false, "Event fallback data must not use Date.now during module render.");
-assert.equal(eventData.includes("FALLBACK_NOW_MS"), true, "Event fallback data must use a deterministic timestamp.");
+assert.equal(eventData.includes("BETA_GENERATED_AT"), true, "Event fallback data must use a deterministic beta timestamp.");
 assert.equal(eventFormat.includes("shortTimeUntil"), false, "Event format helpers must not expose Date.now-based render helpers.");
 
 assert.equal(dashboard.includes("DznPulseProvider enablePopups enableAccountDecisionPopups"), true, "The hidden-header dashboard must own account-decision popups.");
