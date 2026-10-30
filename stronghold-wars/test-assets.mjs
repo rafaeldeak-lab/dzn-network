@@ -11,6 +11,7 @@ import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/wor
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
 import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js';
+import { facilityMotion } from './preview/facility-motion.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -27,6 +28,17 @@ for (let level = 1; level <= 5; level++) {
   const full = yardProcessState(level, seconds * .45, { ...production, stored: 100 });
   if (full.running || full.stage !== 'stored' || full.fill !== 1 || full.sawdust)
     throw new Error(`Timberline L${level} must stop when storage is full.`);
+}
+for (let level = 1; level <= 5; level++) {
+  const raised = facilityMotion(level, 0, true);
+  const striking = facilityMotion(level, .25, true);
+  const cutting = facilityMotion(level, .5, true);
+  const idle = facilityMotion(level, .25, false);
+  const accessible = facilityMotion(level, .25, true, true);
+  if (!raised.moving || !(striking.pressHeight < raised.pressHeight) || !cutting.sparks
+    || idle.moving || idle.sparks || accessible.moving || accessible.sparks
+    || (level > 1 && !(raised.cycleSeconds < facilityMotion(level - 1, 0, true).cycleSeconds)))
+    throw new Error(`Working facility L${level} must strike, speed up with upgrades and stop safely.`);
 }
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();

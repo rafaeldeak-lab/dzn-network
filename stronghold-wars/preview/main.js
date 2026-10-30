@@ -14,6 +14,7 @@ import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL,
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
 import { yardProcessState } from './yard-process.js';
+import { facilityMotion } from './facility-motion.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -503,8 +504,155 @@ for (let i = 0; i < 48; i++) {
 
 // ---------- Buildings ----------
 const buildings = {};
-const animated = { radars: [], lights: [], chimneys: [], yards: [] };
+const animated = { yards: [], facilities: new Map() };
 let warTurretRig = null;
+
+function createFacilityActivity(key, building, level) {
+  const root = new THREE.Group();
+  root.name = `${key}_working_equipment`;
+  building.group.add(root);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x202b29, metalness: .73, roughness: .43 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x7b837c, metalness: .82, roughness: .3 });
+  const purple = new THREE.MeshStandardMaterial({ color: 0x633686, metalness: .63, roughness: .38 });
+  const power = new THREE.MeshStandardMaterial({ color: 0x9be65a, emissive: 0x72bf30, emissiveIntensity: .2 });
+  const hot = new THREE.MeshStandardMaterial({ color: 0xffac60, emissive: 0xff6425, emissiveIntensity: .16, metalness: .56, roughness: .3 });
+  const rig = { key, level, root, phase: 0, power, hot, sparks: [] };
+  if (key === 'workshop') {
+    // An exposed press is readable from the strategy camera even when the
+    // detailed GLB has a roof. It processes the same Parts that can be collected.
+    root.position.set(1.75, 0, 3.05);
+    box(root, 2.45, .24, 1.48, dark, 0, .12, 0);
+    for (const x of [-.94, .94]) cyl(root, .065, .065, 1.45, steel, x, .35, 0, 8);
+    box(root, 2.1, .17, .56, purple, 0, 1.73, 0);
+    rig.press = box(root, 1.03, .34, .72, steel, 0, 1.47, 0);
+    rig.billet = box(root, .68, .12, .34, hot, -.7, .35, .03);
+    rig.wheel = cyl(root, .35, .35, .13, steel, 1.07, .76, .27, 20);
+    cyl(root, .09, .09, .18, purple, 1.07, .85, .27, 12);
+    box(root, .29, 1.1 + level * .12, .33, dark, -1.13, .3, -.43);
+    rig.exhaust = new THREE.Vector3(-1.13, 1.53 + level * .12, -.43);
+    for (let i = 0; i < Math.min(3, level); i++) {
+      const spark = new THREE.Mesh(new THREE.TetrahedronGeometry(.055 + i * .012), new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffa64e : 0xd8b4fe }));
+      spark.position.set((i - 1) * .15, .55, .1);
+      root.add(spark);
+      rig.sparks.push(spark);
+    }
+    if (level >= 3) {
+      rig.auxWheel = cyl(root, .26, .26, .12, purple, -1.03, .83, .42, 18);
+      box(root, .26, .18, .28, power, -.98, 1.16, .42);
+    }
+    if (level >= 5) {
+      rig.coil = new THREE.Mesh(new THREE.TorusGeometry(.47, .055, 8, 24), power);
+      rig.coil.rotation.x = Math.PI / 2;
+      rig.coil.position.set(0, 1.85, 0);
+      root.add(rig.coil);
+    }
+  } else if (key === 'comms') {
+    root.position.set(3.05, 0, 2.55);
+    box(root, 1.18, .22, 1.18, dark, 0, .12, 0);
+    const mastHeight = 2.25 + level * .32;
+    cyl(root, .075, .11, mastHeight, steel, 0, .22, 0, 10);
+    rig.dish = new THREE.Group();
+    rig.dish.position.set(0, mastHeight + .31, 0);
+    root.add(rig.dish);
+    const dishFace = new THREE.Mesh(new THREE.SphereGeometry(.55 + level * .055, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2.8), steel);
+    dishFace.rotation.x = Math.PI / 2;
+    dishFace.material.side = THREE.DoubleSide;
+    rig.dish.add(dishFace);
+    box(rig.dish, .12, .12, .72, purple, 0, 0, .38);
+    rig.signal = new THREE.Mesh(new THREE.TorusGeometry(.22, .035, 8, 20), power);
+    rig.signal.position.set(0, mastHeight + .35, .68);
+    root.add(rig.signal);
+    if (level >= 4) {
+      rig.secondDish = rig.dish.clone(true);
+      rig.secondDish.scale.setScalar(.72);
+      rig.secondDish.position.set(-.65, mastHeight * .72, .1);
+      root.add(rig.secondDish);
+    }
+  } else if (key === 'depot') {
+    root.position.set(0, 0, 3.15);
+    box(root, 2.35, .18, 1.18, dark, 0, .1, 0);
+    rig.rollers = [];
+    for (const x of [-.82, -.27, .28, .83]) {
+      const roller = cyl(root, .09, .09, .9, steel, x, .28, 0, 12);
+      roller.rotation.x = Math.PI / 2;
+      rig.rollers.push(roller);
+    }
+    rig.crates = [];
+    for (let i = 0; i < Math.min(3, Math.ceil(level / 2)); i++) {
+      const crate = new THREE.Group();
+      box(crate, .45, .34, .43, dark, 0, .52, 0);
+      box(crate, .48, .055, .47, purple, 0, .74, 0);
+      box(crate, .3, .1, .06, power, 0, .54, .23);
+      root.add(crate);
+      rig.crates.push(crate);
+    }
+    if (level >= 3) {
+      rig.loader = new THREE.Group();
+      rig.loader.position.set(1.15, 1.5, -.35);
+      box(rig.loader, .15, 1.55, .15, steel, 0, -.68, 0);
+      box(rig.loader, .94, .12, .18, purple, -.4, 0, 0);
+      root.add(rig.loader);
+    }
+  } else if (key === 'hq') {
+    root.position.set(2.95, 0, 2.55);
+    cyl(root, .48, .55, .2, dark, 0, .1, 0, 12);
+    cyl(root, .055, .07, 2 + level * .2, steel, 0, .25, 0, 10);
+    rig.command = new THREE.Mesh(new THREE.TorusGeometry(.38, .045, 8, 24), power);
+    rig.command.rotation.x = Math.PI / 2;
+    rig.command.position.y = 2.3 + level * .2;
+    root.add(rig.command);
+  }
+  return rig;
+}
+
+function syncFacilityActivity(key, level) {
+  if (!['workshop', 'comms', 'depot', 'hq'].includes(key) || !buildings[key]) return;
+  const old = animated.facilities.get(key);
+  if (old?.level === level) return;
+  if (old) {
+    buildings[key].group.remove(old.root);
+    old.root.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
+  }
+  animated.facilities.set(key, createFacilityActivity(key, buildings[key], level));
+}
+
+function stepFacilityActivity(rig, dt, time, production, access, reducedMotion) {
+  const member = service.member();
+  const workingForgeJobs = member?.forgeJobs?.some(job => job.status === 'working') || false;
+  const running = rig.key === 'workshop' ? access && production?.perSecond > 0 && production.stored < production.capacity
+    : rig.key === 'depot' ? access && production?.stored > 0 : access;
+  const speed = rig.key === 'workshop' && workingForgeJobs ? 1.35 : 1;
+  const cycle = facilityMotion(rig.level, rig.phase, running, reducedMotion);
+  if (cycle.moving) rig.phase = (rig.phase + dt * speed / cycle.cycleSeconds) % 1;
+  const pose = facilityMotion(rig.level, rig.phase, running, reducedMotion);
+  rig.power.emissiveIntensity = pose.glow * .45;
+  if (rig.press) {
+    rig.press.position.y = pose.pressHeight;
+    rig.billet.position.x = pose.feedX;
+    rig.hot.emissiveIntensity = pose.glow;
+    if (pose.moving) rig.wheel.rotation.y += dt * 3.2;
+    if (rig.auxWheel && pose.moving) rig.auxWheel.rotation.y -= dt * 2.2;
+    if (rig.coil) rig.coil.rotation.z = pose.moving ? Math.sin(time * 2) * .1 : 0;
+    rig.sparks.forEach((spark, index) => {
+      spark.visible = pose.sparks && index < pose.tier;
+      if (spark.visible) spark.position.y = .57 + .18 * Math.sin(time * 14 + index * 2);
+    });
+  }
+  if (rig.dish && pose.moving) {
+    rig.dish.rotation.y += dt * (.45 + pose.tier * .07);
+    rig.dish.rotation.x = -.13 + Math.sin(time * .53) * .12;
+    if (rig.secondDish) rig.secondDish.rotation.y -= dt * .72;
+  }
+  if (rig.signal) rig.signal.scale.setScalar(pose.moving ? .8 + .2 * Math.sin(time * 2.4) : .8);
+  if (rig.rollers && pose.moving) rig.rollers.forEach(roller => { roller.rotation.y += dt * 2; });
+  if (rig.crates) rig.crates.forEach((crate, index) => {
+    crate.visible = Boolean(production?.stored > index * Math.max(1, production.capacity / rig.crates.length));
+    crate.position.x = pose.moving ? ((rig.phase + index / rig.crates.length) % 1) * 1.85 - .9 : -.9 + index * .65;
+  });
+  if (rig.loader) rig.loader.rotation.y = pose.moving ? Math.sin(time * .8) * .42 : 0;
+  if (rig.command) rig.command.rotation.y = pose.moving ? time * .55 : 0;
+  return pose.moving;
+}
 
 function addYardPart(parent, geometry, material, x, y, z) {
   const part = new THREE.Mesh(geometry, material);
@@ -1210,8 +1358,7 @@ function buildModel(key, level) {
     if (level >= 3) {
       box(g, 2, 1.6, 2, MAT.dark, 0, 5.5);
       cyl(g, 0.06, 0.06, 3, MAT.metal, 0, 7.1);
-      const flag = box(g, 1.2, 0.7, 0.05, MAT.purple, 0.6, 9.2);
-      animated.lights.push({ flag });
+      box(g, 1.2, 0.7, 0.05, MAT.purple, 0.6, 9.2);
     }
   } else if (key === 'workshop') {
     box(g, 6, 0.4, 4.5, MAT.concrete);
@@ -1224,7 +1371,6 @@ function buildModel(key, level) {
     box(g, 2, 1.6, 0.1, MAT.green, 0, 0.4, 2.02);
     for (let i = 0; i < level; i++) {
       const chimney = cyl(g, 0.3, 0.35, 2.5 + i, MAT.metal, -2 + i * 1.6, 2.5, -1);
-      animated.chimneys.push({ group: g, x: -2 + i * 1.6, y: 5 + i, z: -1 });
       chimney.userData.isChimney = true;
     }
   } else if (key === 'tower') {
@@ -1267,7 +1413,6 @@ function buildModel(key, level) {
     radar.add(dish);
     box(radar, 0.1, 0.1, 1, MAT.purple, 0, 0, 0.3);
     g.add(radar);
-    animated.radars.push(radar);
     if (level >= 3) {
       cyl(g, 0.05, 0.08, 5, MAT.metal, -1.8, 2.4, -1.8, 5);
       box(g, 0.25, 0.25, 0.25, MAT.purple, -1.8, 7.4, -1.8);
@@ -1444,6 +1589,7 @@ function reconcileBasePresentation() {
   }
   for (const key of reconciliation.changedKeys) {
     requestBuildingModel(key, levels[key]);
+    syncFacilityActivity(key, levels[key]);
     renderedBuildingLevels[key] = levels[key];
     if (buildings[key]) buildings[key].group.userData.buildingLevel = levels[key];
   }
@@ -1454,6 +1600,7 @@ function refreshBuilding(key) {
   if (buildings[key]) {
     const level = state.levels[key];
     requestBuildingModel(key, level);
+    syncFacilityActivity(key, level);
     renderedBuildingLevels[key] = level;
     buildings[key].group.userData.buildingLevel = level;
     applyScaffoldState();
@@ -1485,6 +1632,7 @@ for (const key of Object.keys(DEFS)) {
   building.group.userData.buildingLevel = state.levels[key];
   group.add(building.model);
   buildings[key] = building;
+  syncFacilityActivity(key, state.levels[key]);
   renderedBuildingLevels[key] = state.levels[key];
 }
 syncLayoutPositions();
@@ -1868,10 +2016,14 @@ function placeDefenderPreview(role, level) {
 const smokeMat = new THREE.MeshBasicMaterial({ color: 0x9aa39a, transparent: true, opacity: 0.5, depthWrite: false });
 const smokeGeo = new THREE.SphereGeometry(0.35, 8, 6);
 const smoke = [];
-function spawnSmoke(worldPos) {
+function spawnSmoke(worldPos, size = 1, opacity = .5) {
   const puff = new THREE.Mesh(smokeGeo, smokeMat.clone());
   puff.position.copy(worldPos);
   puff.userData.life = 0;
+  puff.userData.size = size;
+  puff.userData.opacity = opacity;
+  puff.scale.setScalar(size);
+  puff.material.opacity = opacity;
   scene.add(puff);
   smoke.push(puff);
 }
@@ -4153,7 +4305,6 @@ function updateWarDamage(battle, progress) {
 function buildWarBaseVisual(side, condition = null) {
   clearWarBaseVisuals();
   const token = warDefenderToken;
-  const animationCounts = { radars: animated.radars.length, lights: animated.lights.length, chimneys: animated.chimneys.length };
   warBaseGroup.position.set(OUTPOST.x, 0, OUTPOST.z);
   for (const [key, building] of Object.entries(DEFS)) {
     if (key === 'depot' && side.base.depotRaidable === false) continue;
@@ -4192,9 +4343,6 @@ function buildWarBaseVisual(side, condition = null) {
   box(warBaseGroup, 35, 0.45, 0.65, MAT.dark, 0, 0, 17);
   box(warBaseGroup, 0.65, 0.45, 34, MAT.dark, -17, 0, 0);
   box(warBaseGroup, 0.65, 0.45, 34, MAT.dark, 17, 0, 0);
-  animated.radars.length = animationCounts.radars;
-  animated.lights.length = animationCounts.lights;
-  animated.chimneys.length = animationCounts.chimneys;
   warBaseGroup.visible = true;
   const postNodes = patrolNodesForLayout({ ...side.base.layout, walls: warStandingWalls(side.base.layout, condition) });
   for (const [role, defender] of Object.entries(side.base.defenders || {})) {
@@ -4970,39 +5118,33 @@ renderer.setAnimationLoop(time => {
   service.advancePartsProduction();
   service.advanceTimberProduction();
 
-  animated.radars.forEach(r => {
-    r.rotation.y += dt * 1.5;
-  });
   if (buildings.tower?.group.visible) stepArcBattery(buildings.tower.model?.userData.turretRig, dt, elapsed);
-  animated.lights.forEach(l => {
-    if (l.head) {
-      l.head.rotation.y = Math.sin(elapsed * 0.5) * 1.6 + 0.8;
-    }
-    if (l.flag) {
-      l.flag.rotation.y = Math.sin(elapsed * 3) * 0.3;
-    }
-  });
   const timberProduction = service.getTimberProductionInfo();
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   animated.yards.forEach(yard => stepYardProcess(yard, dt, timberProduction, reducedMotion));
+  const partsProduction = service.getProductionInfo();
+  const allowedToWork = service.getAccess().allowed;
+  for (const rig of animated.facilities.values())
+    stepFacilityActivity(rig, dt, elapsed, partsProduction, allowedToWork, reducedMotion);
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     for (const crane of animatedDistrictScaffolds) if (crane) crane.rotation.y += dt * .8;
   smokeTimer += dt;
   if (smokeTimer > 0.25) {
     smokeTimer = 0;
-    animated.chimneys.forEach(c => {
-      tmp.set(c.x, c.y, c.z);
-      c.group.localToWorld(tmp);
-      spawnSmoke(tmp);
-    });
+    const forge = animated.facilities.get('workshop');
+    if (forge?.exhaust && allowedToWork && partsProduction?.perSecond > 0 && partsProduction.stored < partsProduction.capacity && !reducedMotion) {
+      tmp.copy(forge.exhaust);
+      forge.root.localToWorld(tmp);
+      spawnSmoke(tmp, .35, .23);
+    }
   }
   for (let i = smoke.length - 1; i >= 0; i--) {
     const p = smoke[i];
     p.userData.life += dt;
     p.position.y += dt * 1.2;
     p.position.x += dt * 0.4;
-    p.scale.setScalar(1 + p.userData.life * 1.5);
-    p.material.opacity = Math.max(0, 0.5 - p.userData.life * 0.2);
+    p.scale.setScalar(p.userData.size * (1 + p.userData.life * 1.5));
+    p.material.opacity = Math.max(0, p.userData.opacity * (1 - p.userData.life / 2.5));
     if (p.userData.life > 2.5) {
       scene.remove(p);
       p.material.dispose();
