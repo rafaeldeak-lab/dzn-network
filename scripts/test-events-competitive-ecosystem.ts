@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 
-import { getEventsListPayload, hasQualifyingFullEventSubscription, resolveEventStatusFilter } from "../functions/_lib/events";
+import {
+  getEventDetailPayload,
+  getEventsListPayload,
+  getLiveEventFeedPayload,
+  getServerEventsProfilePayload,
+  hasQualifyingFullEventSubscription,
+  resolveEventStatusFilter,
+} from "../functions/_lib/events";
 import { buildChallengePhaseTemplates, renderEventProgressBar, resolveAdmEligibilityEvidence } from "../functions/_lib/event-hub";
 import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCategory } from "../functions/_lib/server-categories";
 import type { Env } from "../functions/_lib/types";
@@ -358,12 +365,30 @@ void main();
 
 async function main() {
   const teaserPayload = await getEventsListPayload({} as Env, null, { full: true, limit: 50 });
+  assert.equal(teaserPayload.source, "display_fallback", "An unavailable event store must return the public beta empty state.");
+  assert.deepEqual(teaserPayload.events, [], "An unavailable event store must not invent competitions.");
+  assert.deepEqual(teaserPayload.summary, {
+    active_events: 0,
+    upcoming_events: 0,
+    completed_events: 0,
+    registered_servers: 0,
+    total_participants: 0,
+  }, "The public beta empty state must have zero verified totals.");
   assert.equal(teaserPayload.teaserMode, true, "Unauthenticated full=true must stay in teaser mode.");
   assert.equal(teaserPayload.events.length <= 10, true, "Teaser events must be capped to top 10.");
   const upcomingPayload = await getEventsListPayload({} as Env, null, { status: "upcoming", limit: 50 });
   assert.equal(upcomingPayload.events.every((event) => ["upcoming", "registration_open", "standby"].includes(event.status)), true, "Upcoming filter must hide live events.");
   const activePayload = await getEventsListPayload({} as Env, null, { status: "active", limit: 50 });
   assert.equal(activePayload.events.every((event) => event.status === "live"), true, "Active filter must only show live events.");
+  const unavailableFeed = await getLiveEventFeedPayload({} as Env);
+  assert.equal(unavailableFeed.source, "display_fallback", "An unavailable event store must expose an empty activity feed.");
+  assert.deepEqual(unavailableFeed.activity, [], "An unavailable event store must not fabricate activity.");
+  const unavailableDetail = await getEventDetailPayload({} as Env, null, "missing-event");
+  assert.equal(unavailableDetail.status, 404, "A missing event must remain a not-found response when event storage is unavailable.");
+  assert.equal(unavailableDetail.errorCode, "EVENT_NOT_FOUND");
+  const unavailableServerProfile = await getServerEventsProfilePayload({} as Env, "missing-server", null);
+  assert.equal(unavailableServerProfile.source, "display_fallback", "An unavailable event store must return the server-profile beta state.");
+  assert.equal(unavailableServerProfile.server.server_id, "missing-server");
   assert.equal(buildChallengePhaseTemplates("pvp_pve", "capture_the_flag").length, 6, "72h PvP/PvE CTF should create six phase templates.");
   assert.equal(buildChallengePhaseTemplates("deathmatch", "capture_the_flag").every((phase) => phase.metricType.startsWith("pvp_")), true, "Deathmatch phases must stay PvP-only.");
   assert.equal(buildChallengePhaseTemplates("pve", "survival_challenge").some((phase) => phase.metricType === "build_score"), true, "PvE templates must include build/base scoring.");
@@ -396,11 +421,23 @@ async function assertD1BackedEventSummaries() {
         score INTEGER DEFAULT 0, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, draws INTEGER DEFAULT 0,
         seed INTEGER, registered_at TEXT
       )`,
-      "CREATE TABLE competitive_event_matches (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, match_status TEXT)",
+      `CREATE TABLE competitive_event_matches (
+        id TEXT PRIMARY KEY, event_id TEXT NOT NULL, left_server_id TEXT, right_server_id TEXT, winner_server_id TEXT,
+        category TEXT, match_status TEXT, round_number INTEGER, left_score INTEGER, right_score INTEGER,
+        starts_at TEXT, ends_at TEXT, created_at TEXT
+      )`,
       `CREATE TABLE competitive_event_activity (
         id TEXT PRIMARY KEY, event_id TEXT, server_id TEXT, activity_type TEXT, message TEXT, metadata TEXT, created_at TEXT
       )`,
-      "CREATE TABLE linked_servers (id TEXT PRIMARY KEY, public_slug TEXT, server_category TEXT, status TEXT)",
+      `CREATE TABLE linked_servers (
+        id TEXT PRIMARY KEY, user_id TEXT, guild_id TEXT, public_slug TEXT, server_category TEXT, server_type TEXT,
+        server_mode TEXT, competitive_enabled INTEGER, last_event_at TEXT, updated_at TEXT, status TEXT,
+        listing_visibility TEXT, merged_into_server_id TEXT, current_players INTEGER, max_players INTEGER,
+        event_mmr INTEGER, verified_server INTEGER, display_name TEXT, hostname TEXT, server_name TEXT,
+        nitrado_service_name TEXT, season_points INTEGER, event_wins INTEGER, event_losses INTEGER, event_draws INTEGER
+      )`,
+      "CREATE TABLE discord_guilds (guild_id TEXT PRIMARY KEY, icon_url TEXT, owner_user_id TEXT)",
+      "CREATE TABLE server_subscriptions (guild_id TEXT, plan_key TEXT, status TEXT, owner_discord_id TEXT)",
     ];
     for (const statement of schema) await db.prepare(statement).run();
     const eventInsert = db.prepare(`INSERT INTO competitive_events (
@@ -418,6 +455,23 @@ async function assertD1BackedEventSummaries() {
       .bind("registration-ended-a", "event-ended-1", "server-a", timestamp).run();
     await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
       .bind("registration-ended-b", "event-ended-2", "server-b", timestamp).run();
+
+    await db.prepare(`INSERT INTO linked_servers (
+      id, user_id, guild_id, public_slug, server_category, server_type, server_mode, competitive_enabled,
+      last_event_at, updated_at, status, listing_visibility, merged_into_server_id, current_players, max_players,
+      event_mmr, verified_server, display_name, hostname, server_name, nitrado_service_name,
+      season_points, event_wins, event_losses, event_draws
+    ) VALUES (?, NULL, ?, ?, 'deathmatch', 'deathmatch', 'deathmatch', 1, ?, ?, 'live', 'public', NULL, 0, 10, 1000, 1, ?, NULL, NULL, NULL, 0, 0, 0, 0)`)
+      .bind("server-a", "guild-with-icon", "server-a", timestamp, timestamp, "Icon Server").run();
+    await db.prepare(`INSERT INTO linked_servers (
+      id, user_id, guild_id, public_slug, server_category, server_type, server_mode, competitive_enabled,
+      last_event_at, updated_at, status, listing_visibility, merged_into_server_id, current_players, max_players,
+      event_mmr, verified_server, display_name, hostname, server_name, nitrado_service_name,
+      season_points, event_wins, event_losses, event_draws
+    ) VALUES (?, NULL, ?, ?, 'deathmatch', 'deathmatch', 'deathmatch', 1, ?, ?, 'live', 'public', NULL, 0, 10, 1000, 1, ?, NULL, NULL, NULL, 0, 0, 0, 0)`)
+      .bind("server-b", "guild-without-icon", "server-b", timestamp, timestamp, "No Icon Server").run();
+    await db.prepare("INSERT INTO discord_guilds (guild_id, icon_url, owner_user_id) VALUES (?, ?, ?)")
+      .bind("guild-with-icon", "https://cdn.discordapp.com/icons/guild-with-icon/icon.png", "owner-a").run();
 
     const env = { DB: db as unknown as D1Database } as Env;
     const all = await getEventsListPayload(env, null, { limit: 24 });
@@ -437,6 +491,34 @@ async function assertD1BackedEventSummaries() {
     assert.equal(live.summary.active_events, 1);
     assert.equal(live.summary.completed_events, 0);
     assert.equal(live.summary.registered_servers, 1, "Filtered totals include only matching event registrations.");
+
+    const missingDetail = await getEventDetailPayload(env, null, "not-a-real-event");
+    assert.equal(missingDetail.status, 404, "Unknown event slugs must not receive a synthetic event detail response.");
+    assert.equal(missingDetail.errorCode, "EVENT_NOT_FOUND");
+
+    const emptyFeed = await getLiveEventFeedPayload(env);
+    assert.equal(emptyFeed.source, "display_fallback", "A ready event store with no activity must return an empty public feed.");
+    assert.deepEqual(emptyFeed.activity, [], "A ready event store with no activity must not invent feed rows.");
+
+    const missingServerProfile = await getServerEventsProfilePayload(env, "not-a-real-server", null);
+    assert.equal(missingServerProfile.source, "display_fallback", "Unknown servers must receive the neutral competition-profile state.");
+    assert.equal(missingServerProfile.server.server_id, "not-a-real-server");
+
+    await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
+      .bind("registration-live-b", "event-live", "server-b", timestamp).run();
+    const detail = await getEventDetailPayload(env, null, "live-cup");
+    assert.equal(detail.source, "live");
+    assert.equal(detail.registered_servers.length, 2, "Published event details must include registered real servers.");
+    assert.equal(
+      detail.registered_servers.find((server) => server.server_id === "server-a")?.guild_icon_url,
+      "https://cdn.discordapp.com/icons/guild-with-icon/icon.png",
+      "Registered servers must expose their canonical Discord guild icon when one is available.",
+    );
+    assert.equal(
+      detail.registered_servers.find((server) => server.server_id === "server-b")?.guild_icon_url,
+      null,
+      "Registered servers without a Discord guild icon must remain neutral rather than reuse another server's artwork.",
+    );
   } finally {
     await mf.dispose();
   }
