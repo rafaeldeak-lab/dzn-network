@@ -31,6 +31,7 @@ import { PrivateSupporterCards } from "@/components/player/private-supporter-car
 import { PlayerProfilePrivacySettings } from "@/components/player/profile-privacy-settings";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
+import { publicMapLabel } from "@/lib/showcase-labels";
 
 type PlayerHomeMode = "home" | "profile";
 type ProfileSectionId = "profile-summary" | "game-account" | "profile-settings";
@@ -1045,7 +1046,7 @@ function FollowedServersPanel({ servers, source }: { servers: PlayerHubSavedServ
                 </span>
                 <span className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase text-slate-300">
                   <span>{server.platform ?? "Platform TBA"}</span>
-                  <span>{server.map_name ?? "Map TBA"}</span>
+                  <span>{publicMapLabel(server.map_name)}</span>
                   <span>{formatPlayers(server.current_players, server.max_players, server.player_count_status)}</span>
                 </span>
                 {server.public_short_description ? (
@@ -1310,7 +1311,7 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
                       {progression.featured_server.server_name}
                     </span>
                     <span className="mt-0.5 block truncate text-[0.6rem] font-bold uppercase text-slate-400">
-                      {progression.featured_server.server_type} - {progression.featured_server.platform ?? "Platform TBA"} - {progression.featured_server.map_name ?? "Map TBA"}
+                      {progression.featured_server.server_type} - {progression.featured_server.platform ?? "Platform TBA"} - {publicMapLabel(progression.featured_server.map_name)}
                     </span>
                     <span className="mt-0.5 block text-[0.7rem] font-semibold text-slate-300">
                       {progression.featured_server.kills} kills / {progression.featured_server.deaths} total deaths / {formatDistance(progression.featured_server.longest_kill_distance)} longest

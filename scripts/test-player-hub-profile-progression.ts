@@ -40,6 +40,9 @@ assert.doesNotMatch(
 
 assert.match(playerHome, /My Profile/, "Player Hub UI must render the profile panel.");
 assert.match(playerHome, /My Player Stats/, "Player Hub UI must render current-user statistics.");
+assert.match(playerHome, /import \{ publicMapLabel \} from "@\/lib\/showcase-labels";/, "Player Hub must use the shared public-friendly map label formatter.");
+assert.match(playerHome, /publicMapLabel\(server\.map_name\)/, "Followed server cards must not expose raw DayZ mission identifiers.");
+assert.match(playerHome, /publicMapLabel\(progression\.featured_server\.map_name\)/, "Featured player server details must not expose raw DayZ mission identifiers.");
 assert.match(playerHome, /aria-label="Player statistics"/, "Player Hub stats must be labelled as the player's aggregate stats.");
 assert.match(playerHome, /CompactStat label="Total deaths"/, "Player Hub must distinguish total recorded deaths from leaderboard PvP deaths.");
 assert.match(playerHome, /Player leaderboard K\/D uses PvP deaths only/, "Player Hub must explain the leaderboard death scope.");
