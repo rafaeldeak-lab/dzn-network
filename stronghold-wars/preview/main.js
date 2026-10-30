@@ -15,6 +15,7 @@ import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FI
 import { operativeAsset } from './operative-assets.js';
 import { yardProcessState } from './yard-process.js';
 import { facilityMotion } from './facility-motion.js';
+import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './forge-workshop.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -508,6 +509,7 @@ const animated = { yards: [], facilities: new Map() };
 let warTurretRig = null;
 
 function createFacilityActivity(key, building, level) {
+  if (key === 'workshop') return createForgeWorkshop(THREE, building.group, level);
   const root = new THREE.Group();
   root.name = `${key}_working_equipment`;
   building.group.add(root);
@@ -515,38 +517,8 @@ function createFacilityActivity(key, building, level) {
   const steel = new THREE.MeshStandardMaterial({ color: 0x7b837c, metalness: .82, roughness: .3 });
   const purple = new THREE.MeshStandardMaterial({ color: 0x633686, metalness: .63, roughness: .38 });
   const power = new THREE.MeshStandardMaterial({ color: 0x9be65a, emissive: 0x72bf30, emissiveIntensity: .2 });
-  const hot = new THREE.MeshStandardMaterial({ color: 0xffac60, emissive: 0xff6425, emissiveIntensity: .16, metalness: .56, roughness: .3 });
-  const rig = { key, level, root, phase: 0, power, hot, sparks: [] };
-  if (key === 'workshop') {
-    // An exposed press is readable from the strategy camera even when the
-    // detailed GLB has a roof. It processes the same Parts that can be collected.
-    root.position.set(1.75, 0, 3.05);
-    box(root, 2.45, .24, 1.48, dark, 0, .12, 0);
-    for (const x of [-.94, .94]) cyl(root, .065, .065, 1.45, steel, x, .35, 0, 8);
-    box(root, 2.1, .17, .56, purple, 0, 1.73, 0);
-    rig.press = box(root, 1.03, .34, .72, steel, 0, 1.47, 0);
-    rig.billet = box(root, .68, .12, .34, hot, -.7, .35, .03);
-    rig.wheel = cyl(root, .35, .35, .13, steel, 1.07, .76, .27, 20);
-    cyl(root, .09, .09, .18, purple, 1.07, .85, .27, 12);
-    box(root, .29, 1.1 + level * .12, .33, dark, -1.13, .3, -.43);
-    rig.exhaust = new THREE.Vector3(-1.13, 1.53 + level * .12, -.43);
-    for (let i = 0; i < Math.min(3, level); i++) {
-      const spark = new THREE.Mesh(new THREE.TetrahedronGeometry(.055 + i * .012), new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffa64e : 0xd8b4fe }));
-      spark.position.set((i - 1) * .15, .55, .1);
-      root.add(spark);
-      rig.sparks.push(spark);
-    }
-    if (level >= 3) {
-      rig.auxWheel = cyl(root, .26, .26, .12, purple, -1.03, .83, .42, 18);
-      box(root, .26, .18, .28, power, -.98, 1.16, .42);
-    }
-    if (level >= 5) {
-      rig.coil = new THREE.Mesh(new THREE.TorusGeometry(.47, .055, 8, 24), power);
-      rig.coil.rotation.x = Math.PI / 2;
-      rig.coil.position.set(0, 1.85, 0);
-      root.add(rig.coil);
-    }
-  } else if (key === 'comms') {
+  const rig = { key, level, root, phase: 0, power };
+  if (key === 'comms') {
     root.position.set(3.05, 0, 2.55);
     box(root, 1.18, .22, 1.18, dark, 0, .12, 0);
     const mastHeight = 2.25 + level * .32;
@@ -613,31 +585,20 @@ function syncFacilityActivity(key, level) {
     buildings[key].group.remove(old.root);
     old.root.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
   }
-  animated.facilities.set(key, createFacilityActivity(key, buildings[key], level));
+  const next = createFacilityActivity(key, buildings[key], level);
+  if (key === 'workshop' && old && level > old.level) startForgeUpgradeReveal(next);
+  animated.facilities.set(key, next);
 }
 
 function stepFacilityActivity(rig, dt, time, production, access, reducedMotion) {
   const member = service.member();
   const workingForgeJobs = member?.forgeJobs?.some(job => job.status === 'working') || false;
-  const running = rig.key === 'workshop' ? access && production?.perSecond > 0 && production.stored < production.capacity
-    : rig.key === 'depot' ? access && production?.stored > 0 : access;
-  const speed = rig.key === 'workshop' && workingForgeJobs ? 1.35 : 1;
+  if (rig.key === 'workshop') return stepForgeWorkshop(rig, dt, time, production, workingForgeJobs, access, reducedMotion);
+  const running = rig.key === 'depot' ? access && production?.stored > 0 : access;
   const cycle = facilityMotion(rig.level, rig.phase, running, reducedMotion);
-  if (cycle.moving) rig.phase = (rig.phase + dt * speed / cycle.cycleSeconds) % 1;
+  if (cycle.moving) rig.phase = (rig.phase + dt / cycle.cycleSeconds) % 1;
   const pose = facilityMotion(rig.level, rig.phase, running, reducedMotion);
   rig.power.emissiveIntensity = pose.glow * .45;
-  if (rig.press) {
-    rig.press.position.y = pose.pressHeight;
-    rig.billet.position.x = pose.feedX;
-    rig.hot.emissiveIntensity = pose.glow;
-    if (pose.moving) rig.wheel.rotation.y += dt * 3.2;
-    if (rig.auxWheel && pose.moving) rig.auxWheel.rotation.y -= dt * 2.2;
-    if (rig.coil) rig.coil.rotation.z = pose.moving ? Math.sin(time * 2) * .1 : 0;
-    rig.sparks.forEach((spark, index) => {
-      spark.visible = pose.sparks && index < pose.tier;
-      if (spark.visible) spark.position.y = .57 + .18 * Math.sin(time * 14 + index * 2);
-    });
-  }
   if (rig.dish && pose.moving) {
     rig.dish.rotation.y += dt * (.45 + pose.tier * .07);
     rig.dish.rotation.x = -.13 + Math.sin(time * .53) * .12;
@@ -5132,7 +5093,8 @@ renderer.setAnimationLoop(time => {
   if (smokeTimer > 0.25) {
     smokeTimer = 0;
     const forge = animated.facilities.get('workshop');
-    if (forge?.exhaust && allowedToWork && partsProduction?.perSecond > 0 && partsProduction.stored < partsProduction.capacity && !reducedMotion) {
+    if (forge?.exhaust && forgeWorkState(partsProduction,
+      service.member()?.forgeJobs?.some(job => job.status === 'working'), allowedToWork).active && !reducedMotion) {
       tmp.copy(forge.exhaust);
       forge.root.localToWorld(tmp);
       spawnSmoke(tmp, .35, .23);

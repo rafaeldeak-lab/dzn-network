@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import * as THREE from 'three';
 import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
 import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
@@ -12,6 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js'
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
 import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js';
 import { facilityMotion } from './preview/facility-motion.js';
+import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './preview/forge-workshop.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -30,16 +32,47 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Timberline L${level} must stop when storage is full.`);
 }
 for (let level = 1; level <= 5; level++) {
-  const raised = facilityMotion(level, 0, true);
-  const striking = facilityMotion(level, .25, true);
-  const cutting = facilityMotion(level, .5, true);
-  const idle = facilityMotion(level, .25, false);
-  const accessible = facilityMotion(level, .25, true, true);
-  if (!raised.moving || !(striking.pressHeight < raised.pressHeight) || !cutting.sparks
-    || idle.moving || idle.sparks || accessible.moving || accessible.sparks
-    || (level > 1 && !(raised.cycleSeconds < facilityMotion(level - 1, 0, true).cycleSeconds)))
-    throw new Error(`Working facility L${level} must strike, speed up with upgrades and stop safely.`);
+  const raised = forgePose(level, .1, true);
+  const striking = forgePose(level, .5, true);
+  const released = forgePose(level, .9, true);
+  const idle = forgePose(level, .5, false);
+  const accessible = forgePose(level, .5, true, true);
+  if (!raised.moving || !(striking.pressHeight < raised.pressHeight)
+    || !(striking.feedX > raised.feedX) || !(released.feedX > striking.feedX)
+    || !striking.sparks || idle.moving || idle.sparks || accessible.moving || accessible.sparks
+    || (level > 1 && !(raised.cycleSeconds < forgePose(level - 1, 0, true).cycleSeconds)))
+    throw new Error(`Forge L${level} must feed, strike, eject, speed up and stop safely.`);
+  const host = new THREE.Group();
+  const rig = createForgeWorkshop(THREE, host, level);
+  let meshCount = 0;
+  rig.root.traverse(object => { if (object.isMesh) meshCount++; });
+  const bounds = new THREE.Box3().setFromObject(rig.root).getSize(new THREE.Vector3());
+  if (meshCount < 27 + level || bounds.x > 3.2 || bounds.z > 2.1 || bounds.y > 2.8
+    || (level >= 2 && !rig.rollers.some(part => part.feed))
+    || (level >= 3 && !rig.fans.length)
+    || (level >= 4 && !rig.arm)
+    || (level >= 5 && !rig.plasma))
+    throw new Error(`Forge L${level} must have bounded, tier-specific articulated equipment.`);
+  rig.phase = .5;
+  stepForgeWorkshop(rig, 0, 1, { perSecond: level, stored: 10, capacity: 100 }, false, true, false);
+  if (!rig.sparks.some(spark => spark.visible) || !(rig.press.position.y < raised.pressHeight))
+    throw new Error(`Forge L${level} should visibly strike while producing Parts.`);
+  stepForgeWorkshop(rig, 0, 1, { perSecond: level, stored: 100, capacity: 100 }, false, true, false);
+  if (rig.sparks.some(spark => spark.visible) || rig.billet.visible || rig.phase !== 0)
+    throw new Error(`Forge L${level} should stop safely when Parts storage fills.`);
+  startForgeUpgradeReveal(rig);
+  stepForgeWorkshop(rig, .1, 1, { perSecond: level, stored: 100, capacity: 100 }, false, true, false);
+  if (!rig.revealRing.visible || !rig.revealSparks.every(spark => spark.visible))
+    throw new Error(`Forge L${level} should reveal its completed upgrade even with full storage.`);
+  stepForgeWorkshop(rig, .1, 1, { perSecond: level, stored: 100, capacity: 100 }, false, true, true);
+  if (rig.revealRing.visible || rig.revealSparks.some(spark => spark.visible))
+    throw new Error(`Forge L${level} upgrade reveal must respect reduced motion.`);
 }
+if (!forgeWorkState({ perSecond: 4, stored: 100, capacity: 100 }, true, true).active
+  || forgeWorkState({ perSecond: 4, stored: 10, capacity: 100 }, false, false).active)
+  throw new Error('A personal Forge job may continue at full storage, but access revocation stops the machine.');
+if (!facilityMotion(1, 0, true).moving || facilityMotion(1, 0, true, true).moving)
+  throw new Error('Other facility motion must respect reduced-motion settings.');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);
 const recorded = new Map();
 for (const line of manifest) {
