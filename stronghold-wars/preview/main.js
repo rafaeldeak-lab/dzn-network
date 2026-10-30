@@ -297,10 +297,6 @@ function drawCompatibilityScene() {
     ctx.lineWidth = Math.max(4, unit * (.33 + plot.routeLevel * .04)); ctx.lineCap = 'round'; ctx.stroke();
     if (plot.routeLevel >= 4) { ctx.strokeStyle = '#70e59a'; ctx.lineWidth = 2; ctx.stroke(); }
   }
-  const wall = [];
-  for (const [x, z] of [[-17, -17], [17, -17], [17, 17], [-17, 17]]) wall.push(project(x, z));
-  ctx.beginPath(); ctx.moveTo(wall[0].x, wall[0].y); wall.slice(1).forEach(pt => ctx.lineTo(pt.x, pt.y)); ctx.closePath();
-  ctx.strokeStyle = `rgba(174,188,156,${0.44 + (state.levels?.hq || 1) * 0.07})`; ctx.lineWidth = Math.max(2, unit * (0.12 + (state.levels?.hq || 1) * 0.015)); ctx.stroke();
   for (const segment of service.community()?.saved.base.layout?.walls || []) {
     const p = project(segment.x, segment.z);
     const size = Math.max(5, unit * .7);
@@ -493,15 +489,6 @@ box(campFallback, 1.5, 0.15, 0.38, campAccent, -6.6, 1.34, -13.1);
 for (const x of [-2.8, -1.7]) box(campFallback, 0.62, 0.53, 0.68, MAT.dark, x, 0, -13.7);
 const campBeacon = cyl(campFallback, 0.1, 0.18, 1.45, MAT.dark, -2.1, 0, -10.5);
 box(campFallback, 0.4, 0.19, 0.4, MAT.green, -2.1, 1.46, -10.5);
-
-// Perimeter fence posts
-for (let i = 0; i < 48; i++) {
-  const a = (i / 48) * Math.PI * 2;
-  box(scene, 0.3, 1.6, 0.3, MAT.dark, Math.cos(a) * 18, 0, Math.sin(a) * 18);
-  if (i % 12 === 0) {
-    box(scene, 0.25, 0.25, 0.25, MAT.green, Math.cos(a) * 18, 1.6, Math.sin(a) * 18);
-  }
-}
 
 // ---------- Buildings ----------
 const buildings = {};
