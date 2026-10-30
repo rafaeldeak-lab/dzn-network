@@ -1037,11 +1037,9 @@ async function assertOwnerPrivateDraftReviewRoutes() {
   assert.equal(creatorPublicPrivate.status, 404, "Configured creators must still use owner-only review APIs for private drafts.");
   assert.match(creatorPublicPrivate.headers.get("cache-control") ?? "", /private,\s*no-store/);
 
-  const knownDemo = await publicEventDetail(env, "weekly-warriors");
-  assert.equal(knownDemo.status, 200, "Known exact demo event slugs may still use the display fallback.");
-  const knownDemoPayload = await knownDemo.json() as { source: string; event?: { slug: string } };
-  assert.equal(knownDemoPayload.source, "display_fallback");
-  assert.equal(knownDemoPayload.event?.slug, "weekly-warriors");
+  const retiredDemo = await publicEventDetail(env, "weekly-warriors");
+  assert.equal(retiredDemo.status, 404, "Retired demo event slugs must not recreate fictional public competitions.");
+  assert.doesNotMatch(await retiredDemo.text(), /dzn-season-1|weekly-warriors|pandora-showdown|spring-clash|legends-cup|summer-wars/);
 
   const unknownDemo = await publicEventDetail(env, "not-a-demo-event");
   assert.equal(unknownDemo.status, 404, "Unknown slugs must never receive demoEvents()[0].");

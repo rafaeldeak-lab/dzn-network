@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
 import { NavigationProgress } from "@/components/site/navigation-progress";
 import { DznCommsLauncher } from "@/components/comms/dzn-comms-launcher";
+import { BetaStatusBanner } from "@/components/dzn/beta-status-banner";
 import { SiteHeaderRoot } from "@/components/site-header";
 import "./globals.css";
 
@@ -38,6 +39,7 @@ export default function RootLayout({
           <NavigationProgress />
         </Suspense>
         <SiteHeaderRoot />
+        <BetaStatusBanner />
         {children}
         <DznCommsLauncher />
       </body>

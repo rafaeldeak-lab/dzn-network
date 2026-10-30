@@ -7,14 +7,14 @@ export function SeasonBanner() {
         <div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase text-violet-100">
             <Trophy className="h-4 w-4" />
-            DZN Season 1
+            Season progression
           </div>
-          <h2 className="mt-2 text-2xl font-black uppercase text-white">Same-category wars are live</h2>
-          <p className="mt-1 text-sm text-zinc-400">Deathmatch fights Deathmatch. PvP fights PvP. No mixed-category competition.</p>
+          <h2 className="mt-2 text-2xl font-black uppercase text-white">Every competition stays in its category</h2>
+          <p className="mt-1 text-sm text-zinc-400">Deathmatch faces Deathmatch. PvP faces PvP. Published seasons never mix category rules.</p>
         </div>
         <div className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/24 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-100">
           <Flag className="h-4 w-4" />
-          Cross-server matching
+          Snapshot-safe standings
         </div>
       </div>
     </section>

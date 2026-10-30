@@ -3,14 +3,15 @@ import Link from "next/link";
 import { cn } from "./event-format";
 
 const tabs = [
-  { label: "CTF Tournaments", href: "/events" },
+  { label: "Overview", href: "/events" },
+  { label: "Tournaments", href: "/events/tournaments" },
   { label: "Upcoming", href: "/events/tournaments?status=upcoming" },
-  { label: "Active", href: "/events/tournaments?status=active" },
-  { label: "Completed", href: "/events/tournaments?status=completed" },
+  { label: "Live", href: "/events/tournaments?status=active" },
   { label: "Challenges", href: "/events/challenges" },
+  { label: "Seasons", href: "/seasons" },
 ];
 
-export function EventTabs({ active = "CTF Tournaments" }: { active?: string }) {
+export function EventTabs({ active = "Overview" }: { active?: string }) {
   return (
     <nav className="flex flex-wrap gap-2 rounded-lg border border-white/8 bg-black/24 p-1">
       {tabs.map((tab) => (

@@ -87,6 +87,7 @@ type EventServerRow = {
   registered_at: string | null;
   server_name: string | null;
   public_slug: string | null;
+  guild_icon_url: string | null;
   server_type: string | null;
   server_mode: string | null;
   server_category: string | null;
@@ -113,8 +114,10 @@ type MatchRow = {
   updated_at: string | null;
   left_server_name: string | null;
   left_slug: string | null;
+  left_guild_icon_url: string | null;
   right_server_name: string | null;
   right_slug: string | null;
+  right_guild_icon_url: string | null;
   winner_name: string | null;
 };
 
@@ -136,6 +139,7 @@ type ServerRow = {
   id: string;
   user_id: string | null;
   guild_id: string | null;
+  guild_icon_url?: string | null;
   merged_into_server_id?: string | null;
   public_slug: string | null;
   display_name: string | null;
@@ -351,7 +355,7 @@ async function validateCompetitiveEventsReadSchemaNow(env: Env): Promise<EventRe
 export async function getEventsListPayload(env: Env, viewer: SessionUser | null, options: EventListOptions = {}) {
   const publicStatusFilter = resolvePublicEventStatusFilter(options.status);
   if (!publicStatusFilter.ok) return invalidPublicEventStatusPayload();
-  if (!env.DB) return demoEventsListPayload(options, false);
+  if (!env.DB) return emptyEventsListPayload(options, false);
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (!schemaReady.ok) return eventListSchemaUnavailablePayload(schemaReady);
   const entitlement = await hasFullEventAccess(env, viewer);
@@ -420,7 +424,10 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     .first<EventSummaryRow>(),
   ]);
   const events = (result.results ?? []).map(toEventSummary);
-  const visibleEvents = events.length ? events : filterDemoEvents(options, limit);
+  // A public empty state must stay empty. The old display fallback fabricated
+  // event names, bracket scores and participating communities, which made the
+  // competition surface look live before any verified event existed.
+  const visibleEvents = events;
   const liveSummary = summaryRow ? {
     active_events: Number(summaryRow.active_events ?? 0),
     upcoming_events: Number(summaryRow.upcoming_events ?? 0),
@@ -445,7 +452,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
 export async function getEventDetailPayload(env: Env, viewer: SessionUser | null, slug: string, options: { full?: boolean } = {}) {
   const normalizedSlug = cleanSlug(slug);
   if (!normalizedSlug) return eventNotFoundPayload();
-  if (!env.DB) return demoEventDetailPayload(normalizedSlug, false) ?? eventNotFoundPayload();
+  if (!env.DB) return eventNotFoundPayload();
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (schemaReady.ok === false) return schemaReady;
   const entitlement = await hasFullEventAccess(env, viewer);
@@ -467,7 +474,7 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
     const status = String(event.status ?? "draft").trim().toLowerCase();
     if (visibility === "private" || status === "draft") return eventNotFoundPayload();
   }
-  if (!event) return demoEventDetailPayload(normalizedSlug, entitlement) ?? eventNotFoundPayload();
+  if (!event) return eventNotFoundPayload();
   const [servers, matches, activity] = await Promise.all([
     fetchEventServers(env, event.id, full ? 100 : 10),
     fetchEventMatches(env, event.id),
@@ -825,7 +832,7 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
       ok: true,
       generated_at: new Date().toISOString(),
       source: "display_fallback",
-      activity: demoActivity(),
+      activity: [],
     };
   }
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
@@ -835,16 +842,16 @@ export async function getLiveEventFeedPayload(env: Env, limit = 25) {
     ok: true,
     generated_at: new Date().toISOString(),
     source: activity.length ? "live" : "display_fallback",
-    activity: activity.length ? activity : demoActivity(),
+    activity,
   };
 }
 
 export async function getServerEventsProfilePayload(env: Env, serverIdOrSlug: string, viewer: SessionUser | null) {
-  if (!env.DB) return demoServerEventsProfile(serverIdOrSlug, false);
+  if (!env.DB) return emptyServerEventsProfile(serverIdOrSlug, false);
   const schemaReady = await validateCompetitiveEventsReadSchema(env);
   if (!schemaReady.ok) return schemaReady;
   const server = await fetchServerByIdOrSlug(env, serverIdOrSlug);
-  if (!server) return demoServerEventsProfile(serverIdOrSlug, false);
+  if (!server) return emptyServerEventsProfile(serverIdOrSlug, false);
   const category = normalizeServerCategoryFromRecord(server);
   const entitlement = await hasFullEventAccess(env, viewer);
   const [current, history, compatible] = await Promise.all([
@@ -884,9 +891,11 @@ async function fetchEventServers(env: Env, eventId: string, limit: number) {
       `SELECT competitive_event_servers.*,
               linked_servers.public_slug, linked_servers.server_type, linked_servers.server_mode, linked_servers.server_category,
               linked_servers.current_players, linked_servers.max_players, linked_servers.event_mmr, linked_servers.verified_server,
+              discord_guilds.icon_url AS guild_icon_url,
               COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name
        FROM competitive_event_servers
        JOIN linked_servers ON linked_servers.id = competitive_event_servers.server_id
+       LEFT JOIN discord_guilds ON discord_guilds.guild_id = linked_servers.guild_id
        WHERE competitive_event_servers.event_id = ?
        ORDER BY competitive_event_servers.score DESC, competitive_event_servers.wins DESC, competitive_event_servers.seed ASC, server_name ASC
        LIMIT ?`,
@@ -902,12 +911,16 @@ async function fetchEventMatches(env: Env, eventId: string) {
       `SELECT competitive_event_matches.*,
               COALESCE(NULLIF(left_server.display_name, ''), NULLIF(left_server.hostname, ''), left_server.server_name, left_server.nitrado_service_name) AS left_server_name,
               left_server.public_slug AS left_slug,
+              left_guild.icon_url AS left_guild_icon_url,
               COALESCE(NULLIF(right_server.display_name, ''), NULLIF(right_server.hostname, ''), right_server.server_name, right_server.nitrado_service_name) AS right_server_name,
               right_server.public_slug AS right_slug,
+              right_guild.icon_url AS right_guild_icon_url,
               COALESCE(NULLIF(winner.display_name, ''), NULLIF(winner.hostname, ''), winner.server_name, winner.nitrado_service_name) AS winner_name
        FROM competitive_event_matches
        JOIN linked_servers AS left_server ON left_server.id = competitive_event_matches.left_server_id
        JOIN linked_servers AS right_server ON right_server.id = competitive_event_matches.right_server_id
+       LEFT JOIN discord_guilds AS left_guild ON left_guild.guild_id = left_server.guild_id
+       LEFT JOIN discord_guilds AS right_guild ON right_guild.guild_id = right_server.guild_id
        LEFT JOIN linked_servers AS winner ON winner.id = competitive_event_matches.winner_server_id
        WHERE competitive_event_matches.event_id = ?
        ORDER BY COALESCE(competitive_event_matches.round_number, 0) ASC, competitive_event_matches.created_at ASC
@@ -1294,6 +1307,7 @@ function toEventServer(row: EventServerRow) {
     server_id: row.server_id,
     server_name: row.server_name ?? "Unnamed DZN Server",
     public_slug: row.public_slug,
+    guild_icon_url: row.guild_icon_url,
     category,
     category_label: getServerCategoryLabel(category),
     approved: Number(row.approved ?? 0) === 1,
@@ -1325,8 +1339,8 @@ function toMatch(row: MatchRow) {
     right_score: Number(row.right_score ?? 0),
     starts_at: row.starts_at,
     ends_at: row.ends_at,
-    left_server: { server_id: row.left_server_id, server_name: row.left_server_name ?? "Left Server", public_slug: row.left_slug },
-    right_server: { server_id: row.right_server_id, server_name: row.right_server_name ?? "Right Server", public_slug: row.right_slug },
+    left_server: { server_id: row.left_server_id, server_name: row.left_server_name ?? "Left Server", public_slug: row.left_slug, guild_icon_url: row.left_guild_icon_url },
+    right_server: { server_id: row.right_server_id, server_name: row.right_server_name ?? "Right Server", public_slug: row.right_slug, guild_icon_url: row.right_guild_icon_url },
   };
 }
 
@@ -1352,6 +1366,7 @@ function publicServer(server: ServerRow) {
     server_id: server.id,
     server_name: serverDisplayName(server),
     public_slug: server.public_slug,
+    guild_icon_url: server.guild_icon_url ?? null,
     category,
     category_label: getServerCategoryLabel(category),
     event_mmr: Number(server.event_mmr ?? 1000),
@@ -1514,10 +1529,8 @@ async function ensureColumns(db: D1Database, tableName: string, columns: Record<
   }
 }
 
-function demoEventsListPayload(options: EventListOptions, entitlement: boolean) {
+function emptyEventsListPayload(options: EventListOptions, entitlement: boolean) {
   const full = options.full === true && entitlement;
-  const limit = full ? sanitizeLimit(options.limit, 100, 100) : 10;
-  const events = filterDemoEvents(options, limit);
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -1527,8 +1540,8 @@ function demoEventsListPayload(options: EventListOptions, entitlement: boolean) 
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
     statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
-    summary: summarizeEvents(events),
-    events,
+    summary: summarizeEvents([]),
+    events: [],
   };
 }
 
@@ -1566,45 +1579,7 @@ function eventListSchemaUnavailablePayload(schemaReady: Extract<EventReadinessRe
   };
 }
 
-function filterDemoEvents(options: EventListOptions, limit: number) {
-  const statusFilterResult = resolvePublicEventStatusFilter(options.status);
-  if (!statusFilterResult.ok) return [];
-  const statusFilter = statusFilterResult.statuses;
-  const category = normalizeServerCategory(options.category);
-  const type = normalizeEventType(options.type);
-  return demoEvents()
-    .filter((event) => {
-      const publicStatus = (PUBLIC_EVENT_STATUSES as readonly string[]).includes(event.status) ? event.status as PublicCompetitiveEventStatus : null;
-      const statusOk = Boolean(publicStatus) && (statusFilter.length === 0 || statusFilter.includes(publicStatus as PublicCompetitiveEventStatus));
-      const categoryOk = !category || event.category === category;
-      const typeOk = !type || event.event_type === type;
-      return statusOk && categoryOk && typeOk;
-    })
-    .slice(0, limit);
-}
-
-function demoEventDetailPayload(slug: string, entitlement: boolean) {
-  const event = demoEvents().find((item) => item.slug === cleanSlug(slug));
-  if (!event) return null;
-  const leaderboard = demoServers(event.category).slice(0, entitlement ? 16 : 10);
-  return {
-    ok: true,
-    generated_at: new Date().toISOString(),
-    source: "display_fallback",
-    premiumLocked: !entitlement,
-    teaserMode: !entitlement,
-    event,
-    registered_servers: leaderboard,
-    leaderboard: leaderboard.map((server, index) => ({ ...server, rank: index + 1 })),
-    activity_feed: demoActivity(),
-    current_matches: demoMatches(event.category),
-    matches: demoMatches(event.category),
-    category_badge: { value: event.category, label: event.category_label },
-  };
-}
-
-function demoServerEventsProfile(slug: string, entitlement: boolean) {
-  const category = normalizeServerCategory(slug.includes("pvp") ? "pvp" : slug.includes("role") ? "roleplay" : "deathmatch") ?? "deathmatch";
+function emptyServerEventsProfile(slug: string, entitlement: boolean) {
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -1612,134 +1587,25 @@ function demoServerEventsProfile(slug: string, entitlement: boolean) {
     premiumLocked: !entitlement,
     server: {
       server_id: slug,
-      server_name: slug.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
-      public_slug: slug,
-      category,
-      category_label: getServerCategoryLabel(category),
-      verified_server: true,
-      event_mmr: 1503,
-      season_points: 3240,
-      event_wins: 7,
-      event_losses: 2,
-      event_draws: 1,
-      last_event_at: new Date().toISOString(),
+      server_name: "Competition data is awaiting publication",
+      public_slug: null,
+      category: "modded",
+      category_label: getServerCategoryLabel("modded"),
+      verified_server: false,
+      event_mmr: 0,
+      season_points: 0,
+      event_wins: 0,
+      event_losses: 0,
+      event_draws: 0,
+      last_event_at: null,
     },
-    current_events: demoEvents().filter((event) => event.category === category).slice(0, 2),
-    upcoming_events: demoEvents().filter((event) => event.category === category && event.status !== "live").slice(0, 2),
-    event_history: demoEvents().filter((event) => event.status === "ended").slice(0, 2),
-    trophies: [{ label: "Season Contender", value: "Top 10" }, { label: "Verified Server", value: "DZN verified" }],
-    recent_matches: demoMatches(category),
-    compatible_upcoming_events: demoEvents().filter((event) => event.category === category),
+    current_events: [],
+    upcoming_events: [],
+    event_history: [],
+    trophies: [],
+    recent_matches: [],
+    compatible_upcoming_events: [],
   };
-}
-
-function demoEvents() {
-  const now = Date.now();
-  const rows = [
-    ["dzn-season-1", "DZN Season 1", "Capture the flag across verified DayZ console communities.", "deathmatch", "capture_the_flag", "live", 32, 512, 24],
-    ["weekly-warriors", "Weekly Warriors", "Compact weekly fight night for same-category servers.", "deathmatch", "community_cup", "live", 16, 256, 10],
-    ["pandora-showdown", "Pandora Showdown", "Roster-locked bot tournament with live scorecards.", "pvp", "bot_tournament", "live", 8, 128, 6],
-    ["spring-clash", "Spring Clash", "Upcoming category-safe bracket for faction servers.", "faction_wars", "faction_wars", "upcoming", 24, 384, 0],
-    ["legends-cup", "Legends Cup", "Seasonal survival challenge for hardcore servers.", "hardcore", "survival_challenge", "registration_open", 16, 258, 0],
-    ["summer-wars", "Summer Wars", "PvP/PvE seasonal war with premium analytics.", "pvp_pve", "seasonal_wars", "upcoming", 32, 512, 0],
-  ] as const;
-  return rows.map(([slug, name, description, category, eventType, status, registered, participants, score], index) => {
-    const normalizedCategory = normalizeServerCategory(category) ?? "modded";
-    const normalizedType = normalizeEventType(eventType) ?? "community_cup";
-    const normalizedStatus = normalizeEventStatus(status) ?? "upcoming";
-    return {
-      id: `demo-${slug}`,
-      name,
-      slug,
-      description,
-      category: normalizedCategory,
-      category_label: getServerCategoryLabel(normalizedCategory),
-      event_type: normalizedType,
-      event_type_label: eventTypeLabel(normalizedType),
-      status: normalizedStatus,
-      status_label: eventStatusLabel(normalizedStatus),
-      visibility: "public",
-      premium_tier: index < 3 ? "pro" : "free",
-      server_limit: 32,
-      team_limit: 32,
-      registered_servers: registered,
-      total_participants: participants,
-      progress_percent: Math.min(100, Math.round((registered / 32) * 100)),
-      total_score: score * 100,
-      match_count: score,
-      starts_at: new Date(now + (index - 1) * 86400000).toISOString(),
-      ends_at: new Date(now + (index + 3) * 86400000).toISOString(),
-      banner_url: index % 2 === 0 ? "/media/dzn-cinematic-survivor.png" : "/dzn/build/build-hero.webp",
-      rules: "Same category only. Verified rosters only. DZN dedupe and server-scope rules apply.",
-      rewards: "Champion badge, featured placement, and seasonal points.",
-      created_at: new Date(now - 86400000 * 12).toISOString(),
-      updated_at: new Date(now - 3600000).toISOString(),
-    };
-  });
-}
-
-function demoServers(category: string) {
-  const safeCategory = normalizeServerCategory(category) ?? "deathmatch";
-  return ["Pandora DayZ", "Nuke Town", "Warlords PvP", "Vendetta", "Rogue Squad", "Outcasts", "Frontier EU", "Last Haven", "DeadZone UK", "Iron Valley"].map((name, index) => ({
-    registration_id: `demo-reg-${index}`,
-    server_id: `demo-server-${index}`,
-    server_name: name,
-    public_slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
-    category: safeCategory,
-    category_label: getServerCategoryLabel(safeCategory),
-    approved: true,
-    score: 2340 - index * 165,
-    wins: Math.max(0, 7 - index),
-    losses: index % 4,
-    draws: index % 2,
-    seed: index + 1,
-    registered_at: new Date(Date.now() - index * 3600000).toISOString(),
-    current_players: 12 + index,
-    max_players: 50,
-    event_mmr: 1500 - index * 28,
-    verified_server: index < 4,
-  }));
-}
-
-function demoMatches(category: string) {
-  const servers = demoServers(category);
-  return [0, 2, 4, 6].map((index, roundIndex) => ({
-    id: `demo-match-${index}`,
-    event_id: "demo-dzn-season-1",
-    category: servers[index]?.category ?? "deathmatch",
-    category_label: servers[index]?.category_label ?? "Deathmatch",
-    match_status: roundIndex === 0 ? "live" : roundIndex === 1 ? "completed" : "pending",
-    winner_server_id: roundIndex === 1 ? servers[index]?.server_id : null,
-    winner_name: roundIndex === 1 ? servers[index]?.server_name : null,
-    round_number: roundIndex + 1,
-    left_score: 3 - roundIndex,
-    right_score: roundIndex,
-    starts_at: new Date(Date.now() + roundIndex * 3600000).toISOString(),
-    ends_at: null,
-    left_server: servers[index],
-    right_server: servers[index + 1] ?? servers[0],
-  }));
-}
-
-function demoActivity() {
-  return [
-    "Pandora DayZ captured a flag and advanced the bracket.",
-    "Nuke Town joined a Deathmatch-only community cup.",
-    "Warlords PvP score updated from verified roster actions.",
-    "Spring Clash registration opened for Faction Wars servers.",
-  ].map((message, index) => ({
-    id: `demo-activity-${index}`,
-    event_id: "demo-dzn-season-1",
-    event_name: "DZN Season 1",
-    event_slug: "dzn-season-1",
-    server_id: `demo-server-${index}`,
-    server_name: message.split(" ").slice(0, 2).join(" "),
-    public_slug: null,
-    activity_type: ["ctf_capture", "server_joined_event", "score_updated", "registration_opened"][index] ?? "score_updated",
-    message,
-    metadata: { source: "display_fallback" },
-    created_at: new Date(Date.now() - index * 900000).toISOString(),
-  }));
 }
 
 const COMPETITIVE_EVENT_SCHEMA_STATEMENTS = [
