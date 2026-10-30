@@ -14,6 +14,7 @@ import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js'
 import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js';
 import { facilityMotion } from './preview/facility-motion.js';
 import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './preview/forge-workshop.js';
+import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './preview/comms-array.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'preview');
 if (YARD_CYCLE_SECONDS.length !== 5 || YARD_CYCLE_SECONDS.some((time, index) => !Number.isFinite(time) || time <= 0 || (index && time >= YARD_CYCLE_SECONDS[index - 1])))
@@ -71,6 +72,35 @@ for (let level = 1; level <= 5; level++) {
 if (!forgeWorkState({ perSecond: 4, stored: 100, capacity: 100 }, true, true).active
   || forgeWorkState({ perSecond: 4, stored: 10, capacity: 100 }, false, false).active)
   throw new Error('A personal Forge job may continue at full storage, but access revocation stops the machine.');
+for (let level = 1; level <= 5; level++) {
+  const active = commsPose(level, .25, true);
+  const idle = commsPose(level, .25, false);
+  if (!active.moving || !Number.isFinite(active.yaw) || !Number.isFinite(active.pitch)
+    || idle.moving || idle.packet !== 0 || commsPose(level, .25, true, true).moving
+    || (level > 1 && active.cycleSeconds >= commsPose(level - 1, .25, true).cycleSeconds))
+    throw new Error(`Communications L${level} must scan faster at each tier and stop without access or with reduced motion.`);
+  const host = new THREE.Group();
+  const rig = createCommsArray(THREE, host, level);
+  const bounds = new THREE.Box3().setFromObject(rig.root).getSize(new THREE.Vector3());
+  let meshes = 0;
+  rig.root.traverse(object => { if (object.isMesh) meshes++; });
+  if (meshes < 22 + level || bounds.x > 2.7 || bounds.z > 2.7 || bounds.y > 3.2
+    || (level >= 3 && !rig.secondary) || (level >= 4 && !rig.upperScanner)
+    || (level >= 5 && rig.contacts.length !== 3))
+    throw new Error(`Communications L${level} needs bounded, tier-specific articulated relay equipment.`);
+  rig.phase = .25;
+  stepCommsArray(rig, 0, 1, true, false);
+  if (!rig.signal.visible || !rig.yaw.rotation.y || !rig.pitch.rotation.x)
+    throw new Error(`Communications L${level} should visibly scan while the owner has access.`);
+  stepCommsArray(rig, 0, 1, false, false);
+  if (rig.signal.visible || rig.yaw.rotation.y !== 0)
+    throw new Error(`Communications L${level} should park its array without owner access.`);
+  startCommsUpgradeReveal(rig);
+  stepCommsArray(rig, .1, 1, true, false);
+  if (!rig.revealRing.visible) throw new Error(`Communications L${level} should reveal an upgrade.`);
+  stepCommsArray(rig, .1, 1, true, true);
+  if (rig.revealRing.visible || rig.signal.visible) throw new Error(`Communications L${level} must respect reduced motion.`);
+}
 if (!facilityMotion(1, 0, true).moving || facilityMotion(1, 0, true, true).moving)
   throw new Error('Other facility motion must respect reduced-motion settings.');
 const manifest = readFileSync(join(root, 'ASSET_SHA256.txt'), 'utf8').trim().split(/\r?\n/);

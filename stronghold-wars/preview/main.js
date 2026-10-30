@@ -16,6 +16,7 @@ import { operativeAsset } from './operative-assets.js';
 import { yardProcessState } from './yard-process.js';
 import { facilityMotion } from './facility-motion.js';
 import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './forge-workshop.js';
+import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './comms-array.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
 // ---------- Versioned local game-service boundary ----------
@@ -497,6 +498,7 @@ let warTurretRig = null;
 
 function createFacilityActivity(key, building, level) {
   if (key === 'workshop') return createForgeWorkshop(THREE, building.group, level);
+  if (key === 'comms') return createCommsArray(THREE, building.group, level);
   const root = new THREE.Group();
   root.name = `${key}_working_equipment`;
   building.group.add(root);
@@ -505,29 +507,7 @@ function createFacilityActivity(key, building, level) {
   const purple = new THREE.MeshStandardMaterial({ color: 0x633686, metalness: .63, roughness: .38 });
   const power = new THREE.MeshStandardMaterial({ color: 0x9be65a, emissive: 0x72bf30, emissiveIntensity: .2 });
   const rig = { key, level, root, phase: 0, power };
-  if (key === 'comms') {
-    root.position.set(3.05, 0, 2.55);
-    box(root, 1.18, .22, 1.18, dark, 0, .12, 0);
-    const mastHeight = 2.25 + level * .32;
-    cyl(root, .075, .11, mastHeight, steel, 0, .22, 0, 10);
-    rig.dish = new THREE.Group();
-    rig.dish.position.set(0, mastHeight + .31, 0);
-    root.add(rig.dish);
-    const dishFace = new THREE.Mesh(new THREE.SphereGeometry(.55 + level * .055, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2.8), steel);
-    dishFace.rotation.x = Math.PI / 2;
-    dishFace.material.side = THREE.DoubleSide;
-    rig.dish.add(dishFace);
-    box(rig.dish, .12, .12, .72, purple, 0, 0, .38);
-    rig.signal = new THREE.Mesh(new THREE.TorusGeometry(.22, .035, 8, 20), power);
-    rig.signal.position.set(0, mastHeight + .35, .68);
-    root.add(rig.signal);
-    if (level >= 4) {
-      rig.secondDish = rig.dish.clone(true);
-      rig.secondDish.scale.setScalar(.72);
-      rig.secondDish.position.set(-.65, mastHeight * .72, .1);
-      root.add(rig.secondDish);
-    }
-  } else if (key === 'depot') {
+  if (key === 'depot') {
     root.position.set(0, 0, 3.15);
     box(root, 2.35, .18, 1.18, dark, 0, .1, 0);
     rig.rollers = [];
@@ -574,6 +554,7 @@ function syncFacilityActivity(key, level) {
   }
   const next = createFacilityActivity(key, buildings[key], level);
   if (key === 'workshop' && old && level > old.level) startForgeUpgradeReveal(next);
+  if (key === 'comms' && old && level > old.level) startCommsUpgradeReveal(next);
   animated.facilities.set(key, next);
 }
 
@@ -581,17 +562,12 @@ function stepFacilityActivity(rig, dt, time, production, access, reducedMotion) 
   const member = service.member();
   const workingForgeJobs = member?.forgeJobs?.some(job => job.status === 'working') || false;
   if (rig.key === 'workshop') return stepForgeWorkshop(rig, dt, time, production, workingForgeJobs, access, reducedMotion);
+  if (rig.key === 'comms') return stepCommsArray(rig, dt, time, access, reducedMotion);
   const running = rig.key === 'depot' ? access && production?.stored > 0 : access;
   const cycle = facilityMotion(rig.level, rig.phase, running, reducedMotion);
   if (cycle.moving) rig.phase = (rig.phase + dt / cycle.cycleSeconds) % 1;
   const pose = facilityMotion(rig.level, rig.phase, running, reducedMotion);
   rig.power.emissiveIntensity = pose.glow * .45;
-  if (rig.dish && pose.moving) {
-    rig.dish.rotation.y += dt * (.45 + pose.tier * .07);
-    rig.dish.rotation.x = -.13 + Math.sin(time * .53) * .12;
-    if (rig.secondDish) rig.secondDish.rotation.y -= dt * .72;
-  }
-  if (rig.signal) rig.signal.scale.setScalar(pose.moving ? .8 + .2 * Math.sin(time * 2.4) : .8);
   if (rig.rollers && pose.moving) rig.rollers.forEach(roller => { roller.rotation.y += dt * 2; });
   if (rig.crates) rig.crates.forEach((crate, index) => {
     crate.visible = Boolean(production?.stored > index * Math.max(1, production.capacity / rig.crates.length));
@@ -1469,6 +1445,7 @@ function normalizeBuildingClone(template, key, level) {
   normalized.userData.assetPath = asset.glb;
   normalized.updateMatrixWorld(true);
   if (key === 'tower') normalized.userData.turretRig = articulateArcBattery(normalized);
+  if (key === 'comms') normalized.userData.commsRig = articulateCommsModel(THREE, normalized, level);
   return normalized;
 }
 
@@ -1508,7 +1485,11 @@ function requestBuildingModel(key, level) {
     building.modelAssetPath = asset.glb;
     building.modelLevel = level;
     building.group.userData.buildingLevel = level;
-    if (previous) { building.group.remove(previous); clearArcSplitGeometry(previous); }
+    if (key === 'comms') {
+      const activity = animated.facilities.get('comms');
+      if (activity) activity.modelRotor = replacement.userData.commsRig;
+    }
+    if (previous) { building.group.remove(previous); clearArcSplitGeometry(previous); clearCommsSplitGeometry(previous); }
     setRendererDiagnostic('');
   }).catch(error => {
     if (building.loadToken !== requestToken) return;
