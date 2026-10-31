@@ -464,6 +464,7 @@ console.log('Five distinct textured DZN Timberline GLBs and separate moving mach
 const wallManifest = JSON.parse(readFileSync(join(root, 'assets/models/walls/manifest.json'), 'utf8'));
 if (Object.keys(wallManifest.assets).length !== 5) throw new Error('Five wall stages are required.');
 const wallHashes = new Set();
+let previousWallHeight = 0;
 for (let level = 1; level <= 5; level++) {
   const name = `wall_l0${level}`, entry = wallManifest.assets[name];
   if (!entry) throw new Error(`Wall Level ${level} is missing.`);
@@ -473,10 +474,23 @@ for (let level = 1; level <= 5; level++) {
   wallHashes.add(hash);
   const jsonLength = bytes.readUInt32LE(12);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLength));
-  const nodes = new Set(gltf.nodes.map(node => node.name));
-  if (!nodes.has(level <= 2 ? 'reclaimed_timber' : 'armoured_barrier') || (level === 5 && !nodes.has('active_defence_node'))) throw new Error(`Wall Level ${level} geometry is incomplete.`);
+  const node = gltf.nodes.find(item => item.name === `DZN_wall_L0${level}`);
+  const primitives = gltf.meshes[node?.mesh]?.primitives || [];
+  const names = new Set(primitives.map(item => gltf.materials[item.material]?.name));
+  const low = Math.min(...primitives.map(item => gltf.accessors[item.attributes.POSITION].min[1]));
+  const high = Math.max(...primitives.map(item => gltf.accessors[item.attributes.POSITION].max[1]));
+  const width = Math.max(...primitives.map(item => gltf.accessors[item.attributes.POSITION].max[0]))
+    - Math.min(...primitives.map(item => gltf.accessors[item.attributes.POSITION].min[0]));
+  const height = high - low;
+  if (primitives.length < 5 || primitives.length > 8 || width < 1.9 || width > 2
+    || height <= previousWallHeight || !names.has('scratched_DZN_armor')
+    || (level <= 2 && !names.has('weathered_reclaimed_pine'))
+    || (level >= 2 && !names.has('DZN_violet_powdercoat'))
+    || (level >= 4 && !names.has('DZN_lime_power_channel')))
+    throw new Error(`Wall Level ${level} needs a continuous, distinct, efficient DZN barrier.`);
+  previousWallHeight = height;
 }
-console.log('Five distinct DZN perimeter wall GLBs verified.');
+console.log('Five connected, textured, progressively reinforced DZN wall GLBs verified.');
 const routeManifest = JSON.parse(readFileSync(join(root, 'assets/models/routes/manifest.json'), 'utf8'));
 const routeNames = Object.keys(routeManifest.assets);
 if (routeNames.length !== 5 || ![1, 2, 3, 4, 5].every(level => routeNames.includes(`supply_route_l0${level}`))) throw new Error('Supply route kit must contain five distinct visual tiers.');
