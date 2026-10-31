@@ -1154,7 +1154,7 @@ async function reconcileLandScenery() {
         }
       }
       for (const [name, ox, oz, rotation] of [
-        ['fern_patch', -4.75, -1.2, .3], ['mossy_rock_cluster', 4.75, 1.25, .8],
+        ['fern_patch', -4.75, -1.2, .3], ['mossy_rock_cluster', -4.75, -4.5, .8],
         [plot.treesRemaining ? 'brush_pile' : 'fallen_trunk', -4.65, 2.5, 1.25],
       ]) {
         const detail = models[name].clone(true);
