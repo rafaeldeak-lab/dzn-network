@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "provenance": "DZN owner portraits informed five clean ImageGen references. Meshy T2.5 Smart Topology generated five private, textured A-pose models at 15 existing credits each. Meshy humanoid rigging supplied walking and running; Blender added an independent hand-bound 3D axe and a full-body idle clip.",
+  "usage": "DZN Stronghold Wars game. Rights subject to the owner Meshy and ImageGen accounts and terms.",
+  "coordinateSystem": "glTF Y-up; the Fixer faces +Z in the game",
+  "assets": {
+    "engineer_l01": {
+      "file": "assets/models/squads-v13/engineer_l01.glb",
+      "source": "source-art/meshy-fixer-v13/engineer_l01-rig.glb",
+      "reference": "source-art/meshy-fixer-v13/engineer_l01-reference.png",
+      "portrait": "assets/portraits/squads-final/engineer_l01.png",
+      "bytes": 5206884,
+      "sha256": "27a1cf0d8219ef1c3678b4c24c8c7bf9eae55bd9bce8d5309bb6f0bac7f65bd0",
+      "sourceSha256": "3640a8032d992d4c8de06e6334040484cb360efa38e3bcf8e9dda34e6b011004",
+      "referenceSha256": "863102a9546ae0c044453afb2bf8297ce3e206e470372ae24f99be416973f49d",
+      "triangles": 17234,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Operative_Idle",
+        "DZN_Operative_Run",
+        "DZN_Operative_Walk"
+      ],
+      "handTool": "mixamorig:LeftHand",
+      "meshyCredits": 15
+    },
+    "engineer_l02": {
+      "file": "assets/models/squads-v13/engineer_l02.glb",
+      "source": "source-art/meshy-fixer-v13/engineer_l02-rig.glb",
+      "reference": "source-art/meshy-fixer-v13/engineer_l02-reference.png",
+      "portrait": "assets/portraits/squads-final/engineer_l02.png",
+      "bytes": 5174928,
+      "sha256": "4129a74a78e3db88cbc390543934f09fb2eae71e04170fa1f37923ba8b56e4ca",
+      "sourceSha256": "8dccd3bb9547acbc949623b568d80b5f70d7bc4fb37679f3a41a978655892181",
+      "referenceSha256": "c26e9fc0c856a45f59b6952c2b5b819127a88f6a8575b51ddcbd32bad81c9695",
+      "triangles": 17372,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Operative_Idle",
+        "DZN_Operative_Run",
+        "DZN_Operative_Walk"
+      ],
+      "handTool": "mixamorig:LeftHand",
+      "meshyCredits": 15
+    },
+    "engineer_l03": {
+      "file": "assets/models/squads-v13/engineer_l03.glb",
+      "source": "source-art/meshy-fixer-v13/engineer_l03-rig.glb",
+      "reference": "source-art/meshy-fixer-v13/engineer_l03-reference.png",
+      "portrait": "assets/portraits/squads-final/engineer_l03.png",
+      "bytes": 4711388,
+      "sha256": "05496ca4158d729b43b59ae53647a552a5a32258647fd27aa274a873d44a0067",
+      "sourceSha256": "f235c38d358b0535a48adefa4be158804534ada0128f2b5fa5bd99abfd8dd8fa",
+      "referenceSha256": "d29b74b0b6ec0ac30f3aed887c70169956c5265feb9ab84b653d66e3b22e3baa",
+      "triangles": 17772,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Operative_Idle",
+        "DZN_Operative_Run",
+        "DZN_Operative_Walk"
+      ],
+      "handTool": "mixamorig:LeftHand",
+      "meshyCredits": 15
+    },
+    "engineer_l04": {
+      "file": "assets/models/squads-v13/engineer_l04.glb",
+      "source": "source-art/meshy-fixer-v13/engineer_l04-rig.glb",
+      "reference": "source-art/meshy-fixer-v13/engineer_l04-reference.png",
+      "portrait": "assets/portraits/squads-final/engineer_l04.png",
+      "bytes": 5496000,
+      "sha256": "18b0beec8ee640d5fc0c996d30345813646fb6a06bf8b74970a2585711c28d20",
+      "sourceSha256": "51a2a4c6f950c6ad1dbc585654475ef066410314bc9cd01ac7252eec7d259806",
+      "referenceSha256": "3d6b006449217161276bcdc8af730bd23046f45e7c3ef138f440c4a31f92ede6",
+      "triangles": 17781,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Operative_Idle",
+        "DZN_Operative_Run",
+        "DZN_Operative_Walk"
+      ],
+      "handTool": "mixamorig:LeftHand",
+      "meshyCredits": 15
+    },
+    "engineer_l05": {
+      "file": "assets/models/squads-v13/engineer_l05.glb",
+      "source": "source-art/meshy-fixer-v13/engineer_l05-rig.glb",
+      "reference": "source-art/meshy-fixer-v13/engineer_l05-reference.png",
+      "portrait": "assets/portraits/squads-final/engineer_l05.png",
+      "bytes": 5621160,
+      "sha256": "50a2e71d354d3f68678a89e61f079b38ce507f41782c083b03cfae084dfa0852",
+      "sourceSha256": "48f51e968d097f444bb4309cf385d5de752dfec00fd4df5d32be60230341503c",
+      "referenceSha256": "b45c214d089f280b33725809432cc888cad50d2ca798c2920b9f191f2604475e",
+      "triangles": 18039,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Operative_Idle",
+        "DZN_Operative_Run",
+        "DZN_Operative_Walk"
+      ],
+      "handTool": "mixamorig:LeftHand",
+      "meshyCredits": 15
+    }
+  }
+}

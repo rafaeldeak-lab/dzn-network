@@ -625,30 +625,35 @@ for (let level = 1; level <= 5; level++) {
     || triangles !== ghost.triangles || ghost.animations.some(animation => !ghostAnimations.get(animation))) throw new Error(`Ghost Level ${level} lacks textured, skinned walk/idle geometry.`);
 }
 console.log('Five distinct image-guided DZN Ghost levels verified with retained sources, skins, textures and walk/idle clips.');
-const fixerManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v12/manifest.json'), 'utf8'));
-const fixerBaseline = JSON.parse(readFileSync(join(root, 'assets/models/squads-v8/manifest.json'), 'utf8'));
-if (!fixerManifest.complete || Object.keys(fixerManifest.assets || {}).length !== 5) throw new Error('Fixer kit must have five steady-grip models.');
+const fixerManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v13/manifest.json'), 'utf8'));
+if (!fixerManifest.complete || Object.keys(fixerManifest.assets || {}).length !== 5) throw new Error('Fixer kit must have five animated Meshy models.');
 const fixerHashes = new Set();
 for (let level = 1; level <= 5; level++) {
   const name = `engineer_l0${level}`, fixer = fixerManifest.assets[name];
-  if (!fixer || fixer.file !== squadAsset('engineer', level) || fixer.reference !== squadPortrait('engineer', level) || !fixer.rosebudJob
-    || fixer.sourceSha256 !== fixerBaseline.assets[name]?.sourceSha256 || fixer.sha256 === fixerBaseline.assets[name]?.sha256) throw new Error(`Fixer Level ${level} steady-grip model or portrait mapping is missing.`);
+  if (!fixer || fixer.file !== squadAsset('engineer', level) || fixer.portrait !== squadPortrait('engineer', level)
+    || fixer.sha256 === fixerManifest.assets[`engineer_l0${level - 1}`]?.sha256)
+    throw new Error(`Fixer Level ${level} model or portrait mapping is missing.`);
   const bytes = readFileSync(join(root, ...fixer.file.split('/')));
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), fixer.source));
-  const reference = readFileSync(join(root, ...fixer.reference.split('/')));
+  const reference = readFileSync(join(dirname(fileURLToPath(import.meta.url)), fixer.reference));
   const hash = createHash('sha256').update(bytes).digest('hex');
   if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length || bytes.length !== fixer.bytes
     || hash !== fixer.sha256 || fixerHashes.has(hash)
     || createHash('sha256').update(source).digest('hex') !== fixer.sourceSha256
-    || createHash('sha256').update(reference).digest('hex') !== fixer.referenceSha256) throw new Error(`Fixer Level ${level} source, portrait or game GLB integrity failed.`);
+    || createHash('sha256').update(reference).digest('hex') !== fixer.referenceSha256) throw new Error(`Fixer Level ${level} source, reference or game GLB integrity failed.`);
   fixerHashes.add(hash);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
   const clips = new Map((gltf.animations || []).map(animation => [animation.name, animation.channels.length]));
   const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((count, part) => count + gltf.accessors[part.indices].count / 3, 0);
-  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 15 || gltf.images?.length < 2
-    || triangles !== fixer.triangles || fixer.animations.some(animation => !clips.get(animation))) throw new Error(`Fixer Level ${level} lacks textured, skinned walk/idle geometry.`);
+  const axe = gltf.nodes?.filter(node => node.name?.startsWith('Fixer_axe')) || [];
+  const leftHand = gltf.nodes?.findIndex(node => node.name === 'mixamorig:LeftHand');
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 60 || gltf.images?.length < 1
+    || triangles !== fixer.triangles || leftHand < 0 || !gltf.skins[0].joints.includes(leftHand)
+    || axe.length < 3 || axe.some(node => node.skin !== 0 || !gltf.meshes[node.mesh]?.primitives.every(part => part.attributes.JOINTS_0 !== undefined && part.attributes.WEIGHTS_0 !== undefined))
+    || ['DZN_Operative_Walk', 'DZN_Operative_Run', 'DZN_Operative_Idle'].some(animation => !clips.get(animation)))
+    throw new Error(`Fixer Level ${level} needs textured armor, a rigged hand axe and walk/run/idle clips.`);
 }
-console.log('Five distinct DZN Fixer steady-grip levels verified with retained image-guided sources, skins, textures and walk/idle clips.');
+console.log('Five distinct DZN Fixer levels verified with Meshy source, rigged axes and walk/run/idle clips.');
 const medicManifest = JSON.parse(readFileSync(join(root, 'assets/models/squads-v9/manifest.json'), 'utf8'));
 if (Object.keys(medicManifest.assets || {}).length !== 5) throw new Error('Lifeline kit must have five image-guided models.');
 const medicHashes = new Set();
