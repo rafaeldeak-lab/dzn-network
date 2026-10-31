@@ -391,10 +391,10 @@ let fittedZoom = baseFitZoom();
 let zoom = fittedZoom;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
-const cameraOffset = new THREE.Vector3(40, 40, 40);
+const cameraOffset = new THREE.Vector3(40, 40, 40), patrolCameraOffset = new THREE.Vector3(28, 64, 28);
 let focusedPatrolRole = null;
 function updateCameraPosition() {
-  camera.position.copy(camTarget).add(cameraOffset);
+  camera.position.copy(camTarget).add(focusedPatrolRole ? patrolCameraOffset : cameraOffset);
   camera.lookAt(camTarget);
 }
 function updateCamera() {
