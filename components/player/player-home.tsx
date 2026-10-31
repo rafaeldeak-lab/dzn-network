@@ -1265,6 +1265,9 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
                 </span>
               </div>
               <nav aria-label="My profile actions" className="mt-2.5 flex flex-wrap gap-1.5">
+                <Link href="/player/cabinet" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-violet-300/40 bg-violet-400/10 px-2.5 py-1.5 text-xs font-bold text-violet-100 hover:bg-violet-400/20">
+                  <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0" /> My cabinet
+                </Link>
                 <a href="/player/profile#profile-settings" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-emerald-300/30 px-2.5 py-1.5 text-xs font-bold text-emerald-100 hover:bg-emerald-300/10">
                   <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" /> Edit profile
                 </a>

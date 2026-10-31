@@ -1235,6 +1235,10 @@ export function ServerSettingsPage() {
         </section>
       </div>
 
+      <section className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-300/30 bg-violet-400/[0.07] p-5" aria-label="Server collectible vault">
+        <div><h2 className="text-xl font-black text-white">Server Vault</h2><p className="mt-1 text-sm leading-6 text-zinc-300">Keep your server collectibles and choose a showcase for your community.</p></div>
+        <Link href={`/dashboard/vault?serverId=${encodeURIComponent(settings.server.id)}`} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-violet-200/40 bg-violet-300/10 px-4 py-2 text-sm font-bold text-violet-100 hover:bg-violet-300/20"><Trophy className="h-4 w-4" aria-hidden="true" />Open server vault</Link>
+      </section>
       <VisualLoadoutSection key={settings.server.id} serverId={settings.server.id} serverName={settings.server.name} planKey={settings.plan.plan_key} />
       <AdvertisingPackagePanel settings={settings} />
       <ProAdvertSettingsPanel
