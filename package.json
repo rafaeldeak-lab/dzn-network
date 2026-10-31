@@ -278,7 +278,9 @@
     "test:vault:api": "tsx scripts/test-vault-cabinets.ts",
     "test:vault:security": "tsx scripts/test-vault-security.ts",
     "test:vault:ui": "tsx scripts/test-vault-ui.ts",
-    "test:vault": "npm run test:vault:api && npm run test:vault:security && npm run test:vault:ui"
+    "test:vault:opening": "tsx scripts/test-vault-opening-experience.ts && npm run test:vault:reward-roadmap",
+    "test:vault:reward-roadmap": "tsx scripts/test-vault-reward-roadmap.ts",
+    "test:vault": "npm run test:vault:api && npm run test:vault:security && npm run test:vault:ui && npm run test:vault:opening"
   },
   "dependencies": {
     "@taros-minesweeper/lib": "1.1.2",
