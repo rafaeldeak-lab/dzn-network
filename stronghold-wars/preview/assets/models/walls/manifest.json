@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original local procedural DZN perimeter geometry; no paid service",
+  "license": "Project-owned original",
+  "assets": {
+    "wall_l01": {
+      "file": "assets/models/walls/wall_l01.glb",
+      "sha256": "3cf0209122b5995be694021f624d120ad995cf1ee12d93029a8db4e6447af789",
+      "bytes": 200392,
+      "meshes": 9
+    },
+    "wall_l02": {
+      "file": "assets/models/walls/wall_l02.glb",
+      "sha256": "b9e9740d8bd5dd5c61d611795c08f25afc0e993ed88b729ef3a9532b1b967bab",
+      "bytes": 258116,
+      "meshes": 10
+    },
+    "wall_l03": {
+      "file": "assets/models/walls/wall_l03.glb",
+      "sha256": "f00ab9c636462a0bcd40d0ebea46c5d9556b0c027b11fce02977f741b8cc6daf",
+      "bytes": 372464,
+      "meshes": 12
+    },
+    "wall_l04": {
+      "file": "assets/models/walls/wall_l04.glb",
+      "sha256": "eab959ece6811a37f626660890ca814f88c2761406b940e3c1a0fd0779a1641c",
+      "bytes": 544604,
+      "meshes": 15
+    },
+    "wall_l05": {
+      "file": "assets/models/walls/wall_l05.glb",
+      "sha256": "61c851fde5799343a7dee1db7bfc8a4c0c8713dcc95dd7a042afe0e33f8dc466",
+      "bytes": 668396,
+      "meshes": 19
+    }
+  }
+}

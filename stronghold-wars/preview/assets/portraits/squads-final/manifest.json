@@ -1,0 +1,360 @@
+{
+  "schema": 1,
+  "source": "Owner-supplied final DZN progression sheets",
+  "outputSize": [
+    768,
+    768
+  ],
+  "assets": {
+    "assault_l01": {
+      "file": "assets/portraits/squads-final/assault_l01.png",
+      "source": "DZN Warden assault progression-2.png",
+      "sourceSha256": "b519081055079e794091224dcb83e94d22666f26efaaa56ebc2dd40407e3ee85",
+      "sha256": "009de94e8d95cc7dca275e68fa393fe4054f11ec3f5a0fe2ad1d3bb4a8a8a5fb",
+      "bytes": 433230,
+      "bbox": [
+        53,
+        68,
+        446,
+        765
+      ],
+      "opaquePixels": 138446
+    },
+    "assault_l02": {
+      "file": "assets/portraits/squads-final/assault_l02.png",
+      "source": "DZN Warden assault progression-2.png",
+      "sourceSha256": "b519081055079e794091224dcb83e94d22666f26efaaa56ebc2dd40407e3ee85",
+      "sha256": "ef71a7cb6b3e7e7ece0658e281dc5eadf496ed33ef702ef9878c589d6949445e",
+      "bytes": 444045,
+      "bbox": [
+        435,
+        68,
+        816,
+        766
+      ],
+      "opaquePixels": 140928
+    },
+    "assault_l03": {
+      "file": "assets/portraits/squads-final/assault_l03.png",
+      "source": "DZN Warden assault progression-2.png",
+      "sourceSha256": "b519081055079e794091224dcb83e94d22666f26efaaa56ebc2dd40407e3ee85",
+      "sha256": "c1e31526423f6dad277a6b0605a9bbffc7f2072520550be2ef1f6fdf58de36bb",
+      "bytes": 471121,
+      "bbox": [
+        812,
+        68,
+        1199,
+        765
+      ],
+      "opaquePixels": 145896
+    },
+    "assault_l04": {
+      "file": "assets/portraits/squads-final/assault_l04.png",
+      "source": "DZN Warden assault progression-2.png",
+      "sourceSha256": "b519081055079e794091224dcb83e94d22666f26efaaa56ebc2dd40407e3ee85",
+      "sha256": "fa9ffb59ae2a622f6c4380d07ba603fea9ea6390eeb24e6a07a92c62dbd7bc6d",
+      "bytes": 498896,
+      "bbox": [
+        1191,
+        68,
+        1569,
+        766
+      ],
+      "opaquePixels": 155320
+    },
+    "assault_l05": {
+      "file": "assets/portraits/squads-final/assault_l05.png",
+      "source": "DZN Warden assault progression-2.png",
+      "sourceSha256": "b519081055079e794091224dcb83e94d22666f26efaaa56ebc2dd40407e3ee85",
+      "sha256": "f8faf759f3ded37b39dc03ae11edee36d7a70ff57840375871ea31d63128c5a5",
+      "bytes": 548251,
+      "bbox": [
+        1576,
+        64,
+        1980,
+        766
+      ],
+      "opaquePixels": 169077
+    },
+    "recon_l01": {
+      "file": "assets/portraits/squads-final/recon_l01.png",
+      "source": "DZN Ghost five-stage scout progression-5.png",
+      "sourceSha256": "683148d81c2aa41cc712e042daf7dc7cb9306313f0a0416b778ee5f54f345088",
+      "sha256": "15fcd586741aa0a3f6cbc02555b93862ae06789dd397e5faee5e8e8e290e5347",
+      "bytes": 392164,
+      "bbox": [
+        47,
+        101,
+        377,
+        783
+      ],
+      "opaquePixels": 116953
+    },
+    "recon_l02": {
+      "file": "assets/portraits/squads-final/recon_l02.png",
+      "source": "DZN Ghost five-stage scout progression-5.png",
+      "sourceSha256": "683148d81c2aa41cc712e042daf7dc7cb9306313f0a0416b778ee5f54f345088",
+      "sha256": "3d2aac367992ecfe772d793dca9c8ed80a600c7eb45f952ceb33b5c3eb04fcd4",
+      "bytes": 422690,
+      "bbox": [
+        441,
+        94,
+        774,
+        783
+      ],
+      "opaquePixels": 130637
+    },
+    "recon_l03": {
+      "file": "assets/portraits/squads-final/recon_l03.png",
+      "source": "DZN Ghost five-stage scout progression-5.png",
+      "sourceSha256": "683148d81c2aa41cc712e042daf7dc7cb9306313f0a0416b778ee5f54f345088",
+      "sha256": "3da9f4abacf59a12c7f582f9258dff85b6407199a3180ba343b330193dfa1faf",
+      "bytes": 370360,
+      "bbox": [
+        829,
+        8,
+        1163,
+        783
+      ],
+      "opaquePixels": 137504
+    },
+    "recon_l04": {
+      "file": "assets/portraits/squads-final/recon_l04.png",
+      "source": "DZN Ghost five-stage scout progression-5.png",
+      "sourceSha256": "683148d81c2aa41cc712e042daf7dc7cb9306313f0a0416b778ee5f54f345088",
+      "sha256": "0239ad27d6e49db1c1e89ff514df16306f8b396f89de10e773a9ffc1f17fa6fa",
+      "bytes": 398814,
+      "bbox": [
+        1219,
+        8,
+        1564,
+        784
+      ],
+      "opaquePixels": 145880
+    },
+    "recon_l05": {
+      "file": "assets/portraits/squads-final/recon_l05.png",
+      "source": "DZN Ghost five-stage scout progression-5.png",
+      "sourceSha256": "683148d81c2aa41cc712e042daf7dc7cb9306313f0a0416b778ee5f54f345088",
+      "sha256": "ea64164257db40b57fe5ca26cc8ba16844e293d537771993e8453391f8203c12",
+      "bytes": 444145,
+      "bbox": [
+        1601,
+        7,
+        1971,
+        784
+      ],
+      "opaquePixels": 161496
+    },
+    "engineer_l01": {
+      "file": "assets/portraits/squads-final/engineer_l01.png",
+      "source": "DZN Fixer five-stage lineup, fully framed-6.png",
+      "sourceSha256": "c624eaae61363bc7419ab9af00b93289fc746beed7ccec9f2a542583972f9ec1",
+      "sha256": "20581b4e15b0f6902454385291243c9771113309480be4fd0dbac30a0faab3d0",
+      "bytes": 463349,
+      "bbox": [
+        113,
+        99,
+        443,
+        727
+      ],
+      "opaquePixels": 116622
+    },
+    "engineer_l02": {
+      "file": "assets/portraits/squads-final/engineer_l02.png",
+      "source": "DZN Fixer five-stage lineup, fully framed-6.png",
+      "sourceSha256": "c624eaae61363bc7419ab9af00b93289fc746beed7ccec9f2a542583972f9ec1",
+      "sha256": "d41e5839b2fd4101518b3b71fe997a68eb72b1c206dcb467b179c6455192be90",
+      "bytes": 494497,
+      "bbox": [
+        466,
+        99,
+        806,
+        727
+      ],
+      "opaquePixels": 121445
+    },
+    "engineer_l03": {
+      "file": "assets/portraits/squads-final/engineer_l03.png",
+      "source": "DZN Fixer five-stage lineup, fully framed-6.png",
+      "sourceSha256": "c624eaae61363bc7419ab9af00b93289fc746beed7ccec9f2a542583972f9ec1",
+      "sha256": "b585767391d7b9502b414a7ecb69ab3c3cf3b86a6afee37370ca233139798923",
+      "bytes": 526885,
+      "bbox": [
+        808,
+        98,
+        1155,
+        728
+      ],
+      "opaquePixels": 127706
+    },
+    "engineer_l04": {
+      "file": "assets/portraits/squads-final/engineer_l04.png",
+      "source": "DZN Fixer five-stage lineup, fully framed-6.png",
+      "sourceSha256": "c624eaae61363bc7419ab9af00b93289fc746beed7ccec9f2a542583972f9ec1",
+      "sha256": "a046efb58cecbdcbc067ee91612ae4eff433be0406654c67085f808c012c9157",
+      "bytes": 541291,
+      "bbox": [
+        1158,
+        95,
+        1506,
+        728
+      ],
+      "opaquePixels": 132485
+    },
+    "engineer_l05": {
+      "file": "assets/portraits/squads-final/engineer_l05.png",
+      "source": "DZN Fixer five-stage lineup, fully framed-6.png",
+      "sourceSha256": "c624eaae61363bc7419ab9af00b93289fc746beed7ccec9f2a542583972f9ec1",
+      "sha256": "ec57bb6a48f881cbd661387ab771dfdcb81bec68f14f47c6886f9c2d3b190974",
+      "bytes": 581925,
+      "bbox": [
+        1509,
+        95,
+        1870,
+        728
+      ],
+      "opaquePixels": 143159
+    },
+    "sentinel_l01": {
+      "file": "assets/portraits/squads-final/sentinel_l01.png",
+      "source": "DZN Sentinel five-stage formation-7.png",
+      "sourceSha256": "0f547123ef9acceb104615cac70d2374706abaae526ef0a3e39bacf32b38a971",
+      "sha256": "6ea48c60ba214d2668bb1bc3a90aa8fc7e1ebcb168ca526a0a09a145b3089811",
+      "bytes": 422449,
+      "bbox": [
+        97,
+        90,
+        429,
+        703
+      ],
+      "opaquePixels": 108944
+    },
+    "sentinel_l02": {
+      "file": "assets/portraits/squads-final/sentinel_l02.png",
+      "source": "DZN Sentinel five-stage formation-7.png",
+      "sourceSha256": "0f547123ef9acceb104615cac70d2374706abaae526ef0a3e39bacf32b38a971",
+      "sha256": "bc8876d1a460f214d81c43385ed5fc3c4fe9e13de512c1628dd74034f9fee6ac",
+      "bytes": 446647,
+      "bbox": [
+        458,
+        90,
+        790,
+        703
+      ],
+      "opaquePixels": 113847
+    },
+    "sentinel_l03": {
+      "file": "assets/portraits/squads-final/sentinel_l03.png",
+      "source": "DZN Sentinel five-stage formation-7.png",
+      "sourceSha256": "0f547123ef9acceb104615cac70d2374706abaae526ef0a3e39bacf32b38a971",
+      "sha256": "f3c3efdd48b3a2f7a5e6cb6d6c3f1287f325cb285663ff81be845008242d8d84",
+      "bytes": 485127,
+      "bbox": [
+        826,
+        89,
+        1165,
+        704
+      ],
+      "opaquePixels": 120776
+    },
+    "sentinel_l04": {
+      "file": "assets/portraits/squads-final/sentinel_l04.png",
+      "source": "DZN Sentinel five-stage formation-7.png",
+      "sourceSha256": "0f547123ef9acceb104615cac70d2374706abaae526ef0a3e39bacf32b38a971",
+      "sha256": "31262599171bf4df5e0c8bd08428dcb75cb349c562d3294eadb86ec3eb1dcfcc",
+      "bytes": 528269,
+      "bbox": [
+        1190,
+        89,
+        1552,
+        705
+      ],
+      "opaquePixels": 127600
+    },
+    "sentinel_l05": {
+      "file": "assets/portraits/squads-final/sentinel_l05.png",
+      "source": "DZN Sentinel five-stage formation-7.png",
+      "sourceSha256": "0f547123ef9acceb104615cac70d2374706abaae526ef0a3e39bacf32b38a971",
+      "sha256": "07d937c20a8947ae8e954951a401f670a29663e646564e3821b1c7f4045b982b",
+      "bytes": 544292,
+      "bbox": [
+        1594,
+        88,
+        1938,
+        704
+      ],
+      "opaquePixels": 129419
+    },
+    "medic_l01": {
+      "file": "assets/portraits/squads-final/medic_l01.png",
+      "source": "DZN Lifeline Medic Upgrade Lineup-4.png",
+      "sourceSha256": "633c9900c15cbc12fe23b763df9c5afdc8f672fe7473d5eb841d3cba7c2b1ff5",
+      "sha256": "0b870a0f6ab214c122b2edf2cdc8256ea47151d1d47cc5d5417da5829f6eec1c",
+      "bytes": 446755,
+      "bbox": [
+        38,
+        77,
+        394,
+        769
+      ],
+      "opaquePixels": 133203
+    },
+    "medic_l02": {
+      "file": "assets/portraits/squads-final/medic_l02.png",
+      "source": "DZN Lifeline Medic Upgrade Lineup-4.png",
+      "sourceSha256": "633c9900c15cbc12fe23b763df9c5afdc8f672fe7473d5eb841d3cba7c2b1ff5",
+      "sha256": "9740075e2fdcb25f3c67105feca2ea7fdb49e0cc0a24f0019afa757d60f8d177",
+      "bytes": 456563,
+      "bbox": [
+        421,
+        77,
+        769,
+        769
+      ],
+      "opaquePixels": 134247
+    },
+    "medic_l03": {
+      "file": "assets/portraits/squads-final/medic_l03.png",
+      "source": "DZN Lifeline Medic Upgrade Lineup-4.png",
+      "sourceSha256": "633c9900c15cbc12fe23b763df9c5afdc8f672fe7473d5eb841d3cba7c2b1ff5",
+      "sha256": "6dd8f62dddf7dc86037450f035a48832d309209a380870e74545f929342066e3",
+      "bytes": 490807,
+      "bbox": [
+        804,
+        77,
+        1167,
+        769
+      ],
+      "opaquePixels": 143119
+    },
+    "medic_l04": {
+      "file": "assets/portraits/squads-final/medic_l04.png",
+      "source": "DZN Lifeline Medic Upgrade Lineup-4.png",
+      "sourceSha256": "633c9900c15cbc12fe23b763df9c5afdc8f672fe7473d5eb841d3cba7c2b1ff5",
+      "sha256": "6c3cf46325f32e6f46e2ee2e25fbf711841c03043a5e93c7fe6cc4b839acb55d",
+      "bytes": 533521,
+      "bbox": [
+        1193,
+        77,
+        1571,
+        769
+      ],
+      "opaquePixels": 150412
+    },
+    "medic_l05": {
+      "file": "assets/portraits/squads-final/medic_l05.png",
+      "source": "DZN Lifeline Medic Upgrade Lineup-4.png",
+      "sourceSha256": "633c9900c15cbc12fe23b763df9c5afdc8f672fe7473d5eb841d3cba7c2b1ff5",
+      "sha256": "5c36e7a47383367fcaa839cefa1c8937ea17ce44fed76ca140166eb20c18f448",
+      "bytes": 509984,
+      "bbox": [
+        1592,
+        13,
+        1977,
+        769
+      ],
+      "opaquePixels": 168323
+    }
+  }
+}

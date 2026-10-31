@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Owner-supplied DZN defender concept images; preserved without edits",
+  "assets": {
+    "guardian": {
+      "file": "assets/portraits/defenders/guardian.png",
+      "sourceFile": "DZN Guardian with a massive barrier shield-2.png",
+      "sha256": "37de91d685fb486d695359898735f302955ba89c65ede98422f2552cc9c2de35",
+      "bytes": 2249210,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    "aegis": {
+      "file": "assets/portraits/defenders/aegis.png",
+      "sourceFile": "DZN Aegis with twin interceptor drones-1.png",
+      "sha256": "b8df7e00b5c3840b4651578575fdd6cd60ddcff0c189fd1d3708c0ca2efdc637",
+      "bytes": 1072825,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    "trapper": {
+      "file": "assets/portraits/defenders/trapper.png",
+      "sourceFile": "DZN Trapper with Triple Snare Modules-3.png",
+      "sha256": "562ce916179037c2099bae034569f3b81a258ae8b300bd1dfde424c11e3fa355",
+      "bytes": 1484589,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    },
+    "hound": {
+      "file": "assets/portraits/defenders/hound.png",
+      "sourceFile": "DZN Hound_ Armored Robotic Patrol-4.png",
+      "sha256": "1f8d6efb91a9a203567eaa34c5f441e51c692daba78e782ec0d9eb5fe2dae9b8",
+      "bytes": 1585137,
+      "dimensions": [
+        1254,
+        1254
+      ]
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "stage": "five-level-series",
+  "provenance": "Owner-approved Meshy Pro image-guided generations from original DZN Timberline concepts, normalized with the pre-existing animated saw and conveyor machinery in Blender.",
+  "license": "Private owner-account generation; usage subject to Meshy terms",
+  "generation": {
+    "model": "Meshy T2.5",
+    "targetPolygons": 15000,
+    "texture": true,
+    "quotedCreditsPerLevel": 15,
+    "quotedCreditsTotal": 75,
+    "approvedPilotCeiling": 25,
+    "approvedAdditionalCeiling": 60
+  },
+  "assets": {
+    "timberline_l01": {
+      "file": "assets/models/facilities/timberline_meshy_l01.glb",
+      "bytes": 4250876,
+      "sha256": "94df69a356abe3d7e3a5525dc0a272b6ac605d53ed6bd03dbf4aae3f8e7430fd",
+      "sourceSha256": "0f5b735e528adb959578a781d891e36b13dde5bac43ab8b0ede3b97314aa82c6",
+      "referenceSha256": "823a3c4eb95e6cdaebcfe87358c7239cab33d5592c43fffc14b8bb5ae91b2adb"
+    },
+    "timberline_l02": {
+      "file": "assets/models/facilities/timberline_meshy_l02.glb",
+      "bytes": 4410756,
+      "sha256": "946a78745824271a196e87c90d7263c8e1df9f6a8a233d6b55f67ea7ddd04df5",
+      "sourceSha256": "3c8085460c756dd146b1026fdd10a97b223e3aad857707a2ee6531ddd33ae9b6",
+      "referenceSha256": "df574680c836036e9e0fbf2d8bcf67d6ef29a52ba604c688612ece024dec5ab0"
+    },
+    "timberline_l03": {
+      "file": "assets/models/facilities/timberline_meshy_l03.glb",
+      "bytes": 4646668,
+      "sha256": "7f00179d7eb542677747170f49586a14724f21c4a898a0bf32c197465530bce6",
+      "sourceSha256": "1a3ef4d65085dfbf4a8b7a3d12e63a5d82d5d4b96bf62cf3b3c08a67fe684bcd",
+      "referenceSha256": "b9a4ae3c2546d31ca4f3d92378879bb4efd9a990a5ef15a72e8d985b76b3d5f6"
+    },
+    "timberline_l04": {
+      "file": "assets/models/facilities/timberline_meshy_l04.glb",
+      "bytes": 4542728,
+      "sha256": "cfac9b826adcb9e56301d65b8eaae02b11f7e81f66a9c19a803be5af9eba110b",
+      "sourceSha256": "4493fe10e68983483ad170a49e38adea04da780a99d8b15f01ea13dd5aa419f3",
+      "referenceSha256": "b585adf257e733de0c01a9de9ad65852097efcb893dc05df5a913bb8c8c88058"
+    },
+    "timberline_l05": {
+      "file": "assets/models/facilities/timberline_meshy_l05.glb",
+      "bytes": 4858228,
+      "sha256": "409bd1617f377a160bd32c0937153d93f0c8c6c9ee1a4a0f5b2defa88c145631",
+      "sourceSha256": "685226f30328ca36a89ee695f7bcf7d283810bf9915f61b2ea68d1792b0c5db5",
+      "referenceSha256": "041c92680d7dc11c243941861b59ec229361c827390376a7e7b3f886f0e1d28c"
+    }
+  }
+}
