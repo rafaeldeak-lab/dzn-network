@@ -18,3 +18,17 @@ export function yardProcessState(level, elapsedSeconds, production) {
     light: running ? (stage === 'cut' ? 'cutting' : 'working') : 'stored',
   };
 }
+
+export function yardMachinePose(cycle, reducedMotion = false) {
+  const operating = cycle.running && !reducedMotion;
+  const sorting = operating && cycle.stage === 'sort';
+  const cutStroke = operating && cycle.stage === 'cut' ? Math.sin(cycle.phase * cycle.cycleSeconds * 55) * .075 : 0;
+  const sortProgress = sorting ? Math.max(0, Math.min(1, (cycle.phase - .53) / .35)) : 0;
+  return {
+    operating,
+    carriageZ: 1.55 + cutStroke,
+    sorterAngle: sorting ? Math.sin(cycle.phase * cycle.cycleSeconds * 24) * .085 : 0,
+    hookY: 2.54 - Math.sin(sortProgress * Math.PI) * .28,
+    hookX: .72 + sortProgress * .45,
+  };
+}

@@ -11,7 +11,7 @@ import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/de
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
-import { YARD_CYCLE_SECONDS, yardProcessState } from './preview/yard-process.js';
+import { YARD_CYCLE_SECONDS, yardProcessState, yardMachinePose } from './preview/yard-process.js';
 import { facilityMotion } from './preview/facility-motion.js';
 import { createForgeWorkshop, forgePose, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './preview/forge-workshop.js';
 import { commsPose, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './preview/comms-array.js';
@@ -36,6 +36,16 @@ for (let level = 1; level <= 5; level++) {
   const full = yardProcessState(level, seconds * .45, { ...production, stored: 100 });
   if (full.running || full.stage !== 'stored' || full.fill !== 1 || full.sawdust)
     throw new Error(`Timberline L${level} must stop when storage is full.`);
+  const cutting = yardMachinePose(yardProcessState(level, seconds * .475, production));
+  const sorting = yardMachinePose(yardProcessState(level, seconds * .7, production));
+  const parked = yardMachinePose(full);
+  const accessible = yardMachinePose(yardProcessState(level, seconds * .7, production), true);
+  if (!cutting.operating || cutting.carriageZ === 1.55 || !sorting.operating
+    || sorting.hookX <= .72 || sorting.hookY >= 2.54
+    || parked.operating || parked.carriageZ !== 1.55 || parked.sorterAngle !== 0
+    || parked.hookX !== .72 || parked.hookY !== 2.54
+    || accessible.operating || accessible.sorterAngle !== 0 || accessible.hookX !== .72)
+    throw new Error(`Timberline L${level} must park its machinery when production stops or motion is reduced.`);
 }
 for (let level = 1; level <= 5; level++) {
   const raised = forgePose(level, .1, true);

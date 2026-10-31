@@ -13,7 +13,7 @@ import { FIRST_EDITION_CARDS, cardEarned } from './collectible-cards.js';
 import { GRID_STEP, LAYOUT_ZONES, CORE_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition } from './layout-grid.js';
 import { OPERATIVES, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, FIELD_UPGRADES, PING_TYPES, OperationsController } from './operative-ops.js';
 import { operativeAsset } from './operative-assets.js';
-import { yardProcessState } from './yard-process.js';
+import { yardProcessState, yardMachinePose } from './yard-process.js';
 import { facilityMotion } from './facility-motion.js';
 import { createForgeWorkshop, forgeWorkState, startForgeUpgradeReveal, stepForgeWorkshop } from './forge-workshop.js';
 import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startCommsUpgradeReveal, stepCommsArray } from './comms-array.js';
@@ -668,7 +668,8 @@ function stepYardProcess(yard, dt, production, reducedMotion) {
   const previous = yardProcessState(yard.level, yard.phase, production);
   if (previous.running && !reducedMotion) yard.phase += dt;
   const cycle = yardProcessState(yard.level, yard.phase, production);
-  const moving = cycle.running && !reducedMotion;
+  const machine = yardMachinePose(cycle, reducedMotion);
+  const moving = machine.operating;
   yard.input.visible = moving && (cycle.stage === 'feed' || cycle.stage === 'cut');
   yard.input.position.x = cycle.logX;
   yard.output.visible = moving && cycle.stage === 'sort';
@@ -689,16 +690,18 @@ function stepYardProcess(yard, dt, production, reducedMotion) {
   yard.lamp.material.color.setHex(cycle.light === 'stored' ? 0xffb343 : cycle.light === 'cutting' ? 0xff7545 : 0x8ccf39);
   yard.lamp.material.emissive.copy(yard.lamp.material.color);
   yard.lamp.material.emissiveIntensity = moving ? .8 + Math.sin(yard.phase * 8) * .2 : .35;
+  // Set the parked pose every frame so a full yard, interrupted production or
+  // reduced-motion change cannot leave a saw, sorter or hook frozen mid-cycle.
+  if (yard.carriage) yard.carriage.position.z = machine.carriageZ;
+  if (yard.sorter) yard.sorter.rotation.z = machine.sorterAngle;
+  if (yard.hook) {
+    yard.hook.position.y = machine.hookY;
+    yard.hook.position.x = machine.hookX;
+  }
   if (!moving) return;
   if (yard.rotor) yard.rotor.rotation.z -= dt * (5.2 + yard.level * .9);
   for (const roller of yard.rollers) roller.rotateY(dt * (1.5 + yard.level * .22));
   for (const roller of yard.exteriorRollers) roller.rotateZ(dt * (1.5 + yard.level * .22));
-  if (yard.carriage) yard.carriage.position.z = 1.55 + (cycle.stage === 'cut' ? Math.sin(yard.phase * 55) * .075 : 0);
-  if (yard.sorter) yard.sorter.rotation.z = cycle.stage === 'sort' ? Math.sin(yard.phase * 24) * .085 : 0;
-  if (yard.hook) {
-    yard.hook.position.y = 2.54 - (cycle.stage === 'sort' ? Math.sin((cycle.phase - .53) / .35 * Math.PI) * .28 : 0);
-    yard.hook.position.x = .72 + (cycle.stage === 'sort' ? (cycle.phase - .53) / .35 * .45 : 0);
-  }
   if (yard.feedWheel) yard.feedWheel.rotation.z += dt * (2 + yard.level * .3);
   if (yard.beacon) yard.beacon.rotation.y += dt * .45;
 }
