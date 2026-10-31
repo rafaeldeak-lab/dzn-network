@@ -382,7 +382,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a2420);
 scene.fog = new THREE.Fog(0x1a2420, 60, 130);
 
-let zoom = 28;
+function baseFitZoom() {
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  return aspect < .72 ? Math.min(86, Math.max(28, 36 / aspect)) : 28;
+}
+let fittedZoom = baseFitZoom();
+let zoom = fittedZoom;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
 const cameraOffset = new THREE.Vector3(40, 40, 40);
@@ -402,6 +407,9 @@ function updateCamera() {
 }
 updateCamera();
 window.addEventListener('resize', () => {
+  const wasFittedToBase = zoom === fittedZoom && camTarget.lengthSq() < 1;
+  fittedZoom = baseFitZoom();
+  if (wasFittedToBase) zoom = fittedZoom;
   renderer.setSize(window.innerWidth, window.innerHeight);
   updateCamera();
 });
@@ -2109,7 +2117,7 @@ function stopPatrolFocus(returnToBase = false) {
   patrolFocusExit.textContent = '← Back to base';
   patrolFocusLight.visible = false;
   patrolFocusRing.visible = false;
-  if (returnToBase) { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); }
+  if (returnToBase) { camTarget.set(0, 0, 0); zoom = baseFitZoom(); updateCamera(); }
 }
 function focusedPatrol() {
   if (!focusedPatrolRole) return null;
@@ -2751,7 +2759,7 @@ function showLandPanel(focusPlotId = null) {
   openPanel(`<h2>Land & Forest</h2><p>Chop trees for Timber. The owner approves each cleared district; members fund its buildings together.</p><p class="notice">Your Timber: ${snapshot.member.timber} · Claimed land: ${snapshot.base.landPlots.filter(plot => plot.status === 'claimed').length}/5${repairPriority ? ` · Repair priority: ${escapeHTML(GAME_CONFIG.landPlots.find(plot => plot.id === repairPriority)?.name || repairPriority)}` : ''}</p>${focusPlotId ? '<div class="row"><button id="returnBaseBtn">Return camera to base</button></div>' : ''}<div class="row"><button id="recycleTimberBtn" ${snapshot.member.salvage < GAME_CONFIG.recycleSalvageCost ? 'disabled' : ''}>Recycle ${GAME_CONFIG.recycleSalvageCost} Salvage → ${GAME_CONFIG.recycledTimber} Timber</button></div>${cards}<details class="technical-details"><summary>Routes, defence and renewable Timber</summary><p class="help">Daily Salvage keeps Timber renewable. Supply routes add +${service.routeNetworkBonus()} to each member's next daily Salvage claim. Ridgewatch boosts Assault, Signal Relay boosts Recon, and Highland Works defends both. Facility levels and barricades freeze during an accepted local war; routes do not change war scoring.</p></details><div class="row"><button id="closeBtn">Close</button></div>`);
   // Timberline is the first card, so retain the short explanation and return
   // control at the top instead of scrolling them off screen.
-  if ($('returnBaseBtn')) $('returnBaseBtn').onclick = () => { camTarget.set(0, 0, 0); zoom = 28; updateCamera(); closePanel(); };
+  if ($('returnBaseBtn')) $('returnBaseBtn').onclick = () => { camTarget.set(0, 0, 0); zoom = baseFitZoom(); updateCamera(); closePanel(); };
   $('closeBtn').onclick = closePanel;
   $('recycleTimberBtn').onclick = () => { const result = service.recycleTimber(); toast(result.ok ? `+${result.amount} recycled Timber` : result.error); updateHud(); showLandPanel(); };
   panel.querySelectorAll('[data-chop]').forEach(button => button.onclick = () => {
@@ -4842,7 +4850,7 @@ function updateWarBattle(dt) {
   warOrders.hidden = true;
   camTarget.set(0, 0, 0);
   cameraOffset.copy(completed.previousCameraOffset);
-  zoom = 28;
+  zoom = baseFitZoom();
   updateCamera();
   toast(`Raid replay complete · ${completed.result.score} points. Open War Table for the full result.`);
   showWarTable();
@@ -5009,7 +5017,7 @@ function finishRaid(won) {
   $('closeBtn').onclick = () => {
     closePanel();
     camTarget.set(0, 0, 0);
-    zoom = 28;
+    zoom = baseFitZoom();
     updateCamera();
   };
 }
@@ -5089,7 +5097,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    zoom = THREE.MathUtils.clamp(zoom * pinchStart / dist, 12, 60);
+    zoom = THREE.MathUtils.clamp(zoom * pinchStart / dist, 12, 96);
     pinchStart = dist;
   } else {
     dragDistance += Math.abs(dx) + Math.abs(dy);
@@ -5142,7 +5150,7 @@ renderer.domElement.addEventListener('pointercancel', e => pointers.delete(e.poi
 renderer.domElement.addEventListener('wheel', e => {
   if (fieldSession) { zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.08 : 0.92), 25, 44); updateCamera(); return; }
   if (focusedPatrolRole) stopPatrolFocus();
-  zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 12, 60);
+  zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 12, 96);
   updateCamera();
 }, { passive: true });
 
