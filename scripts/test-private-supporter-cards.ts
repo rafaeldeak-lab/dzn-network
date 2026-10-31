@@ -31,7 +31,7 @@ assert.match(component, /if \(!available\) return null/);
 assert.match(component, /credentials: "include"/);
 assert.match(component, /cache: "no-store"/);
 assert.doesNotMatch(component, /localStorage|sessionStorage|navigator\.share|navigator\.clipboard|sendBeacon|analytics/i);
-assert.match(profile, /showPrivateSupporterCards/);
+assert.match(profile, /showPlayerCabinet/);
 
 async function run() {
   const disabledResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards"), {} as Env);

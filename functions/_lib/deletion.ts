@@ -389,6 +389,7 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
     ["player_discord_community_memberships", "user_id"],
     ["player_profile_privacy_preferences", "user_id"],
     ["player_public_profiles", "user_id"],
+    ["player_cabinet_showcase_items", "user_id"],
     ["player_game_identity_claims", "user_id"],
     ["player_game_identity_links", "user_id"],
     ["player_game_identity_audit_log", "user_id"],

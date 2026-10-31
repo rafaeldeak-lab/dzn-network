@@ -1,12 +1,13 @@
 "use client";
 
-import { Activity, AlertTriangle, CalendarDays, Check, Crosshair, EyeOff, Gamepad2, Loader2, Radio, Server, Share2, ShieldCheck, Sparkles, Trophy, UserRound } from "lucide-react";
+import { Activity, AlertTriangle, CalendarDays, Check, Crosshair, Crown, EyeOff, Gamepad2, Loader2, Radio, Server, Share2, ShieldCheck, Sparkles, Trophy, UserRound } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
 import { publicMapLabel } from "@/lib/showcase-labels";
+import { supporterCardArtworkUrl } from "@/lib/supporter-card-art";
 
 type FutureSection = { visible: boolean; status: "not_available_yet" | "hidden"; message: string };
 type CallingCardSection = { visible: boolean; status: "available" | "not_available_yet" | "hidden"; message: string; items: Array<{ product_key: string; name: string; granted_at: string }> };
@@ -241,8 +242,9 @@ function FutureRow({ label, section, icon }: { label: string; section: FutureSec
   return <div className="flex min-h-24 gap-3 border border-violet-300/15 bg-violet-300/[0.055] p-3"><span className="mt-0.5 text-violet-200">{icon}</span><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-black uppercase text-white">{label}</p><span className="text-[9px] font-black uppercase text-violet-200">{section.status.replace(/_/g, " ")}</span></div><p className="mt-2 text-xs font-semibold leading-5 text-slate-400">{section.message}</p></div></div>;
 }
 function CallingCardRow({ section }: { section: CallingCardSection }) {
-  return <div className="min-h-24 border border-violet-300/15 bg-violet-300/[0.055] p-3"><div className="flex gap-3"><Gamepad2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" /><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-black uppercase text-white">Supporter Cards</p><span className="text-[9px] font-black uppercase text-violet-200">{section.status.replace(/_/g, " ")}</span></div><p className="mt-2 text-xs font-semibold leading-5 text-slate-400">{section.message}</p></div></div>{section.visible && section.items.length ? <div className="mt-3 flex flex-wrap gap-2">{section.items.map((item) => <span key={item.product_key} className="rounded-md border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">{item.name}</span>)}</div> : null}</div>;
+  return <div className="min-h-24 border border-violet-300/15 bg-violet-300/[0.055] p-3"><div className="flex gap-3"><Gamepad2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" /><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-black uppercase text-white">Cabinet Cards</p><span className="text-[9px] font-black uppercase text-violet-200">{section.status.replace(/_/g, " ")}</span></div><p className="mt-2 text-xs font-semibold leading-5 text-slate-400">{section.message}</p></div></div>{section.visible && section.items.length ? <div className="mt-3 grid gap-2">{section.items.map((item) => <PublicCabinetCard key={item.product_key} item={item} />)}</div> : null}</div>;
 }
+function PublicCabinetCard({ item }: { item: CallingCardSection["items"][number] }) { const artwork = supporterCardArtworkUrl(item.product_key); return <div className="flex min-w-0 items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/[0.06] p-2.5"><div className="flex h-11 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-violet-300/25 bg-[#090711]">{artwork ? <img src={artwork} alt="" className="h-full w-full object-contain p-0.5" loading="lazy" decoding="async" /> : <Crown aria-hidden="true" className="h-4 w-4 text-violet-200" />}</div><div className="min-w-0"><p className="truncate text-[10px] font-black uppercase text-cyan-100">{item.name}</p><p className="mt-0.5 text-[9px] font-bold uppercase text-slate-400">Selected from cabinet</p></div></div>; }
 function TruthfulEmpty({ message }: { message: string }) { return <p className="border-l-2 border-amber-300 bg-amber-300/8 p-3 text-sm font-semibold leading-6 text-amber-50">{message}</p>; }
 function EmptyHandleState() { return <p className="text-sm font-semibold leading-6 text-amber-50">Public player profiles open from a generated handle such as /players/example-handle. Log in to manage your own profile publishing settings.</p>; }
 function LoadingState({ message }: { message: string }) { return <section className="mx-auto mt-16 flex max-w-xl items-center justify-center gap-3 rounded-lg border border-cyan-300/25 bg-[#050b14]/90 p-6 text-sm font-semibold text-cyan-100"><Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />{message}</section>; }

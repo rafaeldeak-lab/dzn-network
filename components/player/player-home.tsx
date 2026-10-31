@@ -27,7 +27,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { PlayerGameIdentityLinks } from "@/components/player/player-game-identity-links";
-import { PrivateSupporterCards } from "@/components/player/private-supporter-cards";
+import { PlayerCabinet } from "@/components/player/player-cabinet";
 import { PlayerProfilePrivacySettings } from "@/components/player/profile-privacy-settings";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
@@ -620,7 +620,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         {mode === "profile" && authState.status === "logged_in" ? (
           <div className="min-w-0">
             {visitedProfileSections.has("profile-summary") ? (
-              <div hidden={activeProfileSection !== "profile-summary"}><ProfileProgressionPanel state={hubState} showPrivateSupporterCards /></div>
+              <div hidden={activeProfileSection !== "profile-summary"}><ProfileProgressionPanel state={hubState} showPlayerCabinet /></div>
             ) : null}
             {visitedProfileSections.has("game-account") ? (
               <div id="game-account" hidden={activeProfileSection !== "game-account"} className="scroll-mt-72 md:scroll-mt-44"><PlayerGameIdentityLinks /></div>
@@ -1226,7 +1226,7 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
   );
 }
 
-function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: { state: PlayerHubState; showPrivateSupporterCards?: boolean }) {
+function ProfileProgressionPanel({ state, showPlayerCabinet = false }: { state: PlayerHubState; showPlayerCabinet?: boolean }) {
   const data = state.status === "ready" ? state.data : null;
   const profile = data?.profile_summary ?? null;
   const progression = data?.progression_summary ?? null;
@@ -1334,7 +1334,7 @@ function ProfileProgressionPanel({ state, showPrivateSupporterCards = false }: {
               </div>
             </div>
           </div>
-          {showPrivateSupporterCards ? <PrivateSupporterCards /> : null}
+          {showPlayerCabinet ? <PlayerCabinet /> : null}
         </div>
       ) : (
         <div className="mt-5 grid gap-3">

@@ -221,6 +221,7 @@ Public profiles must respect saved privacy preferences:
 - Preference reads are private/no-store, default without implicit writes, and return a public profile href only when the current user has opted in and has an active generated handle.
 - Preference writes are same-origin, current-user-only, bounded, boolean-only, and idempotent through `UNIQUE(user_id)`.
 - The current saved section choices are `public_profile_enabled`, `show_display_name`, `show_gameplay_summary`, `show_featured_server`, `show_xp_progress`, `show_challenge_progress`, `show_calling_cards`, and `show_award_dates`.
+- Player Cabinet cards are permanent, account-bound Store entitlements. A purchase is private by default; a player must separately select an active owned card in their cabinet and enable the Cabinet Cards profile section before it appears on a public profile. The public surface shows no payment, receipt, order, entitlement, or raw account information.
 - Enabling public profile publishing may generate or reactivate only the current user's handle. Handles are presentation-only and cannot grant authority or competitive effect.
 - Public `GET /api/public/players/[handle]` and `/players/[handle]` show only approved sections.
 - Hidden sections, private identifiers, and raw award evidence stay private.
