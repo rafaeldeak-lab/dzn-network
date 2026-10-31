@@ -55,7 +55,7 @@ function chopCycle(time) {
 
 export function fixerActionPose(time, moving, stop, breachAge = Infinity, reducedMotion = false) {
   if (reducedMotion) return { task: null, arm: 0, hand: 0, support: 0, look: 0, breach: 0 };
-  const task = !moving && ['workshop', 'hall', 'yard'].includes(stop) ? stop : null;
+  const task = !moving && ['workshop', 'hall', 'yard', 'depot'].includes(stop) ? stop : null;
   const breach = Math.max(0, 1 - Math.max(0, breachAge) / .65);
   const tempo = 4.6;
   const stroke = task ? Math.sin(time * tempo) : 0;
@@ -150,6 +150,22 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
         yard.add(plank); outputPlanks.push(plank);
       }
     }
+    const depot = new THREE.Group(); depot.name = 'fixer_depot_delivery'; root.add(depot);
+    const deliveryPlanks = [];
+    const pallet = new THREE.Mesh(new THREE.CylinderGeometry(.34, .36, .075, 8), steel);
+    pallet.scale.z = .55; pallet.position.set(.78, .065, .55); depot.add(pallet);
+    const depotShape = new THREE.Shape();
+    depotShape.moveTo(-.17, -.035); depotShape.lineTo(.17, -.035);
+    depotShape.lineTo(.17, .035); depotShape.lineTo(-.17, .035); depotShape.closePath();
+    const deliveryGeometry = new THREE.ExtrudeGeometry(depotShape, {
+      depth: .038, bevelEnabled: true, bevelThickness: .006,
+      bevelSize: .007, bevelSegments: 2,
+    });
+    for (let index = 0; index < Math.min(5, tier + 1); index++) {
+      const plank = new THREE.Mesh(deliveryGeometry, [timber, bark]);
+      plank.rotation.x = Math.PI / 2;
+      depot.add(plank); deliveryPlanks.push(plank);
+    }
     const clamps = [];
     if (tier >= 3) for (const side of [-1, 1]) {
       const clamp = new THREE.Group();
@@ -178,12 +194,13 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
     }
     work = soldier.userData.fixerWork = { root, material, materials: [material, bark, timber, steel, light],
       textures: [barkMap, endMap],
-      particles, yard, whole, halves, outputPlanks, clamps, feedWheel, guide, tier };
+      particles, yard, depot, deliveryPlanks, whole, halves, outputPlanks, clamps, feedWheel, guide, tier };
   }
   if (!work) return;
   work.root.visible = Boolean(task && !reducedMotion);
   if (!work.root.visible) return;
   work.yard.visible = task === 'yard';
+  work.depot.visible = task === 'depot';
   const chop = task === 'yard' ? chopCycle(time) : null;
   if (work.feedWheel) work.feedWheel.rotation.z = time * .9;
   work.whole.visible = !chop || chop.phase < .59;
@@ -199,6 +216,14 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
     plank.position.set(-.53 - delivery * .14, .055 + index * .043,
       .4 + index % 2 * .024);
     plank.rotation.z = (1 - delivery) * -.08;
+  });
+  const deliveryPhase = ((time * .43) % 1 + 1) % 1;
+  work.deliveryPlanks.forEach((plank, index) => {
+    const threshold = .12 + index * .14;
+    const progress = ease((deliveryPhase - threshold) / .09);
+    plank.visible = task === 'depot' && deliveryPhase >= threshold;
+    plank.position.set(.78, .14 + index * .048 + (1 - progress) * .09, .55 + index % 2 * .025);
+    plank.rotation.z = (1 - progress) * -.08;
   });
   work.clamps.forEach((clamp, index) => {
     const open = chop ? ease((chop.phase - .48) / .15) : 0;

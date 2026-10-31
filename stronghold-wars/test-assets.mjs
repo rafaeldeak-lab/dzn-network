@@ -239,7 +239,8 @@ const fixerHand = new THREE.Bone(); fixerHand.name = 'Hand_L'; fixerHand.positio
 for (const name of ['UpperArm_R', 'Neck']) { const bone = new THREE.Bone(); bone.name = name; fixerModel.add(bone); }
 const yardAction = fixerActionPose(Math.PI / (2 * 3.4), false, 'yard');
 const forgeAction = fixerActionPose(Math.PI / (2 * 4.6), false, 'workshop');
-if (yardAction.task !== 'yard' || forgeAction.task !== 'workshop' || !yardAction.arm || !forgeAction.hand
+const depotAction = fixerActionPose(Math.PI / (2 * 4.6), false, 'depot');
+if (yardAction.task !== 'yard' || forgeAction.task !== 'workshop' || depotAction.task !== 'depot' || !yardAction.arm || !forgeAction.hand
   || fixerActionPose(0, true, 'yard').task || fixerActionPose(0, false, 'camp').task
   || fixerActionPose(0, false, 'yard', Infinity, true).task || fixerActionPose(0, true, null, .3).breach < .5)
   throw new Error('Fixer should work at the yard and Forge, signal a breach and respect reduced motion.');
@@ -265,6 +266,10 @@ if (fixer.userData.fixerWork.whole.visible || !fixer.userData.fixerWork.halves.e
 stepFixerWork(fixer, 1.2, 'workshop', 5);
 if (fixer.userData.fixerWork.yard.visible)
   throw new Error('The chopping station must stay hidden at the Forge.');
+stepFixerWork(fixer, 1.2, 'depot', 5);
+if (!fixer.userData.fixerWork.depot.visible || fixer.userData.fixerWork.yard.visible
+  || !fixer.userData.fixerWork.deliveryPlanks.some(plank => plank.visible))
+  throw new Error('Fixer should unload cut timber at the Supply Depot.');
 stepFixerWork(fixer, 1, null, 5);
 if (fixer.userData.fixerWork.root.visible) throw new Error('Fixer work cue should stop between buildings.');
 stepFixerWork(fixer, 1, 'workshop', 5, true);
@@ -274,6 +279,7 @@ for (let level = 1; level <= 5; level++) {
   stepFixerWork(unit, .2, 'yard', level);
   const station = unit.userData.fixerWork;
   if (station.outputPlanks.length !== (level >= 2 ? Math.min(4, level + 1) : 0)
+    || station.deliveryPlanks.length !== Math.min(5, level + 1)
     || station.clamps.length !== (level >= 3 ? 2 : 0)
     || Boolean(station.feedWheel) !== (level >= 4)
     || Boolean(station.guide) !== (level >= 5)
@@ -734,7 +740,7 @@ if (walledHallLayout.walls.some(wall => wall.x === walledHallStop[0] && wall.z =
     !walkablePatrolPath(PATROL_NODES.camp, walledHallStop, walledHallLayout)) throw new Error('A ring of wall segments must not put the Hall patrol stop inside a wall.');
 const workingYardLayout = { ...defaultLayout(), yardAccessible: true };
 const workingYardNodes = patrolNodesForLayout(workingYardLayout);
-const yardMotion = setPatrolOrder(createPatrolMotion('engineer'), 'standard', ['workshop', 'yard', 'camp', 'workshop']);
+const yardMotion = setPatrolOrder(createPatrolMotion('engineer'), 'standard', ['workshop', 'yard', 'depot', 'camp', 'workshop']);
 const yardVisits = new Set();
 for (let frame = 0; frame < 4800; frame++) {
   stepPatrolMotion(yardMotion, .05, workingYardNodes, workingYardLayout);
@@ -742,7 +748,7 @@ for (let frame = 0; frame < 4800; frame++) {
   const site = workingYardLayout.structures['timberline-depot'];
   if (Math.abs(yardMotion.x - site.x) < 3.2 && Math.abs(yardMotion.z - site.z) < 3.2) throw new Error('Fixer walked through the Lumber Yard model.');
 }
-if (!yardVisits.has('yard') || !yardVisits.has('workshop') || !yardVisits.has('camp')) throw new Error('Fixer did not visit the completed Lumber Yard and return to camp.');
+if (!yardVisits.has('yard') || !yardVisits.has('depot') || !yardVisits.has('workshop') || !yardVisits.has('camp')) throw new Error('Fixer did not deliver timber from the Lumber Yard to the Supply Depot and return to camp.');
 console.log('Dynamic patrol nodes and wall-avoiding grid paths verified.');
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (const [post, node] of Object.entries(DEFENDER_POST_NODES)) {
   const motion = createDefenderMotion(role, post);

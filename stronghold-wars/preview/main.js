@@ -1836,7 +1836,7 @@ function syncPatrolKits() { for (const patrol of patrols) equipSoldier(patrol.me
 function syncPatrolOrders() {
   const base = service.community()?.saved.base;
   const orders = base?.patrolOrders || {};
-  const yardRoute = activePatrolLayout?.yardAccessible ? ['workshop', 'yard', 'camp', 'workshop'] : null;
+  const yardRoute = activePatrolLayout?.yardAccessible ? ['workshop', 'yard', 'depot', 'camp', 'workshop'] : null;
   const workSite = (base ? service._constructionJobs(base) : []).filter(({ project }) => project.startedAt <= Date.now()).sort((a, b) => a.project.finishAt - b.project.finishAt)[0];
   const target = workSite?.kind === 'core' ? (workSite.project.key === 'hq' ? 'hall' : workSite.project.key)
     : workSite ? `district:${workSite.plot.id}` : null;
