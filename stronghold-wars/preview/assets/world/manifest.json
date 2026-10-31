@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "asset": "assets/world/stronghold-world.png",
+  "dimensions": [
+    1600,
+    800
+  ],
+  "sha256": "856df140dc484b45a5699d31d1ecbd8ebc81d8ad80b3dfbf187fb3320a4ff253",
+  "provenance": "Original DZN palette and grid over world-atlas 50m Natural Earth land geometry (ISC license); no paid provider or third-party game art."
+}

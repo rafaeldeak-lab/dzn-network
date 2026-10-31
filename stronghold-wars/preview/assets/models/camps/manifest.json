@@ -1,0 +1,12 @@
+{
+  "source": "Rosebud AI 3D Model Create, 2026-10-23",
+  "assets": {
+    "squad_bivouac": {
+      "file": "assets/models/camps/dzn-squad-bivouac-for-a-realistic-isometric-3d-survival-strategy-game-one-open-s.glb",
+      "sha256": "3886cb9db1a46f6d31a6373780c2ea8ffea4635cb6dca1a66be5417c5cfd9ad9",
+      "bytes": 1209860,
+      "dimensions": [0.958, 1.0016, 0.5667],
+      "description": "Open DZN field shelter with bunks, radio equipment and canvas canopy; scaled in the scene beside the squad camp route node."
+    }
+  }
+}

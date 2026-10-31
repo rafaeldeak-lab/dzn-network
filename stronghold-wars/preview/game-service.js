@@ -4,6 +4,13 @@
  * inventories, idempotent actions, progression, and Forge persistence. It is
  * intentionally local-only; it is not an authentication or security boundary.
  */
+import { SQUAD_ROLES, squadBattleStats, squadUnlocked, evaluateWarSquad } from './squad-assets.js';
+import { DEFENDER_CONCEPTS, DEFENDER_COSTS, DEFENDER_POSTS, defenderBattleEffect } from './defender-assets.js';
+import { routeBriefing } from './world-map.js';
+import { CORE_DEFAULTS, DISTRICT_DEFAULTS, WALL_COSTS, MAX_WALLS_PER_HALL, defaultLayout, isGridCell, layoutOccupancy, rowCells, validateLayoutPosition, validateWallPosition, zoneAt, cellKey } from './layout-grid.js';
+import { newOperationsState, normalizeOperationsState } from './operative-ops.js';
+import { PATROL_ORDERS } from './patrol-routes.js';
+import { WAR_DEFENCE_ORDERS, evaluateWarPlan, evaluateWarFieldOrder, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter } from './war-tactics.js';
 export const SERVICE_STORAGE_KEY = 'dzn-stronghold-save-v3';
 export const V2_STORAGE_KEY = 'dzn-stronghold-save-v2';
 export const V2_BACKUP_KEY = 'dzn-stronghold-save-v2-backup';
@@ -11,6 +18,11 @@ export const LEGACY_STORAGE_KEY = 'dzn-stronghold-save-v1';
 export const LEGACY_BACKUP_KEY = 'dzn-stronghold-save-v1-backup';
 export const CORRUPT_BACKUP_PREFIX = `${SERVICE_STORAGE_KEY}-corrupt-backup-v1-`;
 export const DAY_MS = 24 * 60 * 60 * 1000;
+export const FIELD_ORDERS = Object.freeze([
+  Object.freeze({ id: 'parts', name: 'Supply Pickup', objective: 'Collect produced Parts from your Workshop / Forge.', rewardParts: 40 }),
+  Object.freeze({ id: 'forge', name: 'Field Fabrication', objective: 'Claim a completed Forge job.', rewardParts: 50 }),
+  Object.freeze({ id: 'drill', name: 'Outpost Drill', objective: 'Win a practice raid with your training squad.', rewardParts: 60 }),
+]);
 export const WAR_RULES = Object.freeze({
   challengeLifetimeMs: 24 * 60 * 60 * 1000,
   preparationReadyMs: 30 * 1000,
@@ -18,11 +30,21 @@ export const WAR_RULES = Object.freeze({
   attackWindowMs: 10 * 60 * 1000,
   maxAttacksPerSide: 2,
   localRewardParts: 40,
+  scoutArrivalMs: 30 * 1000,
+  squadReturnMs: 90 * 1000,
+  maxScoutsPerSide: 2,
 });
+export const BATTLE_WEAR_RULES = Object.freeze({ maxSeverity: 3, repairParts: 25, repairTimber: 1 });
+export const WAR_STAGE_DEFS = Object.freeze([
+  Object.freeze({ id: 'forge-convoy', name: 'Forge Convoy', building: 'Workshop / Forge', key: 'workshop', parts: 30, timber: 10, objective: 'Dispatch repair kits and Timber to the front.' }),
+  Object.freeze({ id: 'relay-capture', name: 'Relay Capture', building: 'Communications', key: 'comms', parts: 40, timber: 0, objective: 'Secure the DZN signal link before the rival side.' }),
+  Object.freeze({ id: 'tower-stand', name: 'Tower Stand', building: 'Arc Battery', key: 'tower', parts: 25, timber: 15, objective: 'Hold the perimeter through the final timed phase.' }),
+]);
 
 export const GAME_CONFIG = Object.freeze({
   maxLevel: 5,
   revealSeconds: 2.5,
+  constructionSecondsPerLevel: 20,
   dailySalvage: 100,
   forgeQueueBuffer: 2,
   landPlots: Object.freeze([
@@ -40,7 +62,7 @@ export const GAME_CONFIG = Object.freeze({
   barricadeTimberCost: 30,
   maxBarricadesPerPlot: 3,
   facilities: Object.freeze({
-    'timberline-depot': Object.freeze({ name: 'Timberline Lumber Yard', model: 'timberline', purpose: 'Daily personal Timber resupply', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
+    'timberline-depot': Object.freeze({ name: 'Timberline Lumber Yard', model: 'timberline', purpose: 'Stored Timber production and daily personal resupply', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'ridgewatch-range': Object.freeze({ name: 'Ridgewatch Training Range', model: 'ridgewatch', purpose: '+2 Assault score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'signal-marsh': Object.freeze({ name: 'Signal Marsh Relay', model: 'signal', purpose: '+2 Recon score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
     'highland-works': Object.freeze({ name: 'Highland Defence Works', model: 'highland', purpose: '-2 opposing attack score per level', costs: Object.freeze([[0, 0], [100, 30], [250, 60], [500, 90], [900, 120], [1500, 150]]) }),
@@ -70,7 +92,7 @@ export const GAME_CONFIG = Object.freeze({
       benefits: Object.freeze(['2 Parts/sec; personal Forge access', '4 Parts/sec', '6 Parts/sec', '8 Parts/sec', '10 Parts/sec']),
     }),
     tower: Object.freeze({
-      name: 'Watchtower', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
+      name: 'Arc Battery', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
       stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ firepowerPercent: level * 25 }))),
       benefits: Object.freeze([25, 50, 75, 100, 125].map(value => `Training squad firepower +${value}%`)),
     }),
@@ -78,6 +100,13 @@ export const GAME_CONFIG = Object.freeze({
       name: 'Communications', kind: 'support', costs: Object.freeze([0, 250, 700, 1600, 3200]),
       stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ trainingRewardPercent: level * 20 }))),
       benefits: Object.freeze([20, 40, 60, 80, 100].map(value => `Training reward +${value}%`)),
+    }),
+    depot: Object.freeze({
+      name: 'DZN Supply Depot', kind: 'support', costs: Object.freeze([0, 350, 900, 1900, 3800]),
+      stats: Object.freeze([1, 2, 3, 4, 5].map(level => Object.freeze({ extraPartsStorage: (level - 1) * 500, extraTimberStorage: (level - 1) * 40 }))),
+      benefits: Object.freeze([1, 2, 3, 4, 5].map(level => level === 1
+        ? 'Secure supply lockers; standard Parts and Timber capacity'
+        : `+${(level - 1) * 500} Parts and +${(level - 1) * 40} Timber storage for every member`)),
     }),
   }),
   districts: Object.freeze([
@@ -102,9 +131,9 @@ export const PREVIEW_IDENTITIES = Object.freeze([
 ]);
 
 const COMMUNITIES = Object.freeze([
-  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
-  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
-  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, members: Object.freeze(['free-owner', 'free-member']) }),
+  Object.freeze({ id: 'iron-pines', name: 'Iron Pines Collective', eligible: true, proActive: true, map: [47, 29], members: Object.freeze(['iron-owner', 'iron-admin', 'iron-member', 'iron-unverified']) }),
+  Object.freeze({ id: 'violet-ridge', name: 'Violet Ridge Syndicate', eligible: true, proActive: true, map: [23, 32], members: Object.freeze(['violet-owner', 'violet-admin', 'violet-member']) }),
+  Object.freeze({ id: 'mossback-free', name: 'Mossback Free Community', eligible: false, proActive: false, map: [82, 38], members: Object.freeze(['free-owner', 'free-member']) }),
 ]);
 
 const SUPPORT_KEYS = Object.freeze(['workshop', 'tower', 'comms']);
@@ -114,22 +143,55 @@ const safeInt = (value, fallback = 0) => {
   return Number.isSafeInteger(n) && n >= 0 ? n : fallback;
 };
 const clone = value => JSON.parse(JSON.stringify(value));
+const TRAINING_ROLES = Object.freeze(Object.keys(SQUAD_ROLES));
+const trainingCapacity = levels => 2 + (levels.hq || 1) * 2;
+const REINFORCEMENT_REQUEST_MS = 12 * 60 * 60 * 1000;
+const MAX_REINFORCEMENTS_PER_REQUEST = 4;
+export const TRAINING_COSTS = Object.freeze({ assault: 30, recon: 40, engineer: 40, sentinel: 60, medic: 50 });
+export const TRAINING_SECONDS = Object.freeze({ assault: 12, recon: 16, engineer: 16, sentinel: 24, medic: 20 });
+const starterReserve = () => Object.fromEntries(TRAINING_ROLES.map(role => [role, role === 'assault' ? 4 : 0]));
+const normalizedReserve = reserve => Object.fromEntries(TRAINING_ROLES.map(role => [role, Math.min(100, safeInt(reserve?.[role]))]));
+function defaultTrainingLoadout(levels) {
+  const counts = Object.fromEntries(TRAINING_ROLES.map(role => [role, 0]));
+  counts.assault = trainingCapacity(levels);
+  return counts;
+}
+function validTrainingLoadout(counts, levels) {
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) return false;
+  let total = 0;
+  for (const role of TRAINING_ROLES) {
+    const count = Number(counts[role] ?? 0);
+    if (!Number.isSafeInteger(count) || count < 0 || count > trainingCapacity(levels) || (count && !squadUnlocked(role, levels))) return false;
+    total += count;
+  }
+  return total > 0 && total <= trainingCapacity(levels) && Object.keys(counts).every(role => TRAINING_ROLES.includes(role));
+}
+function normalizedTrainingLoadout(counts, levels) {
+  return validTrainingLoadout(counts, levels)
+    ? Object.fromEntries(TRAINING_ROLES.map(role => [role, Number(counts[role] ?? 0)]))
+    : defaultTrainingLoadout(levels);
+}
 
 function emptyBase(treasury = 200) {
   return {
-    levels: { hq: 1, workshop: 1, tower: 1, comms: 1 },
+    levels: { hq: 1, workshop: 1, tower: 1, comms: 1, depot: 1 },
     treasury: safeInt(treasury), projects: [], nextProjectNumber: 1,
     completedProjectIds: [], actionRecords: [], chronicle: [], raidCount: 0, lastRaidClaimed: 0,
+    reinforcementRequests: [],
     legacyJobs: [], completedLegacyJobIds: [],
+    layout: defaultLayout(), blueprints: [],
+    patrolOrders: Object.fromEntries(Object.keys(SQUAD_ROLES).map(role => [role, 'standard'])),
+    repairPriority: null,
+    defenders: Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => [role, { level: 0, post: null, project: null }])),
     landPlots: GAME_CONFIG.landPlots.map(plot => ({
       id: plot.id, treesRemaining: plot.trees, status: plot.hall === 1 ? 'claimed' : 'wild',
-      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null,
+      timberFunded: 0, barricades: 0, facilityLevel: 0, facilityProject: null, routeLevel: 0, routeProject: null, wear: 0,
     })),
   };
 }
 
 function emptyMember() {
-  return { parts: 600, stored: 0, salvage: 150, timber: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], muted: false };
+  return { parts: 600, stored: 0, productionAt: 0, salvage: 150, timber: 0, timberStored: 0, timberProductionAt: 0, nextClaimAt: 0, nextTimberClaimAt: 0, lifetimeContributed: 0, forgeJobs: [], actionRecords: [], trainingLoadout: null, trainingReserve: starterReserve(), trainingJobs: [], warDeployments: [], fieldOrders: { day: '', completed: [], claimed: [] }, muted: false };
 }
 
 function createFreshState() {
@@ -148,9 +210,12 @@ function createFreshState() {
     communities,
     members,
     wars: [],
+    scouts: [],
+    nextScoutNumber: 1,
     warActionRecords: [],
     warRewardLedger: [],
     nextWarNumber: 1,
+    operations: newOperationsState(),
     migratedLegacy: false,
     createdAt: Date.now(),
   };
@@ -166,6 +231,13 @@ function createRecoveryState() {
 
 function normalizeLevel(value, fallback = 1) {
   return Math.min(GAME_CONFIG.maxLevel, Math.max(1, safeInt(value, fallback) || 1));
+}
+
+function chooseDepotPosition(layout, claimed, preferred = null) {
+  const candidates = [preferred, { x: CORE_DEFAULTS.depot[0], z: CORE_DEFAULTS.depot[1] }];
+  for (let z = -10; z <= 10; z += 2)
+    for (let x = -12; x <= 12; x += 2) candidates.push({ x, z });
+  return candidates.find(point => point && !validateLayoutPosition(layout, claimed, 'depot', point.x, point.z)) || null;
 }
 
 function migrateLegacySave(legacy) {
@@ -216,15 +288,29 @@ function normalizeWarRecord(war) {
       const status = saved?.status === 'claimed' ? 'claimed' : config.hall === 1 ? 'claimed' : 'wild';
       return { id: config.id, status, barricades: status === 'claimed' ? Math.min(GAME_CONFIG.maxBarricadesPerPlot, safeInt(saved?.barricades)) : 0, facilityLevel: status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.facilityLevel)) : 0 };
     });
-    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0);
+    const depotRaidable = typeof source?.base?.depotRaidable === 'boolean' ? source.base.depotRaidable
+      : isGridCell(source?.base?.layout?.structures?.depot?.x, source?.base?.layout?.structures?.depot?.z);
+    const structures = defaultLayout().structures;
+    for (const key of Object.keys(structures)) {
+      const point = source?.base?.layout?.structures?.[key];
+      if (isGridCell(point?.x, point?.z)) structures[key] = { x: point.x, z: point.z };
+    }
+    const walls = Array.isArray(source?.base?.layout?.walls) ? source.base.layout.walls.filter(wall => wall && /^wall-\d+$/.test(wall.id) && isGridCell(wall.x, wall.z)).map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: Math.min(hq, Math.max(1, safeInt(wall.level, 1))) })).slice(0, MAX_WALLS_PER_HALL[hq]) : [];
+    const fortification = landPlots.reduce((total, plot) => total + (plot.status === 'claimed' ? plot.barricades : 0), 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.keys(DEFENDER_CONCEPTS).map(role => {
+      const saved = source?.base?.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      return [role, { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null }];
+    }));
     return {
       communityId: source?.communityId,
       name: String(source?.name || source?.communityId || 'Community'),
       capturedAt: safeInt(source?.capturedAt),
-      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots },
+      base: { levels, treasury: safeInt(source?.base?.treasury), landPlots, defenders, depotRaidable, layout: { structures, walls } },
       stats: { squadSize: 2 + hq * 2, wallTier: hq, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
-        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
+        assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
     };
   };
   const snapshots = { challenger: side(war.snapshots?.challenger), defender: side(war.snapshots?.defender) };
@@ -237,11 +323,39 @@ function normalizeWarRecord(war) {
     const source = Array.isArray(war.roster?.[communityId]) ? war.roster[communityId] : [];
     roster[communityId] = source.filter(item => item && typeof item.identityId === 'string').map(item => ({ identityId: item.identityId, name: String(item.name || 'Member'), role: String(item.role || 'member') }));
   }
-  const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => ({
-    attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
-    tactic: a.tactic === 'recon' ? 'recon' : 'assault', at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
-  })) : [];
+  const attacks = Array.isArray(war.attacks) ? war.attacks.filter(a => a && typeof a.attackId === 'string' && communities.includes(a.communityId)).map(a => {
+    const tactic = a.tactic === 'recon' ? 'recon' : 'assault';
+    const attacker = a.communityId === war.challengerCommunityId ? snapshots.challenger : snapshots.defender;
+    const defender = a.communityId === war.challengerCommunityId ? snapshots.defender : snapshots.challenger;
+    const conditionAtLaunch = normalizeWarCondition(defender, a.conditionAtLaunch);
+    const evaluated = a.tactics?.plan ? evaluateWarPlan(defender, tactic, a.tactics.plan, conditionAtLaunch) : null;
+    const squad = a.squad?.counts ? evaluateWarSquad(attacker.base.levels, tactic, a.squad.counts, attacker.stats.squadSize, evaluated) : null;
+    const normalized = {
+      attackId: a.attackId, actionId: String(a.actionId || ''), identityId: String(a.identityId || ''), communityId: a.communityId,
+      tactic, at: safeInt(a.at), score: safeInt(a.score), casualties: safeInt(a.casualties), feedback: String(a.feedback || ''),
+      baseScore: safeInt(a.baseScore ?? a.score), baseCasualties: safeInt(a.baseCasualties ?? a.casualties),
+      combatVersion: a.combatVersion === 2 ? 2 : 1, combatBaseScore: safeInt(a.combatBaseScore),
+      systemsVersion: a.systemsVersion === 2 ? 2 : 1,
+      defenderCombatVersion: a.defenderCombatVersion === 2 ? 2 : 1,
+      orders: Array.isArray(a.orders) ? a.orders.filter(order => evaluateWarFieldOrder(tactic, order?.phase, order?.command).ok)
+        .filter((order, index, all) => all.findIndex(item => item.phase === order.phase) === index)
+        .slice(0, 2).map(order => ({ ...evaluateWarFieldOrder(tactic, order.phase, order.command), at: safeInt(order.at) })) : [],
+      returnAt: safeInt(a.returnAt), returnedAt: safeInt(a.returnedAt), recallPenalty: safeInt(a.recallPenalty), exposureBonus: safeInt(a.exposureBonus), scoutBonus: safeInt(a.scoutBonus), defenderPenalty: safeInt(a.defenderPenalty),
+      defenceOrder: Object.hasOwn(WAR_DEFENCE_ORDERS, a.defenceOrder) ? a.defenceOrder : 'balanced',
+      defenceOrderActive: Boolean(a.defenceOrderActive), defenceOrderPenalty: safeInt(a.defenceOrderPenalty), defenceExposureShield: safeInt(a.defenceExposureShield),
+      tactics: evaluated?.ok ? evaluated : null, squad: squad?.ok ? squad : null, conditionAtLaunch,
+    };
+    normalized.damage = normalized.combatVersion === 2
+      ? simulateWarCombat(attacker, defender, normalized)
+      : buildWarDamageReport(attacker, defender, normalized);
+    return normalized;
+  }) : [];
   const score = Object.fromEntries(communities.map(id => [id, safeInt(war.score?.[id])]));
+  const stages = Array.isArray(war.stages) ? war.stages.filter(item => WAR_STAGE_DEFS.some(def => def.id === item?.id)).slice(0, WAR_STAGE_DEFS.length).map(item => ({
+    id: item.id, opensAt: safeInt(item.opensAt), closesAt: safeInt(item.closesAt),
+    completedBy: Object.fromEntries(communities.map(id => [id, item.completedBy?.[id] && typeof item.completedBy[id].identityId === 'string'
+      ? { identityId: item.completedBy[id].identityId, at: safeInt(item.completedBy[id].at), points: Math.min(20, safeInt(item.completedBy[id].points)) } : null])),
+  })) : [];
   return {
     id: war.id, challengerCommunityId: war.challengerCommunityId, defenderCommunityId: war.defenderCommunityId,
     challengerIdentityId: String(war.challengerIdentityId || ''), state,
@@ -249,7 +363,12 @@ function normalizeWarRecord(war) {
     acceptedAt: safeInt(war.acceptedAt), prepReadyAt: safeInt(war.prepReadyAt), prepDeadlineAt: safeInt(war.prepDeadlineAt),
     startedBy: String(war.startedBy || ''), startedAt: safeInt(war.startedAt), attackEndsAt: safeInt(war.attackEndsAt),
     resolvedAt: safeInt(war.resolvedAt), declinedAt: safeInt(war.declinedAt), expiredAt: safeInt(war.expiredAt),
-    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score,
+    snapshots, roster, attacks, attackIds: [...new Set(attacks.map(a => a.attackId))], score, stages,
+    defenceOrders: Object.fromEntries(communities.map(id => {
+      const saved = war.defenceOrders?.[id];
+      return [id, { order: Object.hasOwn(WAR_DEFENCE_ORDERS, saved?.order) ? saved.order : 'balanced',
+        assignedBy: String(saved?.assignedBy || ''), assignedAt: safeInt(saved?.assignedAt) }];
+    })),
     winnerCommunityId: communities.includes(war.winnerCommunityId) ? war.winnerCommunityId : null, tie: Boolean(war.tie),
     rewardLedgerIds: Array.isArray(war.rewardLedgerIds) ? war.rewardLedgerIds.filter(id => typeof id === 'string') : [],
     events: Array.isArray(war.events) ? war.events.filter(e => e && typeof e.type === 'string').map(e => ({ type: String(e.type), at: safeInt(e.at), actorId: String(e.actorId || ''), text: String(e.text || ''), details: e.details && typeof e.details === 'object' ? clone(e.details) : {} })) : [],
@@ -272,23 +391,53 @@ function normalizeLoadedState(raw) {
     const base = savedCommunity.base || {};
     const normalized = emptyBase(safeInt(base.treasury));
     for (const key of Object.keys(GAME_CONFIG.buildings)) normalized.levels[key] = normalizeLevel(base.levels?.[key], 1);
+    for (const role of Object.keys(SQUAD_ROLES)) {
+      const order = base.patrolOrders?.[role];
+      if (Object.hasOwn(PATROL_ORDERS, order)) normalized.patrolOrders[role] = order;
+    }
+    for (const role of Object.keys(DEFENDER_CONCEPTS)) {
+      const saved = base.defenders?.[role];
+      const level = Math.min(GAME_CONFIG.maxLevel, safeInt(saved?.level));
+      const targetLevel = level + 1;
+      const cost = DEFENDER_COSTS[targetLevel];
+      const project = cost && saved?.project?.targetLevel === targetLevel ? {
+        targetLevel, cost, funded: Math.min(cost, safeInt(saved.project.funded)),
+        donors: Array.isArray(saved.project.donors) ? saved.project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), amount: safeInt(d.amount), at: safeInt(d.at) })) : [],
+      } : null;
+      normalized.defenders[role] = { level, post: level && DEFENDER_POSTS[saved?.post] ? saved.post : null, project };
+    }
     normalized.projects = Array.isArray(base.projects) ? base.projects.filter(p => p && typeof p.id === 'string' && GAME_CONFIG.buildings[p.key]).map(p => ({
       id: p.id, key: p.key, targetLevel: normalizeLevel(p.targetLevel, 1), targetAmount: safeInt(p.targetAmount),
       funded: Math.min(safeInt(p.funded), safeInt(p.targetAmount)), benefit: String(p.benefit || ''),
       prerequisites: Array.isArray(p.prerequisites) ? p.prerequisites.map(String) : [],
-      status: p.status === 'completed' ? 'completed' : 'approved', pinned: Boolean(p.pinned),
+      status: p.status === 'constructing' && safeInt(p.funded) >= safeInt(p.targetAmount)
+        && safeInt(p.startedAt) >= safeInt(p.createdAt) && safeInt(p.finishAt) > safeInt(p.startedAt)
+        && Number.isSafeInteger(p.crewSlot) && p.crewSlot >= 0 && p.crewSlot < 3 ? 'constructing'
+        : ['completed', 'blocked'].includes(p.status) ? p.status : 'approved', pinned: Boolean(p.pinned),
       createdAt: safeInt(p.createdAt), completedAt: safeInt(p.completedAt),
+      crewSlot: p.status === 'constructing' ? safeInt(p.crewSlot) : 0,
+      startedAt: p.status === 'constructing' ? safeInt(p.startedAt) : 0,
+      finishAt: p.status === 'constructing' ? safeInt(p.finishAt) : 0,
       donors: Array.isArray(p.donors) ? p.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), amount: safeInt(d.amount), at: safeInt(d.at) })) : [],
     })) : [];
     normalized.nextProjectNumber = Math.max(1, safeInt(base.nextProjectNumber, 1));
     normalized.completedProjectIds = Array.isArray(base.completedProjectIds) ? [...new Set(base.completedProjectIds.filter(v => typeof v === 'string'))] : [];
     normalized.actionRecords = Array.isArray(base.actionRecords) ? base.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [];
+    normalized.reinforcementRequests = Array.isArray(base.reinforcementRequests) ? base.reinforcementRequests.filter(request =>
+      request && typeof request.id === 'string' && request.id.length <= 160 && TRAINING_ROLES.includes(request.role)
+      && PREVIEW_IDENTITIES.some(profile => profile.id === request.identityId && profile.communityId === community.id)
+      && Number.isSafeInteger(request.count) && request.count >= 1 && request.count <= MAX_REINFORCEMENTS_PER_REQUEST
+      && Number.isSafeInteger(request.donated) && request.donated >= 0 && request.donated <= request.count
+      && Number.isFinite(Number(request.createdAt)) && Number.isFinite(Number(request.expiresAt))
+    ).slice(-30).map(request => ({ id: request.id, identityId: request.identityId, role: request.role,
+      count: request.count, donated: request.donated, createdAt: safeInt(request.createdAt),
+      expiresAt: safeInt(request.expiresAt) })) : [];
     const chronicleIds = new Set();
     normalized.chronicle = Array.isArray(base.chronicle) ? base.chronicle.filter(item => {
-      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
+      if (!item || typeof item.id !== 'string' || !/^(project|land|facility|route|war|defender):[\w-]+(?::\d+)?$/.test(item.id) || chronicleIds.has(item.id)) return false;
       chronicleIds.add(item.id);
       return true;
-    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
+    }).slice(-120).map(item => ({ id: item.id, kind: ['project', 'land', 'facility', 'route', 'war', 'defender'].includes(item.kind) ? item.kind : 'project', text: String(item.text || '').slice(0, 180), at: safeInt(item.at) })) : [];
     normalized.raidCount = safeInt(base.raidCount);
     normalized.lastRaidClaimed = safeInt(base.lastRaidClaimed);
     normalized.raidCount = Math.max(normalized.raidCount, normalized.lastRaidClaimed);
@@ -305,6 +454,7 @@ function normalizeLoadedState(raw) {
       if (plot.status === 'claimed') plot.timberFunded = config.timberCost;
       if (plot.status !== 'claimed') plot.barricades = 0;
       plot.facilityLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.facilityLevel)) : 0;
+      plot.wear = plot.facilityLevel ? Math.min(BATTLE_WEAR_RULES.maxSeverity, safeInt(savedPlot.wear)) : 0;
       plot.routeLevel = plot.status === 'claimed' ? Math.min(GAME_CONFIG.maxLevel, safeInt(savedPlot.routeLevel)) : 0;
       const project = savedPlot.facilityProject;
       const targetLevel = plot.facilityLevel + 1;
@@ -314,6 +464,9 @@ function normalizeLoadedState(raw) {
           targetLevel, partsCost: costs[0], timberCost: costs[1],
           partsFunded: Math.min(costs[0], safeInt(project.partsFunded)),
           timberFunded: Math.min(costs[1], safeInt(project.timberFunded)),
+          status: project.status === 'constructing' && safeInt(project.finishAt) > safeInt(project.startedAt) ? 'constructing' : 'approved',
+          crewSlot: Number.isInteger(project.crewSlot) && project.crewSlot >= 0 && project.crewSlot < 3 ? project.crewSlot : null,
+          startedAt: safeInt(project.startedAt), finishAt: safeInt(project.finishAt),
           donors: Array.isArray(project.donors) ? project.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), parts: safeInt(d.parts), timber: safeInt(d.timber), at: safeInt(d.at) })) : [],
         };
       }
@@ -325,10 +478,51 @@ function normalizeLoadedState(raw) {
           targetLevel: routeTarget, partsCost: routeCosts[0], timberCost: routeCosts[1],
           partsFunded: Math.min(routeCosts[0], safeInt(routeProject.partsFunded)),
           timberFunded: Math.min(routeCosts[1], safeInt(routeProject.timberFunded)),
+          status: routeProject.status === 'constructing' && safeInt(routeProject.finishAt) > safeInt(routeProject.startedAt) ? 'constructing' : 'approved',
+          crewSlot: Number.isInteger(routeProject.crewSlot) && routeProject.crewSlot >= 0 && routeProject.crewSlot < 3 ? routeProject.crewSlot : null,
+          startedAt: safeInt(routeProject.startedAt), finishAt: safeInt(routeProject.finishAt),
           donors: Array.isArray(routeProject.donors) ? routeProject.donors.slice(-8).map(d => ({ identityId: String(d.identityId || ''), name: String(d.name || 'Member'), parts: safeInt(d.parts), timber: safeInt(d.timber), at: safeInt(d.at) })) : [],
         };
       }
     }
+    normalized.repairPriority = normalized.landPlots.some(plot => plot.id === base.repairPriority && plot.wear > 0)
+      ? base.repairPriority : normalized.landPlots.find(plot => plot.wear > 0)?.id || null;
+    const claimed = new Set(normalized.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const savedLayout = base.layout && typeof base.layout === 'object' ? base.layout : {};
+    // Place a newly introduced depot after restoring the existing structures
+    // and walls. Older saved layouts keep every paid wall where it was.
+    delete normalized.layout.structures.depot;
+    for (const key of Object.keys(normalized.layout.structures)) {
+      const point = savedLayout.structures?.[key];
+      if (isGridCell(point?.x, point?.z) && !validateLayoutPosition(normalized.layout, claimed, key, point.x, point.z))
+        normalized.layout.structures[key] = { x: point.x, z: point.z };
+    }
+    const wallIds = new Set();
+    for (const wall of Array.isArray(savedLayout.walls) ? savedLayout.walls : []) {
+      if (normalized.layout.walls.length >= MAX_WALLS_PER_HALL[normalized.levels.hq]) break;
+      if (!wall || typeof wall.id !== 'string' || !/^wall-\d+$/.test(wall.id) || wallIds.has(wall.id)) continue;
+      if (!isGridCell(wall.x, wall.z) || validateWallPosition(normalized.layout, claimed, wall.x, wall.z)) continue;
+      const level = Math.min(normalized.levels.hq, GAME_CONFIG.maxLevel, Math.max(1, safeInt(wall.level, 1)));
+      normalized.layout.walls.push({ id: wall.id, x: wall.x, z: wall.z, level });
+      wallIds.add(wall.id);
+    }
+    normalized.layout.structures.depot = chooseDepotPosition(normalized.layout, claimed, savedLayout.structures?.depot)
+      || { x: CORE_DEFAULTS.depot[0], z: CORE_DEFAULTS.depot[1] };
+    normalized.layout.nextWallNumber = Math.max(1, safeInt(savedLayout.nextWallNumber, 1), ...normalized.layout.walls.map(wall => Number(wall.id.slice(5)) + 1));
+    const blueprintSlots = new Set();
+    normalized.blueprints = (Array.isArray(base.blueprints) ? base.blueprints : []).filter(item => {
+      if (!Number.isInteger(item?.slot) || item.slot < 1 || item.slot > 3 || blueprintSlots.has(item.slot)) return false;
+      blueprintSlots.add(item.slot);
+      return true;
+    }).map(item => ({
+      slot: item.slot, name: String(item.name || `Plan ${item.slot}`).slice(0, 32), savedAt: safeInt(item.savedAt),
+      structures: Object.fromEntries(Object.keys(normalized.layout.structures).map(key => {
+        const point = item.structures?.[key];
+        return [key, isGridCell(point?.x, point?.z) ? { x: point.x, z: point.z } : null];
+      })),
+      walls: (Array.isArray(item.walls) ? item.walls : []).slice(0, 72).filter(wall => wall && /^wall-\d+$/.test(wall.id) && isGridCell(wall.x, wall.z))
+        .map(wall => ({ id: wall.id, x: wall.x, z: wall.z })),
+    }));
     normalized.legacyJobs = Array.isArray(base.legacyJobs) ? base.legacyJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.buildings[j.key] && Number.isFinite(Number(j.end))).map(j => ({ id: j.id, key: j.key, targetLevel: normalizeLevel(j.targetLevel, 1), end: Number(j.end), migratedPaid: true })) : [];
     fresh.communities[community.id] = { proActive: community.eligible ? Boolean(savedCommunity.proActive) : false, base: normalized };
   }
@@ -337,8 +531,11 @@ function normalizeLoadedState(raw) {
     if (!saved) continue;
     fresh.members[profile.id] = {
       parts: safeInt(saved.parts), stored: Number.isFinite(Number(saved.stored)) ? Math.max(0, Number(saved.stored)) : 0,
+      productionAt: safeInt(saved.productionAt),
       salvage: safeInt(saved.salvage), nextClaimAt: safeInt(saved.nextClaimAt), nextTimberClaimAt: safeInt(saved.nextTimberClaimAt),
       timber: safeInt(saved.timber),
+      timberStored: Number.isFinite(Number(saved.timberStored)) ? Math.max(0, Number(saved.timberStored)) : 0,
+      timberProductionAt: safeInt(saved.timberProductionAt),
       lifetimeContributed: safeInt(saved.lifetimeContributed),
       forgeJobs: Array.isArray(saved.forgeJobs) ? saved.forgeJobs.filter(j => j && typeof j.id === 'string' && GAME_CONFIG.forgeRecipes.some(r => r.id === j.recipeId)).map(j => ({
         id: j.id, recipeId: j.recipeId, input: safeInt(j.input), output: safeInt(j.output), durationSeconds: safeInt(j.durationSeconds),
@@ -349,13 +546,33 @@ function normalizeLoadedState(raw) {
         finishAt: Number.isFinite(Number(j.finishAt)) ? Number(j.finishAt) : null, claimedAt: safeInt(j.claimedAt),
       })) : [],
       actionRecords: Array.isArray(saved.actionRecords) ? saved.actionRecords.filter(r => r && typeof r.id === 'string').slice(-500) : [],
+      trainingLoadout: saved.trainingLoadout && typeof saved.trainingLoadout === 'object' && !Array.isArray(saved.trainingLoadout)
+        ? clone(saved.trainingLoadout) : null,
+      // Older saves receive one starter squad; an explicitly empty reserve stays empty.
+      trainingReserve: saved.trainingReserve && typeof saved.trainingReserve === 'object' && !Array.isArray(saved.trainingReserve)
+        ? normalizedReserve(saved.trainingReserve) : starterReserve(),
+      trainingJobs: Array.isArray(saved.trainingJobs) ? saved.trainingJobs.filter(job => job && typeof job.id === 'string' && TRAINING_ROLES.includes(job.role) && Number.isFinite(Number(job.finishAt)))
+        .slice(-100).map(job => ({ id: job.id, role: job.role, count: Math.min(12, safeInt(job.count)), finishAt: safeInt(job.finishAt) })).filter(job => job.count > 0) : [],
+      warDeployments: Array.isArray(saved.warDeployments) ? saved.warDeployments.filter(item => item && typeof item.warId === 'string' && typeof item.attackId === 'string' && Number.isFinite(Number(item.returnAt)))
+        .slice(-100).map(item => ({ warId: item.warId, attackId: item.attackId, returnAt: safeInt(item.returnAt), counts: normalizedReserve(item.counts) })) : [],
+      fieldOrders: {
+        day: typeof saved.fieldOrders?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.fieldOrders.day) ? saved.fieldOrders.day : '',
+        completed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.completed.includes(id)),
+        claimed: FIELD_ORDERS.map(order => order.id).filter(id => Array.isArray(saved.fieldOrders?.claimed) && Array.isArray(saved.fieldOrders?.completed) && saved.fieldOrders.claimed.includes(id) && saved.fieldOrders.completed.includes(id)),
+      },
       muted: Boolean(saved.muted),
     };
   }
   fresh.wars = Array.isArray(raw.wars) ? raw.wars.map(normalizeWarRecord).filter(Boolean) : [];
+  fresh.scouts = Array.isArray(raw.scouts) ? raw.scouts.filter(scout => scout && typeof scout.id === 'string' && ['iron-pines', 'violet-ridge'].includes(scout.communityId) && ['iron-pines', 'violet-ridge'].includes(scout.targetCommunityId) && scout.communityId !== scout.targetCommunityId && PREVIEW_IDENTITIES.some(profile => profile.id === scout.identityId && profile.communityId === scout.communityId)).slice(-100).map(scout => ({
+    id: scout.id, warId: String(scout.warId || ''), identityId: scout.identityId, communityId: scout.communityId, targetCommunityId: scout.targetCommunityId,
+    at: safeInt(scout.at), arrivalAt: safeInt(scout.arrivalAt), returnAt: safeInt(scout.returnAt), recalledAt: safeInt(scout.recalledAt),
+  })) : [];
+  fresh.nextScoutNumber = Math.max(1, safeInt(raw.nextScoutNumber, fresh.scouts.length + 1));
   fresh.warActionRecords = Array.isArray(raw.warActionRecords) ? raw.warActionRecords.filter(r => r && typeof r.id === 'string' && typeof r.actorId === 'string' && r.result && typeof r.result === 'object').slice(-2000).map(r => ({ id: r.id, actorId: r.actorId, kind: String(r.kind || ''), result: clone(r.result), at: safeInt(r.at) })) : [];
   fresh.warRewardLedger = Array.isArray(raw.warRewardLedger) ? raw.warRewardLedger.filter(r => r && typeof r.id === 'string' && typeof r.identityId === 'string').map(r => ({ id: r.id, warId: String(r.warId || ''), identityId: r.identityId, amount: safeInt(r.amount), at: safeInt(r.at) })) : [];
   fresh.nextWarNumber = Math.max(1, safeInt(raw.nextWarNumber, fresh.wars.length + 1));
+  fresh.operations = normalizeOperationsState(raw.operations, PREVIEW_IDENTITIES);
   fresh.schemaVersion = 3;
   return fresh;
 }
@@ -372,6 +589,17 @@ export class LocalGameService {
     this.backupKey = backupKey;
     this.state = null;
     this._load();
+    for (const community of COMMUNITIES) {
+      const profile = PREVIEW_IDENTITIES.find(item => item.communityId === community.id);
+      if (profile) this.processConstructionJobs(profile.id);
+    }
+    // Catch up each eligible member exactly once from the last saved clock.
+    // Older saves start their production clock now, without a retroactive grant.
+    for (const profile of PREVIEW_IDENTITIES) {
+      this.advancePartsProduction(profile.id);
+      this.advanceTimberProduction(profile.id);
+    }
+    this.save();
   }
 
   _preserveRawBackup(key, raw) {
@@ -503,6 +731,64 @@ export class LocalGameService {
     return { id: entry.definition.id, name: entry.definition.name, eligible: entry.definition.eligible, proActive: entry.saved.proActive, role: profile.role };
   }
 
+  // Public-style projection for the local map. No member inventory, donor,
+  // treasury, exact location or private roster data crosses this boundary.
+  getWorldMap() {
+    return COMMUNITIES.map(definition => {
+      const saved = this.state.communities[definition.id];
+      const base = saved.base;
+      return {
+        id: definition.id, name: definition.name, map: [...definition.map], illustrative: true,
+        accessTier: definition.eligible && saved.proActive ? 'owner Pro active' : 'view only',
+        hallLevel: base.levels.hq,
+        wallSegments: base.layout.walls.length,
+        wallTierTotal: base.layout.walls.reduce((sum, wall) => sum + wall.level, 0),
+        buildings: Object.fromEntries(Object.entries(base.levels).map(([key, level]) => [key, level])),
+        defenders: Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }])),
+        districts: base.landPlots.map(plot => ({ id: plot.id, status: plot.status, treesRemaining: plot.treesRemaining,
+          facilityLevel: plot.facilityLevel, routeLevel: plot.routeLevel, barricades: plot.barricades, wear: plot.wear })),
+        construction: base.projects.filter(project => ['approved', 'constructing'].includes(project.status)).map(project => ({
+          kind: 'building', name: GAME_CONFIG.buildings[project.key].name, key: project.key, targetLevel: project.targetLevel,
+          percent: project.targetAmount > 0 ? Math.floor(project.funded / project.targetAmount * 100) : 0,
+          status: project.status, startedAt: project.startedAt || 0, finishAt: project.finishAt || 0,
+        })).concat(base.landPlots.flatMap(plot => [
+          plot.facilityProject ? { kind: 'facility', name: GAME_CONFIG.facilities[plot.id]?.name || 'District facility', targetLevel: plot.facilityProject.targetLevel,
+            percent: Math.floor(100 * (plot.facilityProject.partsFunded + plot.facilityProject.timberFunded) / (plot.facilityProject.partsCost + plot.facilityProject.timberCost)),
+            status: plot.facilityProject.status, startedAt: plot.facilityProject.startedAt || 0, finishAt: plot.facilityProject.finishAt || 0 } : null,
+          plot.routeProject ? { kind: 'route', name: 'Supply route', targetLevel: plot.routeProject.targetLevel,
+            percent: Math.floor(100 * (plot.routeProject.partsFunded + plot.routeProject.timberFunded) / (plot.routeProject.partsCost + plot.routeProject.timberCost)),
+            status: plot.routeProject.status, startedAt: plot.routeProject.startedAt || 0, finishAt: plot.routeProject.finishAt || 0 } : null,
+        ].filter(Boolean))).concat(Object.entries(base.defenders).flatMap(([role, defender]) => defender.project ? [{
+          kind: 'defender', name: DEFENDER_CONCEPTS[role].name, key: role, targetLevel: defender.project.targetLevel,
+          percent: Math.floor(100 * defender.project.funded / defender.project.cost),
+        }] : [])),
+      };
+    });
+  }
+
+  getAwaySquads(communityId, warId) {
+    const war = this._warById(warId);
+    if (!war || !['preparation', 'active'].includes(war.state)) return [];
+    const now = this.now();
+    const attacks = war.attacks.filter(attack => attack.communityId === communityId && attack.returnAt > now && (!attack.returnedAt || attack.returnedAt > now));
+    const scouts = this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === communityId && scout.returnAt > now && (!scout.recalledAt || scout.recalledAt > now));
+    return [...attacks.map(attack => ({ id: attack.attackId, kind: 'attack', returnAt: attack.returnAt })), ...scouts.map(scout => ({ id: scout.id, kind: 'scout', returnAt: scout.returnAt }))];
+  }
+
+  getScoutReports(identityId = this.state.currentIdentityId, warId = null) {
+    const profile = this.profile(identityId);
+    if (!profile || !this.getAccess(identityId).allowed) return [];
+    const now = this.now();
+    return this.state.scouts.filter(scout => scout.communityId === profile.communityId && (!warId || scout.warId === warId)).map(scout => {
+      const arrived = scout.arrivalAt <= now && (!scout.recalledAt || scout.recalledAt >= scout.arrivalAt);
+      const war = this._warById(scout.warId);
+      const target = war?.snapshots?.challenger?.communityId === scout.targetCommunityId ? war.snapshots.challenger : war?.snapshots?.defender;
+      return { ...scout, arrived, active: !scout.recalledAt && now < scout.returnAt,
+        intel: arrived && target ? { hallLevel: target.base.levels.hq, towerLevel: target.base.levels.tower,
+          fortification: target.stats.fortification, worksDefence: target.stats.worksDefence } : null };
+    });
+  }
+
   getAccess(identityId = this.state.currentIdentityId) {
     const profile = this.profile(identityId);
     const entry = this.community(identityId);
@@ -567,13 +853,17 @@ export class LocalGameService {
     const levels = { ...base.levels };
     const hall = levels.hq;
     const landPlots = base.landPlots.map(plot => ({ id: plot.id, status: plot.status, barricades: plot.status === 'claimed' ? plot.barricades : 0, facilityLevel: plot.status === 'claimed' ? plot.facilityLevel : 0 }));
-    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0);
+    const structures = clone(base.layout.structures);
+    const walls = base.layout.walls.map(wall => ({ id: wall.id, x: wall.x, z: wall.z, level: wall.level }));
+    const fortification = landPlots.reduce((total, plot) => total + plot.barricades, 0) + Math.min(12, Math.floor(walls.reduce((sum, wall) => sum + wall.level, 0) / 3));
     const facility = Object.fromEntries(landPlots.map(plot => [plot.id, plot.facilityLevel]));
+    const defenders = Object.fromEntries(Object.entries(base.defenders).map(([role, defender]) => [role, { level: defender.level, post: defender.post }]));
     return {
       communityId, name: definition.name, capturedAt: this.now(),
-      base: { levels, treasury: safeInt(base.treasury), landPlots },
+      base: { levels, treasury: safeInt(base.treasury), landPlots, defenders, depotRaidable: true, layout: { structures, walls } },
       stats: { squadSize: 2 + hall * 2, wallTier: hall, firepower: levels.tower * 25, commsSignal: levels.comms * 20, workshopOutput: levels.workshop * 2, fortification,
-        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2 },
+        assaultBonus: facility['ridgewatch-range'] * 2, reconBonus: facility['signal-marsh'] * 2, worksDefence: facility['highland-works'] * 2,
+        assaultKit: squadBattleStats(levels, 'assault'), reconKit: squadBattleStats(levels, 'recon') },
     };
   }
 
@@ -606,6 +896,13 @@ export class LocalGameService {
     this._syncWarDeadlines();
     const war = this._warById(warId);
     return war ? clone(war) : null;
+  }
+
+  getWarCondition(warId, defendingCommunityId) {
+    const war = this._warById(warId);
+    if (!war || ![war.challengerCommunityId, war.defenderCommunityId].includes(defendingCommunityId)) return null;
+    const defender = defendingCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    return clone(warConditionAfter(defender, war.attacks.filter(attack => attack.communityId !== defendingCommunityId)));
   }
 
   getWars(identityId = this.state.currentIdentityId) {
@@ -641,7 +938,8 @@ export class LocalGameService {
       resolvedAt: 0, declinedAt: 0, expiredAt: 0,
       snapshots: { challenger: this._warSideSnapshot(communityId), defender: this._warSideSnapshot(opponentCommunityId) },
       roster: { [communityId]: this._warRoster(communityId), [opponentCommunityId]: this._warRoster(opponentCommunityId) },
-      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 },
+      attacks: [], attackIds: [], score: { [communityId]: 0, [opponentCommunityId]: 0 }, stages: [],
+      defenceOrders: { [communityId]: { order: 'balanced', assignedBy: '', assignedAt: 0 }, [opponentCommunityId]: { order: 'balanced', assignedBy: '', assignedAt: 0 } },
       winnerCommunityId: null, tie: false, rewardLedgerIds: [], events: [], replay: null,
     };
     war.events.push({ type: 'challenge', at: now, actorId: identityId, text: `${this.community(identityId).definition.name} challenged ${COMMUNITIES.find(item => item.id === opponentCommunityId).name}.`, details: { challengeExpiresAt: war.challengeExpiresAt } });
@@ -672,6 +970,28 @@ export class LocalGameService {
     war.events.push({ type: 'accepted', at: now, actorId: identityId, text: `${profile.name} accepted. Preparation is open; launch becomes available in 30 seconds.`, details: { prepReadyAt: war.prepReadyAt, prepDeadlineAt: war.prepDeadlineAt } });
     const result = { ok: true, warId, state: war.state, prepReadyAt: war.prepReadyAt, prepDeadlineAt: war.prepDeadlineAt };
     this._recordWarAction(identityId, actionId, 'accept', result);
+    this.save();
+    return result;
+  }
+
+  setWarDefenceOrder(identityId, warId, order, actionId = this.newActionId('war-defence-order')) {
+    const replay = this._warActionReplay(identityId, actionId, 'defence-order');
+    if (replay) return replay;
+    this._syncWarDeadlines();
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    if (!war || !profile || ![war.challengerCommunityId, war.defenderCommunityId].includes(profile.communityId))
+      return { ok: false, error: 'This preview identity is not a participant in the war.' };
+    const roleError = this._warIdentityError(identityId, profile.communityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (war.state !== 'preparation' || this.now() >= war.prepDeadlineAt)
+      return { ok: false, error: 'Defence orders can only be set during preparation, before the war starts.' };
+    if (!Object.hasOwn(WAR_DEFENCE_ORDERS, order)) return { ok: false, error: 'Choose a valid defence order.' };
+    const at = this.now();
+    war.defenceOrders[profile.communityId] = { order, assignedBy: identityId, assignedAt: at };
+    war.events.push({ type: 'defence-order', at, actorId: identityId, text: `${profile.name} prepared a sealed home-defence order.`, details: { communityId: profile.communityId } });
+    const result = { ok: true, warId, communityId: profile.communityId, order, name: WAR_DEFENCE_ORDERS[order].name, assignedAt: at };
+    this._recordWarAction(identityId, actionId, 'defence-order', result);
     this.save();
     return result;
   }
@@ -711,6 +1031,9 @@ export class LocalGameService {
     if (now < war.prepReadyAt) return { ok: false, error: `Preparation is still underway for ${Math.ceil((war.prepReadyAt - now) / 1000)} seconds.` };
     if (now > war.prepDeadlineAt) return { ok: false, error: 'The preparation window has ended.' };
     war.state = 'active'; war.startedBy = identityId; war.startedAt = now; war.attackEndsAt = now + WAR_RULES.attackWindowMs;
+    const stageLength = WAR_RULES.attackWindowMs / WAR_STAGE_DEFS.length;
+    war.stages = WAR_STAGE_DEFS.map((stage, index) => ({ id: stage.id, opensAt: now + stageLength * index,
+      closesAt: now + stageLength * (index + 1), completedBy: { [war.challengerCommunityId]: null, [war.defenderCommunityId]: null } }));
     war.events.push({ type: 'started', at: now, actorId: identityId, text: 'War started. Each side may deploy up to two verified roster members before the attack window closes.', details: { attackEndsAt: war.attackEndsAt, attackCap: WAR_RULES.maxAttacksPerSide } });
     const result = { ok: true, warId, state: war.state, attackEndsAt: war.attackEndsAt };
     this._recordWarAction(identityId, actionId, 'start', result);
@@ -718,7 +1041,86 @@ export class LocalGameService {
     return result;
   }
 
-  submitWarAttack(identityId, warId, tactic, actionId = this.newActionId('war-attack')) {
+  completeWarStage(identityId, warId, stageId, actionId = this.newActionId('war-stage')) {
+    const replay = this._warActionReplay(identityId, actionId, `stage:${warId}:${stageId}`);
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    const definition = WAR_STAGE_DEFS.find(item => item.id === stageId);
+    if (!war || !profile || !definition) return { ok: false, error: 'Choose a valid active war stage.' };
+    const communityId = profile.communityId;
+    if (![war.challengerCommunityId, war.defenderCommunityId].includes(communityId)) return { ok: false, error: 'Only a participating server can complete this stage.' };
+    const accessError = this._warIdentityError(identityId, communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'Only a verified member on the accepted-war roster can take part.' };
+    if (war.state !== 'active') return { ok: false, error: 'Stages run only during an active war.' };
+    const stage = war.stages?.find(item => item.id === stageId);
+    const now = this.now();
+    if (!stage || now < stage.opensAt || now >= stage.closesAt) return { ok: false, error: 'This timed stage is not open.' };
+    if (stage.completedBy[communityId]) return { ok: false, error: 'Your server has already completed this stage.' };
+    const member = this.member(identityId);
+    if (member.parts < definition.parts || member.timber < definition.timber) return { ok: false, error: `Need ${definition.parts} Parts and ${definition.timber} Timber for ${definition.name}.` };
+    const side = war.snapshots.challenger.communityId === communityId ? war.snapshots.challenger : war.snapshots.defender;
+    const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const firstBonus = stage.completedBy[opponentId] ? 0 : 2;
+    const points = 6 + Math.min(5, side.base.levels[definition.key]) + firstBonus;
+    member.parts -= definition.parts; member.timber -= definition.timber;
+    stage.completedBy[communityId] = { identityId, at: now, points };
+    war.score[communityId] += points;
+    war.events.push({ type: 'stage', at: now, actorId: identityId, text: `${profile.name} completed ${definition.name} at ${definition.building} · +${points} local war points.`, details: { stageId, communityId, points, firstBonus } });
+    const result = { ok: true, warId, stageId, points, firstBonus, totalScore: war.score[communityId] };
+    this._recordWarAction(identityId, actionId, `stage:${warId}:${stageId}`, result);
+    this.save();
+    return result;
+  }
+
+  dispatchScout(identityId, warId, actionId = this.newActionId('scout-dispatch')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-dispatch');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const profile = this.profile(identityId);
+    if (!war || !profile || ![war.challengerCommunityId, war.defenderCommunityId].includes(profile.communityId)) return { ok: false, error: 'Choose a war involving your connected community.' };
+    const accessError = this._warIdentityError(identityId, profile.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!war.roster[profile.communityId]?.some(member => member.identityId === identityId)) return { ok: false, error: 'This member was not on the verified pre-war roster.' };
+    if (!['preparation', 'active'].includes(war.state)) return { ok: false, error: 'Scouts can deploy during preparation or an active war.' };
+    const now = this.now();
+    if (war.state === 'preparation' && now > war.prepDeadlineAt || war.state === 'active' && now > war.attackEndsAt) return { ok: false, error: 'The mission window has closed.' };
+    if (this.state.scouts.filter(scout => scout.warId === warId && scout.communityId === profile.communityId).length >= WAR_RULES.maxScoutsPerSide) return { ok: false, error: 'This community has deployed its two scouts.' };
+    if (this.state.scouts.some(scout => scout.warId === warId && scout.identityId === identityId)) return { ok: false, error: 'This member has already scouted in this war.' };
+    if (this.getAwaySquads(profile.communityId, warId).some(squad => war.attacks.some(attack => attack.attackId === squad.id && attack.identityId === identityId))) return { ok: false, error: 'Your war squad is away. Wait for its return before scouting.' };
+    const targetCommunityId = profile.communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
+    const scout = { id: `scout-${this.state.nextScoutNumber++}`, warId, identityId, communityId: profile.communityId, targetCommunityId,
+      at: now, arrivalAt: now + WAR_RULES.scoutArrivalMs, returnAt: now + WAR_RULES.squadReturnMs, recalledAt: 0 };
+    this.state.scouts.push(scout);
+    if (this.state.scouts.length > 100) this.state.scouts.splice(0, this.state.scouts.length - 100);
+    war.events.push({ type: 'scout', at: now, actorId: identityId, text: `${profile.name} dispatched a scout. Home defence is exposed until recall or return.`, details: { scoutId: scout.id, returnAt: scout.returnAt } });
+    const result = { ok: true, scoutId: scout.id, arrivalAt: scout.arrivalAt, returnAt: scout.returnAt, targetCommunityId };
+    this._recordWarAction(identityId, actionId, 'scout-dispatch', result);
+    this.save();
+    return result;
+  }
+
+  recallScout(identityId, scoutId, actionId = this.newActionId('scout-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'scout-recall');
+    if (replay) return replay;
+    const scout = this.state.scouts.find(item => item.id === scoutId);
+    const profile = this.profile(identityId);
+    if (!scout || !profile || scout.identityId !== identityId) return { ok: false, error: 'Only the scout owner can recall this mission.' };
+    const accessError = this._warIdentityError(identityId, scout.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const war = this._warById(scout.warId);
+    const now = this.now();
+    if (!war || !['preparation', 'active'].includes(war.state) || scout.recalledAt || now >= scout.returnAt) return { ok: false, error: 'This scout has already returned or the war has closed.' };
+    scout.recalledAt = now;
+    war.events.push({ type: 'scout-recall', at: now, actorId: identityId, text: `${profile.name} recalled their scout to reinforce home defence.`, details: { scoutId } });
+    const result = { ok: true, scoutId, arrived: now >= scout.arrivalAt, recalledAt: now };
+    this._recordWarAction(identityId, actionId, 'scout-recall', result);
+    this.save();
+    return result;
+  }
+
+  submitWarAttack(identityId, warId, tactic, actionId = this.newActionId('war-attack'), plan = null) {
     const replay = this._warActionReplay(identityId, actionId, 'attack');
     if (replay) return replay;
     const war = this._warById(warId);
@@ -735,22 +1137,135 @@ export class LocalGameService {
     const sideAttacks = war.attacks.filter(attack => attack.communityId === profile.communityId);
     if (sideAttacks.length >= WAR_RULES.maxAttacksPerSide) return { ok: false, error: `Attack cap reached (${WAR_RULES.maxAttacksPerSide} per community).` };
     if (war.attacks.some(attack => attack.identityId === identityId)) return { ok: false, error: 'Each roster member may deploy once per war.' };
+    if (this.getScoutReports(identityId, warId).some(scout => scout.identityId === identityId && scout.active)) return { ok: false, error: 'Your scout squad is still away. Recall it or wait for its return before attacking.' };
     const attacker = profile.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
     const defender = profile.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    const conditionAtLaunch = this.getWarCondition(warId, defender.communityId);
+    const tactics = plan === null ? null : evaluateWarPlan(defender, tactic, plan, conditionAtLaunch);
+    if (tactics && !tactics.ok) return { ok: false, error: tactics.error };
+    const squad = plan?.squad == null ? null : evaluateWarSquad(attacker.base.levels, tactic, plan.squad, attacker.stats.squadSize, tactics);
+    if (squad && !squad.ok) return { ok: false, error: squad.error };
+    // Current tactical deployments use the member's trained personal reserve.
+    // Historical plan-less attacks retain their saved legacy rules.
+    if (squad) {
+      const reserve = this.getTrainingReadiness(identityId)?.reserve;
+      const missing = TRAINING_ROLES.filter(role => squad.counts[role] > (reserve?.[role] || 0));
+      if (missing.length) return { ok: false, error: `Train ${missing.map(role => SQUAD_ROLES[role].name).join(', ')} before deploying this war squad.` };
+    }
     const a = attacker.base.levels; const d = defender.base.levels;
+    const kit = squad ? squadBattleStats(a, tactic, squad.counts) : tactic === 'assault' ? attacker.stats.assaultKit : attacker.stats.reconKit;
     const rawScore = tactic === 'assault'
       ? 20 + a.hq * 12 + a.tower * 16 + a.comms * 4 - d.hq * 4 - d.tower * 10 - defender.stats.fortification * 3 + attacker.stats.assaultBonus - defender.stats.worksDefence
       : 15 + a.hq * 7 + a.tower * 3 + a.comms * 18 + a.workshop * 3 - d.comms * 10 - d.tower * 4 - defender.stats.fortification + attacker.stats.reconBonus - defender.stats.worksDefence;
-    const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0))));
+    const awaySquads = this.getAwaySquads(defender.communityId, warId).length;
+    const defence = defenderBattleEffect(defender.base.defenders, tactic);
+    const defenceOrder = evaluateWarDefenceOrder(war.defenceOrders?.[defender.communityId]?.order || 'balanced', tactic, tactics?.plan, awaySquads);
+    const exposureBonus = Math.max(0, Math.min(12, awaySquads * 6 - Math.floor(defender.stats.fortification / 2) - defence.exposureShield - defenceOrder.exposureShield));
+    const scoutBonus = this.getScoutReports(identityId, warId).some(scout => scout.warId === warId && scout.arrived) ? 4 : 0;
+    const score = Math.max(0, Math.min(100, Math.round(rawScore + kit.scoreBonus + exposureBonus + scoutBonus - defence.scorePenalty - defenceOrder.scorePenalty + (tactics?.scoreDelta || 0) + (squad?.scoreDelta || 0))));
+    const casualties = Math.max(0, Math.min(attacker.stats.squadSize, Math.round(d.hq + d.tower - Math.floor(a.comms / 2) + (tactic === 'assault' ? 1 : 0) - kit.casualtyShield + defence.casualtyPressure + defenceOrder.casualtyPressure + (tactics?.casualtyDelta || 0) + (squad?.casualtyDelta || 0))));
     const attackId = `attack-${war.id}-${war.attacks.length + 1}`;
     if (war.attackIds.includes(attackId)) return { ok: false, error: 'Duplicate attack ID rejected.' };
-    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Watchtower L${d.tower}, ${defender.stats.fortification} barricades and Defence Works -${defender.stats.worksDefence} withdrew ${casualties}/${attacker.stats.squadSize} troops; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} gained +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support and scored ${score}.`;
-    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, score, casualties, feedback };
-    war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += score;
-    war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${score} points · ${casualties} squad losses.`, details: clone(attack) });
-    const result = { ok: true, warId, attackId, tactic, score, casualties, feedback, totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
+    const feedback = `${defender.name} counterfire from Hall L${d.hq}, Arc Battery L${d.tower}, ${defender.stats.fortification} barricades, Defence Works -${defender.stats.worksDefence} and assigned defenders -${defence.scorePenalty}; ${tactic === 'assault' ? 'the direct push' : 'the signal sweep'} used ${kit.ability}, +${kit.scoreBonus} upgraded kit, +${tactic === 'assault' ? attacker.stats.assaultBonus : attacker.stats.reconBonus} district support, +${scoutBonus} scout intel and +${exposureBonus} exposed-defence advantage${defenceOrder.active ? `; ${defenceOrder.name} cut ${defenceOrder.scorePenalty} planning points and shielded ${defenceOrder.exposureShield} exposure` : ''}${tactics ? `; ${tactics.laneName} ${tactics.methodName.toLowerCase()} toward ${tactics.objectiveName}, ${tactics.wallCount} walls in corridor, ${tactics.scoreDelta >= 0 ? '+' : ''}${tactics.scoreDelta} tactical planning points` : ''}${squad ? `; selected ${Object.entries(squad.counts).filter(([, count]) => count).map(([role, count]) => `${count} ${SQUAD_ROLES[role].name}`).join(', ')}, ${squad.scoreDelta >= 0 ? '+' : ''}${squad.scoreDelta} composition planning points${squad.specialties.length ? ` (${squad.specialties.join(', ')})` : ''}` : ''}.`;
+    const returnAt = now + WAR_RULES.squadReturnMs;
+    const attack = { attackId, actionId, identityId, communityId: profile.communityId, tactic, at: now, returnAt, returnedAt: 0, recallPenalty: 0, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
+      defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
+      combatVersion: tactics?.ok ? 2 : 1, combatBaseScore: score, systemsVersion: tactics?.ok ? 2 : 1,
+      defenderCombatVersion: tactics?.ok ? 2 : 1,
+      baseScore: score, baseCasualties: casualties, score, casualties, feedback, tactics, squad, orders: [], conditionAtLaunch };
+    attack.damage = attack.combatVersion === 2 ? simulateWarCombat(attacker, defender, attack) : buildWarDamageReport(attacker, defender, attack);
+    if (!attack.damage.ok) return attack.damage;
+    if (attack.combatVersion === 2) {
+      attack.score = attack.baseScore = attack.damage.score;
+      attack.casualties = attack.baseCasualties = attack.damage.casualties;
+      attack.feedback += ` The locked battle dealt ${attack.damage.objective.maxHealth - attack.damage.objective.remainingHealth}/${attack.damage.objective.maxHealth} objective damage, broke ${attack.damage.walls.filter(wall => !wall.remainingHealth).length}/${attack.damage.walls.length} route walls and withdrew ${attack.casualties}/${attacker.stats.squadSize} troops, scoring ${attack.score}.`;
+      if (attack.damage.supplyDisrupted) attack.feedback += ' The previously damaged Depot reduced defender counterfire by 15% for this strike.';
+      if (attack.damage.batteryOffline) attack.feedback += ' The Arc Battery was offline at launch; it fired no volleys.';
+      else if (attack.damage.batterySuppressed) attack.feedback += ' The damaged Arc Battery fired at half strength.';
+      if (attack.damage.signalBonus) attack.feedback += ` The jammed Communications relay gave the Recon squad +${attack.damage.signalBonus} points.`;
+      if (attack.damage.defenderEvents?.length) attack.feedback += ` Assigned specialists made ${attack.damage.defenderEvents.length} recorded defensive actions along the route.`;
+    }
+    if (squad) {
+      const member = this.member(identityId);
+      for (const role of TRAINING_ROLES) member.trainingReserve[role] -= squad.counts[role];
+      member.warDeployments.push({ warId, attackId, returnAt, counts: clone(squad.counts) });
+    }
+    war.attacks.push(attack); war.attackIds.push(attackId); war.score[profile.communityId] += attack.score;
+    war.events.push({ type: 'attack', at: now, actorId: identityId, text: `${profile.name} deployed ${tactic === 'assault' ? 'Assault' : 'Recon'} · ${attack.score} points · ${attack.casualties} squad losses.`, details: clone(attack) });
+    const result = { ok: true, warId, attackId, tactic, score: attack.score, casualties: attack.casualties, feedback: attack.feedback, tactics, squad, damage: attack.damage, returnAt, exposureBonus, scoutBonus, defenderPenalty: defence.scorePenalty,
+      defenceOrder: defenceOrder.order, defenceOrderActive: defenceOrder.active, defenceOrderPenalty: defenceOrder.scorePenalty, defenceExposureShield: defenceOrder.exposureShield,
+      totalScore: war.score[profile.communityId], attacksRemaining: WAR_RULES.maxAttacksPerSide - sideAttacks.length - 1 };
     this._recordWarAction(identityId, actionId, 'attack', result);
+    this.save();
+    return result;
+  }
+
+  issueWarFieldOrder(identityId, warId, attackId, phase, command, actionId = this.newActionId('war-field-order')) {
+    const replay = this._warActionReplay(identityId, actionId, 'war-field-order');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const attack = war?.attacks.find(item => item.attackId === attackId);
+    const profile = this.profile(identityId);
+    if (!attack || !profile || attack.identityId !== identityId) return { ok: false, error: 'Only this deployed squad’s commander can issue its field orders.' };
+    const accessError = this._warIdentityError(identityId, attack.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (war.state !== 'active' || this.now() > war.attackEndsAt || this.now() > attack.at + 60_000 || attack.returnedAt)
+      return { ok: false, error: 'This battle’s field-order window has closed.' };
+    const effect = evaluateWarFieldOrder(attack.tactic, phase, command);
+    if (!effect.ok) return effect;
+    if (attack.orders?.some(order => order.phase === phase)) return { ok: false, error: 'One order has already been issued for this phase.' };
+    if (phase === 'withdrawal' && !attack.orders?.some(order => order.phase === 'contact'))
+      return { ok: false, error: 'Issue the contact order before directing withdrawal.' };
+    const attacker = attack.communityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    const previousScore = attack.score;
+    const previousCasualties = attack.casualties;
+    const defender = attack.communityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    const order = { ...effect, at: this.now() };
+    attack.orders.push(order);
+    if (attack.combatVersion === 2) {
+      attack.damage = simulateWarCombat(attacker, defender, attack);
+      if (!attack.damage.ok) { attack.orders.pop(); return attack.damage; }
+      attack.score = attack.damage.score;
+      attack.casualties = attack.damage.casualties;
+    } else {
+      attack.score = Math.max(0, Math.min(100, attack.score + effect.scoreDelta));
+      attack.casualties = Math.max(0, Math.min(attacker.stats.squadSize, attack.casualties + effect.casualtyDelta));
+      attack.damage = buildWarDamageReport(attacker, defender, attack);
+    }
+    war.score[attack.communityId] += attack.score - previousScore;
+    attack.feedback += ` ${order.name} during ${phase}: ${attack.score - previousScore >= 0 ? '+' : ''}${attack.score - previousScore} points, ${attack.casualties - previousCasualties >= 0 ? '+' : ''}${attack.casualties - previousCasualties} squad losses.`;
+    const attackEvent = war.events.find(event => event.type === 'attack' && event.details?.attackId === attackId);
+    if (attackEvent) {
+      attackEvent.details = clone(attack);
+      attackEvent.text = `${profile.name} deployed ${attack.tactic === 'assault' ? 'Assault' : 'Recon'} · ${attack.score} points · ${attack.casualties} squad losses after field orders.`;
+    }
+    war.events.push({ type: 'field-order', at: order.at, actorId: identityId, text: `${profile.name}: ${order.name} · ${attack.score} attack points, ${attack.casualties} squad losses.`, details: { attackId, phase, command, score: attack.score, casualties: attack.casualties } });
+    const result = { ok: true, warId, attackId, order, score: attack.score, casualties: attack.casualties, damage: attack.damage,
+      totalScore: war.score[attack.communityId], feedback: attack.feedback };
+    this._recordWarAction(identityId, actionId, 'war-field-order', result);
+    this.save();
+    return result;
+  }
+
+  recallWarSquad(identityId, warId, attackId, actionId = this.newActionId('war-recall')) {
+    const replay = this._warActionReplay(identityId, actionId, 'war-recall');
+    if (replay) return replay;
+    const war = this._warById(warId);
+    const attack = war?.attacks.find(item => item.attackId === attackId);
+    const profile = this.profile(identityId);
+    if (!attack || !profile || attack.identityId !== identityId) return { ok: false, error: 'Only the deployed squad owner can recall this attack.' };
+    const accessError = this._warIdentityError(identityId, attack.communityId);
+    if (accessError) return { ok: false, error: accessError };
+    const now = this.now();
+    if (war.state !== 'active' || attack.returnedAt || !attack.returnAt || now >= attack.returnAt) return { ok: false, error: 'This squad has returned or the war is closed.' };
+    const penalty = Math.ceil(attack.score / 4);
+    attack.returnedAt = now;
+    attack.recallPenalty = penalty;
+    attack.score -= penalty;
+    war.score[attack.communityId] -= penalty;
+    war.events.push({ type: 'squad-recall', at: now, actorId: identityId, text: `${profile.name} recalled a war squad to defend home · -${penalty} attack points.`, details: { attackId, penalty } });
+    const result = { ok: true, warId, attackId, returnedAt: now, penalty, score: attack.score, totalScore: war.score[attack.communityId] };
+    this._recordWarAction(identityId, actionId, 'war-recall', result);
     this.save();
     return result;
   }
@@ -767,6 +1282,7 @@ export class LocalGameService {
     if (war.state !== 'active') return { ok: false, error: `War has already ended or cannot resolve from state ${war.state}.` };
     const challengerCount = war.attacks.filter(attack => attack.communityId === war.challengerCommunityId).length;
     const defenderCount = war.attacks.filter(attack => attack.communityId === war.defenderCommunityId).length;
+    if (war.stages?.length && this.now() < war.attackEndsAt) return { ok: false, error: 'The three timed build challenges must finish before this war can resolve.' };
     if (this.now() < war.attackEndsAt && (challengerCount < WAR_RULES.maxAttacksPerSide || defenderCount < WAR_RULES.maxAttacksPerSide)) return { ok: false, error: 'Resolve when both attack caps are reached or after the attack window ends.' };
     const now = this.now();
     const challengerScore = war.score[war.challengerCommunityId];
@@ -774,27 +1290,52 @@ export class LocalGameService {
     war.tie = challengerScore === defenderScore;
     war.winnerCommunityId = war.tie ? null : challengerScore > defenderScore ? war.challengerCommunityId : war.defenderCommunityId;
     war.state = 'resolved'; war.resolvedAt = now;
+    const wear = [];
+    for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
+      const base = this.state.communities[communityId].base;
+      for (const attack of war.attacks.filter(item => item.communityId !== communityId)) {
+        const preference = attack.tactic === 'recon'
+          ? ['signal-marsh', 'timberline-depot', 'ridgewatch-range', 'highland-works']
+          : ['ridgewatch-range', 'highland-works', 'timberline-depot', 'signal-marsh'];
+        const plot = preference.map(id => base.landPlots.find(item => item.id === id))
+          .find(item => item?.status === 'claimed' && item.facilityLevel > 0 && item.wear < BATTLE_WEAR_RULES.maxSeverity);
+        if (!plot) continue;
+        plot.wear++;
+        if (!base.repairPriority) base.repairPriority = plot.id;
+        wear.push({ communityId, plotId: plot.id, severity: plot.wear, attackId: attack.attackId });
+      }
+    }
+    const winnerSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.challenger : war.snapshots.defender;
+    const loserSide = war.winnerCommunityId === war.challengerCommunityId ? war.snapshots.defender : war.snapshots.challenger;
+    const winnerRegion = COMMUNITIES.find(item => item.id === war.winnerCommunityId);
+    const loserRegion = COMMUNITIES.find(item => item.id === loserSide.communityId);
+    const victoryMultiplier = war.tie ? 1 : routeBriefing(
+      { map: winnerRegion.map, hallLevel: winnerSide.base.levels.hq },
+      { map: loserRegion.map, hallLevel: loserSide.base.levels.hq, defenders: loserSide.base.defenders },
+    ).rewardMultiplier;
     const rewards = [];
     for (const identity of [...new Set(war.attacks.map(attack => attack.identityId))]) {
       const ledgerId = `war-reward:${war.id}:${identity}`;
       if (this.state.warRewardLedger.some(entry => entry.id === ledgerId)) continue;
       const member = this.member(identity);
       if (!member) continue;
-      member.parts += WAR_RULES.localRewardParts;
-      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount: WAR_RULES.localRewardParts, at: now });
+      const attacker = war.attacks.find(attack => attack.identityId === identity);
+      const amount = attacker.communityId === war.winnerCommunityId ? Math.round(WAR_RULES.localRewardParts * victoryMultiplier) : WAR_RULES.localRewardParts;
+      member.parts += amount;
+      this.state.warRewardLedger.push({ id: ledgerId, warId: war.id, identityId: identity, amount, at: now });
       war.rewardLedgerIds.push(ledgerId);
-      rewards.push({ identityId: identity, amount: WAR_RULES.localRewardParts, ledgerId });
+      rewards.push({ identityId: identity, amount, ledgerId });
     }
-    war.replay = { version: 1, attackIds: [...war.attackIds], attacks: clone(war.attacks), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
+    war.replay = { version: 2, attackIds: [...war.attackIds], attacks: clone(war.attacks), stages: clone(war.stages || []), score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie };
     const resultText = war.tie ? 'War resolved as a tie.' : `${COMMUNITIES.find(item => item.id === war.winnerCommunityId).name} won ${Math.max(challengerScore, defenderScore)}–${Math.min(challengerScore, defenderScore)}.`;
-    war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards) } });
+    war.events.push({ type: 'resolved', at: now, actorId: identityId, text: resultText, details: { score: clone(war.score), winnerCommunityId: war.winnerCommunityId, tie: war.tie, rewards: clone(rewards), wear: clone(wear) } });
     for (const communityId of [war.challengerCommunityId, war.defenderCommunityId]) {
       const opponentId = communityId === war.challengerCommunityId ? war.defenderCommunityId : war.challengerCommunityId;
       const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
       const outcome = war.tie ? 'draw' : war.winnerCommunityId === communityId ? 'victory' : 'defeat';
       this._recordChronicle(this.state.communities[communityId].base, `war:${war.id}`, 'war', `War against ${opponent}: ${outcome}. ${war.score[communityId]}–${war.score[opponentId]}.`, now);
     }
-    const result = { ok: true, warId, state: war.state, winnerCommunityId: war.winnerCommunityId, tie: war.tie, score: clone(war.score), rewards };
+    const result = { ok: true, warId, state: war.state, winnerCommunityId: war.winnerCommunityId, tie: war.tie, score: clone(war.score), rewards, wear };
     this._recordWarAction(identityId, actionId, 'resolve', result);
     this.save();
     return result;
@@ -802,6 +1343,9 @@ export class LocalGameService {
 
   selectIdentity(identityId) {
     if (!this.profile(identityId)) return { ok: false, error: 'Unknown preview identity.' };
+    this.processConstructionJobs(identityId);
+    this.advancePartsProduction(identityId);
+    this.advanceTimberProduction(identityId);
     this.state.currentIdentityId = identityId;
     this.save();
     return { ok: true };
@@ -813,6 +1357,10 @@ export class LocalGameService {
     if (!profile || !entry) return { ok: false, error: 'Unknown preview identity.' };
     if (profile.role !== 'owner') return { ok: false, error: 'Only this community’s owner can change its simulated Pro status.' };
     if (!entry.definition.eligible) return { ok: false, error: 'The Free preview community is not eligible for this Pro toggle.' };
+    for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === profile.communityId)) {
+      this.advancePartsProduction(member.id);
+      this.advanceTimberProduction(member.id);
+    }
     entry.saved.proActive = Boolean(active);
     this.save();
     return { ok: true, proActive: entry.saved.proActive };
@@ -851,6 +1399,9 @@ export class LocalGameService {
       if (plot.facilityLevel) addEarlier(`facility:${plot.id}:${plot.facilityLevel}`, 'facility', `${GAME_CONFIG.facilities[plot.id].name} reached Level ${plot.facilityLevel}.`);
       if (plot.routeLevel) addEarlier(`route:${plot.id}:${plot.routeLevel}`, 'route', `${config.name} supply route reached Level ${plot.routeLevel}.`);
     }
+    for (const [role, defender] of Object.entries(base.defenders)) {
+      for (let level = 1; level <= defender.level; level++) addEarlier(`defender:${role}:${level}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${level}.`);
+    }
     for (const war of this.state.wars.filter(item => item.state === 'resolved' && [item.challengerCommunityId, item.defenderCommunityId].includes(entry.definition.id))) {
       const opponentId = war.challengerCommunityId === entry.definition.id ? war.defenderCommunityId : war.challengerCommunityId;
       const opponent = COMMUNITIES.find(item => item.id === opponentId)?.name || 'opponent';
@@ -880,7 +1431,7 @@ export class LocalGameService {
     } else if (key !== 'hq' && targetLevel <= GAME_CONFIG.maxLevel && targetLevel > base.levels.hq) {
       prerequisites.push(`Command Hall must reach Level ${targetLevel} first (currently Level ${base.levels.hq}).`);
     }
-    if (base.projects.some(project => project.key === key && project.status === 'approved')) prerequisites.push('A project for this building is already approved.');
+    if (base.projects.some(project => project.key === key && ['approved', 'constructing'].includes(project.status))) prerequisites.push('A project for this building is already approved or under construction.');
     if (base.legacyJobs.some(job => job.key === key)) prerequisites.push('A previously paid legacy construction job is still finishing.');
     const definition = GAME_CONFIG.buildings[key];
     return {
@@ -911,6 +1462,204 @@ export class LocalGameService {
 
   _findAction(records, id) {
     return records.find(record => record.id === id) || null;
+  }
+
+  _fieldOrderState(member) {
+    const day = new Date(this.now()).toISOString().slice(0, 10);
+    if (member.fieldOrders?.day !== day) member.fieldOrders = { day, completed: [], claimed: [] };
+    return member.fieldOrders;
+  }
+
+  _completeFieldOrder(member, orderId) {
+    const orders = this._fieldOrderState(member);
+    if (!orders.completed.includes(orderId)) orders.completed.push(orderId);
+  }
+
+  getFieldOrders(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError, orders: [] };
+    const member = this.member(identityId);
+    if (!member) return { ok: false, error: 'Member inventory unavailable.', orders: [] };
+    const day = new Date(this.now()).toISOString().slice(0, 10);
+    const current = member.fieldOrders?.day === day ? member.fieldOrders : { completed: [], claimed: [] };
+    return {
+      ok: true, day, resetsAt: Date.parse(`${day}T00:00:00.000Z`) + DAY_MS,
+      orders: FIELD_ORDERS.map(order => ({ ...order, completed: current.completed.includes(order.id), claimed: current.claimed.includes(order.id) })),
+    };
+  }
+
+  claimFieldOrder(identityId, orderId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const order = FIELD_ORDERS.find(item => item.id === orderId);
+    if (!order) return { ok: false, error: 'Unknown Field Order.' };
+    const member = this.member(identityId);
+    const progress = this._fieldOrderState(member);
+    if (!progress.completed.includes(orderId)) return { ok: false, error: 'Complete this Field Order before claiming its reward.' };
+    if (progress.claimed.includes(orderId)) return { ok: false, error: 'This Field Order reward was already claimed today.' };
+    progress.claimed.push(orderId);
+    member.parts += order.rewardParts;
+    this.save();
+    return { ok: true, orderId, amount: order.rewardParts };
+  }
+
+  getDefenderRequirement(identityId, role) {
+    const config = DEFENDER_CONCEPTS[role];
+    const entry = this.community(identityId);
+    if (!config || !entry) return { ok: false, role, prerequisites: ['Defender unavailable.'] };
+    const base = entry.saved.base;
+    const defender = base.defenders[role];
+    const targetLevel = defender.level + 1;
+    const prerequisites = [];
+    const accessError = this._accessError(identityId);
+    if (accessError) prerequisites.push(accessError);
+    if (targetLevel > GAME_CONFIG.maxLevel) prerequisites.push('Maximum defender level reached.');
+    if (base.levels.hq < Math.max(config.hall, targetLevel)) prerequisites.push(`Command Hall Level ${Math.max(config.hall, targetLevel)} required.`);
+    if (base.levels[config.support] < Math.max(config.supportLevel, targetLevel)) prerequisites.push(`${GAME_CONFIG.buildings[config.support].name} Level ${Math.max(config.supportLevel, targetLevel)} required.`);
+    if (defender.project) prerequisites.push('An approved upgrade is already being funded.');
+    return { ok: prerequisites.length === 0, role, level: defender.level, targetLevel,
+      cost: DEFENDER_COSTS[targetLevel] || 0, prerequisites, project: clone(defender.project), post: defender.post };
+  }
+
+  _defenderContext(identityId, role, actionId, operation) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member || !DEFENDER_CONCEPTS[role]) return { error: 'Defender or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `defender-${operation}-${role}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind ? { replay: { ...clone(prior.result), replay: true } } : { error: 'This action ID was already used for another action or identity.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    return { entry, member, defender: entry.saved.base.defenders[role], kind };
+  }
+
+  approveDefender(identityId, role, actionId = this.newActionId('defender-approve')) {
+    const context = this._defenderContext(identityId, role, actionId, 'approve');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const requirement = this.getDefenderRequirement(identityId, role);
+    if (!requirement.ok) return { ok: false, error: requirement.prerequisites.join(' ') };
+    context.defender.project = { targetLevel: requirement.targetLevel, cost: requirement.cost, funded: 0, donors: [] };
+    const result = { ok: true, role, targetLevel: requirement.targetLevel, cost: requirement.cost };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  fundDefender(identityId, role, amount, actionId = this.newActionId('defender-fund')) {
+    const context = this._defenderContext(identityId, role, actionId, 'fund');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const numeric = Number(amount);
+    if (!Number.isSafeInteger(numeric) || numeric < 1) return { ok: false, error: 'Enter a positive whole number of Parts.' };
+    const project = context.defender.project;
+    if (!project) return { ok: false, error: 'Leadership must approve this defender upgrade before funding.' };
+    const accepted = Math.min(numeric, project.cost - project.funded, context.member.parts);
+    if (accepted < 1) return { ok: false, error: 'No personal Parts are available or the project is fully funded.' };
+    context.member.parts -= accepted;
+    context.member.lifetimeContributed += accepted;
+    project.funded += accepted;
+    project.donors.push({ identityId, name: this.profile(identityId).name, amount: accepted, at: this.now() });
+    project.donors = project.donors.slice(-8);
+    const completed = project.funded === project.cost && context.defender.level === project.targetLevel - 1;
+    if (completed) {
+      context.defender.level = project.targetLevel;
+      context.defender.project = null;
+      this._recordChronicle(context.entry.saved.base, `defender:${role}:${project.targetLevel}`, 'defender', `${DEFENDER_CONCEPTS[role].name} reached Level ${project.targetLevel}.`);
+    }
+    const result = { ok: true, role, accepted, remaining: completed ? 0 : project.cost - project.funded, completed, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  assignDefender(identityId, role, post, actionId = this.newActionId('defender-assign')) {
+    const context = this._defenderContext(identityId, role, actionId, 'assign');
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (!context.defender.level) return { ok: false, error: 'Unlock this defender before assigning a post.' };
+    if (post !== null && !DEFENDER_POSTS[post]) return { ok: false, error: 'Choose a valid defensive post or stand down.' };
+    context.defender.post = post;
+    const result = { ok: true, role, post, level: context.defender.level };
+    this._recordAction(context.entry.saved.base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  assignPatrolOrder(identityId, role, order, actionId = this.newActionId('patrol-order')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Community unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `patrol-order-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind && prior.result.role === role && prior.result.order === order
+      ? { ...clone(prior.result), replay: true }
+      : { ok: false, error: 'This action ID was already used for another order or identity.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    if (!Object.hasOwn(SQUAD_ROLES, role) || !Object.hasOwn(PATROL_ORDERS, order)) return { ok: false, error: 'Choose a valid squad and patrol destination.' };
+    if (!squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'Unlock this squad before assigning its patrol.' };
+    entry.saved.base.patrolOrders[role] = order;
+    const result = { ok: true, role, order };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  setRepairPriority(identityId, plotId, actionId = this.newActionId('repair-priority')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Community unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    const kind = `repair-priority-${identityId}`;
+    if (prior) return prior.kind === kind && prior.result.plotId === plotId
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const roleError = this._roleError(identityId, ['owner', 'admin']);
+    if (roleError) return { ok: false, error: roleError };
+    const plot = entry.saved.base.landPlots.find(item => item.id === plotId && item.wear > 0);
+    if (!plot) return { ok: false, error: 'Choose a damaged district for repair priority.' };
+    entry.saved.base.repairPriority = plotId;
+    const result = { ok: true, plotId };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
+  }
+
+  repairDistrict(identityId, plotId, actionId = this.newActionId('district-repair')) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return { ok: false, error: 'Community or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique action ID of 1–160 characters is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    const kind = `district-repair-${identityId}`;
+    if (prior) return prior.kind === kind && prior.result.plotId === plotId
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const base = entry.saved.base;
+    const plot = base.landPlots.find(item => item.id === plotId && item.wear > 0);
+    if (!plot) return { ok: false, error: 'This district has no battle wear to repair.' };
+    if (base.repairPriority !== plotId) return { ok: false, error: 'Leadership must prioritise this district first.' };
+    if (member.parts < BATTLE_WEAR_RULES.repairParts || member.timber < BATTLE_WEAR_RULES.repairTimber)
+      return { ok: false, error: `Repair needs ${BATTLE_WEAR_RULES.repairParts} Parts and ${BATTLE_WEAR_RULES.repairTimber} Timber.` };
+    member.parts -= BATTLE_WEAR_RULES.repairParts;
+    member.timber -= BATTLE_WEAR_RULES.repairTimber;
+    member.lifetimeContributed += BATTLE_WEAR_RULES.repairParts;
+    plot.wear--;
+    if (!plot.wear) base.repairPriority = base.landPlots.find(item => item.wear > 0)?.id || null;
+    const result = { ok: true, plotId, remaining: plot.wear, completed: plot.wear === 0, nextPriority: base.repairPriority };
+    this._recordAction(base.actionRecords, actionId, result, kind);
+    this.save();
+    return result;
   }
 
   _landContext(identityId, plotId, actionId, kind) {
@@ -998,6 +1747,209 @@ export class LocalGameService {
     return result;
   }
 
+  _layoutContext(identityId, actionId, operation, request) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return { error: 'Community or member unavailable.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { error: 'A unique action ID of 1–160 characters is required.' };
+    const kind = `layout-${operation}-${identityId}`;
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === kind && prior.result.request === request
+      ? { replay: { ...clone(prior.result), replay: true } }
+      : { error: 'This action ID was already used for another layout action.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { error: accessError };
+    const roleError = this._roleError(identityId, ['owner']);
+    if (roleError) return { error: roleError };
+    return { entry, member, base: entry.saved.base, kind, request };
+  }
+
+  _blueprintCandidate(base, blueprint) {
+    if (!blueprint) return { error: 'This blueprint slot is empty.' };
+    const current = base.layout;
+    const expected = new Set(current.walls.map(wall => wall.id));
+    if (!Array.isArray(blueprint.walls) || blueprint.walls.length !== expected.size
+      || blueprint.walls.some(wall => !expected.has(wall.id))
+      || new Set(blueprint.walls.map(wall => wall.id)).size !== expected.size)
+      return { error: 'Wall inventory changed. Save this slot again before deploying it.' };
+    const positions = new Map(blueprint.walls.map(wall => [wall.id, wall]));
+    const structures = {};
+    for (const key of Object.keys(current.structures)) {
+      const point = blueprint.structures?.[key];
+      if (key === 'depot' && !point) continue;
+      if (!isGridCell(point?.x, point?.z)) return { error: 'This blueprint has an invalid building position.' };
+      structures[key] = { x: point.x, z: point.z };
+    }
+    const candidate = { structures, walls: current.walls.map(wall => ({ ...wall, x: positions.get(wall.id).x, z: positions.get(wall.id).z })), nextWallNumber: current.nextWallNumber };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    if (!structures.depot) {
+      const point = chooseDepotPosition(candidate, claimed, current.structures.depot);
+      if (!point) return { error: 'No free compound space for the Supply Depot. Move a wall and save this plan again.' };
+      structures.depot = point;
+    }
+    for (const [key, point] of Object.entries(structures)) {
+      if (key in DISTRICT_DEFAULTS && !claimed.has(key)) continue;
+      const error = validateLayoutPosition(candidate, claimed, key, point.x, point.z);
+      if (error) return { error: `${key}: ${error}` };
+    }
+    for (const wall of candidate.walls) {
+      const error = validateWallPosition(candidate, claimed, wall.x, wall.z, wall.id);
+      if (error) return { error: `${wall.id}: ${error}` };
+    }
+    return { layout: candidate };
+  }
+
+  getBlueprints(identityId = this.state.currentIdentityId) {
+    const base = this.community(identityId)?.saved.base;
+    if (!base) return [];
+    return [1, 2, 3].map(slot => {
+      const blueprint = base.blueprints.find(item => item.slot === slot);
+      const candidate = this._blueprintCandidate(base, blueprint);
+      return { slot, name: blueprint?.name || `Plan ${slot}`, savedAt: blueprint?.savedAt || 0,
+        walls: blueprint?.walls.length || 0, ready: Boolean(candidate.layout), reason: candidate.error || '' };
+    });
+  }
+
+  saveBlueprint(identityId, slot, name, actionId = this.newActionId('save-blueprint')) {
+    const label = String(name || '').trim().slice(0, 32);
+    const context = this._layoutContext(identityId, actionId, 'save-blueprint', `${slot}:${label}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    if (!Number.isInteger(slot) || slot < 1 || slot > 3 || !label) return { ok: false, error: 'Choose a slot and a short blueprint name.' };
+    const { base } = context;
+    const blueprint = { slot, name: label, savedAt: this.now(), structures: clone(base.layout.structures),
+      walls: base.layout.walls.map(({ id, x, z }) => ({ id, x, z })) };
+    base.blueprints = base.blueprints.filter(item => item.slot !== slot).concat(blueprint).sort((a, b) => a.slot - b.slot);
+    const result = { ok: true, slot, name: label, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  applyBlueprint(identityId, slot, actionId = this.newActionId('apply-blueprint')) {
+    const context = this._layoutContext(identityId, actionId, 'apply-blueprint', String(slot));
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, entry } = context;
+    if (this.state.wars.some(war => ['challenged', 'preparation', 'active'].includes(war.state)
+      && [war.challengerCommunityId, war.defenderCommunityId].includes(entry.definition.id)))
+      return { ok: false, error: 'A war is pending or active. Deploy saved layouts after it closes.' };
+    const blueprint = base.blueprints.find(item => item.slot === slot);
+    const candidate = this._blueprintCandidate(base, blueprint);
+    if (candidate.error) return { ok: false, error: candidate.error };
+    base.layout = candidate.layout;
+    const result = { ok: true, slot, name: blueprint.name, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  drillBlueprint(identityId, slot) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const entry = this.community(identityId);
+    const blueprint = entry.saved.base.blueprints.find(item => item.slot === slot);
+    const candidate = this._blueprintCandidate(entry.saved.base, blueprint);
+    if (candidate.error) return { ok: false, error: candidate.error };
+    const defender = this._warSideSnapshot(entry.definition.id);
+    defender.base.layout = clone(candidate.layout);
+    const attacker = clone(defender);
+    attacker.name = 'DZN training squad';
+    const lanes = ['west', 'south', 'east'].map(lane => {
+      const tactics = evaluateWarPlan(defender, 'assault', { lane, objective: 'hq', method: 'breach' });
+      const combat = tactics.ok ? simulateWarCombat(attacker, defender, {
+        tactic: 'assault', tactics, combatBaseScore: Math.max(0, Math.min(100, 44 + tactics.scoreDelta)), orders: [],
+      }) : tactics;
+      return { lane, name: tactics.laneName || lane, score: combat.score ?? 0,
+        casualties: combat.casualties ?? 0, wallCount: tactics.wallCount || 0,
+        breached: combat.walls?.filter(wall => wall.remainingHealth === 0).length || 0,
+        objectiveDamage: combat.objective ? combat.objective.maxHealth - combat.objective.remainingHealth : 0,
+        error: combat.error || '' };
+    });
+    return { ok: true, slot, name: blueprint.name, lanes, worst: lanes.reduce((a, b) => b.score > a.score ? b : a),
+      simulated: true, reward: 0 };
+  }
+
+  moveStructure(identityId, key, x, z, actionId = this.newActionId('move-structure')) {
+    const context = this._layoutContext(identityId, actionId, 'move-structure', `${key}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateLayoutPosition(base.layout, claimed, key, x, z);
+    if (error) return { ok: false, error };
+    base.layout.structures[key] = { x, z };
+    const result = { ok: true, key, x, z, request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  placeWallRow(identityId, start, end = start, actionId = this.newActionId('wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    if (base.layout.walls.length + cells.length > MAX_WALLS_PER_HALL[base.levels.hq]) return { ok: false, error: 'Command Hall wall capacity reached.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    for (const cell of cells) {
+      const error = validateWallPosition(base.layout, claimed, cell.x, cell.z);
+      if (error) return { ok: false, error: `${error} Row unchanged.` };
+    }
+    const cost = WALL_COSTS[1];
+    const partsCost = cost.parts * cells.length, timberCost = cost.timber * cells.length;
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this row.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    const walls = cells.map(cell => ({ id: `wall-${base.layout.nextWallNumber++}`, ...cell, level: 1 }));
+    base.layout.walls.push(...walls);
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  moveWall(identityId, wallId, x, z, actionId = this.newActionId('move-wall')) {
+    const context = this._layoutContext(identityId, actionId, 'move-wall', `${wallId}:${x}:${z}`);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base } = context;
+    const wall = base.layout.walls.find(item => item.id === wallId);
+    if (!wall) return { ok: false, error: 'Choose a wall in this base.' };
+    const claimed = new Set(base.landPlots.filter(plot => plot.status === 'claimed').map(plot => plot.id));
+    const error = validateWallPosition(base.layout, claimed, x, z, wallId);
+    if (error) return { ok: false, error };
+    wall.x = x; wall.z = z;
+    const result = { ok: true, wall: clone(wall), request: context.request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
+  upgradeWallRow(identityId, start, end = start, actionId = this.newActionId('upgrade-wall-row')) {
+    const request = `${start?.x}:${start?.z}:${end?.x}:${end?.z}`;
+    const context = this._layoutContext(identityId, actionId, 'upgrade-wall-row', request);
+    if (context.replay) return context.replay;
+    if (context.error) return { ok: false, error: context.error };
+    const { base, member } = context;
+    const cells = rowCells(start, end);
+    if (!cells) return { ok: false, error: 'Choose a straight row of up to 16 grid cells.' };
+    const walls = cells.map(cell => base.layout.walls.find(wall => wall.x === cell.x && wall.z === cell.z));
+    if (walls.some(wall => !wall)) return { ok: false, error: 'Every cell in the upgrade row needs an existing wall.' };
+    if (walls.some(wall => wall.level >= base.levels.hq || wall.level >= GAME_CONFIG.maxLevel)) return { ok: false, error: 'Unlock a higher Command Hall tier before upgrading this whole row.' };
+    const partsCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].parts, 0);
+    const timberCost = walls.reduce((sum, wall) => sum + WALL_COSTS[wall.level + 1].timber, 0);
+    if (member.parts < partsCost || member.timber < timberCost) return { ok: false, error: `Need ${partsCost} Parts and ${timberCost} Timber for this upgrade.` };
+    member.parts -= partsCost; member.timber -= timberCost;
+    for (const wall of walls) wall.level++;
+    const result = { ok: true, walls: clone(walls), partsCost, timberCost, request };
+    this._recordAction(base.actionRecords, actionId, result, context.kind);
+    this.save();
+    return result;
+  }
+
   approveFacility(identityId, plotId, actionId = this.newActionId('approve-facility')) {
     const context = this._landContext(identityId, plotId, actionId, 'facility-approve');
     if (context.replay) return context.replay;
@@ -1011,7 +1963,8 @@ export class LocalGameService {
     const costs = GAME_CONFIG.facilities[plotId]?.costs[targetLevel];
     if (!costs) return { ok: false, error: 'This facility is fully upgraded.' };
     if (targetLevel > entry.saved.base.levels.hq) return { ok: false, error: `Command Hall Level ${targetLevel} is required for this facility tier.` };
-    plot.facilityProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0, donors: [] };
+    plot.facilityProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0,
+      status: 'approved', crewSlot: null, startedAt: 0, finishAt: 0, donors: [] };
     const result = { ok: true, plotId, targetLevel, partsCost: costs[0], timberCost: costs[1] };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
@@ -1024,7 +1977,7 @@ export class LocalGameService {
     if (context.error) return { ok: false, error: context.error };
     const { entry, member, plot, kind } = context;
     const project = plot.facilityProject;
-    if (plot.status !== 'claimed' || !project) return { ok: false, error: 'Leadership must approve a claimed facility project first.' };
+    if (plot.status !== 'claimed' || !project || project.status === 'constructing') return { ok: false, error: 'This facility is not open for funding.' };
     if (!Number.isSafeInteger(parts) || parts < 0 || !Number.isSafeInteger(timber) || timber < 0 || parts + timber < 1) return { ok: false, error: 'Donate a positive whole amount of Parts or Timber.' };
     const acceptedParts = Math.min(parts, member.parts, project.partsCost - project.partsFunded);
     const acceptedTimber = Math.min(timber, member.timber, project.timberCost - project.timberFunded);
@@ -1036,13 +1989,10 @@ export class LocalGameService {
     project.timberFunded += acceptedTimber;
     project.donors.push({ identityId, name: this.profile(identityId).name, parts: acceptedParts, timber: acceptedTimber, at: this.now() });
     project.donors = project.donors.slice(-8);
-    const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
+    const funded = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
     const targetLevel = project.targetLevel;
-    if (completed) {
-      plot.facilityLevel = targetLevel; plot.facilityProject = null;
-      this._recordChronicle(entry.saved.base, `facility:${plotId}:${targetLevel}`, 'facility', `${GAME_CONFIG.facilities[plotId].name} reached Level ${targetLevel}.`);
-    }
-    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, facilityLevel: plot.facilityLevel };
+    const constructionStarted = funded && this._scheduleConstruction(entry, project);
+    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed: false, constructionStarted, targetLevel, facilityLevel: plot.facilityLevel };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
     return result;
@@ -1061,7 +2011,8 @@ export class LocalGameService {
     const costs = GAME_CONFIG.routeCosts[targetLevel];
     if (!costs) return { ok: false, error: 'This supply route is fully upgraded.' };
     if (targetLevel > entry.saved.base.levels.hq) return { ok: false, error: `Command Hall Level ${targetLevel} is required for this route tier.` };
-    plot.routeProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0, donors: [] };
+    plot.routeProject = { targetLevel, partsCost: costs[0], timberCost: costs[1], partsFunded: 0, timberFunded: 0,
+      status: 'approved', crewSlot: null, startedAt: 0, finishAt: 0, donors: [] };
     const result = { ok: true, plotId, targetLevel, partsCost: costs[0], timberCost: costs[1] };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
@@ -1074,7 +2025,7 @@ export class LocalGameService {
     if (context.error) return { ok: false, error: context.error };
     const { entry, member, plot, kind } = context;
     const project = plot.routeProject;
-    if (plot.status !== 'claimed' || !project) return { ok: false, error: 'Leadership must approve a claimed district route first.' };
+    if (plot.status !== 'claimed' || !project || project.status === 'constructing') return { ok: false, error: 'This supply route is not open for funding.' };
     if (!Number.isSafeInteger(parts) || parts < 0 || !Number.isSafeInteger(timber) || timber < 0 || parts + timber < 1) return { ok: false, error: 'Donate a positive whole amount of Parts or Timber.' };
     const acceptedParts = Math.min(parts, member.parts, project.partsCost - project.partsFunded);
     const acceptedTimber = Math.min(timber, member.timber, project.timberCost - project.timberFunded);
@@ -1086,13 +2037,10 @@ export class LocalGameService {
     project.timberFunded += acceptedTimber;
     project.donors.push({ identityId, name: this.profile(identityId).name, parts: acceptedParts, timber: acceptedTimber, at: this.now() });
     project.donors = project.donors.slice(-8);
-    const completed = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
+    const funded = project.partsFunded === project.partsCost && project.timberFunded === project.timberCost;
     const targetLevel = project.targetLevel;
-    if (completed) {
-      plot.routeLevel = targetLevel; plot.routeProject = null;
-      this._recordChronicle(entry.saved.base, `route:${plotId}:${targetLevel}`, 'route', `${GAME_CONFIG.landPlots.find(item => item.id === plotId).name} supply route reached Level ${targetLevel}.`);
-    }
-    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed, targetLevel, routeLevel: plot.routeLevel };
+    const constructionStarted = funded && this._scheduleConstruction(entry, project);
+    const result = { ok: true, plotId, acceptedParts, acceptedTimber, completed: false, constructionStarted, targetLevel, routeLevel: plot.routeLevel };
     this._recordAction(entry.saved.base.actionRecords, actionId, result, kind);
     this.save();
     return result;
@@ -1116,6 +2064,21 @@ export class LocalGameService {
     member.nextTimberClaimAt = now + DAY_MS;
     this.save();
     return { ok: true, amount, nextClaimAt: member.nextTimberClaimAt };
+  }
+
+  collectYardTimber(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    const info = this.getTimberProductionInfo(identityId);
+    if (!info?.level) return { ok: false, error: 'Build the Timberline Lumber Yard to collect produced Timber.' };
+    this.advanceTimberProduction(identityId);
+    const member = this.member(identityId);
+    const amount = Math.floor(member.timberStored);
+    if (amount < 1) return { ok: false, error: 'No whole Timber is ready to collect yet.' };
+    member.timber += amount;
+    member.timberStored -= amount;
+    this.save();
+    return { ok: true, amount };
   }
 
   recycleTimber(identityId = this.state.currentIdentityId, actionId = this.newActionId('recycle-timber')) {
@@ -1176,7 +2139,7 @@ export class LocalGameService {
     return result;
   }
 
-  _completeProject(entry, project) {
+  _completeProject(entry, project, at = this.now()) {
     const base = entry.saved.base;
     if (base.completedProjectIds.includes(project.id)) return false;
     if (base.levels[project.key] !== project.targetLevel - 1) {
@@ -1184,13 +2147,83 @@ export class LocalGameService {
       project.pinned = false;
       return false;
     }
+    if (project.key === 'workshop' || project.key === 'depot') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advancePartsProduction(member.id, at);
+    if (project.key === 'depot') for (const member of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id)) this.advanceTimberProduction(member.id, at);
     base.levels[project.key] = project.targetLevel;
     project.status = 'completed';
-    project.completedAt = this.now();
+    project.completedAt = at;
     project.pinned = false;
     base.completedProjectIds.push(project.id);
     this._recordChronicle(base, `project:${project.id}`, 'project', `${GAME_CONFIG.buildings[project.key].name} reached Level ${project.targetLevel}.`, project.completedAt);
     return true;
+  }
+
+  getBuilderCapacity(identityId = this.state.currentIdentityId) {
+    const hall = this.community(identityId)?.saved.base.levels.hq || 1;
+    return hall >= 5 ? 3 : hall >= 3 ? 2 : 1;
+  }
+
+  _constructionJobs(base) {
+    return [...base.projects.filter(item => item.status === 'constructing').map(project => ({ kind: 'core', project })),
+      ...base.landPlots.flatMap(plot => [
+        plot.facilityProject?.status === 'constructing' ? { kind: 'facility', plot, project: plot.facilityProject } : null,
+        plot.routeProject?.status === 'constructing' ? { kind: 'route', plot, project: plot.routeProject } : null,
+      ].filter(Boolean))];
+  }
+
+  _scheduleConstruction(entry, project) {
+    if (project.status !== 'approved') return false;
+    const now = this.now();
+    const capacity = entry.saved.base.levels.hq >= 5 ? 3 : entry.saved.base.levels.hq >= 3 ? 2 : 1;
+    const available = Array.from({ length: capacity }, () => now);
+    for (const { project: active } of this._constructionJobs(entry.saved.base)) {
+      if (active.crewSlot >= 0 && active.crewSlot < available.length) available[active.crewSlot] = Math.max(available[active.crewSlot], active.finishAt);
+    }
+    const crewSlot = available.indexOf(Math.min(...available));
+    project.status = 'constructing';
+    project.pinned = false;
+    project.crewSlot = crewSlot;
+    project.startedAt = available[crewSlot];
+    project.finishAt = project.startedAt + GAME_CONFIG.constructionSecondsPerLevel * project.targetLevel * 1000;
+    return true;
+  }
+
+  _startProjectConstruction(entry, project) {
+    return project.funded >= project.targetAmount && this._scheduleConstruction(entry, project);
+  }
+
+  processConstructionJobs(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    if (!entry) return [];
+    const completed = [];
+    let changed = false;
+    for (const { kind, plot, project } of this._constructionJobs(entry.saved.base).filter(item => item.project.finishAt <= this.now()).sort((a, b) => a.project.finishAt - b.project.finishAt)) {
+      if (kind === 'core') {
+        if (this._completeProject(entry, project, project.finishAt)) completed.push(project.key);
+        changed = true;
+      } else {
+        const levelKey = kind === 'facility' ? 'facilityLevel' : 'routeLevel';
+        if (plot.status !== 'claimed' || plot[levelKey] !== project.targetLevel - 1) {
+          project.status = 'blocked';
+          changed = true;
+          continue;
+        }
+        if (kind === 'facility' && plot.id === 'timberline-depot') for (const profile of PREVIEW_IDENTITIES.filter(item => item.communityId === entry.definition.id))
+          this.advanceTimberProduction(profile.id, project.finishAt);
+        plot[levelKey] = project.targetLevel;
+        if (kind === 'facility') {
+          plot.facilityProject = null;
+          this._recordChronicle(entry.saved.base, `facility:${plot.id}:${project.targetLevel}`, 'facility', `${GAME_CONFIG.facilities[plot.id].name} reached Level ${project.targetLevel}.`, project.finishAt);
+        } else {
+          plot.routeProject = null;
+          this._recordChronicle(entry.saved.base, `route:${plot.id}:${project.targetLevel}`, 'route', `${GAME_CONFIG.landPlots.find(item => item.id === plot.id).name} supply route reached Level ${project.targetLevel}.`, project.finishAt);
+        }
+        completed.push(`${kind}:${plot.id}`);
+        changed = true;
+      }
+    }
+    if (changed) this.save();
+    return completed;
   }
 
   contributeToProject(identityId, projectId, amount, actionId = this.newActionId('donate')) {
@@ -1214,8 +2247,8 @@ export class LocalGameService {
     member.lifetimeContributed += accepted;
     project.donors.push({ identityId, name: this.profile(identityId).name, amount: accepted, at: this.now() });
     project.donors = project.donors.slice(-8);
-    const completed = project.funded >= project.targetAmount ? this._completeProject(entry, project) : false;
-    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed, projectId };
+    const constructionStarted = this._startProjectConstruction(entry, project);
+    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed: false, constructionStarted, projectId };
     this._recordAction(base.actionRecords, actionId, result, 'project-contribution');
     this.save();
     return result;
@@ -1239,8 +2272,8 @@ export class LocalGameService {
     if (accepted < 1) return { ok: false, error: base.treasury < 1 ? 'No unallocated Treasury Parts are available.' : 'This project is already fully funded.' };
     base.treasury -= accepted;
     project.funded += accepted;
-    const completed = project.funded >= project.targetAmount ? this._completeProject(entry, project) : false;
-    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed, projectId };
+    const constructionStarted = this._startProjectConstruction(entry, project);
+    const result = { ok: true, accepted, remaining: Math.max(0, project.targetAmount - project.funded), completed: false, constructionStarted, projectId };
     this._recordAction(base.actionRecords, actionId, result, 'treasury-allocation');
     this.save();
     return result;
@@ -1251,10 +2284,12 @@ export class LocalGameService {
     const member = this.member(identityId);
     if (accessError) return { ok: false, error: accessError };
     if (!member) return { ok: false, error: 'Member inventory unavailable.' };
+    this.advancePartsProduction(identityId);
     const amount = Math.floor(member.stored);
     if (!Number.isSafeInteger(amount) || amount < 1) return { ok: false, error: 'No whole Parts are ready to collect yet.' };
     member.parts += amount;
     member.stored -= amount;
+    this._completeFieldOrder(member, 'parts');
     this.save();
     return { ok: true, amount };
   }
@@ -1377,6 +2412,7 @@ export class LocalGameService {
     member.parts += job.output;
     job.status = 'claimed';
     job.claimedAt = this.now();
+    this._completeFieldOrder(member, 'forge');
     const result = { ok: true, amount: job.output, jobId };
     this._recordAction(member.actionRecords, actionId, result, 'forge-claim');
     this.save();
@@ -1392,6 +2428,203 @@ export class LocalGameService {
     this.save();
   }
 
+  getProductionInfo(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const level = entry.saved.base.levels.workshop;
+    return { stored: member.stored, capacity: 500 + (level - 1) * 250 + ((entry.saved.base.levels.depot || 1) - 1) * 500,
+      perSecond: this.getAccess(identityId).allowed ? GAME_CONFIG.buildings.workshop.stats[level - 1].partsPerSecond : 0 };
+  }
+
+  advancePartsProduction(identityId = this.state.currentIdentityId, timestamp = this.now()) {
+    const member = this.member(identityId);
+    const info = this.getProductionInfo(identityId);
+    if (!member || !info) return 0;
+    const now = Math.max(0, Math.floor(Number(timestamp) || 0));
+    const previous = safeInt(member.productionAt);
+    if (now <= previous) return 0;
+    member.productionAt = now;
+    if (!previous || !info.perSecond) return 0;
+    const produced = info.perSecond * Math.min(now - previous, DAY_MS) / 1000;
+    const before = member.stored;
+    member.stored = Math.max(before, Math.min(info.capacity, before + produced));
+    return member.stored - before;
+  }
+
+  getTimberProductionInfo(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const plot = entry.saved.base.landPlots.find(item => item.id === 'timberline-depot');
+    const level = plot?.status === 'claimed' ? plot.facilityLevel : 0;
+    return { level, stored: member.timberStored, capacity: level ? 30 + (level - 1) * 20 + ((entry.saved.base.levels.depot || 1) - 1) * 40 : 0,
+      perMinute: level && this.getAccess(identityId).allowed ? level * 2 : 0 };
+  }
+
+  advanceTimberProduction(identityId = this.state.currentIdentityId, timestamp = this.now()) {
+    const member = this.member(identityId);
+    const info = this.getTimberProductionInfo(identityId);
+    if (!member || !info) return 0;
+    const now = Math.max(0, Math.floor(Number(timestamp) || 0));
+    const previous = safeInt(member.timberProductionAt);
+    if (now <= previous) return 0;
+    member.timberProductionAt = now;
+    if (!previous || !info.perMinute) return 0;
+    const produced = info.perMinute * Math.min(now - previous, DAY_MS) / 60_000;
+    const before = member.timberStored;
+    member.timberStored = Math.max(before, Math.min(info.capacity, before + produced));
+    return member.timberStored - before;
+  }
+
+  getTrainingLoadout(identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!entry || !member) return null;
+    const levels = entry.saved.base.levels;
+    return { counts: normalizedTrainingLoadout(member.trainingLoadout, levels), capacity: trainingCapacity(levels) };
+  }
+
+  _settleTraining(identityId) {
+    const member = this.member(identityId);
+    if (!member) return;
+    const now = this.now();
+    const pending = [];
+    const away = [];
+    let changed = false;
+    for (const job of member.trainingJobs) {
+      if (job.finishAt > now) { pending.push(job); continue; }
+      member.trainingReserve[job.role] = Math.min(100, member.trainingReserve[job.role] + job.count);
+      changed = true;
+    }
+    for (const deployment of member.warDeployments) {
+      const attack = this._warById(deployment.warId)?.attacks.find(item => item.attackId === deployment.attackId && item.identityId === identityId);
+      if (!attack) { changed = true; continue; }
+      if (Math.min(deployment.returnAt, attack.returnedAt || Infinity) > now) { away.push(deployment); continue; }
+      // The final saved combat report includes field orders issued after launch.
+      // Only its surviving soldiers return; a reload cannot grant them twice.
+      for (const soldier of attack.damage?.squad || []) if (TRAINING_ROLES.includes(soldier.role) && soldier.remainingHealth > 0)
+        member.trainingReserve[soldier.role] = Math.min(100, member.trainingReserve[soldier.role] + 1);
+      changed = true;
+    }
+    if (changed) { member.trainingJobs = pending; member.warDeployments = away; this.save(); }
+  }
+
+  getTrainingReadiness(identityId = this.state.currentIdentityId) {
+    const loadout = this.getTrainingLoadout(identityId);
+    const member = this.member(identityId);
+    if (!loadout || !member) return null;
+    this._settleTraining(identityId);
+    const reserve = normalizedReserve(member.trainingReserve);
+    const missing = Object.fromEntries(TRAINING_ROLES.map(role => [role, Math.max(0, loadout.counts[role] - reserve[role])]));
+    return { ...loadout, reserve, missing, ready: TRAINING_ROLES.every(role => missing[role] === 0),
+      jobs: clone(member.trainingJobs), away: clone(member.warDeployments), reserveCapacity: loadout.capacity * 2,
+      occupied: TRAINING_ROLES.reduce((sum, role) => sum + reserve[role], 0) + member.trainingJobs.reduce((sum, job) => sum + job.count, 0)
+        + member.warDeployments.reduce((sum, deployment) => sum + TRAINING_ROLES.reduce((count, role) => count + deployment.counts[role], 0), 0) };
+  }
+
+  getReinforcementRequests(identityId = this.state.currentIdentityId) {
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError, requests: [] };
+    const now = this.now();
+    const requests = this.community(identityId).saved.base.reinforcementRequests
+      .filter(request => request.expiresAt > now && request.donated < request.count)
+      .map(request => ({ ...request, remaining: request.count - request.donated,
+        name: this.profile(request.identityId)?.name || 'Member' }));
+    return { ok: true, requests: clone(requests) };
+  }
+
+  requestReinforcements(identityId, role, count, actionId = this.newActionId('reinforcement-request')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Choose a connected preview member.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique request action is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === `reinforcement-request:${identityId}:${role}:${count}`
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!TRAINING_ROLES.includes(role) || !squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'That troop role is not unlocked for this community.' };
+    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_REINFORCEMENTS_PER_REQUEST) return { ok: false, error: `Request 1–${MAX_REINFORCEMENTS_PER_REQUEST} whole troops.` };
+    const now = this.now();
+    const base = entry.saved.base;
+    if (base.reinforcementRequests.some(request => request.identityId === identityId && request.expiresAt > now && request.donated < request.count))
+      return { ok: false, error: 'Finish or wait for your current request before posting another.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (readiness.occupied + count > readiness.reserveCapacity) return { ok: false, error: 'Leave enough free camp spaces for the requested troops.' };
+    const request = { id: actionId, identityId, role, count, donated: 0, createdAt: now, expiresAt: now + REINFORCEMENT_REQUEST_MS };
+    base.reinforcementRequests.push(request);
+    if (base.reinforcementRequests.length > 30) base.reinforcementRequests.splice(0, base.reinforcementRequests.length - 30);
+    const result = { ok: true, requestId: request.id, expiresAt: request.expiresAt };
+    this._recordAction(base.actionRecords, actionId, result, `reinforcement-request:${identityId}:${role}:${count}`);
+    this.save();
+    return result;
+  }
+
+  donateReinforcements(identityId, requestId, count, actionId = this.newActionId('reinforcement-donation')) {
+    const entry = this.community(identityId);
+    if (!entry) return { ok: false, error: 'Choose a connected preview member.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique donation action is required.' };
+    const prior = this._findAction(entry.saved.base.actionRecords, actionId);
+    if (prior) return prior.kind === `reinforcement-donation:${identityId}:${requestId}:${count}`
+      ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const accessError = this._accessError(identityId);
+    if (accessError) return { ok: false, error: accessError };
+    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_REINFORCEMENTS_PER_REQUEST) return { ok: false, error: 'Donate a whole troop count within the request limit.' };
+    const request = entry.saved.base.reinforcementRequests.find(item => item.id === requestId);
+    if (!request || request.expiresAt <= this.now() || request.donated >= request.count) return { ok: false, error: 'This reinforcement request is closed or expired.' };
+    if (request.identityId === identityId) return { ok: false, error: 'Members cannot donate to their own request.' };
+    if (count > request.count - request.donated) return { ok: false, error: 'That exceeds the remaining requested troops.' };
+    if (this._accessError(request.identityId)) return { ok: false, error: 'The receiving member is no longer eligible.' };
+    this._settleTraining(identityId);
+    const recipientReadiness = this.getTrainingReadiness(request.identityId);
+    if (recipientReadiness.occupied + count > recipientReadiness.reserveCapacity) return { ok: false, error: 'The receiving camp has no room for this donation.' };
+    const donor = this.member(identityId);
+    if (donor.trainingReserve[request.role] < count) return { ok: false, error: 'Train the requested troops before donating them.' };
+    donor.trainingReserve[request.role] -= count;
+    this.member(request.identityId).trainingReserve[request.role] += count;
+    request.donated += count;
+    const result = { ok: true, requestId, role: request.role, count, recipientId: request.identityId, remaining: request.count - request.donated };
+    this._recordAction(entry.saved.base.actionRecords, actionId, result, `reinforcement-donation:${identityId}:${requestId}:${count}`);
+    this.save();
+    return result;
+  }
+
+  trainTroops(identityId, role, count, actionId = this.newActionId('training')) {
+    const access = this.getAccess(identityId);
+    if (!access.allowed) return { ok: false, error: access.reason };
+    const entry = this.community(identityId);
+    const member = this.member(identityId);
+    if (!TRAINING_ROLES.includes(role) || !squadUnlocked(role, entry.saved.base.levels)) return { ok: false, error: 'This troop is not unlocked.' };
+    if (!Number.isSafeInteger(count) || count < 1 || count > trainingCapacity(entry.saved.base.levels)) return { ok: false, error: 'Choose a whole troop count within camp capacity.' };
+    if (typeof actionId !== 'string' || !actionId.trim() || actionId.length > 160) return { ok: false, error: 'A unique training action is required.' };
+    const prior = this._findAction(member.actionRecords, actionId);
+    if (prior) return prior.kind === `train-${role}-${count}` ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This action ID was already used.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (readiness.occupied + count > readiness.reserveCapacity) return { ok: false, error: `Camp holds ${readiness.reserveCapacity} ready or training troops.` };
+    const cost = TRAINING_COSTS[role] * count;
+    if (member.parts < cost) return { ok: false, error: `Need ${cost} personal Parts to train ${count} ${SQUAD_ROLES[role].name}.` };
+    const lastFinish = member.trainingJobs.at(-1)?.finishAt || 0;
+    const finishAt = Math.max(this.now(), lastFinish) + TRAINING_SECONDS[role] * count * 1000;
+    member.parts -= cost;
+    member.trainingJobs.push({ id: actionId, role, count, finishAt });
+    const result = { ok: true, role, count, cost, finishAt };
+    this._recordAction(member.actionRecords, actionId, result, `train-${role}-${count}`);
+    this.save();
+    return result;
+  }
+
+  setTrainingLoadout(identityId, counts) {
+    const access = this.getAccess(identityId);
+    if (!access.allowed) return { ok: false, error: access.reason };
+    const entry = this.community(identityId);
+    const levels = entry.saved.base.levels;
+    if (!validTrainingLoadout(counts, levels)) return { ok: false, error: `Select 1–${trainingCapacity(levels)} unlocked troops with whole-number counts.` };
+    const loadout = normalizedTrainingLoadout(counts, levels);
+    this.member(identityId).trainingLoadout = loadout;
+    this.save();
+    return { ok: true, counts: clone(loadout), capacity: trainingCapacity(levels) };
+  }
+
   recordTrainingVictory(identityId, raidId, reward) {
     const entry = this.community(identityId);
     const member = this.member(identityId);
@@ -1403,6 +2636,7 @@ export class LocalGameService {
     base.lastRaidClaimed = id;
     base.raidCount = Math.max(base.raidCount, id);
     member.parts += safeInt(reward);
+    this._completeFieldOrder(member, 'drill');
     this.save();
     return { ok: true, reward: safeInt(reward) };
   }
@@ -1428,13 +2662,24 @@ export class LocalGameService {
     return completed;
   }
 
-  recordTrainingAttempt(raidId) {
-    const entry = this.community();
-    if (!entry || !this.getAccess().allowed) return { ok: false, error: 'Training access is locked.' };
+  recordTrainingAttempt(raidId, identityId = this.state.currentIdentityId) {
+    const entry = this.community(identityId);
+    if (!entry || !this.getAccess(identityId).allowed) return { ok: false, error: 'Training access is locked.' };
     const id = safeInt(raidId);
     if (id < 1) return { ok: false, error: 'Invalid training encounter.' };
-    entry.saved.base.raidCount = Math.max(entry.saved.base.raidCount, id);
+    const base = entry.saved.base;
+    const actionKey = `training-attempt:${id}`;
+    const prior = this._findAction(base.actionRecords, actionKey);
+    if (prior) return prior.kind === `training-attempt-${identityId}` ? { ...clone(prior.result), replay: true } : { ok: false, error: 'This encounter belongs to another member.' };
+    if (id !== base.raidCount + 1) return { ok: false, error: 'Prepare the next training encounter.' };
+    const readiness = this.getTrainingReadiness(identityId);
+    if (!readiness.ready) return { ok: false, error: 'Train the missing troops before launching the drill.' };
+    const member = this.member(identityId);
+    for (const role of TRAINING_ROLES) member.trainingReserve[role] -= readiness.counts[role];
+    base.raidCount = id;
+    const result = { ok: true, raidId: id, counts: clone(readiness.counts) };
+    this._recordAction(base.actionRecords, actionKey, result, `training-attempt-${identityId}`);
     this.save();
-    return { ok: true, raidId: id };
+    return result;
   }
 }

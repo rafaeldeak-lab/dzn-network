@@ -7,52 +7,52 @@
   "assets": {
     "pine_l01": {
       "file": "assets/models/scenery/pine_l01.glb",
-      "sha256": "4695f61b0b5fdfc07844245fd77d5e1d4493915f0233e9e52ed518eba148c41a",
-      "bytes": 12832,
+      "sha256": "bbd11942da613cce5c168c32954b0ad1fc5ebe8a2e4fe2a7723432d6fd866df8",
+      "bytes": 343488,
       "dimensions": [
-        1.462,
-        3.227,
-        1.426
+        1.679,
+        2.53,
+        1.75
       ]
     },
     "pine_l02": {
       "file": "assets/models/scenery/pine_l02.glb",
-      "sha256": "ab64d06efdbe8b8a04fecb8dbe3a7cf0e2ce46240c67e9875e0bff967ae2efb7",
-      "bytes": 15048,
+      "sha256": "666ba7b7e7e08b26f007b5755d34b9636823a48f220437925d93a33279440a66",
+      "bytes": 486288,
       "dimensions": [
-        1.852,
-        3.949,
-        1.806
+        2,
+        3.05,
+        2.117
       ]
     },
     "pine_l03": {
       "file": "assets/models/scenery/pine_l03.glb",
-      "sha256": "e90202ed7595ba4bbe83de665c79e57d84df5f3745f1c69855078a7d73a9dc6a",
-      "bytes": 17212,
+      "sha256": "df52112ed1af39fb135b316632ed33e185dd6cb4c893be9d434cf8a477977b14",
+      "bytes": 651052,
       "dimensions": [
-        2.242,
-        4.674,
-        2.189
+        2.409,
+        3.57,
+        2.451
       ]
     },
     "pine_l04": {
       "file": "assets/models/scenery/pine_l04.glb",
-      "sha256": "572d589477ae96a1d7f923063405319394f13ac371ff328ce618e9c347961c71",
-      "bytes": 19404,
+      "sha256": "a5a6c1b0b7d81782728353e38bba5b9a3047c79b4c1eb4de5032524cf3d9c900",
+      "bytes": 837764,
       "dimensions": [
-        2.668,
-        5.401,
-        2.618
+        2.786,
+        4.09,
+        2.879
       ]
     },
     "pine_l05": {
       "file": "assets/models/scenery/pine_l05.glb",
-      "sha256": "00a0ff81ac8d2b13d0ab807ad2f2b89dfbf96dff5ce29c1048940e5a3d721e55",
-      "bytes": 19360,
+      "sha256": "1771e145c5c355ac6c0dd7691481827d3e8d401c1cb2e33a7ba5006eeb6133d3",
+      "bytes": 964072,
       "dimensions": [
-        3.063,
-        6.167,
-        3.006
+        3.17,
+        4.61,
+        3.263
       ]
     },
     "pine_stump": {
@@ -77,22 +77,72 @@
     },
     "granite_boulder": {
       "file": "assets/models/scenery/granite_boulder.glb",
-      "sha256": "b21cecbc146d1e62059a41c2f7b4ad8f2a41e98122900e40894059238aa2f090",
-      "bytes": 6276,
+      "sha256": "e0811e5f7cfd6d6714c3889cfd1c24f19ff83686b8e8a6966b6c9afa31b7a6b9",
+      "bytes": 31484,
       "dimensions": [
-        2.278,
-        1.374,
-        1.567
+        2.584,
+        1.178,
+        1.862
       ]
     },
     "claim_marker": {
       "file": "assets/models/scenery/claim_marker.glb",
-      "sha256": "28e5ebf672dfd66692dd59a2b735625b028af73651311e5fde897683781fca80",
-      "bytes": 11124,
+      "sha256": "b2b016e3e4622c266e148c53adffdda52de4c28fe34c353f06121ceac069b401",
+      "bytes": 11128,
       "dimensions": [
         1.66,
         1.03,
         1.66
+      ]
+    },
+    "fallen_trunk": {
+      "file": "assets/models/scenery/fallen_trunk.glb",
+      "sha256": "27504b1b5b9423244abb0710cdb554ad1291bacc55746e576dc3771eff3d18a2",
+      "bytes": 46524,
+      "dimensions": [
+        3.751,
+        0.78,
+        0.78
+      ]
+    },
+    "fern_patch": {
+      "file": "assets/models/scenery/fern_patch.glb",
+      "sha256": "c4563b1f9919de11babe22bf40b0476fcd8f9a86a214b2746c7b1397dbbe7480",
+      "bytes": 18908,
+      "dimensions": [
+        1.334,
+        1.103,
+        1.496
+      ]
+    },
+    "mossy_rock_cluster": {
+      "file": "assets/models/scenery/mossy_rock_cluster.glb",
+      "sha256": "b296d7740a5fdcdfbf440f814a6cdcbbebcbc62fda59cfcb31085c51fcac68a7",
+      "bytes": 51008,
+      "dimensions": [
+        2.088,
+        0.87,
+        1.36
+      ]
+    },
+    "brush_pile": {
+      "file": "assets/models/scenery/brush_pile.glb",
+      "sha256": "04692eec46a580607dfdb8e02d79a395a5eb095cec9339cc04ca5b5e61ae2ac8",
+      "bytes": 45908,
+      "dimensions": [
+        1.347,
+        0.492,
+        1.236
+      ]
+    },
+    "lumber_pallet": {
+      "file": "assets/models/scenery/lumber_pallet.glb",
+      "sha256": "a9576b1b54fc4289d4b9d7e97ffbca043d84674de66db66903fe7569c4120ddf",
+      "bytes": 40324,
+      "dimensions": [
+        1.85,
+        0.61,
+        1.45
       ]
     }
   }

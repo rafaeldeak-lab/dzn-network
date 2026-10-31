@@ -5,54 +5,54 @@
   "unit": "metre",
   "coordinateSystem": "Y up",
   "assets": {
-    "timberline_l01": {
-      "file": "assets/models/facilities/timberline_l01.glb",
-      "sha256": "d6ecbd1c404f38411ac8a76eb9d368a4bb5eade61c9c7e41e02164c5c5f8da3f",
-      "bytes": 74244,
+    "timberline_v4_l01": {
+      "file": "assets/models/facilities/timberline_v4_l01.glb",
+      "sha256": "ab9b3bf74e36f763410d3a29d5a2f2f9ae6fad64881bc3e27810d61f3e7296ae",
+      "bytes": 1370272,
       "dimensions": [
-        6.6,
-        2.45,
-        6.2
+        6.5,
+        3.5,
+        6.1
       ]
     },
-    "timberline_l02": {
-      "file": "assets/models/facilities/timberline_l02.glb",
-      "sha256": "8d699bd245657a5c7177d6b9bd6998f128dd808806f57f0f279cb563177c08ca",
-      "bytes": 85844,
+    "timberline_v4_l02": {
+      "file": "assets/models/facilities/timberline_v4_l02.glb",
+      "sha256": "d25388d0ccda6d59fe4a813c148798076a3e08cb20ab51e95cb5f35ed93fb70b",
+      "bytes": 1460212,
       "dimensions": [
-        6.6,
-        2.59,
-        6.2
+        6.5,
+        3.5,
+        6.1
       ]
     },
-    "timberline_l03": {
-      "file": "assets/models/facilities/timberline_l03.glb",
-      "sha256": "34c8f93dd5e8524400324a71b4c3b80ae3c3f9412f35f62875c805c609b69e48",
-      "bytes": 100832,
+    "timberline_v4_l03": {
+      "file": "assets/models/facilities/timberline_v4_l03.glb",
+      "sha256": "4aab77582c27d309d23edcd65c2b1109a79ee6dfd62f0ba14f4e1d5a69aab0fb",
+      "bytes": 1513240,
       "dimensions": [
-        6.6,
-        3.778,
-        6.2
+        6.5,
+        3.958,
+        6.1
       ]
     },
-    "timberline_l04": {
-      "file": "assets/models/facilities/timberline_l04.glb",
-      "sha256": "f31d23b062a40cc8a32895f983062f37815040f2b68727500af74f1d1a7141ec",
-      "bytes": 113956,
+    "timberline_v4_l04": {
+      "file": "assets/models/facilities/timberline_v4_l04.glb",
+      "sha256": "885301ab52e8d57d7c4ff8ade72c9672db18b71942b0c8b1a45b982e49668b91",
+      "bytes": 1606484,
       "dimensions": [
-        6.6,
-        3.778,
-        6.2
+        6.5,
+        3.958,
+        6.1
       ]
     },
-    "timberline_l05": {
-      "file": "assets/models/facilities/timberline_l05.glb",
-      "sha256": "81489a093ae8c29133b00d80dfab7d3f1a744a6ce71ffc4239a8f5be408338e5",
-      "bytes": 128116,
+    "timberline_v4_l05": {
+      "file": "assets/models/facilities/timberline_v4_l05.glb",
+      "sha256": "39101c74a34f6f926125fdd22877a2c085f865739f910f76f0f5bd570fc1435a",
+      "bytes": 1658528,
       "dimensions": [
-        6.6,
-        4.2,
-        6.2
+        6.5,
+        4.46,
+        6.1
       ]
     },
     "ridgewatch_l01": {

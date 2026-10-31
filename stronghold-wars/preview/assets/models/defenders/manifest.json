@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural 3D defender geometry styled after four owner-supplied DZN concept images; no paid provider.",
+  "license": "Project-owned original geometry; owner-supplied visual references",
+  "unit": "metre",
+  "coordinateSystem": "Y up; forward +Z",
+  "assets": {
+    "guardian_l01": {
+      "file": "assets/models/defenders/guardian_l01.glb",
+      "sha256": "225d9d10aeb84c900d0ca8e16ccf5aaa6cd4c0e30476c9df372917f61499767c",
+      "bytes": 2376016,
+      "dimensions": [
+        1.55,
+        1.859,
+        1.28
+      ],
+      "meshes": 50
+    },
+    "guardian_l02": {
+      "file": "assets/models/defenders/guardian_l02.glb",
+      "sha256": "3197081d4bbf708dd5a5a68d2787238d35b3d8f753725c7793dfa6df942724fe",
+      "bytes": 2719832,
+      "dimensions": [
+        1.6,
+        1.863,
+        1.315
+      ],
+      "meshes": 56
+    },
+    "guardian_l03": {
+      "file": "assets/models/defenders/guardian_l03.glb",
+      "sha256": "507aa691dcc690980b62a354246b71f371f059a2c27961f7e0daf1d16bb33fdc",
+      "bytes": 3120876,
+      "dimensions": [
+        1.643,
+        1.867,
+        1.35
+      ],
+      "meshes": 63
+    },
+    "guardian_l04": {
+      "file": "assets/models/defenders/guardian_l04.glb",
+      "sha256": "5960d7ff6480bcb8d00acf4f093a90dae131541420ab3fa56df823a20e701c3a",
+      "bytes": 3475012,
+      "dimensions": [
+        1.685,
+        1.871,
+        1.385
+      ],
+      "meshes": 70
+    },
+    "guardian_l05": {
+      "file": "assets/models/defenders/guardian_l05.glb",
+      "sha256": "a9a308f6b79da214b15c11120d6cfbb693e66e05af4d5d99ab6dd348972701de",
+      "bytes": 3646872,
+      "dimensions": [
+        1.728,
+        1.91,
+        1.46
+      ],
+      "meshes": 73
+    },
+    "aegis_l01": {
+      "file": "assets/models/defenders/aegis_l01.glb",
+      "sha256": "03ced8915f88a88d4ea99620dd50fe7af4d6e57bccac2f8182fda9af48eaaeee",
+      "bytes": 2305204,
+      "dimensions": [
+        2.07,
+        1.975,
+        0.795
+      ],
+      "meshes": 53
+    },
+    "aegis_l02": {
+      "file": "assets/models/defenders/aegis_l02.glb",
+      "sha256": "ddaf08ab0755c2da97b6a5408272e0bdadcb8f6c69b526d57f3a6f848bc3c1c6",
+      "bytes": 2534380,
+      "dimensions": [
+        2.19,
+        2.105,
+        0.795
+      ],
+      "meshes": 57
+    },
+    "aegis_l03": {
+      "file": "assets/models/defenders/aegis_l03.glb",
+      "sha256": "491554a66d9ab6a11861167146714a252d3cdc210b0d0fc0306a21726c7d233c",
+      "bytes": 2820904,
+      "dimensions": [
+        2.31,
+        2.235,
+        0.795
+      ],
+      "meshes": 62
+    },
+    "aegis_l04": {
+      "file": "assets/models/defenders/aegis_l04.glb",
+      "sha256": "16df50c12f2a987b414f279a49e59bc80135cee03bc04db0decfda797724daab",
+      "bytes": 3164332,
+      "dimensions": [
+        2.43,
+        2.365,
+        0.795
+      ],
+      "meshes": 68
+    },
+    "aegis_l05": {
+      "file": "assets/models/defenders/aegis_l05.glb",
+      "sha256": "e927c45f5bbbd495c9c6eedb57c73b0826dd622432a624e64729ba316ac98f63",
+      "bytes": 3221612,
+      "dimensions": [
+        2.55,
+        2.495,
+        0.795
+      ],
+      "meshes": 69
+    },
+    "trapper_l01": {
+      "file": "assets/models/defenders/trapper_l01.glb",
+      "sha256": "d6ecf54c1f516d471d8c17d1bcf4bb91981b9c0d0e48a8dece3713c676f77c69",
+      "bytes": 2016800,
+      "dimensions": [
+        0.91,
+        1.93,
+        0.855
+      ],
+      "meshes": 48
+    },
+    "trapper_l02": {
+      "file": "assets/models/defenders/trapper_l02.glb",
+      "sha256": "8ae582d9466f538836548ec84a02d03bc68e877330a0eb644e597f9b8779ee46",
+      "bytes": 2303336,
+      "dimensions": [
+        0.928,
+        1.93,
+        0.855
+      ],
+      "meshes": 53
+    },
+    "trapper_l03": {
+      "file": "assets/models/defenders/trapper_l03.glb",
+      "sha256": "95cb30bfc42b6a34f94d70cbf4ee71dea96c7eb36920e6788a5fd4acb361864e",
+      "bytes": 2532528,
+      "dimensions": [
+        0.952,
+        1.93,
+        0.855
+      ],
+      "meshes": 57
+    },
+    "trapper_l04": {
+      "file": "assets/models/defenders/trapper_l04.glb",
+      "sha256": "7263278ce893c8f356984c62bf7609b7132d0d7ba03b4f622453f70d28d55900",
+      "bytes": 2876136,
+      "dimensions": [
+        0.976,
+        1.93,
+        0.855
+      ],
+      "meshes": 63
+    },
+    "trapper_l05": {
+      "file": "assets/models/defenders/trapper_l05.glb",
+      "sha256": "e55648fa122e8ff04ad0f52e7bfb65ffb3408e534483eaa2dfb9db5a14e97be2",
+      "bytes": 2933428,
+      "dimensions": [
+        1,
+        1.93,
+        0.855
+      ],
+      "meshes": 64
+    },
+    "hound_l01": {
+      "file": "assets/models/defenders/hound_l01.glb",
+      "sha256": "62e46ee4330391e77d7a62113b6d480b8ddb3ec06214a2114be5cf5a74974239",
+      "bytes": 1187524,
+      "dimensions": [
+        1.22,
+        1.45,
+        2.655
+      ],
+      "meshes": 24
+    },
+    "hound_l02": {
+      "file": "assets/models/defenders/hound_l02.glb",
+      "sha256": "99b03f620ffb68bbddc382a7f977d06f237be401579783a6bc588c065284374e",
+      "bytes": 1302068,
+      "dimensions": [
+        1.22,
+        1.45,
+        2.655
+      ],
+      "meshes": 26
+    },
+    "hound_l03": {
+      "file": "assets/models/defenders/hound_l03.glb",
+      "sha256": "9db92877da81f32c458d777653792b4770325c1690e6a16d7262b855c3646229",
+      "bytes": 1531168,
+      "dimensions": [
+        1.22,
+        1.45,
+        2.655
+      ],
+      "meshes": 30
+    },
+    "hound_l04": {
+      "file": "assets/models/defenders/hound_l04.glb",
+      "sha256": "b185ea067279cb895202c02dfcfe0793883665c5210ca11404a1a8f6a364c258",
+      "bytes": 1645744,
+      "dimensions": [
+        1.22,
+        1.45,
+        2.655
+      ],
+      "meshes": 32
+    },
+    "hound_l05": {
+      "file": "assets/models/defenders/hound_l05.glb",
+      "sha256": "31abb7560266c74e45e865f3ebedbf6d38c219d8aeb953d5635998fe404a8734",
+      "bytes": 1655940,
+      "dimensions": [
+        1.22,
+        1.51,
+        2.655
+      ],
+      "meshes": 33
+    }
+  }
+}
