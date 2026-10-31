@@ -5,6 +5,7 @@
   "scripts": {
     "pretest": "npm run test:games-hub && npm run test:discord-discovery-recovery && npm run test:onboarding-drafts && npm run test:stronghold",
     "test:stronghold": "tsx scripts/test-stronghold-access.ts && tsx scripts/test-stronghold-bootstrap.ts",
+    "test:stronghold-preview": "node stronghold-wars/test-assets.mjs && node stronghold-wars/test-arc-battery.mjs && node -e \"import('./stronghold-wars/preview/service-tests.js').then(m => console.log(m.runServiceTests()))\"",
     "test:discord-discovery-recovery": "tsx scripts/test-discord-discovery-recovery.ts",
     "dev:games-hub": "tsx scripts/dev-games-hub.ts",
     "test:games-hub": "tsx scripts/test-games-operations.ts && tsx scripts/test-games-hub.ts && npm run test:games-hub-maintenance && npm run test:games-trivia && npm run test:games-word-chain && npm run test:games-hide-seek && npm run test:games-relay-rush && npm run test:games-cipher-grid && npm run test:games-echo-array && npm run test:games-outpost-run && npm run test:games-signal-shift && npm run test:games-circuit-forge && npm run test:circuit-forge-grid-control-migration-maintenance && npm run test:games-ranger-range && npm run test:games-night-run && npm run test:command-centre && npm run test:survival-command && npm run test:survival-command-field-orders-production-activation && npm run test:survival-command-field-orders-migration-maintenance",

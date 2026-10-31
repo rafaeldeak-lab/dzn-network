@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural DZN Stronghold supply-route geometry; no paid provider or third-party game art.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up",
+  "assets": {
+    "supply_route_l01": {
+      "file": "assets/models/routes/supply_route_l01.glb",
+      "sha256": "baa3b59bbb56da6af71cffa05d50a9ee001df79729c82b3a7bb5fe6126105aa0",
+      "bytes": 26348,
+      "dimensions": [
+        2.82,
+        0.77,
+        3.8
+      ]
+    },
+    "supply_route_l02": {
+      "file": "assets/models/routes/supply_route_l02.glb",
+      "sha256": "434538e3a90b03eb35980a57bab14264c1fd9a0bcb9389937f3036c179ad3102",
+      "bytes": 42656,
+      "dimensions": [
+        2.82,
+        0.77,
+        3.8
+      ]
+    },
+    "supply_route_l03": {
+      "file": "assets/models/routes/supply_route_l03.glb",
+      "sha256": "0d92c566fe9f131473bce98ee6cb8a0f960405cbf601ffd8e22bfbfb05265b89",
+      "bytes": 57108,
+      "dimensions": [
+        2.82,
+        0.77,
+        3.8
+      ]
+    },
+    "supply_route_l04": {
+      "file": "assets/models/routes/supply_route_l04.glb",
+      "sha256": "1dc44ee11a428e9b45f01f6a1b1a18e4407b8f0b134d3109161c79c3603f72db",
+      "bytes": 56820,
+      "dimensions": [
+        2.82,
+        0.87,
+        3.8
+      ]
+    },
+    "supply_route_l05": {
+      "file": "assets/models/routes/supply_route_l05.glb",
+      "sha256": "57c497cdd954529400e0d270321679eaf9601163366e2b33ac476ba6ca65d2db",
+      "bytes": 80600,
+      "dimensions": [
+        2.82,
+        1.23,
+        3.8
+      ]
+    }
+  }
+}

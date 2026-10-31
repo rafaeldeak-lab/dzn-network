@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original procedural geometry authored for DZN Stronghold Wars; no paid provider or external art source.",
+  "license": "Project-owned original",
+  "unit": "metre",
+  "coordinateSystem": "Y up",
+  "assets": {
+    "pine_l01": {
+      "file": "assets/models/scenery/pine_l01.glb",
+      "sha256": "bbd11942da613cce5c168c32954b0ad1fc5ebe8a2e4fe2a7723432d6fd866df8",
+      "bytes": 343488,
+      "dimensions": [
+        1.679,
+        2.53,
+        1.75
+      ]
+    },
+    "pine_l02": {
+      "file": "assets/models/scenery/pine_l02.glb",
+      "sha256": "666ba7b7e7e08b26f007b5755d34b9636823a48f220437925d93a33279440a66",
+      "bytes": 486288,
+      "dimensions": [
+        2,
+        3.05,
+        2.117
+      ]
+    },
+    "pine_l03": {
+      "file": "assets/models/scenery/pine_l03.glb",
+      "sha256": "df52112ed1af39fb135b316632ed33e185dd6cb4c893be9d434cf8a477977b14",
+      "bytes": 651052,
+      "dimensions": [
+        2.409,
+        3.57,
+        2.451
+      ]
+    },
+    "pine_l04": {
+      "file": "assets/models/scenery/pine_l04.glb",
+      "sha256": "a5a6c1b0b7d81782728353e38bba5b9a3047c79b4c1eb4de5032524cf3d9c900",
+      "bytes": 837764,
+      "dimensions": [
+        2.786,
+        4.09,
+        2.879
+      ]
+    },
+    "pine_l05": {
+      "file": "assets/models/scenery/pine_l05.glb",
+      "sha256": "1771e145c5c355ac6c0dd7691481827d3e8d401c1cb2e33a7ba5006eeb6133d3",
+      "bytes": 964072,
+      "dimensions": [
+        3.17,
+        4.61,
+        3.263
+      ]
+    },
+    "pine_stump": {
+      "file": "assets/models/scenery/pine_stump.glb",
+      "sha256": "fa3551f1144fdb381ffd04dad7b21d2cb390794bfb5c95569d5d0822372b179d",
+      "bytes": 14044,
+      "dimensions": [
+        1.024,
+        0.648,
+        1.24
+      ]
+    },
+    "pine_log_stack": {
+      "file": "assets/models/scenery/pine_log_stack.glb",
+      "sha256": "49e4cfb30b3874c494adfd37dab1ff4d1a85a0d32f28a208454a23ac0ce8a37b",
+      "bytes": 19136,
+      "dimensions": [
+        3.118,
+        0.823,
+        0.427
+      ]
+    },
+    "granite_boulder": {
+      "file": "assets/models/scenery/granite_boulder.glb",
+      "sha256": "e0811e5f7cfd6d6714c3889cfd1c24f19ff83686b8e8a6966b6c9afa31b7a6b9",
+      "bytes": 31484,
+      "dimensions": [
+        2.584,
+        1.178,
+        1.862
+      ]
+    },
+    "claim_marker": {
+      "file": "assets/models/scenery/claim_marker.glb",
+      "sha256": "b2b016e3e4622c266e148c53adffdda52de4c28fe34c353f06121ceac069b401",
+      "bytes": 11128,
+      "dimensions": [
+        1.66,
+        1.03,
+        1.66
+      ]
+    },
+    "fallen_trunk": {
+      "file": "assets/models/scenery/fallen_trunk.glb",
+      "sha256": "27504b1b5b9423244abb0710cdb554ad1291bacc55746e576dc3771eff3d18a2",
+      "bytes": 46524,
+      "dimensions": [
+        3.751,
+        0.78,
+        0.78
+      ]
+    },
+    "fern_patch": {
+      "file": "assets/models/scenery/fern_patch.glb",
+      "sha256": "c4563b1f9919de11babe22bf40b0476fcd8f9a86a214b2746c7b1397dbbe7480",
+      "bytes": 18908,
+      "dimensions": [
+        1.334,
+        1.103,
+        1.496
+      ]
+    },
+    "mossy_rock_cluster": {
+      "file": "assets/models/scenery/mossy_rock_cluster.glb",
+      "sha256": "b296d7740a5fdcdfbf440f814a6cdcbbebcbc62fda59cfcb31085c51fcac68a7",
+      "bytes": 51008,
+      "dimensions": [
+        2.088,
+        0.87,
+        1.36
+      ]
+    },
+    "brush_pile": {
+      "file": "assets/models/scenery/brush_pile.glb",
+      "sha256": "04692eec46a580607dfdb8e02d79a395a5eb095cec9339cc04ca5b5e61ae2ac8",
+      "bytes": 45908,
+      "dimensions": [
+        1.347,
+        0.492,
+        1.236
+      ]
+    },
+    "lumber_pallet": {
+      "file": "assets/models/scenery/lumber_pallet.glb",
+      "sha256": "a9576b1b54fc4289d4b9d7e97ffbca043d84674de66db66903fe7569c4120ddf",
+      "bytes": 40324,
+      "dimensions": [
+        1.85,
+        0.61,
+        1.45
+      ]
+    }
+  }
+}

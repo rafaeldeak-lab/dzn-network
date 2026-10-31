@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "provenance": "The five Rosebud image-guided DZN Fixer sources from squads-v8 were retained. Blender re-rigged the axe hand and steadied its walk-cycle grip locally; no additional generation credits were used.",
+  "usage": "DZN Stronghold Wars local preview. Rights remain subject to the owner account and Rosebud terms.",
+  "coordinateSystem": "glTF Y-up; Fixer faces +Z in the game",
+  "assets": {
+    "engineer_l01": {
+      "file": "assets/models/squads-v12/engineer_l01.glb",
+      "source": "source-art/rosebud-models/engineer_l01.glb",
+      "reference": "assets/portraits/squads-final/engineer_l01.png",
+      "rosebudJob": "9d5ba989-d418-4a72-a065-0ccbcde4418d",
+      "bytes": 1722672,
+      "sha256": "c35515730859ae42201a687fdf882cab9a6a3f0326144857470a7d45a7d872ed",
+      "sourceSha256": "1d7430c0cf12937901125f3e78cf6a0eb5f1062fe541c8d95af84a68c363e69b",
+      "referenceSha256": "20581b4e15b0f6902454385291243c9771113309480be4fd0dbac30a0faab3d0",
+      "triangles": 23752,
+      "skins": 1,
+      "textures": 2,
+      "animations": [
+        "DZN_Operative_Walk",
+        "DZN_Operative_Idle"
+      ],
+      "heightMetres": 1.8
+    },
+    "engineer_l02": {
+      "file": "assets/models/squads-v12/engineer_l02.glb",
+      "source": "source-art/rosebud-models/engineer_l02.glb",
+      "reference": "assets/portraits/squads-final/engineer_l02.png",
+      "rosebudJob": "2549a86c-c1ce-4e5b-bd3f-291a3bdf0b1e",
+      "bytes": 2155112,
+      "sha256": "b4d16ffec5376c36583ba6a3f3983727eda6c86be61aa1579632a2e2814c41ed",
+      "sourceSha256": "4e7c73f48607e6352046c175a3b41fcfbe5b4758a95ea6d90536314e1bdc23b4",
+      "referenceSha256": "d41e5839b2fd4101518b3b71fe997a68eb72b1c206dcb467b179c6455192be90",
+      "triangles": 23897,
+      "skins": 1,
+      "textures": 2,
+      "animations": [
+        "DZN_Operative_Walk",
+        "DZN_Operative_Idle"
+      ],
+      "heightMetres": 1.8
+    },
+    "engineer_l03": {
+      "file": "assets/models/squads-v12/engineer_l03.glb",
+      "source": "source-art/rosebud-models/engineer_l03.glb",
+      "reference": "assets/portraits/squads-final/engineer_l03.png",
+      "rosebudJob": "3f5e7c65-27c2-400c-bb3e-dff2fb4a1525",
+      "bytes": 2110128,
+      "sha256": "172ad546f23dd49d3f2d37de9106f331f1f163c68dda6d39271c3f90534c4c1c",
+      "sourceSha256": "fbd508b3abaaf801c6bdb6d5979d40d7bf9b0815b3c5081b8401772534cdc583",
+      "referenceSha256": "b585767391d7b9502b414a7ecb69ab3c3cf3b86a6afee37370ca233139798923",
+      "triangles": 22593,
+      "skins": 1,
+      "textures": 2,
+      "animations": [
+        "DZN_Operative_Walk",
+        "DZN_Operative_Idle"
+      ],
+      "heightMetres": 1.8
+    },
+    "engineer_l04": {
+      "file": "assets/models/squads-v12/engineer_l04.glb",
+      "source": "source-art/rosebud-models/engineer_l04.glb",
+      "reference": "assets/portraits/squads-final/engineer_l04.png",
+      "rosebudJob": "7bff115e-d387-4c43-b766-e090046d7534",
+      "bytes": 2179848,
+      "sha256": "a79cdc4b8cef32fef5ef5792578e3431aa085f500aebd965e1fb2d113c5221a4",
+      "sourceSha256": "955eb35643fd18fdda9c2a4c6395998e8bf1d4a7be16cfb758367c17c5ad03cb",
+      "referenceSha256": "a046efb58cecbdcbc067ee91612ae4eff433be0406654c67085f808c012c9157",
+      "triangles": 23706,
+      "skins": 1,
+      "textures": 2,
+      "animations": [
+        "DZN_Operative_Walk",
+        "DZN_Operative_Idle"
+      ],
+      "heightMetres": 1.8
+    },
+    "engineer_l05": {
+      "file": "assets/models/squads-v12/engineer_l05.glb",
+      "source": "source-art/rosebud-models/engineer_l05.glb",
+      "reference": "assets/portraits/squads-final/engineer_l05.png",
+      "rosebudJob": "2744402d-ff10-4e52-9d3d-0c5132984d1e",
+      "bytes": 2131556,
+      "sha256": "278f495bc1f9de9641a66641f4249761be5a170a8bdcdd2032a27fcb0c3a9887",
+      "sourceSha256": "05e9fc08e347ad067e0112c39bc2edf0ce8a2101275c7c51ba1336decdf760b9",
+      "referenceSha256": "ec57bb6a48f881cbd661387ab771dfdcb81bec68f14f47c6886f9c2d3b190974",
+      "triangles": 24644,
+      "skins": 1,
+      "textures": 2,
+      "animations": [
+        "DZN_Operative_Walk",
+        "DZN_Operative_Idle"
+      ],
+      "heightMetres": 1.8
+    }
+  }
+}
