@@ -53,9 +53,17 @@ function chopCycle(time) {
     split: phase >= .59 ? ease((phase - .59) / .2) : 0 };
 }
 
+export function fixerTaskForStop(stop, construction, now, allowed, timber = null) {
+  if (!allowed || !stop) return null;
+  if (stop === 'yard' && !(timber?.perMinute > 0 && timber.stored < timber.capacity)) return null;
+  if (stop === 'depot' && !(timber?.stored > 0)) return null;
+  if (stop === construction?.stop && now < construction.finishAt) return 'construction';
+  return stop;
+}
+
 export function fixerActionPose(time, moving, stop, breachAge = Infinity, reducedMotion = false) {
   if (reducedMotion) return { task: null, arm: 0, hand: 0, support: 0, look: 0, breach: 0 };
-  const task = !moving && ['workshop', 'hall', 'yard', 'depot'].includes(stop) ? stop : null;
+  const task = !moving && ['workshop', 'hall', 'yard', 'depot', 'construction'].includes(stop) ? stop : null;
   const breach = Math.max(0, 1 - Math.max(0, breachAge) / .65);
   const tempo = 4.6;
   const stroke = task ? Math.sin(time * tempo) : 0;
