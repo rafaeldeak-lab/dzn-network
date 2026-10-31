@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
 import { publicMapLabel } from "@/lib/showcase-labels";
+import { PublicVaultShowcase } from "@/components/vault/public-vault-showcase";
 
 type FutureSection = { visible: boolean; status: "not_available_yet" | "hidden"; message: string };
 type CallingCardSection = { visible: boolean; status: "available" | "not_available_yet" | "hidden"; message: string; items: Array<{ product_key: string; name: string; granted_at: string }> };
@@ -109,6 +110,8 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
           </div>
         </div>
       </section>
+
+      <PublicVaultShowcase scope="player" subjectId={data.handle} displayName={data.display_name} />
 
       <section aria-label="Public gameplay statistics" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="Kills" value={gameplay.kills} icon={<Crosshair aria-hidden="true" className="h-5 w-5" />} tone="cyan" />
