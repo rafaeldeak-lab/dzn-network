@@ -1,37 +1,37 @@
 {
-  "schemaVersion": 1,
-  "provenance": "Original local procedural DZN perimeter geometry; no paid service",
+  "schemaVersion": 2,
+  "provenance": "Original Blender 5.2 DZN modular walls; project-owned design using existing weathered pine and metal textures",
   "license": "Project-owned original",
   "assets": {
     "wall_l01": {
-      "file": "assets/models/walls/wall_l01.glb",
-      "sha256": "3cf0209122b5995be694021f624d120ad995cf1ee12d93029a8db4e6447af789",
-      "bytes": 200392,
-      "meshes": 9
+      "file": "assets/models/walls/wall_l01-2.glb",
+      "sha256": "8232755220f56c8788747ed2b6e8b043e129ccfecb940fa8142eaba2acc174c5",
+      "bytes": 742316,
+      "meshes": 1
     },
     "wall_l02": {
-      "file": "assets/models/walls/wall_l02.glb",
-      "sha256": "b9e9740d8bd5dd5c61d611795c08f25afc0e993ed88b729ef3a9532b1b967bab",
-      "bytes": 258116,
-      "meshes": 10
+      "file": "assets/models/walls/wall_l02-2.glb",
+      "sha256": "d44a227b0278956341f431434af380723bf7d5f4f8ff025d12cffd1adf50fc08",
+      "bytes": 753688,
+      "meshes": 1
     },
     "wall_l03": {
-      "file": "assets/models/walls/wall_l03.glb",
-      "sha256": "f00ab9c636462a0bcd40d0ebea46c5d9556b0c027b11fce02977f741b8cc6daf",
-      "bytes": 372464,
-      "meshes": 12
+      "file": "assets/models/walls/wall_l03-2.glb",
+      "sha256": "52efd1ee952ffa879220b15b507c24aac1a4f52670197a7a3392ec8c4fda66e7",
+      "bytes": 325516,
+      "meshes": 1
     },
     "wall_l04": {
-      "file": "assets/models/walls/wall_l04.glb",
-      "sha256": "eab959ece6811a37f626660890ca814f88c2761406b940e3c1a0fd0779a1641c",
-      "bytes": 544604,
-      "meshes": 15
+      "file": "assets/models/walls/wall_l04-2.glb",
+      "sha256": "3f9d6db900c97cab1a49eef5591f02449395749c2c6381639ddf7592629acc41",
+      "bytes": 346856,
+      "meshes": 1
     },
     "wall_l05": {
-      "file": "assets/models/walls/wall_l05.glb",
-      "sha256": "61c851fde5799343a7dee1db7bfc8a4c0c8713dcc95dd7a042afe0e33f8dc466",
-      "bytes": 668396,
-      "meshes": 19
+      "file": "assets/models/walls/wall_l05-2.glb",
+      "sha256": "264723ee25ef3a39fa878fc9635bb317a57239c74216da0ebd5aca30b7431d64",
+      "bytes": 368712,
+      "meshes": 1
     }
   }
 }

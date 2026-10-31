@@ -20,7 +20,7 @@ import { articulateCommsModel, clearCommsSplitGeometry, createCommsArray, startC
 import { sentinelActionPose, applySentinelAction, sentinelMuzzlePosition, clearSentinelUpgradeReveal, startSentinelUpgradeReveal, stepSentinelUpgradeReveal } from './sentinel-actions.js';
 import { wardenActionPose, applyWardenAction, wardenMuzzlePosition, clearWardenUpgradeReveal, startWardenUpgradeReveal, stepWardenUpgradeReveal } from './warden-actions.js';
 import { ghostActionPose, applyGhostAction, ghostScannerPosition, clearGhostScan, stepGhostScan, clearGhostUpgradeReveal, startGhostUpgradeReveal, stepGhostUpgradeReveal } from './ghost-actions.js';
-import { fixerActionPose, applyFixerAction, fixerToolPosition, clearFixerWork, stepFixerWork, clearFixerUpgradeReveal, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './fixer-actions.js';
+import { fixerTaskForStop, fixerActionPose, applyFixerAction, fixerToolPosition, clearFixerWork, stepFixerWork, clearFixerUpgradeReveal, startFixerUpgradeReveal, stepFixerUpgradeReveal } from './fixer-actions.js';
 import { lifelineActionPose, applyLifelineAction, lifelineInjectorPosition, clearLifelineTriage, stepLifelineTriage, clearLifelineUpgradeReveal, startLifelineUpgradeReveal, stepLifelineUpgradeReveal } from './lifeline-actions.js';
 import { WAR_LANES, WAR_OBJECTIVES, WAR_METHODS, WAR_FIELD_ORDERS, WAR_DEFENCE_ORDERS, SUPPLY_DISRUPTION, WAR_SYSTEMS, warSystemStatus, warDefenderPosts, evaluateWarPlan, buildWarDamageReport, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
 
@@ -36,6 +36,7 @@ const DEFS = {
 };
 let activePatrolNodes = PATROL_NODES;
 let activePatrolLayout = null;
+let activeFixerConstruction = null;
 const patrols = [];
 const defenderPatrols = new Map();
 let operativePatrol = null;
@@ -390,10 +391,10 @@ let fittedZoom = baseFitZoom();
 let zoom = fittedZoom;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
 const camTarget = new THREE.Vector3(0, 0, 0);
-const cameraOffset = new THREE.Vector3(40, 40, 40);
+const cameraOffset = new THREE.Vector3(40, 40, 40), patrolCameraOffset = new THREE.Vector3(28, 64, 28);
 let focusedPatrolRole = null;
 function updateCameraPosition() {
-  camera.position.copy(camTarget).add(cameraOffset);
+  camera.position.copy(camTarget).add(focusedPatrolRole ? patrolCameraOffset : cameraOffset);
   camera.lookAt(camTarget);
 }
 function updateCamera() {
@@ -977,7 +978,7 @@ async function chronicleModel(level) {
 
 async function wallModel(level) {
   const key = `wall/${level}`;
-  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}-2.glb`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Wall Level ${level} model could not load.`, error);
     return null;
@@ -1790,10 +1791,8 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
     }
     if (model && isFixer) {
       const timber = stop === 'yard' || stop === 'depot' ? service.getTimberProductionInfo() : null;
-      const yardWorking = timber?.perMinute > 0 && timber.stored < timber.capacity;
-      const depotWorking = timber?.stored > 0;
-      const workStop = !service.getAccess().allowed || (stop === 'yard' && !yardWorking) ||
-        (stop === 'depot' && !depotWorking) ? null : stop;
+      const workStop = fixerTaskForStop(stop, activeFixerConstruction, Date.now(),
+        service.getAccess().allowed, timber);
       const pose = fixerActionPose(soldier.userData.actionClock, pace > .05, workStop, soldier.userData.fixerBreachAge);
       applyFixerAction(model, pose);
       stepFixerWork(soldier, soldier.userData.actionClock, pose.task, soldier.userData.squadTier);
@@ -1853,6 +1852,7 @@ function syncPatrolOrders() {
   const workSite = (base ? service._constructionJobs(base) : []).filter(({ project }) => project.startedAt <= Date.now()).sort((a, b) => a.project.finishAt - b.project.finishAt)[0];
   const target = workSite?.kind === 'core' ? (workSite.project.key === 'hq' ? 'hall' : workSite.project.key)
     : workSite ? `district:${workSite.plot.id}` : null;
+  activeFixerConstruction = target ? { stop: target, finishAt: workSite.project.finishAt } : null;
   if (workSite?.plot) {
     const point = base.layout.structures[workSite.plot.id] || { x: GAME_CONFIG.landPlots.find(plot => plot.id === workSite.plot.id).position[0], z: GAME_CONFIG.landPlots.find(plot => plot.id === workSite.plot.id).position[1] };
     activePatrolNodes[target] = [point.x + 6, point.z];
