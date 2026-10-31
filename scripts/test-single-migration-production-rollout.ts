@@ -790,4 +790,48 @@ try {
   rmSync(survivalFieldOrdersDirectory, { force: true, recursive: true });
 }
 
+const vaultCommentSchemaDirectory = mkdtempSync(join(process.cwd(), ".dzn-vault-comment-schema-test-"));
+try {
+  const run = (args: string[]) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/dzn-single-migration-production-rollout.ts", ...args], { encoding: "utf8" });
+  const write = (name: string, value: string) => {
+    const path = join(vaultCommentSchemaDirectory, name);
+    writeFileSync(path, value, "utf8");
+    return path;
+  };
+  const wrappedRows = (rows: unknown[]) => JSON.stringify([{ results: rows }]);
+  const stageDirectory = join(vaultCommentSchemaDirectory, "stage");
+  const preparedStage = run(["prepare", "--migration", "0115_vault_cabinets.sql", "--stage-dir", stageDirectory]);
+  assert.equal(preparedStage.status, 0, `${preparedStage.stdout ?? ""}${preparedStage.stderr ?? ""}`);
+  const prepared = JSON.parse(readFileSync(join(stageDirectory, "migration-plan.json"), "utf8")) as {
+    migration: { tables: Array<{ name: string; columns: string[] }> };
+    expectedObjectSql: Record<string, string>;
+  };
+  const productionShowcaseSql = prepared.expectedObjectSql.dzn_vault_showcases.replace(
+    "PRIMARY KEY(scope_type, scope_id)",
+    "-- D1 preserves source comments in sqlite_master.\nPRIMARY KEY(scope_type, scope_id)",
+  );
+  const objects = Object.entries(prepared.expectedObjectSql).map(([name, sql]) => ({
+    type: "table",
+    name,
+    tbl_name: name,
+    sql: name === "dzn_vault_showcases" ? productionShowcaseSql : sql,
+  }));
+  const foreignKeyCheck = write("foreign-key-check.json", wrappedRows([]));
+  for (const table of prepared.migration.tables) {
+    writeFileSync(join(stageDirectory, `table-info-${table.name}.json`), wrappedRows(table.columns.map((name) => ({ name }))), "utf8");
+    writeFileSync(join(stageDirectory, `foreign-keys-${table.name}.json`), wrappedRows([]), "utf8");
+    writeFileSync(join(stageDirectory, `row-count-${table.name}.json`), wrappedRows([{ row_count: 0 }]), "utf8");
+  }
+  const schema = run([
+    "verify-schema",
+    "--stage-dir", stageDirectory,
+    "--objects", write("objects.json", wrappedRows(objects)),
+    "--foreign-key-check", foreignKeyCheck,
+  ]);
+  assert.equal(schema.status, 0, `${schema.stdout ?? ""}${schema.stderr ?? ""}`);
+  assert.match(schema.stdout, /Production schema, index, constraint, foreign-key, and zero-row verification passed/);
+} finally {
+  rmSync(vaultCommentSchemaDirectory, { force: true, recursive: true });
+}
+
 console.log("Single-migration production rollout safety tests passed.");

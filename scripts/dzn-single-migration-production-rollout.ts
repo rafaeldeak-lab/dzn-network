@@ -462,8 +462,59 @@ function migrationPosition(plan: MigrationPlan) {
   return { migrations, targetIndex };
 }
 
+function stripSqlComments(source: string) {
+  let result = "";
+  let quote: "'" | '"' | "`" | "[" | null = null;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (quote) {
+      result += character;
+      if (quote === "[") {
+        if (character === "]") quote = null;
+      } else if (character === quote) {
+        if (next === quote) {
+          result += next;
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (character === "[") {
+      quote = "[";
+      result += character;
+      continue;
+    }
+    if (character === "-" && next === "-") {
+      while (index < source.length && source[index] !== "\n") index += 1;
+      if (index < source.length) result += "\n";
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) index += 1;
+      if (index < source.length) index += 1;
+      result += " ";
+      continue;
+    }
+
+    result += character;
+  }
+  return result;
+}
+
 function normalizeSql(source: string) {
-  return source
+  return stripSqlComments(source)
     .replace(/\s+/g, " ")
     .trim()
     .replace(/;$/, "")
