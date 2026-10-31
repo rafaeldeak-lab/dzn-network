@@ -3,18 +3,68 @@ import * as THREE from 'three';
 const axisX = new THREE.Vector3(1, 0, 0);
 const axisY = new THREE.Vector3(0, 1, 0);
 const lastBonePoses = new WeakMap();
+const clamp01 = value => Math.max(0, Math.min(1, value));
+const ease = value => { const t = clamp01(value); return t * t * (3 - 2 * t); };
+
+function woodTexture(cut = false) {
+  if (typeof document === 'undefined') {
+    const color = cut ? [182, 138, 85, 255] : [85, 57, 35, 255];
+    const texture = new THREE.DataTexture(new Uint8Array(color), 1, 1);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = cut ? '#b68a55' : '#553923';
+  ctx.fillRect(0, 0, 256, 256);
+  if (cut) {
+    for (let ring = 1; ring <= 10; ring++) {
+      ctx.beginPath();
+      ctx.ellipse(128, 128, ring * 11.2, ring * 10.5, ring * .04, 0, Math.PI * 2);
+      ctx.strokeStyle = ring % 2 ? '#8e643b' : '#d1a66b';
+      ctx.lineWidth = ring % 3 ? 2 : 3;
+      ctx.stroke();
+    }
+  } else for (let stripe = 0; stripe < 75; stripe++) {
+    const x = stripe * 29 % 256;
+    const offset = stripe * 41 % 61;
+    ctx.beginPath();
+    ctx.moveTo(x, -15);
+    ctx.bezierCurveTo(x + offset / 6, 65, x - offset / 5, 168, x + offset / 7, 271);
+    ctx.strokeStyle = stripe % 3 ? '#8b5d38' : '#30251c';
+    ctx.lineWidth = stripe % 4 ? 2 : 4;
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function chopCycle(time) {
+  const phase = ((time * .58) % 1 + 1) % 1;
+  const lift = ease(phase / .34);
+  const strike = ease((phase - .43) / .16);
+  const recover = ease((phase - .82) / .18);
+  return { phase, arm: -.08 - .18 * lift + .28 * strike - .1 * recover,
+    hand: -.02 * lift + .05 * strike - .03 * recover,
+    impact: phase >= .56 && phase < .8 ? Math.sin((phase - .56) / .24 * Math.PI) : 0,
+    split: phase >= .59 ? ease((phase - .59) / .2) : 0 };
+}
 
 export function fixerActionPose(time, moving, stop, breachAge = Infinity, reducedMotion = false) {
   if (reducedMotion) return { task: null, arm: 0, hand: 0, support: 0, look: 0, breach: 0 };
   const task = !moving && ['workshop', 'hall', 'yard'].includes(stop) ? stop : null;
   const breach = Math.max(0, 1 - Math.max(0, breachAge) / .65);
-  const tempo = task === 'yard' ? 3.4 : 4.6;
+  const tempo = 4.6;
   const stroke = task ? Math.sin(time * tempo) : 0;
+  const chop = task === 'yard' ? chopCycle(time) : null;
   return {
     task,
-    arm: task === 'yard' ? -.14 + stroke * .12 : task ? -.1 + stroke * .08 : breach ? -.16 * breach : 0,
-    hand: task === 'yard' ? .03 + stroke * .08 : task ? stroke * .07 : breach ? .08 * breach : 0,
-    support: task === 'yard' ? -.07 - stroke * .04 : task ? -.06 - stroke * .035 : 0,
+    arm: chop ? chop.arm : task ? -.1 + stroke * .08 : breach ? -.16 * breach : 0,
+    hand: chop ? chop.hand : task ? stroke * .07 : breach ? .08 * breach : 0,
+    support: chop ? -.08 - chop.impact * .04 : task ? -.06 - stroke * .035 : 0,
     look: task ? Math.sin(time * .7) * .045 : 0,
     breach,
   };
@@ -53,7 +103,8 @@ export function clearFixerWork(soldier) {
   if (!work) return;
   work.root.parent?.remove(work.root);
   work.root.traverse(object => object.geometry?.dispose());
-  work.material.dispose();
+  for (const material of work.materials) material.dispose();
+  for (const texture of work.textures) texture.dispose();
   soldier.userData.fixerWork = null;
 }
 
@@ -62,26 +113,77 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
   if (!work && task && !reducedMotion) {
     const root = new THREE.Group(); root.name = 'fixer_tool_activity'; soldier.add(root);
     const material = new THREE.MeshBasicMaterial({ color: 0xffb34f, transparent: true, opacity: .75, depthWrite: false });
+    const barkMap = woodTexture();
+    const endMap = woodTexture(true);
+    const bark = new THREE.MeshStandardMaterial({ map: barkMap, roughness: 1 });
+    const timber = new THREE.MeshStandardMaterial({ map: endMap, roughness: .95 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x4e5552, metalness: .7, roughness: .45 });
+    const light = new THREE.MeshStandardMaterial({ color: 0xffba65, emissive: 0xff8b32, emissiveIntensity: 1.5 });
+    const yard = new THREE.Group(); yard.name = 'fixer_chopping_station'; root.add(yard);
+    const stump = new THREE.Mesh(new THREE.CylinderGeometry(.15, .18, .36, 24), [bark, timber, bark]);
+    stump.position.set(-.18, .18, .42); yard.add(stump);
+    const whole = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .4, 20), [bark, timber, timber]);
+    whole.rotation.x = Math.PI / 2; whole.position.set(-.18, .46, .42); yard.add(whole);
+    const halves = [];
+    for (const side of [-1, 1]) {
+      const half = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .4, 20, 1, false,
+        side < 0 ? 0 : Math.PI, Math.PI), [bark, timber, timber]);
+      half.rotation.x = Math.PI / 2;
+      yard.add(half); halves.push(half);
+    }
+    if (tier >= 2) for (let row = 0; row < 3; row++) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(.28, .035, .085), bark);
+      plank.position.set(-.53, .035 + row * .038, .43 + row % 2 * .02);
+      yard.add(plank);
+    }
+    if (tier >= 3) for (const x of [-.36, 0]) {
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(.025, .07, .35), steel);
+      brace.position.set(x, .39, .42); yard.add(brace);
+    }
+    let feedWheel = null;
+    if (tier >= 4) {
+      feedWheel = new THREE.Mesh(new THREE.CylinderGeometry(.065, .065, .035, 16), steel);
+      feedWheel.rotation.x = Math.PI / 2;
+      feedWheel.position.set(.04, .49, .42); yard.add(feedWheel);
+    }
+    if (tier >= 5) {
+      const guide = new THREE.Mesh(new THREE.SphereGeometry(.025, 10, 8), light);
+      guide.position.set(-.18, .58, .42); yard.add(guide);
+    }
     const particles = [];
     for (let i = 0; i < 2 + Math.min(5, tier); i++) {
       const particle = new THREE.Mesh(new THREE.OctahedronGeometry(.02 + i % 2 * .008, 0), material);
       root.add(particle); particles.push(particle);
     }
-    work = soldier.userData.fixerWork = { root, material, particles };
+    work = soldier.userData.fixerWork = { root, material, materials: [material, bark, timber, steel, light],
+      textures: [barkMap, endMap],
+      particles, yard, whole, halves, feedWheel };
   }
   if (!work) return;
   work.root.visible = Boolean(task && !reducedMotion);
   if (!work.root.visible) return;
+  work.yard.visible = task === 'yard';
+  const chop = task === 'yard' ? chopCycle(time) : null;
+  if (work.feedWheel) work.feedWheel.rotation.z = time * .9;
+  work.whole.visible = !chop || chop.phase < .59;
+  work.halves.forEach((half, index) => {
+    half.visible = Boolean(chop && chop.phase >= .59);
+    half.position.set(-.18 + (index ? 1 : -1) * (.018 + (chop?.split || 0) * .08),
+      .46 + (chop?.split || 0) * .012, .42);
+    half.rotation.y = (index ? 1 : -1) * (chop?.split || 0) * .18;
+  });
   soldier.updateMatrixWorld(true);
-  const origin = soldier.worldToLocal(fixerToolPosition(soldier));
+  const origin = chop ? new THREE.Vector3(-.18, .55, .42) : soldier.worldToLocal(fixerToolPosition(soldier));
   work.material.color.setHex(task === 'yard' ? 0xd4a673 : 0xffb34f);
   work.particles.forEach((particle, index) => {
-    const cycle = ((time * (task === 'yard' ? 1.8 : 2.6) + index / work.particles.length) % 1 + 1) % 1;
-    const spread = .045 + cycle * .22;
+    const cycle = ((time * 2.6 + index / work.particles.length) % 1 + 1) % 1;
+    const burst = chop ? chop.impact : 1;
+    const spread = .045 + cycle * (chop ? .18 : .22);
+    particle.visible = burst > .02;
     particle.position.set(origin.x + Math.cos(index * 2.4) * spread,
-      origin.y + (task === 'yard' ? -cycle * .26 : cycle * .19),
+      origin.y + (chop ? cycle * .22 : cycle * .19),
       origin.z + Math.sin(index * 2.4) * spread);
-    particle.scale.setScalar(1 - cycle * .7);
+    particle.scale.setScalar((1 - cycle * .7) * burst);
   });
 }
 

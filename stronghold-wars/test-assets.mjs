@@ -238,7 +238,7 @@ const stableFixerHand = fixerHand.quaternion.clone();
 for (let frame = 0; frame < 600; frame++) applyFixerAction(fixerModel, yardAction);
 if (fixerHand.quaternion.angleTo(stableFixerHand) > 1e-5) throw new Error('Fixer tool hand must not drift.');
 fixerArm.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), .24);
-applyFixerAction(fixerModel, fixerActionPose(Math.PI * 1.5 / 3.4, false, 'yard'));
+applyFixerAction(fixerModel, fixerActionPose(.34 / .58, false, 'yard'));
 if (Math.abs(fixerArm.rotation.y) < .2 || Math.abs(fixerArm.rotation.x) < .15)
   throw new Error('Fixer work motion must preserve the imported 3D walk pose.');
 fixerArm.quaternion.identity(); applyFixerAction(fixerModel, fixerActionPose(0, true, null));
@@ -246,8 +246,15 @@ if (Math.abs(fixerArm.rotation.x) > 1e-5) throw new Error('Fixer arm must return
 if (fixerToolPosition(fixer).distanceTo(fixerHand.getWorldPosition(new THREE.Vector3())) < .1)
   throw new Error('Fixer war cue should originate from the held tool.');
 stepFixerWork(fixer, 1, 'yard', 5);
-if (!fixer.userData.fixerWork?.root.visible || fixer.userData.fixerWork.particles.length !== 7)
-  throw new Error('Fixer Level 5 should show wood chips while working at the yard.');
+if (!fixer.userData.fixerWork?.root.visible || !fixer.userData.fixerWork.yard.visible
+  || fixer.userData.fixerWork.particles.length !== 7 || !fixer.userData.fixerWork.feedWheel)
+  throw new Error('Fixer Level 5 should show its powered chopping station and wood chips at the yard.');
+stepFixerWork(fixer, 1.2, 'yard', 5);
+if (fixer.userData.fixerWork.whole.visible || !fixer.userData.fixerWork.halves.every(half => half.visible))
+  throw new Error('The Fixer workpiece should split during the axe strike.');
+stepFixerWork(fixer, 1.2, 'workshop', 5);
+if (fixer.userData.fixerWork.yard.visible)
+  throw new Error('The chopping station must stay hidden at the Forge.');
 stepFixerWork(fixer, 1, null, 5);
 if (fixer.userData.fixerWork.root.visible) throw new Error('Fixer work cue should stop between buildings.');
 stepFixerWork(fixer, 1, 'workshop', 5, true);
