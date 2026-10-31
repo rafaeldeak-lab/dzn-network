@@ -316,6 +316,36 @@ const MIGRATION_PLANS: Record<string, MigrationPlan> = {
       "dzn_comms_legacy_reaction_message_cap_reactivate",
     ],
   },
+  "0115_vault_cabinets.sql": {
+    migration: "0115_vault_cabinets.sql",
+    predecessor: "0114_dzn_comms_chat_interactions.sql",
+    tables: [
+      {
+        name: "dzn_vault_grants",
+        columns: ["id", "scope_type", "scope_id", "item_id", "source_type", "source_key", "status", "granted_at", "reversed_at"],
+        foreignKeys: [],
+      },
+      {
+        name: "dzn_vault_showcases",
+        columns: ["scope_type", "scope_id", "version", "published", "slots_json", "updated_by_user_id", "updated_at"],
+        foreignKeys: [],
+      },
+      {
+        name: "dzn_vault_audit",
+        columns: ["id", "scope_type", "scope_id", "actor_user_id", "action", "previous_version", "next_version", "detail_json", "created_at"],
+        foreignKeys: [],
+      },
+    ],
+    indexes: ["idx_dzn_vault_grants_scope", "idx_dzn_vault_audit_scope"],
+    triggers: [
+      "dzn_vault_grant_owner_exists",
+      "dzn_vault_grant_identity_immutable",
+      "dzn_vault_showcase_owner_exists",
+      "dzn_vault_showcase_identity_immutable",
+      "dzn_vault_audit_identity_immutable",
+      "dzn_vault_audit_actor_anonymise_only",
+    ],
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
