@@ -978,7 +978,7 @@ async function chronicleModel(level) {
 
 async function wallModel(level) {
   const key = `wall/${level}`;
-  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}.glb`).then(gltf => gltf.scene).catch(error => {
+  if (!sceneryTemplates.has(key)) sceneryTemplates.set(key, gltfLoader.loadAsync(`assets/models/walls/wall_l0${level}-2.glb`).then(gltf => gltf.scene).catch(error => {
     sceneryTemplates.delete(key);
     console.warn(`Wall Level ${level} model could not load.`, error);
     return null;
