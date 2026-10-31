@@ -261,6 +261,24 @@ stepFixerWork(fixer, 1, 'workshop', 5, true);
 if (fixer.userData.fixerWork.root.visible) throw new Error('Fixer work cue should respect reduced motion.');
 for (let level = 1; level <= 5; level++) {
   const unit = new THREE.Group();
+  stepFixerWork(unit, .2, 'yard', level);
+  const station = unit.userData.fixerWork;
+  if (station.outputPlanks.length !== (level >= 2 ? Math.min(4, level + 1) : 0)
+    || station.clamps.length !== (level >= 3 ? 2 : 0)
+    || Boolean(station.feedWheel) !== (level >= 4)
+    || Boolean(station.guide) !== (level >= 5)
+    || station.outputPlanks.some(plank => plank.visible))
+    throw new Error(`Fixer Level ${level} needs its own staged work equipment.`);
+  stepFixerWork(unit, 1.35, 'yard', level);
+  if (station.outputPlanks.some(plank => !plank.visible)
+    || (level >= 5 && station.guide.material.emissiveIntensity <= .5))
+    throw new Error(`Fixer Level ${level} must deliver timber after its strike.`);
+  stepFixerWork(unit, 1.35, 'yard', Math.min(5, level + 1));
+  if (level < 5 && (unit.userData.fixerWork === station || station.root.parent))
+    throw new Error('The Fixer station must rebuild when its level increases.');
+}
+for (let level = 1; level <= 5; level++) {
+  const unit = new THREE.Group();
   const reveal = startFixerUpgradeReveal(unit, level);
   if (reveal.sparks.length !== 3 + level || !stepFixerUpgradeReveal(unit, .2) || !reveal.root.parent)
     throw new Error(`Fixer Level ${level} should have a tier-specific reveal.`);

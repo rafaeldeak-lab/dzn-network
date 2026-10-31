@@ -110,6 +110,10 @@ export function clearFixerWork(soldier) {
 
 export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = false) {
   let work = soldier.userData.fixerWork;
+  if (work && work.tier !== tier) {
+    clearFixerWork(soldier);
+    work = null;
+  }
   if (!work && task && !reducedMotion) {
     const root = new THREE.Group(); root.name = 'fixer_tool_activity'; soldier.add(root);
     const material = new THREE.MeshBasicMaterial({ color: 0xffb34f, transparent: true, opacity: .75, depthWrite: false });
@@ -131,14 +135,30 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
       half.rotation.x = Math.PI / 2;
       yard.add(half); halves.push(half);
     }
-    if (tier >= 2) for (let row = 0; row < 3; row++) {
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(.28, .035, .085), bark);
-      plank.position.set(-.53, .035 + row * .038, .43 + row % 2 * .02);
-      yard.add(plank);
+    const outputPlanks = [];
+    if (tier >= 2) {
+      const outline = new THREE.Shape();
+      outline.moveTo(-.14, -.038); outline.lineTo(.14, -.038);
+      outline.lineTo(.14, .038); outline.lineTo(-.14, .038); outline.closePath();
+      const plankGeometry = new THREE.ExtrudeGeometry(outline, {
+        depth: .034, bevelEnabled: true, bevelThickness: .005,
+        bevelSize: .006, bevelSegments: 2, curveSegments: 4,
+      });
+      for (let row = 0; row < Math.min(4, tier + 1); row++) {
+        const plank = new THREE.Mesh(plankGeometry, [timber, bark]);
+        plank.rotation.x = Math.PI / 2;
+        yard.add(plank); outputPlanks.push(plank);
+      }
     }
-    if (tier >= 3) for (const x of [-.36, 0]) {
-      const brace = new THREE.Mesh(new THREE.BoxGeometry(.025, .07, .35), steel);
-      brace.position.set(x, .39, .42); yard.add(brace);
+    const clamps = [];
+    if (tier >= 3) for (const side of [-1, 1]) {
+      const clamp = new THREE.Group();
+      clamp.position.set(-.18 + side * .19, .4, .42);
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(.013, .013, .34, 12), steel);
+      rail.rotation.x = Math.PI / 2; clamp.add(rail);
+      const jaw = new THREE.Mesh(new THREE.CylinderGeometry(.026, .026, .06, 12), steel);
+      jaw.rotation.z = Math.PI / 2; jaw.position.x = -side * .025; clamp.add(jaw);
+      yard.add(clamp); clamps.push(clamp);
     }
     let feedWheel = null;
     if (tier >= 4) {
@@ -146,8 +166,9 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
       feedWheel.rotation.x = Math.PI / 2;
       feedWheel.position.set(.04, .49, .42); yard.add(feedWheel);
     }
+    let guide = null;
     if (tier >= 5) {
-      const guide = new THREE.Mesh(new THREE.SphereGeometry(.025, 10, 8), light);
+      guide = new THREE.Mesh(new THREE.SphereGeometry(.025, 12, 10), light);
       guide.position.set(-.18, .58, .42); yard.add(guide);
     }
     const particles = [];
@@ -157,7 +178,7 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
     }
     work = soldier.userData.fixerWork = { root, material, materials: [material, bark, timber, steel, light],
       textures: [barkMap, endMap],
-      particles, yard, whole, halves, feedWheel };
+      particles, yard, whole, halves, outputPlanks, clamps, feedWheel, guide, tier };
   }
   if (!work) return;
   work.root.visible = Boolean(task && !reducedMotion);
@@ -172,6 +193,22 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
       .46 + (chop?.split || 0) * .012, .42);
     half.rotation.y = (index ? 1 : -1) * (chop?.split || 0) * .18;
   });
+  work.outputPlanks.forEach((plank, index) => {
+    const delivery = chop ? ease((chop.phase - .62 - index * .035) / .23) : 0;
+    plank.visible = Boolean(chop && chop.phase >= .62 + index * .035);
+    plank.position.set(-.53 - delivery * .14, .055 + index * .043,
+      .4 + index % 2 * .024);
+    plank.rotation.z = (1 - delivery) * -.08;
+  });
+  work.clamps.forEach((clamp, index) => {
+    const open = chop ? ease((chop.phase - .48) / .15) : 0;
+    clamp.position.x = -.18 + (index ? 1 : -1) * (.19 + open * .045);
+  });
+  if (work.guide) {
+    const pulse = chop?.impact || 0;
+    work.guide.scale.setScalar(1 + pulse * 1.3);
+    work.guide.material.emissiveIntensity = .5 + pulse * 2.2;
+  }
   soldier.updateMatrixWorld(true);
   const origin = chop ? new THREE.Vector3(-.18, .55, .42) : soldier.worldToLocal(fixerToolPosition(soldier));
   work.material.color.setHex(task === 'yard' ? 0xd4a673 : 0xffb34f);
