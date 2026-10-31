@@ -176,6 +176,20 @@ export async function deleteOwnedLinkedServerData(
     if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
     deleted.nitradoConnections += await deleteLinkedServerRows(db, "nitrado_connections", linkedServerId, "user_id = ?", [userId]);
 
+    // Server-owned Vault items and saved displays are only meaningful while
+    // their linked server exists. Remove the complete server scope before the
+    // linked-server row disappears, just as other server-owned records are
+    // removed above.
+    if (await tableExists(db, "dzn_vault_showcases")) {
+      await deleteRows(db, "DELETE FROM dzn_vault_showcases WHERE scope_type = 'server' AND scope_id = ?", [linkedServerId]);
+    }
+    if (await tableExists(db, "dzn_vault_grants")) {
+      await deleteRows(db, "DELETE FROM dzn_vault_grants WHERE scope_type = 'server' AND scope_id = ?", [linkedServerId]);
+    }
+    if (await tableExists(db, "dzn_vault_audit")) {
+      await deleteRows(db, "DELETE FROM dzn_vault_audit WHERE scope_type = 'server' AND scope_id = ?", [linkedServerId]);
+    }
+
     if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
     const linkedResult = await db
       .prepare("DELETE FROM linked_servers WHERE id = ? AND user_id = ?")
@@ -409,6 +423,22 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
   for (const [tableName, columnName] of cascadeReferences) {
     if (!(await tableExists(db, tableName))) continue;
     statements.push(db.prepare(`DELETE FROM ${tableName} WHERE ${columnName} = ?`).bind(userId));
+  }
+
+  // A Cabinet belongs to a player, not to a deleted account. Private player
+  // ownership, saved selections and their audit history must all disappear
+  // during account deletion. Server collections can outlive an individual
+  // owner, so their selections and audit trail remain but lose the actor ID.
+  if (await tableExists(db, "dzn_vault_showcases")) {
+    statements.push(db.prepare("DELETE FROM dzn_vault_showcases WHERE scope_type = 'player' AND scope_id = ?").bind(userId));
+    statements.push(db.prepare("UPDATE dzn_vault_showcases SET updated_by_user_id = NULL WHERE scope_type = 'server' AND updated_by_user_id = ?").bind(userId));
+  }
+  if (await tableExists(db, "dzn_vault_grants")) {
+    statements.push(db.prepare("DELETE FROM dzn_vault_grants WHERE scope_type = 'player' AND scope_id = ?").bind(userId));
+  }
+  if (await tableExists(db, "dzn_vault_audit")) {
+    statements.push(db.prepare("DELETE FROM dzn_vault_audit WHERE scope_type = 'player' AND scope_id = ?").bind(userId));
+    statements.push(db.prepare("UPDATE dzn_vault_audit SET actor_user_id = NULL WHERE scope_type = 'server' AND actor_user_id = ?").bind(userId));
   }
 
   if (await tableExists(db, "server_community_member_candidates")) {

@@ -12,6 +12,8 @@ export type VaultCatalogItem = {
   kind: VaultKind;
   rarity: VaultRarity;
   artIndex: number | null;
+  /** Internal, curated artwork only; never populated from a purchase record. */
+  artUrl?: string;
   effect: VaultEffect;
   availability: "welcome" | "preview" | "legacy";
   scopes: readonly VaultScope[];
@@ -121,10 +123,23 @@ export function getVaultCatalogItem(id: string): VaultCatalogItem | undefined {
   return VAULT_CATALOG.find((item) => item.id === id);
 }
 
+const SUPPORTER_CARD_ARTWORK: Readonly<Record<string, string>> = {
+  "dzn-first-edition-supporter-card": "/store/cards/first-edition-supporter-insignia-v1.png",
+};
+
+export function supporterCardArtworkUrl(productKey: string): string | null {
+  return SUPPORTER_CARD_ARTWORK[productKey] ?? null;
+}
+
 export function legacySupporterCatalog(productKey: string, name: string): VaultCatalogItem {
+  const artUrl = supporterCardArtworkUrl(productKey);
   return {
-    id: `supporter:${productKey}`, name, edition: "Supporter card",
-    description: "An existing supporter collectible from your DZN account.",
-    kind: "card", rarity: "rare", artIndex: null, effect: "none", availability: "legacy", scopes: ["player"],
+    id: `supporter:${productKey}`, name,
+    edition: artUrl ? "First Edition Supporter" : "Supporter card",
+    description: artUrl
+      ? "A permanent First Edition supporter collectible, available to showcase only when its Store entitlement is active."
+      : "An existing supporter collectible from your DZN account.",
+    kind: "card", rarity: artUrl ? "epic" : "rare", artIndex: null, artUrl: artUrl ?? undefined,
+    effect: artUrl ? "gold" : "none", availability: "legacy", scopes: ["player"],
   };
 }

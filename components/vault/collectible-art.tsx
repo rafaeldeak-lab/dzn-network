@@ -16,6 +16,7 @@ export function collectibleStyle(item: VaultCatalogItem): CSSProperties {
 
 export function CollectibleArt({ item, motion = false }: { item: VaultCatalogItem; motion?: boolean }) {
   const index = item.artIndex;
+  const directArtwork = item.artUrl?.startsWith("/store/cards/") ? item.artUrl : null;
   return (
     <>
       {item.kind === "scene" ? (
@@ -23,6 +24,8 @@ export function CollectibleArt({ item, motion = false }: { item: VaultCatalogIte
           <div className={styles.sceneDoor} /><div className={styles.sceneFloor} />
           <span>DZN VAULT<strong>{item.name}</strong></span>
         </div>
+      ) : directArtwork ? (
+        <div aria-hidden="true" className={styles.art} style={{ backgroundImage: `url(${directArtwork})`, backgroundPosition: "center", backgroundSize: "contain" }} />
       ) : index !== null && Number.isInteger(index) && index >= 0 && index < 6 ? (
         <div aria-hidden="true" className={styles.art} style={{
           backgroundImage: "url('/vault/dzn-atlas.webp')",

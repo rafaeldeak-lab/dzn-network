@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { Miniflare } from "miniflare";
-import { type PublicVaultResponse, type VaultCabinetResponse, type VaultSlots } from "../lib/vault";
+import { legacySupporterCatalog, type PublicVaultResponse, type VaultCabinetResponse, type VaultSlots } from "../lib/vault";
 import { onRequest as playerRoute } from "../functions/api/player/vault";
 import { onRequest as serverRoute } from "../functions/api/servers/[serverId]/vault";
 import { onRequest as publicPlayerRoute } from "../functions/api/public/players/[handle]/vault";
 import { onRequest as publicServerRoute } from "../functions/api/public/servers/[serverId]/vault";
 import { vaultStoreMode } from "../functions/_lib/vault";
+import { deleteOwnedLinkedServerData, eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 import { createVaultLocalFixture, seedVaultPurchase, VAULT_LOCAL, vaultLocalEnv } from "./lib/vault-local";
 
@@ -47,6 +48,9 @@ async function cabinet(response: Response): Promise<VaultCabinetResponse> {
 async function count(db: D1Database, table: "dzn_vault_grants" | "dzn_vault_showcases" | "dzn_vault_audit") {
   return Number((await db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first<{ count: number }>())?.count ?? 0);
 }
+async function scopedCount(db: D1Database, table: "dzn_vault_grants" | "dzn_vault_showcases" | "dzn_vault_audit", scope: "player" | "server", scopeId: string) {
+  return Number((await db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE scope_type = ? AND scope_id = ?`).bind(scope, scopeId).first<{ count: number }>())?.count ?? 0);
+}
 async function publicPlayer(env: Env) {
   return call(publicPlayerRoute, request(publicPlayerPath, { cookie: null }), env, { handle: VAULT_LOCAL.handle });
 }
@@ -64,6 +68,8 @@ async function main() {
   assert.equal(vaultStoreMode({ DZN_VAULT_STORE_MODE: "invalid", STRIPE_SECRET_KEY: "sk_live_fixture" } as unknown as Env), null);
   assert.equal(vaultStoreMode({ DZN_VAULT_STORE_MODE: "", STRIPE_SECRET_KEY: "sk_live_fixture" } as unknown as Env), null);
   assert.equal(vaultStoreMode({ DZN_VAULT_STORE_MODE: "test", STRIPE_SECRET_KEY: "sk_live_fixture" } as Env), "test");
+  assert.equal(legacySupporterCatalog("dzn-first-edition-supporter-card", "DZN First Edition Supporter Card").artUrl, "/store/cards/first-edition-supporter-insignia-v1.png");
+  assert.equal(legacySupporterCatalog("unmapped-supporter-card", "Legacy Supporter").artUrl, undefined);
 
   const mf = new Miniflare({
     modules: true, script: "export default { fetch() { return new Response('local vault tests'); } }",
@@ -223,8 +229,8 @@ async function main() {
     await db.prepare("UPDATE sessions SET expires_at = '2099-01-01 00:00:00' WHERE user_id = ?").bind(VAULT_LOCAL.playerId).run();
 
     await assert.rejects(db.prepare("UPDATE dzn_vault_grants SET source_key = 'forged' WHERE id = ?").bind(hero.slice(6)).run(), /immutable/);
-    await assert.rejects(db.prepare("DELETE FROM dzn_vault_grants WHERE id = ?").bind(hero.slice(6)).run(), /reversed/);
-    await assert.rejects(db.prepare("UPDATE dzn_vault_audit SET actor_user_id = 'forged'").run(), /append-only/);
+    await db.prepare("DELETE FROM dzn_vault_grants WHERE id = ?").bind(hero.slice(6)).run();
+    await assert.rejects(db.prepare("UPDATE dzn_vault_audit SET actor_user_id = 'forged'").run(), /(append-only|cleared)/);
     await assert.rejects(db.prepare(`INSERT INTO dzn_vault_showcases VALUES ('player', ?, 1, 1, '{"supporting":[null,null,null,null]}', ?, CURRENT_TIMESTAMP)`)
       .bind(VAULT_LOCAL.otherPlayerId, VAULT_LOCAL.otherPlayerId).run(), /CHECK constraint/);
 
@@ -249,6 +255,19 @@ async function main() {
     };
     assert.equal((await savePlayer(noStoreEnv, 0, noStoreSlots)).status, 200);
     assert.equal((await publicPlayer(noStoreEnv)).status, 200);
+    const noStoreServer = await cabinet(await call(serverRoute, request(serverPath, { method: "POST", body: claimBody }), noStoreEnv, serverParams));
+    const noStoreServerSlots: VaultSlots = {
+      hero: noStoreServer.items.find((item) => item.catalog.kind === "trophy")!.id,
+      supporting: [null, null, null, null],
+      scene: noStoreServer.items.find((item) => item.catalog.kind === "scene")!.id,
+    };
+    assert.equal((await call(serverRoute, request(serverPath, { method: "PUT", body: { expectedVersion: 0, published: true, slots: noStoreServerSlots } }), noStoreEnv, serverParams)).status, 200);
+    const removedServer = await deleteOwnedLinkedServerData(noStoreEnv, VAULT_LOCAL.playerId, VAULT_LOCAL.serverId, { skipOwnerDiscordRoleCleanup: true });
+    assert.equal(removedServer.ok, true);
+    assert.deepEqual(await Promise.all([scopedCount(noStoreDb, "dzn_vault_grants", "server", VAULT_LOCAL.serverId), scopedCount(noStoreDb, "dzn_vault_showcases", "server", VAULT_LOCAL.serverId), scopedCount(noStoreDb, "dzn_vault_audit", "server", VAULT_LOCAL.serverId)]), [0, 0, 0], "Deleting a server must remove its server-owned Vault state.");
+    assert.equal(await eraseOrRetainAccountUser(noStoreDb, VAULT_LOCAL.playerId), 1);
+    assert.deepEqual(await Promise.all([count(noStoreDb, "dzn_vault_grants"), count(noStoreDb, "dzn_vault_showcases"), count(noStoreDb, "dzn_vault_audit")]), [0, 0, 0], "Account deletion must remove private Vault state.");
+    assert.equal(await noStoreDb.prepare("SELECT id FROM users WHERE id = ?").bind(VAULT_LOCAL.playerId).first(), null);
     console.log("Vault cabinet Miniflare D1 tests passed: ownership, publication, purchases, races, privacy and unavailable sources.");
   } finally { await mf.dispose(); }
 }

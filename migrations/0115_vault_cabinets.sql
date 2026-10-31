@@ -31,11 +31,6 @@ BEGIN
   SELECT RAISE(ABORT, 'vault grant identity and source are immutable');
 END;
 
-CREATE TRIGGER dzn_vault_grant_no_delete BEFORE DELETE ON dzn_vault_grants
-BEGIN
-  SELECT RAISE(ABORT, 'vault grants must be reversed, not deleted');
-END;
-
 CREATE TABLE dzn_vault_showcases (
   scope_type TEXT NOT NULL CHECK (scope_type IN ('player', 'server')),
   scope_id TEXT NOT NULL CHECK (length(scope_id) BETWEEN 1 AND 128),
@@ -53,7 +48,9 @@ CREATE TABLE dzn_vault_showcases (
     AND COALESCE(json_type(slots_json, '$.supporting[3]'), '') IN ('text', 'null')
     AND COALESCE(json_type(slots_json, '$.scene'), '') IN ('text', 'null')
   ),
-  updated_by_user_id TEXT NOT NULL,
+  -- This is deliberately nullable so account deletion can anonymise historic
+  -- server showcase edits without changing the selected server collectibles.
+  updated_by_user_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY(scope_type, scope_id)
 );
@@ -75,7 +72,9 @@ CREATE TABLE dzn_vault_audit (
   id TEXT PRIMARY KEY,
   scope_type TEXT NOT NULL CHECK (scope_type IN ('player', 'server')),
   scope_id TEXT NOT NULL,
-  actor_user_id TEXT NOT NULL,
+  -- Account deletion retains server-level audit history but clears the person
+  -- who performed the action. Player-scoped audit rows are removed instead.
+  actor_user_id TEXT,
   action TEXT NOT NULL CHECK (action IN ('welcome_claimed', 'showcase_saved')),
   previous_version INTEGER,
   next_version INTEGER,
@@ -85,12 +84,15 @@ CREATE TABLE dzn_vault_audit (
 
 CREATE INDEX idx_dzn_vault_audit_scope ON dzn_vault_audit(scope_type, scope_id, created_at);
 
-CREATE TRIGGER dzn_vault_audit_no_update BEFORE UPDATE ON dzn_vault_audit
+CREATE TRIGGER dzn_vault_audit_identity_immutable
+BEFORE UPDATE OF id, scope_type, scope_id, action, previous_version, next_version, detail_json, created_at ON dzn_vault_audit
 BEGIN
   SELECT RAISE(ABORT, 'vault audit is append-only');
 END;
 
-CREATE TRIGGER dzn_vault_audit_no_delete BEFORE DELETE ON dzn_vault_audit
+CREATE TRIGGER dzn_vault_audit_actor_anonymise_only
+BEFORE UPDATE OF actor_user_id ON dzn_vault_audit
+WHEN NEW.actor_user_id IS NOT NULL
 BEGIN
-  SELECT RAISE(ABORT, 'vault audit is append-only');
+  SELECT RAISE(ABORT, 'vault audit actor can only be cleared');
 END;
