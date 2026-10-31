@@ -54,8 +54,8 @@ const preferenceFields = [
   },
   {
     key: "show_calling_cards",
-    label: "Calling cards",
-    description: "Show earned account-bound calling cards after that runtime exists.",
+    label: "Cabinet cards",
+    description: "Show only the permanent cards you select from your private Player Cabinet.",
     defaultValue: true,
   },
   {

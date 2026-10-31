@@ -1,6 +1,6 @@
 import { requireDb } from "./db";
 import { readTrustedPlayerFeaturedServer, readTrustedPlayerGameplayAggregate } from "./player-stat-bridge";
-import { readActiveStoreSupporterCards } from "./store-entitlements";
+import { readPublicSelectedStoreSupporterCards } from "./store-entitlements";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerPublicProfilePreferences = {
@@ -391,7 +391,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
     preferences.show_gameplay_summary ? readPublicPlayerAggregate(db, row.discord_id) : Promise.resolve(null),
     preferences.show_featured_server ? readPublicPlayerFeaturedServer(db, row.discord_id) : Promise.resolve(null),
     preferences.show_calling_cards && supporterCardLivemode !== null
-      ? readActiveStoreSupporterCards(db, row.user_id, supporterCardLivemode)
+      ? readPublicSelectedStoreSupporterCards(db, row.user_id, supporterCardLivemode)
       : Promise.resolve([]),
   ]);
 
@@ -451,7 +451,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
         status: !preferences.show_calling_cards ? "hidden" : supporterCards.length ? "available" : "not_available_yet",
         message: !preferences.show_calling_cards
           ? "This section is hidden by the player's saved profile preferences."
-          : supporterCards.length ? "Account-bound DZN supporter cards." : "No supporter cards are available yet.",
+          : supporterCards.length ? "Cards selected from this player's private cabinet." : "No cabinet cards are selected for this public profile yet.",
         items: supporterCards.map((card) => ({ product_key: card.product_key, name: card.product_name, granted_at: card.granted_at })),
       },
       award_dates: futureEarnedSection(preferences.show_award_dates, "Award dates are not published until public-safe award records exist."),
