@@ -42,6 +42,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { publicServerStatusPresentation } from "@/lib/public-server-status";
+import { PublicVaultShowcase } from "@/components/vault/public-vault-showcase";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
@@ -1658,6 +1659,8 @@ export function ServerProfile({ server }: { server: PublicServer }) {
       ) : null}
 
       <ProProfileAdvertPanel server={server} />
+
+      <PublicVaultShowcase scope="server" subjectId={server.linked_server_id} displayName={server.server_name || server.nitrado_service_name || "DZN server"} />
 
       <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid gap-4">
