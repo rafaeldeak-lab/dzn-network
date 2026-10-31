@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { join } from "node:path";
 
 const workflow = readFileSync(".github/workflows/dzn-single-migration-production-rollout.yml", "utf8");
+const vaultPostApplyVerificationWorkflow = readFileSync(".github/workflows/dzn-vault-postapply-production-verification.yml", "utf8");
 const controller = readFileSync("scripts/dzn-single-migration-production-rollout.ts", "utf8");
 
 const migrations = [
@@ -131,6 +132,51 @@ assert.equal((workflow.match(/migrations apply/g) ?? []).length, 1, "The workflo
 assert.match(workflow, /--config "\$\{MIGRATION_STAGE\}\/wrangler\.toml"/);
 assert.match(workflow, /Feature activation: intentionally not performed/);
 assert.match(workflow, /Website deployment: intentionally not performed/);
+
+assert.match(vaultPostApplyVerificationWorkflow, /name: DZN Vault Post-Apply Production Verification/);
+assert.match(vaultPostApplyVerificationWorkflow, /workflow_dispatch:/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /\n  push:/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /\n  pull_request:/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /\n  schedule:/);
+assert.match(vaultPostApplyVerificationWorkflow, /if: github\.ref_name == 'main'/);
+assert.match(vaultPostApplyVerificationWorkflow, /VERIFY_VAULT_MIGRATION_0115_ONLY/);
+assert.match(vaultPostApplyVerificationWorkflow, /approved_commit must be the exact 40-character main SHA/);
+assert.match(vaultPostApplyVerificationWorkflow, /main HEAD \$\{VERIFY_COMMIT\} does not match approved_commit/);
+assert.match(vaultPostApplyVerificationWorkflow, /0115_vault_cabinets\.sql/);
+assert.match(vaultPostApplyVerificationWorkflow, /concurrency:/);
+assert.match(vaultPostApplyVerificationWorkflow, /cancel-in-progress: false/);
+assert.match(vaultPostApplyVerificationWorkflow, /contents: read/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /contents: write/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /actions: write/);
+assert.doesNotMatch(vaultPostApplyVerificationWorkflow, /id-token: write/);
+assert.equal(
+  vaultPostApplyVerificationWorkflow.split(scopedToken).length - 1,
+  1,
+  "The production D1 token must only be scoped to the read-only verifier step.",
+);
+assert.ok(
+  vaultPostApplyVerificationWorkflow.indexOf(scopedToken) > vaultPostApplyVerificationWorkflow.indexOf("- name: Install source dependencies"),
+  "Dependency installation must run before the read-only verifier receives the production D1 token.",
+);
+assert.match(vaultPostApplyVerificationWorkflow, /verify-ledger/);
+assert.match(vaultPostApplyVerificationWorkflow, /--phase after/);
+assert.match(vaultPostApplyVerificationWorkflow, /verify-schema/);
+assert.match(vaultPostApplyVerificationWorkflow, /Database writes: intentionally not performed/);
+assert.match(vaultPostApplyVerificationWorkflow, /Feature activation: intentionally not performed/);
+assert.match(vaultPostApplyVerificationWorkflow, /Website deployment: intentionally not performed/);
+for (const forbidden of [
+  /migrations apply/i,
+  /wrangler pages/i,
+  /wrangler deploy/i,
+  /pages secret/i,
+  /discord\.com/i,
+  /stripe/i,
+  /npx\s+.*nitrado/i,
+  /curl\s+.*-X\s*POST/i,
+  /d1 execute[\s\S]*--file/i,
+]) {
+  assert.doesNotMatch(vaultPostApplyVerificationWorkflow, forbidden, `Vault post-apply verification must not include ${forbidden}.`);
+}
 
 for (const migration of migrations) {
   assert.match(workflow, new RegExp(migration.replace(".", "\\.")));

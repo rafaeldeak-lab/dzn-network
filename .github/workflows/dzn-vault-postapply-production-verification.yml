@@ -1,0 +1,153 @@
+name: DZN Vault Post-Apply Production Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Exact main commit containing the verified Vault migration controller
+        required: true
+      confirm_post_apply_verification:
+        description: Must equal VERIFY_VAULT_MIGRATION_0115_ONLY
+        required: true
+
+concurrency:
+  group: dzn-vault-post-apply-production-verification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      MIGRATION_NAME: 0115_vault_cabinets.sql
+      MIGRATION_STAGE: .dzn-vault-post-apply-verification-stage
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+      APPROVED_COMMIT_INPUT: ${{ inputs.approved_commit }}
+      VERIFY_CONFIRMATION_INPUT: ${{ inputs.confirm_post_apply_verification }}
+
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate post-apply verification boundary
+        run: |
+          set -euo pipefail
+          if [ "${VERIFY_CONFIRMATION_INPUT}" != "VERIFY_VAULT_MIGRATION_0115_ONLY" ]; then
+            echo "::error::confirm_post_apply_verification must equal VERIFY_VAULT_MIGRATION_0115_ONLY."
+            exit 1
+          fi
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::This workflow may only run from main."
+            exit 1
+          fi
+          APPROVED_COMMIT="${APPROVED_COMMIT_INPUT}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character main SHA."
+            exit 1
+          fi
+          VERIFY_COMMIT="$(git rev-parse HEAD)"
+          if [ "${VERIFY_COMMIT}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::main HEAD ${VERIFY_COMMIT} does not match approved_commit ${APPROVED_COMMIT}."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::A valid CLOUDFLARE_ACCOUNT_ID is required."
+            exit 1
+          fi
+          printf "VERIFY_COMMIT=%s\n" "${VERIFY_COMMIT}" >> "$GITHUB_ENV"
+          {
+            echo "## DZN Vault Post-Apply Production Verification"
+            echo "- Commit: ${VERIFY_COMMIT}"
+            echo "- Migration: ${MIGRATION_NAME}"
+            echo "- Production D1: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Database writes: not performed"
+            echo "- Feature flags: unchanged"
+            echo "- Website deployment: not performed"
+            echo "- Discord and payments: not contacted"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install source dependencies
+        run: npm ci
+
+      - name: Validate verifier source and queue
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:production-migration-queue
+          npm run test:single-migration-production-rollout
+          git diff --check
+
+      - name: Build an isolated Vault verification stage
+        run: |
+          set -euo pipefail
+          npx tsx scripts/dzn-single-migration-production-rollout.ts prepare \
+            --migration "${MIGRATION_NAME}" \
+            --stage-dir "${MIGRATION_STAGE}"
+          test -s "${MIGRATION_STAGE}/migration-plan.json"
+          test -s "${MIGRATION_STAGE}/wrangler.toml"
+
+      - name: Verify previously applied Vault schema without writes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN is required for this read-only D1 verification."
+            exit 1
+          fi
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const databases = JSON.parse(process.env.D1_LIST || "[]");
+          const target = databases.find((entry) => entry.name === process.env.PRODUCTION_D1_DATABASE_NAME);
+          if (!target || target.uuid !== process.env.PRODUCTION_D1_DATABASE_ID) {
+            throw new Error("Production D1 identity did not match dzn_network_db.");
+          }
+          console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
+          NODE
+
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > "${MIGRATION_STAGE}/ledger-after.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-ledger \
+            --migration "${MIGRATION_NAME}" \
+            --ledger "${MIGRATION_STAGE}/ledger-after.json" \
+            --phase after
+
+          OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-objects-query --migration "${MIGRATION_NAME}")"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "${OBJECT_QUERY}" > "${MIGRATION_STAGE}/objects-after.json"
+          while IFS= read -r TABLE_NAME; do
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA table_info(${TABLE_NAME});" > "${MIGRATION_STAGE}/table-info-${TABLE_NAME}.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA foreign_key_list(${TABLE_NAME});" > "${MIGRATION_STAGE}/foreign-keys-${TABLE_NAME}.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "SELECT COUNT(*) AS row_count FROM ${TABLE_NAME};" > "${MIGRATION_STAGE}/row-count-${TABLE_NAME}.json"
+          done < <(npx tsx scripts/dzn-single-migration-production-rollout.ts print-target-tables --migration "${MIGRATION_NAME}")
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA foreign_key_check;" > "${MIGRATION_STAGE}/foreign-key-check-after.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-schema \
+            --stage-dir "${MIGRATION_STAGE}" \
+            --objects "${MIGRATION_STAGE}/objects-after.json" \
+            --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-after.json"
+
+          {
+            echo "- Existing migration ledger/schema verification: passed"
+            echo "- Database writes: intentionally not performed"
+            echo "- Feature activation: intentionally not performed"
+            echo "- Website deployment: intentionally not performed"
+            echo "- Discord, billing, and Nitrado actions: intentionally not performed"
+          } >> "$GITHUB_STEP_SUMMARY"
