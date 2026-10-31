@@ -241,7 +241,7 @@ Patrols walk along paths between the compound buildings and squad camp,
 pause at assigned stops, and turn toward their next destination. The exact
 owner-supplied artwork remains in the Armoury; Canvas 2D uses flat portraits
 as a compatibility fallback. The active WebGL folders are `squads-v6` for
-Warden, `squads-v7` for Ghost, `squads-v12` for Fixer, `squads-v9` for
+Warden, `squads-v7` for Ghost, `squads-v13` for Fixer, `squads-v9` for
 Lifeline and `squads-v11` for Sentinel. These Rosebud image-guided models
 are textured 3D interpretations of the single-view concept sheets. The
 earlier procedural models remain under
@@ -249,13 +249,15 @@ earlier procedural models remain under
 `preview/assets/models/squads-v3/` for comparison and are no longer selected
 in WebGL. `tools/generate-squads.mjs` creates the older `squads-v5` kit.
 
-The Fixer's five `squads-v12` GLBs reuse the retained image-guided static
-sources from `squads-v8`. `tools/rig-rosebud-operative.py` places the axe-side
-hand bone at the visible glove, weights the axe and glove to that hand, and
-steadies it during the walk. `tools/package-steady-fixer.mjs` records the
-unchanged source hashes and the revised output hashes. This local rig pass
-used no additional generation credits. The Rosebud editor contains all five
-new GLBs and selects this folder for Fixer patrols.
+The Fixer's five `squads-v13` GLBs use owner-guided, clean A-pose references
+and five distinct textured Meshy T2.5 models. Meshy's humanoid rig supplies
+walking and running clips; `tools/attach-fixer-axe.py` binds a separate 3D axe
+rigidly to the left glove and adds a full-body idle. All five original rigged
+models and the clean references remain in `source-art/meshy-fixer-v13/` for
+rework. `tools/package-meshy-fixer.py` records hashes, meshes and animation
+names in the game asset manifest. This pass used 75 existing Meshy credits
+for the five clean models, and did not purchase credits. The previous
+`squads-v12` family remains available as a rollback.
 
 Warden Levels 1–5 now use five distinct textured models generated with
 Rosebud's Create > 3D Model tool. The static Rosebud source GLBs remain in

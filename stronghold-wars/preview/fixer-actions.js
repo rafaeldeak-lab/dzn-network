@@ -2,6 +2,10 @@ import * as THREE from 'three';
 
 const axisX = new THREE.Vector3(1, 0, 0);
 const axisY = new THREE.Vector3(0, 1, 0);
+const meshyFixerBones = {
+  UpperArm_L: 'mixamorig:LeftArm', Hand_L: 'mixamorig:LeftHand',
+  UpperArm_R: 'mixamorig:RightArm', Neck: 'mixamorig:Neck',
+};
 const lastBonePoses = new WeakMap();
 const clamp01 = value => Math.max(0, Math.min(1, value));
 const ease = value => { const t = clamp01(value); return t * t * (3 - 2 * t); };
@@ -79,7 +83,7 @@ export function fixerActionPose(time, moving, stop, breachAge = Infinity, reduce
 }
 
 function poseBone(model, name, rotations) {
-  const bone = model.getObjectByName(name);
+  const bone = model.getObjectByName(name) || model.getObjectByName(meshyFixerBones[name]);
   if (!bone) return;
   const previous = lastBonePoses.get(bone);
   const base = previous && bone.quaternion.angleTo(previous.output) < 1e-6
@@ -100,7 +104,8 @@ export function applyFixerAction(model, pose) {
 }
 
 export function fixerToolPosition(soldier, target = new THREE.Vector3()) {
-  const hand = soldier.getObjectByName('squad_model')?.getObjectByName('Hand_L');
+  const model = soldier.getObjectByName('squad_model');
+  const hand = model?.getObjectByName('Hand_L') || model?.getObjectByName('mixamorig:LeftHand');
   if (!hand) return target.copy(soldier.position).add(new THREE.Vector3(0, 1.1, 0));
   hand.getWorldPosition(target);
   return target.add(new THREE.Vector3(0, -.08, .17).applyQuaternion(soldier.getWorldQuaternion(new THREE.Quaternion())));
@@ -124,6 +129,9 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
   }
   if (!work && task && !reducedMotion) {
     const root = new THREE.Group(); root.name = 'fixer_tool_activity'; soldier.add(root);
+    // Meshy's left glove sits across the model from the old rig's left glove.
+    // Keep the work station on the tool side without changing the source mesh.
+    if (soldier.getObjectByName('mixamorig:LeftHand')) root.scale.x = -1;
     const material = new THREE.MeshBasicMaterial({ color: 0xffb34f, transparent: true, opacity: .75, depthWrite: false });
     const barkMap = woodTexture();
     const endMap = woodTexture(true);
@@ -244,6 +252,7 @@ export function stepFixerWork(soldier, time, task, tier = 1, reducedMotion = fal
   }
   soldier.updateMatrixWorld(true);
   const origin = chop ? new THREE.Vector3(-.18, .55, .42) : soldier.worldToLocal(fixerToolPosition(soldier));
+  if (!chop) origin.x /= work.root.scale.x;
   work.material.color.setHex(task === 'yard' ? 0xd4a673 : 0xffb34f);
   work.particles.forEach((particle, index) => {
     const cycle = ((time * 2.6 + index / work.particles.length) % 1 + 1) % 1;
