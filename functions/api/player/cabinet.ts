@@ -4,6 +4,7 @@ import { isMockAuth } from "../../_lib/mock";
 import { privateNoStoreHeaders } from "../../_lib/performance";
 import {
   configuredStoreLivemode,
+  parsePlayerCabinetCursor,
   privateSupporterCardsEnabled,
   readPlayerCabinetSupporterCards,
   setPlayerCabinetSupporterCardVisibility,
@@ -32,9 +33,14 @@ export const onRequest: PagesFunction = async ({ env, request }) => {
   if (request.method === "HEAD") return new Response(null, { status: 204, headers: privateNoStoreHeaders() });
 
   if (request.method === "GET") {
+    const rawCursor = new URL(request.url).searchParams.get("cursor");
+    const cursor = parsePlayerCabinetCursor(rawCursor);
+    if (rawCursor && !cursor) {
+      return json({ ok: false, error: "INVALID_CABINET_CURSOR", message: "Open your cabinet again to continue browsing your cards." }, { status: 400, headers: privateNoStoreHeaders() });
+    }
     try {
-      const cards = await readPlayerCabinetSupporterCards(env.DB, user.id, livemode);
-      return json(cabinetPayload(cards), { headers: privateNoStoreHeaders() });
+      const page = await readPlayerCabinetSupporterCards(env.DB, user.id, livemode, cursor);
+      return json(cabinetPayload(page), { headers: privateNoStoreHeaders() });
     } catch {
       return json({ ok: false, error: "PLAYER_CABINET_UNAVAILABLE" }, { status: 503, headers: privateNoStoreHeaders() });
     }
@@ -65,14 +71,16 @@ export const onRequest: PagesFunction = async ({ env, request }) => {
   }
 };
 
-function cabinetPayload(cards: Awaited<ReturnType<typeof readPlayerCabinetSupporterCards>>) {
+function cabinetPayload(page: Awaited<ReturnType<typeof readPlayerCabinetSupporterCards>>) {
   return {
     ok: true,
     private: true,
     scope: "current_user",
-    cards,
+    cards: page.cards,
+    next_cursor: page.next_cursor,
+    selected_count: page.selected_count,
     public_showcase_limit: 4,
-    message: cards.length
+    message: page.cards.length
       ? "Your cabinet is private. Choose up to four owned cards to show on your public profile."
       : "Your permanent Store cards will appear here after a confirmed purchase is fulfilled.",
     safety: {

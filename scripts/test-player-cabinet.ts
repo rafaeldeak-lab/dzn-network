@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 
 import {
+  parsePlayerCabinetCursor,
   playerCabinetPublicShowcaseLimit,
   readPlayerCabinetSupporterCards,
   readPublicSelectedStoreSupporterCards,
@@ -26,9 +27,11 @@ assert.match(route, /request\.method !== "GET" && request\.method !== "HEAD" && 
 assert.match(route, /isSameOriginMutation/);
 assert.match(route, /CABINET_CARD_NOT_OWNED/);
 assert.match(route, /CABINET_SHOWCASE_LIMIT/);
+assert.match(route, /INVALID_CABINET_CURSOR/);
 assert.match(component, /My Player Cabinet/);
 assert.match(component, /Open cabinet/);
 assert.match(component, /Public on profile/);
+assert.match(component, /Load more cards/);
 assert.match(component, /credentials: "include"/);
 assert.doesNotMatch(component, /localStorage|sessionStorage|navigator\.share|navigator\.clipboard|sendBeacon|analytics/i);
 assert.match(publicProfileHelper, /readPublicSelectedStoreSupporterCards/);
@@ -74,13 +77,17 @@ async function run() {
       VALUES ('entitlement','fulfilment','order','buyer','dzn-first-edition-supporter-card','supporter_card','cabinet-entitlement','active','2026-10-02T20:00:00.000Z')`).run();
 
     assert.equal(playerCabinetPublicShowcaseLimit, 4);
-    assert.deepEqual(await readPlayerCabinetSupporterCards(db as unknown as D1Database, "buyer", false), [{
-      product_key: "dzn-first-edition-supporter-card",
-      product_name: "DZN First Edition Supporter Card",
-      granted_at: "2026-10-02T20:00:00.000Z",
-      entitlement_key: "cabinet-entitlement",
-      publicly_showcased: false,
-    }]);
+    assert.deepEqual(await readPlayerCabinetSupporterCards(db as unknown as D1Database, "buyer", false), {
+      cards: [{
+        product_key: "dzn-first-edition-supporter-card",
+        product_name: "DZN First Edition Supporter Card",
+        granted_at: "2026-10-02T20:00:00.000Z",
+        entitlement_key: "cabinet-entitlement",
+        publicly_showcased: false,
+      }],
+      next_cursor: null,
+      selected_count: 0,
+    });
     assert.equal((await readPublicSelectedStoreSupporterCards(db as unknown as D1Database, "buyer", false)).length, 0, "Nothing is public until the player selects it.");
     assert.deepEqual(
       await setPlayerCabinetSupporterCardVisibility(db as unknown as D1Database, "buyer", false, "cabinet-entitlement", true),
@@ -100,13 +107,66 @@ async function run() {
       product_name: "DZN First Edition Supporter Card",
       granted_at: "2026-10-02T20:00:00.000Z",
     }]);
+    for (let index = 2; index <= 29; index += 1) {
+      await seedCabinetCard(db as unknown as D1Database, index);
+    }
+    const firstPage = await readPlayerCabinetSupporterCards(db as unknown as D1Database, "buyer", false);
+    assert.equal(firstPage.cards.length, 24, "Cabinet pages are bounded for a large permanent collection.");
+    assert.equal(firstPage.selected_count, 1);
+    assert.equal(firstPage.cards[0]?.entitlement_key, "cabinet-entitlement", "An older showcased card remains first and removable.");
+    assert.ok(firstPage.next_cursor, "A large cabinet exposes a next-page cursor.");
+    const nextCursor = parsePlayerCabinetCursor(firstPage.next_cursor);
+    assert.ok(nextCursor, "The generated next-page cursor is valid.");
+    const secondPage = await readPlayerCabinetSupporterCards(db as unknown as D1Database, "buyer", false, nextCursor);
+    assert.equal(secondPage.cards.length, 5);
+    assert.equal(secondPage.next_cursor, null);
+    for (let index = 2; index <= 4; index += 1) {
+      assert.equal((await setPlayerCabinetSupporterCardVisibility(db as unknown as D1Database, "buyer", false, `cabinet-entitlement-${index}`, true)).status, "updated");
+    }
+    assert.deepEqual(
+      await setPlayerCabinetSupporterCardVisibility(db as unknown as D1Database, "buyer", false, "cabinet-entitlement-5", true),
+      { status: "showcase_full" },
+      "The fourth selected card is the hard public showcase limit.",
+    );
+    assert.equal((await readPublicSelectedStoreSupporterCards(db as unknown as D1Database, "buyer", false)).length, 4);
     assert.deepEqual(await setPlayerCabinetSupporterCardVisibility(db as unknown as D1Database, "other", false, "cabinet-entitlement", true), { status: "not_owned" });
     await db.prepare("UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = CURRENT_TIMESTAMP WHERE id = 'entitlement'").run();
-    assert.equal((await readPublicSelectedStoreSupporterCards(db as unknown as D1Database, "buyer", false)).length, 0, "A reversed entitlement must immediately leave the public profile.");
+    assert.equal((await readPublicSelectedStoreSupporterCards(db as unknown as D1Database, "buyer", false)).some((card) => card.product_key === "dzn-first-edition-supporter-card"), false, "A reversed entitlement must immediately leave the public profile.");
   } finally {
     await mf.dispose();
   }
   console.log("Player Cabinet tests passed.");
+}
+
+async function seedCabinetCard(db: D1Database, index: number) {
+  const suffix = String(index).padStart(2, "0");
+  const entitlementKey = `cabinet-entitlement-${index}`;
+  const grant = new Date(Date.UTC(2026, 9, 3, 20, 0, index)).toISOString();
+  const productId = `product-${suffix}`;
+  const priceId = `price-${suffix}`;
+  const publicationId = `publication-${suffix}`;
+  const productKey = `dzn-cabinet-card-${suffix}`;
+  const productName = `DZN Cabinet Card ${suffix}`;
+  await db.prepare(`INSERT INTO store_products (id, product_key, name, description, product_type, fulfilment_kind, created_by_user_id, updated_by_user_id)
+    VALUES (?, ?, ?, 'Permanent account-bound supporter card.', 'supporter_pack', 'supporter_card', 'buyer', 'buyer')`)
+    .bind(productId, productKey, productName).run();
+  await db.prepare("INSERT INTO store_prices (id, product_id, unit_amount_minor, created_by_user_id) VALUES (?, ?, 200, 'buyer')")
+    .bind(priceId, productId).run();
+  await db.prepare(`INSERT INTO store_catalog_publications (id, product_id, price_id, stripe_price_id, stripe_mode, livemode, status, active, published_by_user_id, published_at)
+    VALUES (?, ?, ?, ?, 'test', 0, 'published', 1, 'buyer', CURRENT_TIMESTAMP)`)
+    .bind(publicationId, productId, priceId, `price_test_cabinet_${suffix}`).run();
+  await db.prepare(`INSERT INTO store_commerce_orders (id, order_number, purchasing_user_id, publication_id, request_key, status, stripe_mode, livemode, subtotal_amount_minor, total_amount_minor, reservation_expires_at, stock_reservation_state, immutable_item_snapshot_json, fulfilled_at)
+    VALUES (?, ?, 'buyer', ?, ?, 'fulfilled', 'test', 0, 200, 200, '2026-10-03T00:00:00.000Z', 'converted', '{}', ?)`)
+    .bind(`order-${suffix}`, `DZN-S-CABINET-${suffix}`, publicationId, `cabinet-request-${suffix}`, grant).run();
+  await db.prepare(`INSERT INTO store_commerce_order_items (id, order_id, product_id, price_id, product_key, product_name, fulfilment_kind, unit_amount_minor, total_amount_minor)
+    VALUES (?, ?, ?, ?, ?, ?, 'supporter_card', 200, 200)`)
+    .bind(`item-${suffix}`, `order-${suffix}`, productId, priceId, productKey, productName).run();
+  await db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind, status, entitlement_key, granted_at)
+    VALUES (?, ?, 'buyer', 'supporter_card', 'completed', ?, ?)`)
+    .bind(`fulfilment-${suffix}`, `order-${suffix}`, entitlementKey, grant).run();
+  await db.prepare(`INSERT INTO store_commerce_entitlements (id, fulfilment_id, order_id, purchasing_user_id, product_key, fulfilment_kind, entitlement_key, status, granted_at)
+    VALUES (?, ?, ?, 'buyer', ?, 'supporter_card', ?, 'active', ?)`)
+    .bind(`entitlement-${suffix}`, `fulfilment-${suffix}`, `order-${suffix}`, productKey, entitlementKey, grant).run();
 }
 
 async function apply(db: D1Database, name: string) {

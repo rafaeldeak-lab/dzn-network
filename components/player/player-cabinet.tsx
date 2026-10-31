@@ -16,6 +16,8 @@ type CabinetCard = {
 type CabinetPayload = {
   ok: true;
   cards: CabinetCard[];
+  next_cursor: string | null;
+  selected_count: number;
   public_showcase_limit: number;
   message: string;
 };
@@ -49,18 +51,26 @@ export function PlayerCabinet() {
 
   if (!available) return null;
 
-  async function load() {
+  async function load(cursor: string | null = null) {
     if (state.status === "loading" || state.status === "saving") return;
-    setState({ status: "loading", data: state.data, message: "Opening your private Player Cabinet..." });
+    const previous = state.data;
+    const append = Boolean(cursor && previous);
+    setState({ status: "loading", data: previous, message: append ? "Loading more cards from your private cabinet..." : "Opening your private Player Cabinet..." });
     try {
-      const response = await fetch("/api/player/cabinet", { cache: "no-store", credentials: "include" });
+      const url = cursor ? `/api/player/cabinet?${new URLSearchParams({ cursor })}` : "/api/player/cabinet";
+      const response = await fetch(url, { cache: "no-store", credentials: "include" });
       const payload = await response.json().catch(() => null) as Partial<CabinetPayload> & { message?: string } | null;
-      if (!response.ok || !payload?.ok || !Array.isArray(payload.cards) || typeof payload.public_showcase_limit !== "number") {
+      if (!response.ok || !payload?.ok || !Array.isArray(payload.cards) || typeof payload.public_showcase_limit !== "number" || typeof payload.selected_count !== "number" || (payload.next_cursor !== null && typeof payload.next_cursor !== "string")) {
         throw new Error(payload?.message ?? "Your Player Cabinet is not available right now.");
       }
-      setState({ status: "ready", data: payload as CabinetPayload, message: payload.message ?? "Your Player Cabinet is ready." });
+      const next = payload as CabinetPayload;
+      setState({
+        status: "ready",
+        data: append && previous ? { ...next, cards: [...previous.cards, ...next.cards] } : next,
+        message: payload.message ?? "Your Player Cabinet is ready.",
+      });
     } catch (error) {
-      setState({ status: "error", data: state.data, message: errorMessage(error) });
+      setState({ status: "error", data: previous, message: errorMessage(error) });
     }
   }
 
@@ -70,6 +80,7 @@ export function PlayerCabinet() {
     const optimistic = {
       ...previous,
       cards: previous.cards.map((item) => item.entitlement_key === card.entitlement_key ? { ...item, publicly_showcased: publiclyShowcased } : item),
+      selected_count: Math.max(0, previous.selected_count + (publiclyShowcased ? 1 : -1)),
     };
     setState({ status: "saving", data: optimistic, message: publiclyShowcased ? "Saving this card to your public profile showcase..." : "Removing this card from your public profile showcase..." });
     try {
@@ -84,7 +95,11 @@ export function PlayerCabinet() {
       if (!response.ok || !payload?.ok || !payload.card) throw new Error(payload?.message ?? "That cabinet choice could not be saved.");
       setState({
         status: "ready",
-        data: { ...previous, cards: previous.cards.map((item) => item.entitlement_key === payload.card!.entitlement_key ? payload.card! : item) },
+        data: {
+          ...previous,
+          cards: previous.cards.map((item) => item.entitlement_key === payload.card!.entitlement_key ? payload.card! : item),
+          selected_count: Math.max(0, previous.selected_count + (publiclyShowcased ? 1 : -1)),
+        },
         message: publiclyShowcased ? "Card selected for your public profile showcase." : "Card kept private in your cabinet.",
       });
     } catch (error) {
@@ -93,7 +108,7 @@ export function PlayerCabinet() {
   }
 
   const opened = state.data !== null;
-  const selected = state.data?.cards.filter((card) => card.publicly_showcased).length ?? 0;
+  const selected = state.data?.selected_count ?? 0;
 
   return (
     <section className="border-t border-white/10 pt-4" aria-labelledby="player-cabinet-title" aria-busy={state.status === "loading" || state.status === "saving"}>
@@ -126,11 +141,24 @@ export function PlayerCabinet() {
             <span className="rounded border border-cyan-300/25 bg-slate-950/60 px-2 py-1 font-black uppercase text-cyan-100">{selected} of {state.data.public_showcase_limit} selected</span>
           </div>
           {state.data.cards.length ? (
-            <ul className="mt-3 grid gap-3 lg:grid-cols-2" aria-label="Owned permanent cards">
-              {state.data.cards.map((card) => (
-                <CabinetCardTile key={card.entitlement_key} card={card} saving={state.status === "saving"} onPublicChange={setPublic} />
-              ))}
-            </ul>
+            <>
+              <ul className="mt-3 grid gap-3 lg:grid-cols-2" aria-label="Owned permanent cards">
+                {state.data.cards.map((card) => (
+                  <CabinetCardTile key={card.entitlement_key} card={card} saving={state.status === "saving"} onPublicChange={setPublic} />
+                ))}
+              </ul>
+              {state.data.next_cursor ? (
+                <button
+                  type="button"
+                  onClick={() => void load(state.data!.next_cursor)}
+                  disabled={state.status === "loading" || state.status === "saving"}
+                  className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/[0.07] px-3 text-xs font-black uppercase text-cyan-100 transition hover:bg-cyan-300/[0.12] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {state.status === "loading" ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="h-4 w-4" />}
+                  {state.status === "loading" ? "Loading cards" : "Load more cards"}
+                </button>
+              ) : null}
+            </>
           ) : (
             <div className="mt-3 rounded-md border border-dashed border-violet-300/25 bg-violet-300/[0.04] p-4 text-sm font-semibold leading-6 text-slate-300">
               Your cabinet is ready for permanent cosmetic purchases. Once a confirmed Store order is fulfilled, the card will appear here—private by default.
