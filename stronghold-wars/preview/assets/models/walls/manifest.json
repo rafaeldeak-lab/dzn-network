@@ -5,31 +5,31 @@
   "assets": {
     "wall_l01": {
       "file": "assets/models/walls/wall_l01-2.glb",
-      "sha256": "107b9194a0df453d66699871d19cce1d44eabe242b7b3df7047d2dcda6dae9d6",
+      "sha256": "8232755220f56c8788747ed2b6e8b043e129ccfecb940fa8142eaba2acc174c5",
       "bytes": 742316,
       "meshes": 1
     },
     "wall_l02": {
       "file": "assets/models/walls/wall_l02-2.glb",
-      "sha256": "ddcde9bcd28fe2941333d0117883d5b693debdfe85f35dbd347e7e15b6ba2b0c",
+      "sha256": "d44a227b0278956341f431434af380723bf7d5f4f8ff025d12cffd1adf50fc08",
       "bytes": 753688,
       "meshes": 1
     },
     "wall_l03": {
       "file": "assets/models/walls/wall_l03-2.glb",
-      "sha256": "a9a5668e2fd39e699ae6895b80369b1ebde776d27642cff978278d72e6d63239",
+      "sha256": "52efd1ee952ffa879220b15b507c24aac1a4f52670197a7a3392ec8c4fda66e7",
       "bytes": 325516,
       "meshes": 1
     },
     "wall_l04": {
       "file": "assets/models/walls/wall_l04-2.glb",
-      "sha256": "4595926f8b88a13236c762f88db1d3b97f851ed689a26f9632611cace413bb81",
+      "sha256": "3f9d6db900c97cab1a49eef5591f02449395749c2c6381639ddf7592629acc41",
       "bytes": 346856,
       "meshes": 1
     },
     "wall_l05": {
       "file": "assets/models/walls/wall_l05-2.glb",
-      "sha256": "896c7354f45de5852667b0ce4351a5fb552f1f774e7191b1870a3c4d6e31658d",
+      "sha256": "264723ee25ef3a39fa878fc9635bb317a57239c74216da0ebd5aca30b7431d64",
       "bytes": 368712,
       "meshes": 1
     }
