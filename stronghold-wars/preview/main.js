@@ -1789,7 +1789,12 @@ function animateSoldier(soldier, phase, pace = 1, stop = null, dt = 1 / 60) {
       stepGhostScan(soldier, soldier.userData.actionClock, pose.scanning);
     }
     if (model && isFixer) {
-      const pose = fixerActionPose(soldier.userData.actionClock, pace > .05, stop, soldier.userData.fixerBreachAge);
+      const timber = stop === 'yard' || stop === 'depot' ? service.getTimberProductionInfo() : null;
+      const yardWorking = timber?.perMinute > 0 && timber.stored < timber.capacity;
+      const depotWorking = timber?.stored > 0;
+      const workStop = !service.getAccess().allowed || (stop === 'yard' && !yardWorking) ||
+        (stop === 'depot' && !depotWorking) ? null : stop;
+      const pose = fixerActionPose(soldier.userData.actionClock, pace > .05, workStop, soldier.userData.fixerBreachAge);
       applyFixerAction(model, pose);
       stepFixerWork(soldier, soldier.userData.actionClock, pose.task, soldier.userData.squadTier);
     }
