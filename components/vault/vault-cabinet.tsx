@@ -239,9 +239,9 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
           <div className={styles.inventory}>{designs.map((item) => <article key={item.id} className={styles.item} style={collectibleStyle(item)}><button type="button" className={styles.itemVisual} aria-label={`Preview ${item.name}`} onClick={() => { setDesignId(item.id); setInspected(item); }}><CollectibleArt item={item} /><span className={styles.rarity}>{item.rarity}</span><span className={styles.inspectLabel}><Scan aria-hidden="true" />Preview</span></button><div className={styles.itemInfo}><h3>{item.name}</h3><p>{item.edition}</p></div></article>)}</div>
         </>}
       </>}
-      {error ? <div className={`${styles.notice} ${styles.error}`} role="alert"><p>{error}</p>{conflict ? <div className={styles.actions}><button type="button" className={styles.button} disabled={Boolean(busy)} onClick={() => void reloadLatest()}><RefreshCw aria-hidden="true" />{busy === "reload" ? "Loading latest..." : "Load latest and keep my draft"}</button></div> : null}{error.includes("session expired") ? <Link className={styles.button} href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in again</Link> : null}</div> : null}
-      <p className={styles.status} role="status" aria-live="polite">{message}</p>
     </> : null}
+    {state.status === "ready" && data && error ? <div className={`${styles.notice} ${styles.error}`} role="alert"><p>{error}</p>{conflict ? <div className={styles.actions}><button type="button" className={styles.button} disabled={Boolean(busy)} onClick={() => void reloadLatest()}><RefreshCw aria-hidden="true" />{busy === "reload" ? "Loading latest..." : "Load latest and keep my draft"}</button></div> : null}{error.includes("session expired") ? <Link className={styles.button} href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in again</Link> : null}</div> : null}
+    {state.status === "ready" && data ? <p className={styles.status} role="status" aria-live="polite">{message}</p> : null}
     <footer className={styles.footer}><strong>DZN ORIGINALS</strong><span>Cosmetic collectibles · your collection stays separate from competitive results</span></footer>
     <VaultInspector item={inspected} motion={motion} onClose={() => setInspected(null)} />
   </div>;

@@ -88,6 +88,8 @@ export function VaultOpeningExperience({
     if (success) {
       setStage("revealed");
       setAnnouncement("Welcome collection revealed and permanently placed in your cabinet.");
+    } else {
+      setAnnouncement("Your collection could not be placed yet. Read the recovery message below, then try again when you are ready.");
     }
   }
 

@@ -10,10 +10,12 @@ assert.match(opening, /setStage\("charging"\)/, "Opening a free cache must begin
 assert.match(opening, /setTimeout\([\s\S]*?2600\)/, "The cache needs a paced unlock moment before final reveal.");
 assert.match(opening, /await onClaim\(\)/, "The final reveal must explicitly verify the collection instead of granting it during selection.");
 assert.match(opening, /setStage\("revealed"\)/, "A verified collection must finish on the reward reveal state.");
+assert.match(opening, /if \(success\)[\s\S]*?else \{[\s\S]*?could not be placed yet/, "A failed claim must return the opening sequence to a visible recovery state.");
 assert.match(opening, /Future edition · locked/, "Unavailable cache concepts must be visually labelled as unavailable.");
 assert.doesNotMatch(opening, /\/api\/(?:checkout|store|stripe)|paymentIntent|createCheckout/i, "The welcome flow must not introduce commerce into the Vault.");
 assert.match(cabinet, /onClaim=\{\(\) => mutate\("claim"\)\}/, "The existing protected welcome-claim route must remain the only grant path.");
 assert.match(cabinet, /showWelcomeFlow/, "The cache journey must be shown before an unclaimed cabinet.");
+assert.match(cabinet, /state\.status === "ready" && data && error/, "Claim failures must remain visible even while the welcome flow is displayed.");
 
 assert.match(styles, /@keyframes cacheSmoke/, "Elite cache effects need a smoke animation layer.");
 assert.match(styles, /@keyframes rewardParticle/, "Reward reveals need a particle animation layer.");
