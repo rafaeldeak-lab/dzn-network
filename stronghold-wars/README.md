@@ -300,6 +300,13 @@ existing levelled models.
 Four more supplied concepts (Guardian, Aegis, Trapper and Hound) are stored
 unchanged under `preview/assets/portraits/defenders/`. The 20 procedural GLBs
 in `preview/assets/models/defenders/` cover their five appearance levels.
+Guardian now uses five separate Meshy-generated, owner-guided textured bodies
+in `preview/assets/models/defenders-v2/`. Blender binds each level's tiered
+barrier shield to the left hand and includes walk, run, idle and blocking
+actions. The home patrol and war preview use these animated models; the
+procedural Guardian files remain as load fallbacks. Source rigs, clean
+references, credits, hashes and model details are retained in
+`source-art/meshy-guardian-v1/` and the `defenders-v2` manifest.
 The Armoury lets leadership approve a shared Level 1–5 defender upgrade and
 assign its post once members fund it with personal Parts. Each role requires
 Command Hall and its specialist building at the appropriate level. Assigned

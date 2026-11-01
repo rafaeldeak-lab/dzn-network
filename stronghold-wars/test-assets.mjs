@@ -798,7 +798,7 @@ if (Object.keys(defenderManifest.assets).length !== 20) throw new Error('Four DZ
 for (const role of Object.keys(DEFENDER_CONCEPTS)) for (let level = 1; level <= 5; level++) {
   const name = `${role}_l0${level}`;
   const entry = defenderManifest.assets[name];
-  if (!entry || entry.file !== defenderAsset(role, level)) throw new Error(`Missing defender tier: ${name}`);
+  if (!entry || entry.file !== `assets/models/defenders/${name}.glb`) throw new Error(`Missing original defender tier: ${name}`);
   const bytes = readFileSync(join(root, ...entry.file.split('/')));
   if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid defender GLB: ${name}`);
   const jsonLength = bytes.readUInt32LE(12);
@@ -818,6 +818,36 @@ for (const role of Object.keys(DEFENDER_CONCEPTS)) {
   if (bytes.toString('latin1', 0, 4) !== '\x89PNG' || bytes.readUInt32BE(16) !== 1254 || bytes.readUInt32BE(20) !== 1254 || createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error(`Invalid defender portrait: ${role}`);
 }
 console.log('DZN defender concepts verified: 20 distinct 3D GLBs and four unchanged owner images.');
+const guardianManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders-v2/manifest.json'), 'utf8'));
+if (!guardianManifest.complete || Object.keys(guardianManifest.assets || {}).length !== 5)
+  throw new Error('Guardian requires five completed image-guided 3D tiers.');
+const guardianHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `guardian_l0${level}`, entry = guardianManifest.assets[name];
+  if (!entry || entry.file !== defenderAsset('guardian', level) || entry.shieldHand !== 'mixamorig:LeftHand')
+    throw new Error(`Guardian Level ${level} game mapping is missing.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.source));
+  const reference = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.reference));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length
+    || bytes.length !== entry.bytes || hash !== entry.sha256 || guardianHashes.has(hash)
+    || createHash('sha256').update(source).digest('hex') !== entry.sourceSha256
+    || createHash('sha256').update(reference).digest('hex') !== entry.referenceSha256)
+    throw new Error(`Guardian Level ${level} source or game GLB integrity failed.`);
+  guardianHashes.add(hash);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+  const clips = new Map((gltf.animations || []).map(animation => [animation.name, animation.channels.length]));
+  const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((sum, part) => sum + gltf.accessors[part.indices].count / 3, 0);
+  const shield = gltf.nodes?.filter(node => node.name?.startsWith('Guardian_')) || [];
+  const hand = gltf.nodes?.findIndex(node => node.name === 'mixamorig:LeftHand');
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 50 || !gltf.images?.length
+    || triangles !== entry.triangles || hand < 0 || !gltf.skins[0].joints.includes(hand)
+    || shield.length < 3 || shield.some(node => node.skin !== 0 || !gltf.meshes[node.mesh]?.primitives.every(part => part.attributes.JOINTS_0 !== undefined && part.attributes.WEIGHTS_0 !== undefined))
+    || ['DZN_Guardian_Walk', 'DZN_Guardian_Run', 'DZN_Guardian_Idle', 'DZN_Guardian_Block'].some(clip => !clips.get(clip)))
+    throw new Error(`Guardian Level ${level} needs a textured humanoid rig, hand-bound 3D shield and four actions.`);
+}
+console.log('Five distinct DZN Guardian levels verified with source, hand-bound shields and walk/run/idle/block actions.');
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
 if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');
