@@ -902,7 +902,7 @@ function HeroDashboard({
         variants={fadeUp}
         className="dzn-home-hero-card order-1 relative overflow-hidden rounded-xl border border-violet-300/18 bg-[#060a15]/64 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:min-h-[430px] xl:col-start-1 xl:row-start-1"
       >
-        <div className="dzn-home-energy-beam" />
+        <div className="dzn-home-hero-atmosphere" aria-hidden="true"><span className="dzn-home-hero-mist dzn-home-hero-mist--near" /><span className="dzn-home-hero-mist dzn-home-hero-mist--far" /><span className="dzn-home-hero-airlight" /></div>
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#02030a] via-[#02030a]/54 to-transparent" />
 
         <div className="relative z-10 flex h-full flex-col justify-between gap-7">
