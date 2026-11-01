@@ -19,7 +19,7 @@ export function defenderBattleEffect(defenders, tactic) {
 }
 const level = value => Math.max(1, Math.min(5, Math.floor(Number(value) || 1)));
 export const defenderAsset = (key, tier) => DEFENDER_CONCEPTS[key]
-  ? `assets/models/${key === 'guardian' ? 'defenders-v2' : key === 'aegis' ? 'defenders-v3' : 'defenders'}/${key}_l0${level(tier)}.glb`
+  ? `assets/models/${key === 'guardian' ? 'defenders-v2' : key === 'aegis' ? 'defenders-v3' : key === 'trapper' ? 'defenders-v4' : 'defenders'}/${key}_l0${level(tier)}.glb`
   : null;
 export const aegisDroneAsset = tier => `assets/models/defenders-v3/aegis_drone_l0${level(tier)}.glb`;
 export const defenderPortrait = key => DEFENDER_CONCEPTS[key] ? `assets/portraits/defenders/${key}.png` : null;
