@@ -80,7 +80,7 @@ export const VAULT_CATALOG: readonly VaultCatalogItem[] = [
   {
     id: "nebula-chamber", name: "Nebula Chamber", edition: "Welcome scene",
     description: "A violet atmosphere for your showcase. Included in your free welcome set.",
-    kind: "scene", rarity: "origin", artIndex: null, effect: "void", availability: "welcome", scopes: ["player", "server"],
+    kind: "scene", rarity: "origin", artIndex: null, artUrl: "/vault/scenes/nebula-chamber-v1.png", effect: "void", availability: "welcome", scopes: ["player", "server"],
   },
   {
     id: "void-revenant-ascendant", name: "Void Revenant", edition: "Ascendant concept",

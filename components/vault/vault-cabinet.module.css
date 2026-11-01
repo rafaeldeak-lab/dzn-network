@@ -52,13 +52,6 @@
 .heroCard { position: relative; width: min(100%, 181px); aspect-ratio: 2 / 3; border: 1px solid #c7a4f570; border-radius: 10px; overflow: hidden; box-shadow: 0 20px 45px #0009, 0 0 38px #aa66ee15; transform: rotateZ(-1.5deg); transition: transform .45s,box-shadow .45s; z-index: 1; background: #14111a; }
 .displayBay:hover .heroCard { transform: translateY(-3px) rotateZ(.5deg); box-shadow: 0 24px 48px #000b, 0 0 42px #aa66ee24; }
 .art { position: absolute; inset: 0; background-size: 300% 200%; background-repeat: no-repeat; background-color: #15121d; }
-.sceneArt { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 52%,#b578f54a,transparent 58%),linear-gradient(155deg,#2a173c,#090b18 70%); }
-.sceneDoor { position: absolute; inset: 15% 18% 28%; border: 1px solid #b88bef; box-shadow: 0 0 17px #af74fa4d,inset 0 0 22px #a15ae63d; background: linear-gradient(120deg,#ae74f20c,transparent); }
-.sceneDoor::before,.sceneDoor::after { content: ""; position: absolute; border: 1px solid #b88bef38; inset: -12% -16%; }
-.sceneDoor::after { inset: 12% 16%; }
-.sceneFloor { position: absolute; bottom: -22%; left: -50%; width: 200%; height: 64%; background: repeating-linear-gradient(0deg,transparent 0 23px,#a467d74d 23px 24px),repeating-linear-gradient(90deg,transparent 0 23px,#a467d74d 23px 24px); transform: perspective(150px) rotateX(58deg); mask-image: linear-gradient(transparent,#000 50%); }
-.sceneArt > span { position: absolute; inset: 40% 10% auto; text-align: center; color: #c69ce8; font-size: 9px; letter-spacing: .16em; }
-.sceneArt strong { display: block; margin-top: 8px; color: #eee1ff; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; line-height: 1.5; }
 .artFallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: #d4badf; background: repeating-linear-gradient(135deg,transparent 0 12px,#bb91de08 12px 13px),radial-gradient(ellipse at 50% 40%,#41324c,#15121c 65%); }
 .artFallback svg { width: 52px; height: 52px; stroke-width: 1; }
 .artFallback span { font-size: 11px; letter-spacing: .17em; font-weight: 650; text-align: center; }
