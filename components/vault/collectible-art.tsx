@@ -16,16 +16,12 @@ export function collectibleStyle(item: VaultCatalogItem): CSSProperties {
 
 export function CollectibleArt({ item, motion = false }: { item: VaultCatalogItem; motion?: boolean }) {
   const index = item.artIndex;
-  const directArtwork = item.artUrl?.startsWith("/store/cards/") ? item.artUrl : null;
+  /** Only curated, packaged artwork may become a CSS URL. Catalog metadata never accepts external artwork URLs. */
+  const directArtwork = item.artUrl?.match(/^\/(?:vault|store\/cards)\//) ? item.artUrl : null;
   return (
     <>
-      {item.kind === "scene" ? (
-        <div aria-hidden="true" className={styles.sceneArt}>
-          <div className={styles.sceneDoor} /><div className={styles.sceneFloor} />
-          <span>DZN VAULT<strong>{item.name}</strong></span>
-        </div>
-      ) : directArtwork ? (
-        <div aria-hidden="true" className={styles.art} style={{ backgroundImage: `url(${directArtwork})`, backgroundPosition: "center", backgroundSize: "contain" }} />
+      {directArtwork ? (
+        <div aria-hidden="true" className={styles.art} style={{ backgroundImage: `url(${directArtwork})`, backgroundPosition: "center", backgroundSize: item.kind === "scene" ? "cover" : "contain" }} />
       ) : index !== null && Number.isInteger(index) && index >= 0 && index < 6 ? (
         <div aria-hidden="true" className={styles.art} style={{
           backgroundImage: "url('/vault/dzn-atlas.webp')",
