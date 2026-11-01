@@ -5,7 +5,7 @@ import { GAME_CONFIG, LocalGameService, WAR_RULES, WAR_STAGE_DEFS, BATTLE_WEAR_R
 import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, evaluateWarSquad } from './squad-assets.js';
 import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './patrol-routes.js';
-import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait } from './defender-assets.js';
+import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait, aegisDroneAsset } from './defender-assets.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
@@ -1951,10 +1951,10 @@ function bindDefenderRig(model, role) {
 }
 
 function loadDefenderTemplate(role, level) {
-  if (role !== 'guardian') return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
+  if (role !== 'guardian' && role !== 'aegis') return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
   return loadAnimatedSquad(defenderAsset(role, level)).catch(error => {
-    console.warn(`Guardian Level ${level} animated model unavailable; retaining the original defender.`, error);
-    return loadBuildingTemplate(`assets/models/defenders/guardian_l0${level}.glb`).then(scene => ({ scene, animations: [] }));
+    console.warn(`${DEFENDER_CONCEPTS[role].name} Level ${level} animated model unavailable; retaining the original defender.`, error);
+    return loadBuildingTemplate(`assets/models/defenders/${role}_l0${level}.glb`).then(scene => ({ scene, animations: [] }));
   });
 }
 
@@ -1967,6 +1967,61 @@ function bindGuardianAnimations(patrol, asset, model) {
   patrol.action = patrol.actions.idle;
   patrol.actionName = 'idle';
   patrol.action.play();
+}
+
+function bindAegisAnimations(patrol, asset, model) {
+  const clips = Object.fromEntries((asset.animations || []).map(clip => [clip.name, clip]));
+  const names = { idle: 'DZN_Aegis_Idle', walk: 'DZN_Aegis_Walk', command: 'DZN_Aegis_Command' };
+  if (Object.values(names).some(name => !clips[name])) throw new Error('Aegis requires idle, walk and drone-command clips.');
+  patrol.mixer = new THREE.AnimationMixer(model);
+  patrol.actions = Object.fromEntries(Object.entries(names).map(([state, name]) => [state, patrol.mixer.clipAction(clips[name])]));
+  patrol.action = patrol.actions.idle;
+  patrol.actionName = 'idle';
+  patrol.action.play();
+}
+
+function attachAegisDrones(patrol, level, valid = () => true) {
+  return loadBuildingTemplate(aegisDroneAsset(level)).then(template => {
+    if (!valid()) return;
+    patrol.drones = [-1, 1].map((sign, index) => {
+      const drone = template.clone(true);
+      drone.name = index ? 'right_drone' : 'left_drone';
+      drone.position.set(sign * 1.12, 1.83, .33);
+      drone.rotation.y = sign * .2;
+      drone.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
+      patrol.mesh.add(drone);
+      return drone;
+    });
+  }).catch(error => console.warn(`DZN Aegis Level ${level} interceptor drones could not load`, error));
+}
+
+function animateAegisDrones(patrol, time, threat, dt) {
+  if (!patrol.drones) return;
+  const target = patrol.targetPosition ? patrol.mesh.worldToLocal(patrol.targetPosition.clone()) : null;
+  const targetDirection = target ? new THREE.Vector3(target.x, 0, target.z).normalize() : null;
+  for (const [index, drone] of patrol.drones.entries()) {
+    const sign = index ? 1 : -1;
+    const phase = time * (1.15 + threat * .7) + index * Math.PI;
+    const distance = target && threat ? Math.min(3.2, Math.hypot(target.x, target.z) * .42) * threat : 0;
+    const desired = new THREE.Vector3(sign * 1.12 + Math.sin(phase) * .12,
+      1.83 + Math.sin(time * 2.3 + index * 2.1) * (.09 + threat * .06),
+      .33 + Math.cos(phase) * .14);
+    if (targetDirection) desired.addScaledVector(targetDirection, distance);
+    drone.position.lerp(desired, THREE.MathUtils.clamp(dt * 4.5, 0, 1));
+    drone.rotation.y = targetDirection && threat > .2
+      ? THREE.MathUtils.lerp(drone.rotation.y, Math.atan2(targetDirection.x, targetDirection.z), Math.min(1, dt * 4))
+      : Math.sin(phase) * .28;
+    drone.rotation.z = Math.sin(phase * 1.3) * (.06 + threat * .1);
+    for (const side of ['left', 'right']) {
+      const rotor = drone.getObjectByName(`drone_rotor_${side}`);
+      if (rotor) rotor.rotation.y += Math.max(0, dt) * (9 + threat * 11);
+    }
+  }
+}
+
+function aegisTraceOrigin(patrol, index = 0) {
+  const drone = patrol.drones?.[index % 2] || patrol.limbs?.left_drone || patrol.model || patrol.mesh;
+  return drone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, .18, 0));
 }
 
 function syncDefenderPatrols() {
@@ -1985,22 +2040,23 @@ function syncDefenderPatrols() {
     defenderPatrols.set(role, patrol);
     loadDefenderTemplate(role, unit.level).then(asset => {
       if (!patrol.active) return;
-      const animated = role === 'guardian' && asset.animations.length > 0;
+      const animated = (role === 'guardian' || role === 'aegis') && asset.animations.length > 0;
       const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
       if (animated) model.scale.setScalar(1.1);
       model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
       mesh.add(model);
-      if (animated) bindGuardianAnimations(patrol, asset, model);
+      if (animated) (role === 'aegis' ? bindAegisAnimations : bindGuardianAnimations)(patrol, asset, model);
       else patrol.limbs = bindDefenderRig(model, role);
       patrol.model = model;
+      if (role === 'aegis' && animated) attachAegisDrones(patrol, unit.level, () => patrol.active);
     }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
   }
 }
 function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
-  if (role === 'guardian' && patrol.mixer) {
-    const name = motion?.moving ? 'walk' : threat > .35 ? 'block' : 'idle';
+  if ((role === 'guardian' || role === 'aegis') && patrol.mixer) {
+    const name = motion?.moving ? 'walk' : threat > .35 ? role === 'guardian' ? 'block' : 'command' : 'idle';
     if (patrol.actionName !== name) {
       const next = patrol.actions[name];
       next.reset().fadeIn(.18).play();
@@ -2009,6 +2065,7 @@ function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
       patrol.actionName = name;
     }
     patrol.mixer.update(Math.min(.1, Math.max(0, dt)));
+    if (role === 'aegis') animateAegisDrones(patrol, time, threat, dt);
     return;
   }
   const limbs = patrol.limbs || mesh.userData.defenderLimbs;
@@ -2041,6 +2098,7 @@ function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
       drone.rotation.y = Math.sin(time * (0.7 + threat * 2) + index * Math.PI) * (0.35 + threat * 0.5);
     }
   }
+  if (role === 'aegis') animateAegisDrones(patrol, time, threat, dt);
   if (role === 'trapper') for (let index = 0; index < 3; index++) {
     const snareModule = limbs[`snare_module_${index}`];
     const charge = limbs[`snare_charge_${index}`];
@@ -2053,23 +2111,32 @@ function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
 }
 syncDefenderPatrols();
 let defenderPreview = null;
+let defenderPreviewMotion = null;
 let defenderPreviewToken = 0;
 function placeDefenderPreview(role, level) {
   const path = defenderAsset(role, level);
   if (!path) return;
   const token = ++defenderPreviewToken;
   if (defenderPreview) { scene.remove(defenderPreview); defenderPreview = null; }
+  defenderPreviewMotion = null;
   loadDefenderTemplate(role, level).then(asset => {
     if (token !== defenderPreviewToken) return;
-    const model = role === 'guardian' && asset.animations.length ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
+    const animated = (role === 'guardian' || role === 'aegis') && asset.animations.length;
+    const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
     model.position.set(-2, 0.07, -8);
     model.rotation.y = -0.6;
-    model.scale.setScalar(role === 'guardian' && asset.animations.length ? 1.38 : 1.25);
+    model.scale.setScalar(animated ? 1.38 : 1.25);
     model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
     model.userData.cosmeticConcept = true;
     defenderPreview = model;
     scene.add(model);
-  }).catch(error => console.warn(`Defender concept could not load: ${path}`, error));
+    if (animated) {
+      const preview = { mesh: model, model, role };
+      (role === 'aegis' ? bindAegisAnimations : bindGuardianAnimations)(preview, asset, model);
+      defenderPreviewMotion = preview;
+      if (role === 'aegis') attachAegisDrones(preview, level, () => token === defenderPreviewToken);
+    }
+  }).catch(error => console.warn(`Defender concept could not load: ${role} L${level}`, error));
   toast(`${DEFENDER_CONCEPTS[role].name} L${level} · 3D concept at squad camp · no battle effect`);
 }
 
@@ -4435,13 +4502,14 @@ function buildWarBaseVisual(side, condition = null) {
     warDefenderMeshes.push(patrol);
     loadDefenderTemplate(role, defender.level).then(asset => {
       if (token !== warDefenderToken) return;
-      const animated = role === 'guardian' && asset.animations.length > 0;
+      const animated = (role === 'guardian' || role === 'aegis') && asset.animations.length > 0;
       const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
       if (animated) model.scale.setScalar(1.1);
       mesh.add(model);
       patrol.model = model;
-      if (animated) bindGuardianAnimations(patrol, asset, model);
+      if (animated) (role === 'aegis' ? bindAegisAnimations : bindGuardianAnimations)(patrol, asset, model);
       else patrol.limbs = bindDefenderRig(model, role);
+      if (role === 'aegis' && animated) attachAegisDrones(patrol, defender.level, () => token === warDefenderToken);
     }).catch(error => console.warn(`War defender model could not load: ${role}`, error));
   }
 }
@@ -4790,6 +4858,7 @@ function updateWarBattle(dt) {
       return !best || distance < best.distance ? { mesh: troop.mesh, distance } : best;
     }, null);
     const threat = nearest ? THREE.MathUtils.clamp((20 - nearest.distance) / 12, 0, 1) : 0;
+    defender.targetPosition = nearest?.mesh.position || null;
     let moving = false;
     if (defender.role === 'hound') {
       const current = { x: defender.mesh.position.x - OUTPOST.x, z: defender.mesh.position.z - OUTPOST.z };
@@ -4831,8 +4900,7 @@ function updateWarBattle(dt) {
         if (!target) continue;
         if (event.role === 'guardian') spawnWarPulse(warBattle, target.position, 0xc084fc, 1.5);
         else if (event.role === 'aegis') {
-          const drone = defender.limbs?.left_drone || defender.model || defender.mesh;
-          const origin = drone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.25, 0));
+          const origin = aegisTraceOrigin(defender, index);
           spawnWarTrace(warBattle, origin, target.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
         } else if (event.role === 'trapper') spawnWarPulse(warBattle, target.position, 0xafff52, 1.1);
         else if (event.role === 'hound') spawnWarPulse(warBattle, target.position, 0xb7ff72, 0.68);
@@ -4841,8 +4909,8 @@ function updateWarBattle(dt) {
       defender.nextCue = warBattle.time + (defender.role === 'aegis' ? 1.4 : 1.8);
       if (defender.role === 'guardian' && nearest.distance < 9) spawnWarPulse(warBattle, defender.mesh.position, 0xc084fc, 1.9);
       else if (defender.role === 'aegis') {
-        const drone = defender.limbs?.left_drone || defender.model || defender.mesh;
-        const origin = drone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.25, 0));
+        defender.droneCueIndex = (defender.droneCueIndex || 0) + 1;
+        const origin = aegisTraceOrigin(defender, defender.droneCueIndex);
         spawnWarTrace(warBattle, origin, nearest.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
       } else if (defender.role === 'trapper' && nearest.distance < 8) spawnWarPulse(warBattle, nearest.mesh.position, 0xafff52, 1.1);
       else if (defender.role === 'hound' && nearest.distance < 3) spawnWarPulse(warBattle, nearest.mesh.position, 0xb7ff72, 0.68);
@@ -5272,6 +5340,7 @@ renderer.setAnimationLoop(time => {
     patrol.mesh.rotation.y = motion.yaw;
     animateDefender(patrol, elapsed, 0, dt);
   }
+  if (defenderPreviewMotion) animateDefender(defenderPreviewMotion, elapsed, Math.sin(elapsed * .8) > .2 ? .65 : 0, dt);
   if (operativeMesh.visible && operativePatrol.motion) {
     const motion = stepPatrolMotion(operativePatrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     operativeMesh.position.set(motion.x, 0, motion.z);

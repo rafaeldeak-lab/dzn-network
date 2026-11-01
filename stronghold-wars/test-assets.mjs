@@ -7,7 +7,7 @@ import { BUILDING_ASSETS } from './preview/building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, squadBattleStats } from './preview/squad-assets.js';
 import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
 import { defaultLayout } from './preview/layout-grid.js';
-import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait } from './preview/defender-assets.js';
+import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait, aegisDroneAsset } from './preview/defender-assets.js';
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
@@ -848,6 +848,48 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Guardian Level ${level} needs a textured humanoid rig, hand-bound 3D shield and four actions.`);
 }
 console.log('Five distinct DZN Guardian levels verified with source, hand-bound shields and walk/run/idle/block actions.');
+const aegisManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders-v3/manifest.json'), 'utf8'));
+if (!aegisManifest.complete || Object.keys(aegisManifest.assets || {}).length !== 10)
+  throw new Error('Aegis requires five complete soldier tiers and five interceptor drone tiers.');
+const aegisBodyHashes = new Set(), aegisDroneHashes = new Set();
+let lastDroneTriangles = 0;
+for (let level = 1; level <= 5; level++) {
+  const name = `aegis_l0${level}`, droneName = `aegis_drone_l0${level}`;
+  const entry = aegisManifest.assets[name], droneEntry = aegisManifest.assets[droneName];
+  if (!entry || !droneEntry || entry.file !== defenderAsset('aegis', level) || droneEntry.file !== aegisDroneAsset(level))
+    throw new Error(`Aegis Level ${level} body or independent drone mapping is missing.`);
+  for (const [asset, knownHashes] of [[entry, aegisBodyHashes], [droneEntry, aegisDroneHashes]]) {
+    const bytes = readFileSync(join(root, ...asset.file.split('/')));
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length
+      || bytes.length !== asset.bytes || hash !== asset.sha256 || knownHashes.has(hash))
+      throw new Error(`Aegis Level ${level} asset integrity or appearance distinction failed.`);
+    knownHashes.add(hash);
+    const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+    const names = new Set((gltf.nodes || []).map(node => node.name));
+    const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((sum, part) => sum + gltf.accessors[part.indices].count / 3, 0);
+    if (!gltf.meshes?.length || triangles !== asset.triangles || triangles > (asset === entry ? 22000 : 12000))
+      throw new Error(`Aegis Level ${level} must stay inside the game mesh budget.`);
+    if (asset === entry) {
+      const clips = new Set((gltf.animations || []).map(clip => clip.name));
+      if (!gltf.skins?.length || gltf.skins[0].joints?.length < 50 || !gltf.images?.length
+        || !['DZN_Aegis_Idle', 'DZN_Aegis_Walk', 'DZN_Aegis_Run', 'DZN_Aegis_Command'].every(clip => clips.has(clip))
+        || !names.has('mixamorig:LeftArm') || !names.has('mixamorig:RightArm'))
+        throw new Error(`Aegis Level ${level} needs a textured humanoid with idle, walk, run and command animations.`);
+    } else if (gltf.skins?.length || !names.has('drone_rotor_left') || !names.has('drone_rotor_right')
+      || !names.has('interceptor_eye') || !names.has('left_swept_wing') || !names.has('right_swept_wing')
+      || (level >= 3 && !names.has('left_aerial')) || (level >= 4 && !names.has('left_armour_chevron'))
+      || (level === 5 && !names.has('left_elite_winglet')) || triangles <= lastDroneTriangles)
+      throw new Error(`Aegis Level ${level} needs two articulated rotors and a visibly advancing drone shell.`);
+    else lastDroneTriangles = triangles;
+  }
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.source));
+  const reference = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.reference));
+  if (createHash('sha256').update(source).digest('hex') !== entry.sourceSha256
+    || createHash('sha256').update(reference).digest('hex') !== entry.referenceSha256)
+    throw new Error(`Aegis Level ${level} owner-guided reference or Meshy rig changed.`);
+}
+console.log('Five DZN Aegis soldiers and ten independently moving interceptor drones verified across all tiers.');
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
 if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');

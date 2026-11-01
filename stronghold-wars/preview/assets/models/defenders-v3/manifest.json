@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "provenance": "The supplied DZN Aegis concept informed five tiered image references. Meshy T2.5 Smart Topology produced five private textured body models at 15 existing credits each. Meshy humanoid rigging supplied walking and running. Blender authored idle and drone-command poses, plus two separate interceptor drones with tier-specific armour and named spinning fan pivots.",
+  "usage": "DZN Stronghold Wars game. Rights subject to the owner Meshy and ImageGen accounts and terms.",
+  "coordinateSystem": "glTF Y-up; the Aegis body and drones face +Z in the game",
+  "assets": {
+    "aegis_l01": {
+      "file": "assets/models/defenders-v3/aegis_l01.glb",
+      "source": "source-art/meshy-aegis-v1/aegis_l01-rig.glb",
+      "reference": "source-art/meshy-aegis-v1/aegis_l01-reference.png",
+      "portrait": "assets/portraits/defenders/aegis.png",
+      "bytes": 5236024,
+      "sha256": "67b0ed17db134b600a840b83d1c78b62468b5c18304f4d591739515ed0dd338e",
+      "sourceSha256": "4560dcb1d24a1e53ffd7d695767e08aa9fe2d68ad038695ccf04e8a631496335",
+      "referenceSha256": "fa2d084ff60e16d1611c3f07c693d6286f2c59383a725905e5f0c6812a27b31a",
+      "triangles": 15796,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Aegis_Command",
+        "DZN_Aegis_Idle",
+        "DZN_Aegis_Run",
+        "DZN_Aegis_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "aegis_drone_l01": {
+      "file": "assets/models/defenders-v3/aegis_drone_l01.glb",
+      "generatedBy": "tools/build-aegis-drones.py",
+      "bytes": 277144,
+      "sha256": "14dd16b2b0a9ec301910e2b403b62479356b5150ec8fb5b9f2d2fcfab0d5194d",
+      "triangles": 4736,
+      "skins": 0,
+      "textures": 0,
+      "animations": [],
+      "articulatedNodes": [
+        "drone_rotor_left",
+        "drone_rotor_right"
+      ],
+      "meshyCredits": 0
+    },
+    "aegis_l02": {
+      "file": "assets/models/defenders-v3/aegis_l02.glb",
+      "source": "source-art/meshy-aegis-v1/aegis_l02-rig.glb",
+      "reference": "source-art/meshy-aegis-v1/aegis_l02-reference.png",
+      "portrait": "assets/portraits/defenders/aegis.png",
+      "bytes": 4918560,
+      "sha256": "9bfe414dc5a0c120efec74810195543500b318c13383637f8636fb7beae014eb",
+      "sourceSha256": "35dbfb8f8af0e88fec0244feab0584acf21309859b2d5d32a7dd25ba76a8bd17",
+      "referenceSha256": "3f5e867f3531d691bd73741293c36c5ade98eb95bd7ca17bca72ce6c07c182d6",
+      "triangles": 15837,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Aegis_Command",
+        "DZN_Aegis_Idle",
+        "DZN_Aegis_Run",
+        "DZN_Aegis_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "aegis_drone_l02": {
+      "file": "assets/models/defenders-v3/aegis_drone_l02.glb",
+      "generatedBy": "tools/build-aegis-drones.py",
+      "bytes": 322696,
+      "sha256": "518a30bf998a0d20d2eb6a8808d6b2803e0dd6f1fd5907b8efcf6b0688d296d7",
+      "triangles": 5292,
+      "skins": 0,
+      "textures": 0,
+      "animations": [],
+      "articulatedNodes": [
+        "drone_rotor_left",
+        "drone_rotor_right"
+      ],
+      "meshyCredits": 0
+    },
+    "aegis_l03": {
+      "file": "assets/models/defenders-v3/aegis_l03.glb",
+      "source": "source-art/meshy-aegis-v1/aegis_l03-rig.glb",
+      "reference": "source-art/meshy-aegis-v1/aegis_l03-reference.png",
+      "portrait": "assets/portraits/defenders/aegis.png",
+      "bytes": 5035152,
+      "sha256": "2641fbf548cc7a4856b5bfab6f906d2549a79646bd1b339805567cc7a5ac8663",
+      "sourceSha256": "18c72c78e59f462cf07900f98da0da1baff5fa7c9baa27f92c197e594197d039",
+      "referenceSha256": "6b9cb3e9df94bb83eba1dc82f960b61b8b87d0d81690586e0134f0907fd8f554",
+      "triangles": 15794,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Aegis_Command",
+        "DZN_Aegis_Idle",
+        "DZN_Aegis_Run",
+        "DZN_Aegis_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "aegis_drone_l03": {
+      "file": "assets/models/defenders-v3/aegis_drone_l03.glb",
+      "generatedBy": "tools/build-aegis-drones.py",
+      "bytes": 373924,
+      "sha256": "f69e367c3f44c1f56c0483c17d13cc1881160c335a747fc59502adf8684c0547",
+      "triangles": 6148,
+      "skins": 0,
+      "textures": 0,
+      "animations": [],
+      "articulatedNodes": [
+        "drone_rotor_left",
+        "drone_rotor_right"
+      ],
+      "meshyCredits": 0
+    },
+    "aegis_l04": {
+      "file": "assets/models/defenders-v3/aegis_l04.glb",
+      "source": "source-art/meshy-aegis-v1/aegis_l04-rig.glb",
+      "reference": "source-art/meshy-aegis-v1/aegis_l04-reference.png",
+      "portrait": "assets/portraits/defenders/aegis.png",
+      "bytes": 5181480,
+      "sha256": "0fc877e1f80cc93ad869515fcf411eb6c0a2a5071a454483424ded32653d5a91",
+      "sourceSha256": "9b250306d44a3d0a74bac4b74eee110a1febc5dfdaf52af9ea06029765eb4f36",
+      "referenceSha256": "9caf28da33b438f429353af04b387b403bfb4181fe2d508635c7506fce3b3553",
+      "triangles": 15822,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Aegis_Command",
+        "DZN_Aegis_Idle",
+        "DZN_Aegis_Run",
+        "DZN_Aegis_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "aegis_drone_l04": {
+      "file": "assets/models/defenders-v3/aegis_drone_l04.glb",
+      "generatedBy": "tools/build-aegis-drones.py",
+      "bytes": 375268,
+      "sha256": "31041780b7485e5649d921ff8320264dc0693d15887f63a1606b14e66cf1b6b0",
+      "triangles": 6236,
+      "skins": 0,
+      "textures": 0,
+      "animations": [],
+      "articulatedNodes": [
+        "drone_rotor_left",
+        "drone_rotor_right"
+      ],
+      "meshyCredits": 0
+    },
+    "aegis_l05": {
+      "file": "assets/models/defenders-v3/aegis_l05.glb",
+      "source": "source-art/meshy-aegis-v1/aegis_l05-rig.glb",
+      "reference": "source-art/meshy-aegis-v1/aegis_l05-reference.png",
+      "portrait": "assets/portraits/defenders/aegis.png",
+      "bytes": 4882712,
+      "sha256": "a06f86f425613f19511358aca9c2fcc005c3894f541029768946605678abecda",
+      "sourceSha256": "5fb96ef3d7ef08461a187bb46c34da13a1191c1714ee97fc04d41929f42bc66a",
+      "referenceSha256": "2926237d8ddd36a20efd20bbe5df2d90e4c4b4bd50e1adef70352283fb9735f9",
+      "triangles": 15851,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Aegis_Command",
+        "DZN_Aegis_Idle",
+        "DZN_Aegis_Run",
+        "DZN_Aegis_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "aegis_drone_l05": {
+      "file": "assets/models/defenders-v3/aegis_drone_l05.glb",
+      "generatedBy": "tools/build-aegis-drones.py",
+      "bytes": 418516,
+      "sha256": "acf22428a5c4dd66e43eda6e25df64d38c928bcb40a4f5f7866329605d6b74de",
+      "triangles": 7084,
+      "skins": 0,
+      "textures": 0,
+      "animations": [],
+      "articulatedNodes": [
+        "drone_rotor_left",
+        "drone_rotor_right"
+      ],
+      "meshyCredits": 0
+    }
+  }
+}
