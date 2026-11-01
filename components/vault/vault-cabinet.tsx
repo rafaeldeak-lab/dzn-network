@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { VAULT_CATALOG, type VaultCabinetResponse, type VaultCatalogItem, type VaultOwnedItem, type VaultScope, type VaultSlots } from "@/lib/vault";
 import { CollectibleArt, CollectibleHero, VaultInspector, collectibleStyle } from "./collectible-art";
+import { VaultOpeningExperience } from "./vault-opening-experience";
 import { VaultShowcaseDisplay } from "./vault-showcase-display";
 import { addVaultItem, draftFromShowcase, emptyVaultDraft, featureVaultItem, isVaultDraftChanged, mergeVaultOwnershipRefresh, ownedShowcaseProjection, removeVaultItem, type VaultDraft } from "./vault-state";
 import styles from "./vault-cabinet.module.css";
@@ -28,6 +29,7 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
   const [conflict, setConflict] = useState(false);
   const [message, setMessage] = useState("");
   const [motion, setMotion] = useState(false);
+  const [showWelcomeFlow, setShowWelcomeFlow] = useState(false);
   const [loadKey, setLoadKey] = useState(0);
   const activeRequest = useRef<AbortController | null>(null);
 
@@ -51,6 +53,7 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
         setData(payload);
         setDraft(draftFromShowcase(payload.showcase));
         setSelectedId(payload.showcase.slots.hero ?? payload.items.find((item) => item.catalog.kind !== "scene")?.id ?? null);
+        setShowWelcomeFlow(payload.welcomeAvailable);
         setState({ status: "ready", message: "" });
         setError("");
         setConflict(false);
@@ -66,8 +69,8 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
     setLoadKey((value) => value + 1);
   }
 
-  async function mutate(kind: "save" | "claim") {
-    if (busy || !data || (kind === "claim" && !data.welcomeAvailable)) return;
+  async function mutate(kind: "save" | "claim"): Promise<boolean> {
+    if (busy || !data || (kind === "claim" && !data.welcomeAvailable)) return false;
     const controller = new AbortController();
     activeRequest.current?.abort();
     activeRequest.current = controller;
@@ -82,15 +85,15 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
         }),
       });
       const payload = await response.json().catch(() => null) as VaultCabinetResponse & VaultError | null;
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       if (response.status === 409) {
         setConflict(true);
         setError("Your saved showcase changed in another session. Your draft is still here. Load the latest saved version before applying your changes.");
-        return;
+        return false;
       }
       if (response.status === 401) {
         setError("Your session expired. Sign in again before saving. Your draft remains on this page.");
-        return;
+        return false;
       }
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.message || (response.status === 503 ? "Ownership could not be verified right now. Your saved showcase is unchanged; try again shortly." : "The request could not be completed. Your saved showcase is unchanged."));
@@ -109,8 +112,10 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
         setMessage("Your free welcome collectible and scene are now permanently in your cabinet. Choose what to showcase, then save.");
         setSelectedId(payload.items.find((item) => item.source === "welcome" && item.catalog.kind !== "scene")?.id ?? null);
       }
+      return true;
     } catch (caught) {
       if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Your request could not be completed.");
+      return false;
     } finally { if (!controller.signal.aborted) setBusy(null); }
   }
 
@@ -176,7 +181,17 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
       <p>{state.message}</p>
       <div className={styles.actions}>{state.status === "login" ? <Link className={`${styles.button} ${styles.primary}`} href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in with Discord</Link> : <button type="button" className={styles.button} onClick={retry}><RefreshCw aria-hidden="true" />Try again</button>}<Link className={styles.button} href="/store">Explore DZN collections</Link></div>
     </section> : null}
-    {state.status === "ready" && data ? <>
+    {state.status === "ready" && data && showWelcomeFlow && welcome ? <VaultOpeningExperience
+      scope={scope}
+      reward={welcome}
+      displayName={data.displayName}
+      motion={motion}
+      busy={busy === "claim"}
+      claimed={!data.welcomeAvailable}
+      onClaim={() => mutate("claim")}
+      onContinue={() => { setShowWelcomeFlow(false); setMessage("Welcome collection revealed. Your cabinet is ready to customise."); }}
+    /> : null}
+    {state.status === "ready" && data && !showWelcomeFlow ? <>
       {view !== "saved" ? <nav className={styles.tabs} aria-label="Cabinet views"><button type="button" aria-pressed={view === "collection"} onClick={() => setView("collection")}>Your collection</button><button type="button" aria-pressed={view === "designs"} onClick={() => setView("designs")}>Design gallery</button><span>{data.items.length} owned {data.items.length === 1 ? "item" : "items"}</span></nav> : null}
       {data.purchaseSource === "unavailable" && view !== "saved" ? <p className={styles.notice}>Purchased items cannot be verified right now. They are not shown here until the ownership check is available again. Your free and earned collection is still available.</p> : null}
       {view === "saved" ? <>
@@ -224,9 +239,9 @@ export function VaultCabinet({ scope, serverId }: { scope: VaultScope; serverId?
           <div className={styles.inventory}>{designs.map((item) => <article key={item.id} className={styles.item} style={collectibleStyle(item)}><button type="button" className={styles.itemVisual} aria-label={`Preview ${item.name}`} onClick={() => { setDesignId(item.id); setInspected(item); }}><CollectibleArt item={item} /><span className={styles.rarity}>{item.rarity}</span><span className={styles.inspectLabel}><Scan aria-hidden="true" />Preview</span></button><div className={styles.itemInfo}><h3>{item.name}</h3><p>{item.edition}</p></div></article>)}</div>
         </>}
       </>}
-      {error ? <div className={`${styles.notice} ${styles.error}`} role="alert"><p>{error}</p>{conflict ? <div className={styles.actions}><button type="button" className={styles.button} disabled={Boolean(busy)} onClick={() => void reloadLatest()}><RefreshCw aria-hidden="true" />{busy === "reload" ? "Loading latest..." : "Load latest and keep my draft"}</button></div> : null}{error.includes("session expired") ? <Link className={styles.button} href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in again</Link> : null}</div> : null}
-      <p className={styles.status} role="status" aria-live="polite">{message}</p>
     </> : null}
+    {state.status === "ready" && data && error ? <div className={`${styles.notice} ${styles.error}`} role="alert"><p>{error}</p>{conflict ? <div className={styles.actions}><button type="button" className={styles.button} disabled={Boolean(busy)} onClick={() => void reloadLatest()}><RefreshCw aria-hidden="true" />{busy === "reload" ? "Loading latest..." : "Load latest and keep my draft"}</button></div> : null}{error.includes("session expired") ? <Link className={styles.button} href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in again</Link> : null}</div> : null}
+    {state.status === "ready" && data ? <p className={styles.status} role="status" aria-live="polite">{message}</p> : null}
     <footer className={styles.footer}><strong>DZN ORIGINALS</strong><span>Cosmetic collectibles · your collection stays separate from competitive results</span></footer>
     <VaultInspector item={inspected} motion={motion} onClose={() => setInspected(null)} />
   </div>;
