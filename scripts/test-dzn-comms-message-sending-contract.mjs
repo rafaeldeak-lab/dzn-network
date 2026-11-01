@@ -9,6 +9,7 @@ const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sq
 const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
+const networkRail = read("components/comms/dzn-comms-network-rail.tsx");
 const assist = read("components/comms/dzn-assist.tsx");
 const deletionNotices = read("components/comms/deletion-notices.ts");
 const client = read("components/comms/comms-history-client.ts");
@@ -128,14 +129,19 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /if \(selectedChannel !== "global-chat"\) \{\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "Private access recovery must reset pagination before loading Global Chat.");
   assert.match(shell, /await sendCommsMessage[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful message send must release an earlier-history loading state only for its original channel.");
+  assert.match(shell, /await sendCommsMessage[\s\S]*sendAttemptRef\.current = null;[\s\S]*draftsByChannelRef\.current\[targetChannel\] = "";[\s\S]*if \(selectedChannelRef\.current === targetChannel\)/, "A successful send must clear its room cache even if the reader switches rooms before completion.");
   assert.doesNotMatch(shell, /reactionAttemptRef|\bheart\b|\bboost\b|\blaugh\b|\bsalute\b|\bskull\b/, "The compact Global Chat UI must not retain a fixed reaction catalog.");
+  assert.match(networkRail, /<Metric label="Registered servers" value=\{event\.registered_servers\} \/>/, "The event rail must label the verified event count as registered servers.");
+  assert.doesNotMatch(networkRail, /total_participants|label="Players"/, "The event rail must not present the event API's server-registration total as a player count.");
   assert.match(shell, /Add an emoji reaction/, "The compact Global Chat UI must expose only an on-demand emoji reaction control.");
   assert.match(shell, /is typing\.\.\./, "The chat shell must provide an ephemeral Discord-style typing indicator.");
   assert.match(shell, /const TYPING_IDLE_TIMEOUT_MS = 5_000/, "Typing must stop after a short idle interval.");
   assert.match(shell, /typingLastInputAtRef\.current = Date\.now\(\)/, "Only actual composer input may refresh typing activity.");
   assert.match(shell, /const stop = \(\) => \{[\s\S]*void setCommsTyping\(channel, false\)/, "Typing cleanup must remove the server-side typing state.");
   assert.match(shell, /now - typingLastInputAtRef\.current > TYPING_IDLE_TIMEOUT_MS[\s\S]*stop\(\);/, "An idle draft must clear its typing state instead of renewing indefinitely.");
-  assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
+  assert.match(shell, /function selectCommsChannel\(nextChannel: string\)[\s\S]*historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = nextChannel/, "Changing channels must invalidate in-flight history reads immediately.");
+  assert.match(shell, /draftsByChannelRef\.current\[currentChannel\] = draft/, "Changing rooms must retain the current unsent draft.");
+  assert.match(shell, /messageRailByChannelRef\.current\[currentChannel\] = \{[\s\S]*scrollTop: log\.scrollTop/, "Changing rooms must retain the current scroll position.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
   assert.match(shell, /A newer deletion replaces any earlier placeholder,[\s\S]*deletionNoticeTimeoutsRef\.current\.clear\(\)/, "Repeated deletes must collapse to one brief public placeholder instead of stacking rows.");

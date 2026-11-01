@@ -1,23 +1,33 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import {
-  AlertTriangle,
+  AtSign,
   ArrowDown,
   Bot,
+  ChevronRight,
   Flag,
   Hash,
   LockKeyhole,
+  Menu,
   Megaphone,
-  MessageCircle,
+  PanelRightOpen,
+  Pin,
   Plus,
+  Reply,
+  Search,
   Send,
   ShieldCheck,
+  Smile,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DznAssist } from "./dzn-assist";
+import { DznLogo } from "@/components/dzn/dzn-logo";
+import { DznCommsNetworkRail } from "./dzn-comms-network-rail";
 import { DznUpdatesFeed } from "./dzn-updates-feed";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
@@ -44,7 +54,6 @@ type CommsHistoryState =
 
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
-const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
 const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED === "true";
 // A deployed client learns its available Comms controls from the same-origin
@@ -168,6 +177,12 @@ export function DznCommsShell() {
   const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
   const [deletedMessageIds, setDeletedMessageIds] = useState<ReadonlySet<string>>(() => new Set());
   const [draft, setDraft] = useState("");
+  const draftsByChannelRef = useRef<Record<string, string>>({});
+  const messageRailByChannelRef = useRef<Record<string, { scrollTop: number; followLatest: boolean }>>({});
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
+  const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
+  const [messageFilter, setMessageFilter] = useState<"all" | "mentions">("all");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
@@ -271,11 +286,14 @@ export function DznCommsShell() {
       const nextChannel = window.location.hash === "#dzn-updates" ? "dzn-updates" : "global-chat";
       if (selectedChannelRef.current === nextChannel) return;
       historyRequestGenerationRef.current += 1;
-      setDraft("");
+      setDraft(draftsByChannelRef.current[nextChannel] ?? "");
       setComposerMessage("");
       setLoadingEarlierMessages(false);
       setHistoryPageMode("latest");
-      prepareMessageRailForChannelChange();
+      messageLogChannelRef.current = null;
+      messageLogBoundaryRef.current = null;
+      followLatestMessagesRef.current = true;
+      setUnseenMessageCount(0);
       selectedChannelRef.current = nextChannel;
       if (nextChannel === "global-chat") {
         setHistory({
@@ -306,6 +324,15 @@ export function DznCommsShell() {
     () => mergeDeletionNotices(payload.messages, deletionNotices, deletedMessageIds, payload.channel.slug),
     [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
+  const displayedMessages = useMemo(() => {
+    const query = messageSearch.trim().toLocaleLowerCase();
+    return visibleMessages.filter((message) => {
+      if (messageFilter === "mentions" && !message.body.includes("@")) return false;
+      if (!query) return true;
+      return [message.author_display_name, message.author_role_label, message.body]
+        .some((value) => value.toLocaleLowerCase().includes(query));
+    });
+  }, [messageFilter, messageSearch, visibleMessages]);
   const historyReady = history.status === "ready";
   const recentSpeakers = useMemo(() => historyReady ? recentVisibleSpeakers(visibleMessages) : [], [historyReady, visibleMessages]);
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
@@ -318,7 +345,6 @@ export function DznCommsShell() {
   const typingReadEnabled = historyReady && payload.feature_flags.typing_enabled && payload.channel.slug === "global-chat";
   const typingWriteEnabled = historyReady && payload.feature_flags.typing_write_enabled && payload.channel.slug === "global-chat";
   const statusLabel = useMemo(() => statusCopy(history.status, sendingEnabled), [history.status, sendingEnabled]);
-
   useEffect(() => {
     if (!typingReadEnabled) return;
     const controller = new AbortController();
@@ -388,6 +414,17 @@ export function DznCommsShell() {
     messageLogChannelRef.current = payload.channel.slug;
     messageLogBoundaryRef.current = latestDznCommsMessageRailBoundary(visibleMessages);
 
+    const rememberedRail = channelChanged ? messageRailByChannelRef.current[payload.channel.slug] : undefined;
+    if (channelChanged && rememberedRail) {
+      followLatestMessagesRef.current = rememberedRail.followLatest;
+      window.requestAnimationFrame(() => {
+        const currentLog = messageLogRef.current;
+        if (currentLog) currentLog.scrollTop = Math.min(rememberedRail.scrollTop, currentLog.scrollHeight);
+      });
+      setUnseenMessageCount((count) => count === 0 ? count : 0);
+      return;
+    }
+
     if (channelChanged || followLatestMessagesRef.current) {
       window.requestAnimationFrame(() => {
         const currentLog = messageLogRef.current;
@@ -414,16 +451,60 @@ export function DznCommsShell() {
         : "Preview only";
 
   function selectUpdatesChannel() {
-    if (selectedChannelRef.current === "dzn-updates") return;
+    selectCommsChannel("dzn-updates");
+  }
+
+  function selectCommsChannel(nextChannel: string) {
+    if (selectedChannelRef.current === nextChannel) {
+      setLeftDrawerOpen(false);
+      setRightDrawerOpen(false);
+      return;
+    }
+    rememberCurrentChannelWorkspace();
     historyRequestGenerationRef.current += 1;
-    setDraft("");
+    setDraft(draftsByChannelRef.current[nextChannel] ?? "");
     setComposerMessage("");
     setLoadingEarlierMessages(false);
     setHistoryPageMode("latest");
     prepareMessageRailForChannelChange();
-    selectedChannelRef.current = "dzn-updates";
-    setSelectedChannel("dzn-updates");
-    if (window.location.hash !== "#dzn-updates") window.history.replaceState(null, "", "#dzn-updates");
+    selectedChannelRef.current = nextChannel;
+    setSelectedChannel(nextChannel);
+    setLeftDrawerOpen(false);
+    setRightDrawerOpen(false);
+    if (nextChannel === "dzn-updates") {
+      if (window.location.hash !== "#dzn-updates") window.history.replaceState(null, "", "#dzn-updates");
+      return;
+    }
+    if (window.location.hash === "#dzn-updates") window.history.replaceState(null, "", "#global-chat");
+    setHistory({
+      status: historyProbeEnabled ? "loading" : "static",
+      payload: staticPayload,
+      message: nextChannel === "global-chat"
+        ? historyProbeEnabled ? "Opening Global Chat." : "Message history is not active here. No messages are shown."
+        : "Opening the selected DZN Comms channel.",
+    });
+  }
+
+  function updateDraft(nextDraft: string) {
+    const bounded = [...nextDraft].slice(0, 2_000).join("");
+    draftsByChannelRef.current[selectedChannelRef.current] = bounded;
+    typingLastInputAtRef.current = Date.now();
+    setDraft(bounded);
+  }
+
+  function appendEmoji(emoji: string) {
+    if (!sendingEnabled || sending) return;
+    updateDraft(`${draft}${emoji}`);
+  }
+
+  function replyToMessage(authorName: string) {
+    if (!sendingEnabled || sending) {
+      setComposerMessage("Replies are available when sending is enabled for this channel.");
+      return;
+    }
+    const mention = `@${authorName} `;
+    updateDraft(draft.startsWith(mention) ? draft : `${mention}${draft}`);
+    setComposerMessage(`Replying to ${authorName} with a mention.`);
   }
 
   async function handleSend(event: FormEvent) {
@@ -443,6 +524,10 @@ export function DznCommsShell() {
     try {
       await sendCommsMessage(targetChannel, draft, pendingAttempt.requestId);
       sendAttemptRef.current = null;
+      // A completed request can resolve after the reader has changed rooms.
+      // Clear the sent room's cache even when its composer is not visible so a
+      // return visit cannot accidentally submit the same message twice.
+      draftsByChannelRef.current[targetChannel] = "";
       if (selectedChannelRef.current === targetChannel) {
         setDraft("");
         setComposerMessage(`Message sent to ${payload.channel.name}.`);
@@ -563,6 +648,18 @@ export function DznCommsShell() {
     setUnseenMessageCount(0);
   }
 
+  function rememberCurrentChannelWorkspace() {
+    const currentChannel = selectedChannelRef.current;
+    draftsByChannelRef.current[currentChannel] = draft;
+    const log = messageLogRef.current;
+    if (log && currentChannel !== "dzn-updates") {
+      messageRailByChannelRef.current[currentChannel] = {
+        scrollTop: log.scrollTop,
+        followLatest: followLatestMessagesRef.current,
+      };
+    }
+  }
+
   function scrollMessageRailToLatest() {
     followLatestMessagesRef.current = true;
     setUnseenMessageCount(0);
@@ -577,6 +674,7 @@ export function DznCommsShell() {
     if (!log) return;
     const atBottom = isDznCommsMessageRailAtBottom(log);
     followLatestMessagesRef.current = atBottom;
+    messageRailByChannelRef.current[payload.channel.slug] = { scrollTop: log.scrollTop, followLatest: atBottom };
     if (atBottom) setUnseenMessageCount(0);
   }
 
@@ -633,233 +731,87 @@ export function DznCommsShell() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
-      <section className="mx-auto flex w-full max-w-[92rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="DZN communication tools" className="flex flex-wrap items-center gap-x-1 gap-y-2 border-y border-white/10 bg-[#050812]/92 px-2 py-2">
-          <a href="#global-chat" onClick={() => {
-            if (selectedChannelRef.current === "global-chat") return;
-            historyRequestGenerationRef.current += 1;
-            setDraft("");
-            setComposerMessage("");
-            setLoadingEarlierMessages(false);
-            setHistoryPageMode("latest");
-            prepareMessageRailForChannelChange();
-            selectedChannelRef.current = "global-chat";
-            setHistory({ status: "loading", payload: staticPayload, message: "Opening Global Chat." });
-            setSelectedChannel("global-chat");
-          }} className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-cyan-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-cyan-300/8">
-            <MessageCircle className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-            <span>DZN Comms</span>
-            <span className="text-[10px] tracking-[0.14em] text-emerald-200">{selectedChannelAccessLabel}</span>
-          </a>
-          <a href="#dzn-updates" onClick={selectUpdatesChannel} className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-violet-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-violet-300/8">
-            <Megaphone className="h-4 w-4 text-violet-200" aria-hidden="true" />
-            <span>DZN Updates</span>
-          </a>
-          <a href="#dzn-assist" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-violet-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-violet-300/8">
-            <Bot className="h-4 w-4 text-violet-200" aria-hidden="true" />
-            <span>DZN Assist</span>
-          </a>
-          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group inline-flex min-h-10 items-center gap-2 border-l-2 border-amber-300/70 px-3 py-2 text-sm font-black uppercase text-white transition hover:bg-amber-300/8">
-            <ShieldCheck className="h-4 w-4 text-amber-200" aria-hidden="true" />
-            <span>Owner access</span>
-          </a> : null}
-        </nav>
+      <section className="mx-auto flex w-full max-w-[100rem] flex-col gap-4 px-3 sm:px-5 lg:px-7">
+        <div id="global-chat" className="relative overflow-hidden rounded-2xl border border-violet-300/20 bg-[radial-gradient(circle_at_45%_-18%,rgba(139,92,246,0.18),transparent_34%),linear-gradient(180deg,#070b17,#03050d)] shadow-[0_28px_94px_rgba(0,0,0,0.48)]">
+          <header className="relative z-30 flex min-h-16 items-center gap-3 border-b border-white/10 bg-[#060a14]/94 px-3 backdrop-blur-xl sm:px-4">
+            <button type="button" onClick={() => setLeftDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 lg:hidden" aria-label="Open chat rooms"><Menu className="h-5 w-5" aria-hidden="true" /></button>
+            <div className="hidden min-w-[12.4rem] lg:block"><DznLogo compact /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">DZN Comms</p>
+              <h1 className="truncate text-lg font-black text-white sm:text-xl">{isUpdatesChannel ? "DZN Updates" : payload.channel.name}</h1>
+              {!isUpdatesChannel && recentSpeakers.length > 0 ? <p className="mt-0.5 hidden truncate text-[10px] font-bold text-zinc-500 xl:block">Recent: {recentSpeakers.map((member) => member.author_display_name).join(", ")}</p> : null}
+              <span className="mt-1 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500"><span className={`h-1.5 w-1.5 rounded-full ${history.status === "ready" && sendingEnabled ? "bg-emerald-300" : "bg-zinc-500"}`} aria-hidden="true" />{statusLabel}</span>
+              <span className="sr-only">Chat access: {selectedChannelAccessLabel}</span>
+            </div>
+            {!isUpdatesChannel ? <DznLivePresenceCounter /> : <span className="hidden min-h-10 items-center rounded-md border border-violet-300/25 bg-violet-500/10 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-violet-100 sm:inline-flex">Official feed</span>}
+            <button type="button" onClick={() => setRightDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 lg:hidden" aria-label="Open event and server panel"><PanelRightOpen className="h-5 w-5" aria-hidden="true" /></button>
+          </header>
 
-        <div id="global-chat" className="scroll-mt-6 overflow-hidden rounded-md border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.16),transparent_32%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.13),transparent_28%),rgba(5,9,22,0.92)] shadow-[0_22px_70px_rgba(0,0,0,0.38)]">
-          <div className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-400/10 text-cyan-100 shadow-[0_0_24px_rgba(34,211,238,0.18)]">
-                <MessageCircle className="h-6 w-6" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">DZN Comms</p>
-                <h1 className="mt-1 text-2xl font-black uppercase leading-none text-white sm:text-3xl">{isUpdatesChannel ? "DZN Updates" : payload.channel.name}</h1>
-                <p className="mt-1.5 max-w-2xl text-sm font-semibold leading-5 text-zinc-300">
-                  {isUpdatesChannel
-                    ? "Verified DZN product and community release notes for players and server owners."
-                    : payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}
-                </p>
+          {leftDrawerOpen || rightDrawerOpen ? <button type="button" aria-label="Close open chat panel" onClick={() => { setLeftDrawerOpen(false); setRightDrawerOpen(false); }} className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm lg:hidden" /> : null}
+
+          <div className="grid min-h-[min(52rem,calc(100svh-7rem))] lg:grid-cols-[15.5rem_minmax(0,1fr)_19rem]">
+            <aside aria-label="Chat rooms and groups" className={`fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] flex-col overflow-y-auto border-r border-white/10 bg-[#070b17] shadow-[28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:shadow-none ${leftDrawerOpen ? "translate-x-0" : "-translate-x-full"}`}>
+              <div className="flex items-center justify-between border-b border-white/8 p-4 lg:hidden"><DznLogo compact /><button type="button" onClick={() => setLeftDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close chat rooms"><X className="h-4 w-4" aria-hidden="true" /></button></div>
+              <div className="p-3">
+                <div className="flex items-center justify-between px-2 py-2"><PanelTitle icon={Hash} label="Chat rooms" /><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.8)]" aria-label="Chat connection status" /></div>
+                <div className="mt-2 space-y-1">
+                  {payload.available_channels.filter((channel) => channel.kind === "public").map((channel) => <ChannelButton key={channel.slug} active={!isUpdatesChannel && channel.slug === payload.channel.slug} icon={Hash} label={channel.name} meta={sendingEnabled ? "Live" : "Read only"} onSelect={() => selectCommsChannel(channel.slug)} />)}
+                  <ChannelButton active={isUpdatesChannel} icon={Megaphone} label="DZN Updates" meta="Official" onSelect={selectUpdatesChannel} />
+                </div>
               </div>
-            </div>
-            <div className={presenceUiEnabled && !isUpdatesChannel ? "grid gap-2 sm:grid-cols-3 lg:w-[420px]" : "grid gap-2 sm:grid-cols-2 lg:w-[280px]"}>
-              <StatusPill label="History" value={isUpdatesChannel ? "Permanent" : statusLabel} tone={isUpdatesChannel || history.status === "ready" ? "cyan" : "violet"} />
-              <StatusPill label="Runtime" value={isUpdatesChannel ? "Official" : sendingEnabled ? "Live" : "Read Only"} tone={isUpdatesChannel || sendingEnabled ? "cyan" : "gold"} />
-              {!isUpdatesChannel && presenceUiEnabled ? <DznLivePresenceCounter /> : null}
-            </div>
-          </div>
 
-          {!isUpdatesChannel ? <div className="border-b border-white/10 bg-black/20 px-4 py-2.5 sm:px-5">
-            <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <span className="inline-flex shrink-0 items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-300" /> Recent</span>
-              {recentSpeakers.length > 0 ? recentSpeakers.map((member) => <span key={`${member.author_display_name}:${member.author_role_label}`} className="inline-flex shrink-0 items-center gap-2 text-xs font-bold text-zinc-200"><span className="grid h-6 w-6 place-items-center rounded-full border border-violet-300/35 bg-violet-400/15 text-[10px] text-violet-100">{initials(member.author_display_name)}</span>{member.author_display_name}</span>) : <span className="text-xs font-semibold text-zinc-500">Conversation is quiet.</span>}
-            </div>
-          </div> : null}
+              {privateGroupsUiEnabled && payload.available_channels.some((channel) => channel.kind === "private_group") ? <div className="border-t border-white/8 p-3"><div className="px-2 py-2"><PanelTitle icon={LockKeyhole} label="Your groups" /></div><div className="mt-1 space-y-1">{payload.available_channels.filter((channel) => channel.kind === "private_group").map((channel) => <ChannelButton key={channel.slug} active={!isUpdatesChannel && channel.slug === payload.channel.slug} icon={LockKeyhole} label={channel.name} meta={channel.current_user_member_role ?? "Member"} onSelect={() => selectCommsChannel(channel.slug)} />)}</div></div> : null}
 
-          <div className="grid gap-0 lg:grid-cols-[14.5rem_minmax(0,1fr)_15rem]">
-            <aside className="border-b border-white/10 bg-black/18 p-3 lg:border-b-0 lg:border-r">
-              <PanelTitle icon={Hash} label="Channels" />
-              <div className="mt-3 space-y-2">
-                {payload.available_channels
-                  .filter((channel) => channel.kind === "public" || privateGroupsUiEnabled)
-                  .map((channel) => (
-                    <ChannelButton
-                      key={channel.slug}
-                      active={!isUpdatesChannel && channel.slug === payload.channel.slug}
-                      icon={channel.kind === "private_group" ? LockKeyhole : Hash}
-                      label={channel.name}
-                      meta={channel.kind === "private_group" ? channel.current_user_member_role ?? "Member" : sendingEnabled ? "Live" : "Read-only"}
-                      onSelect={() => {
-                        if (channel.slug === selectedChannelRef.current) return;
-                        historyRequestGenerationRef.current += 1;
-                        setDraft("");
-                        setComposerMessage("");
-                        setLoadingEarlierMessages(false);
-                        setHistoryPageMode("latest");
-                        prepareMessageRailForChannelChange();
-                        selectedChannelRef.current = channel.slug;
-                        setHistory({ status: "loading", payload: staticPayload, message: "Opening the selected DZN Comms channel." });
-                        setSelectedChannel(channel.slug);
-                      }}
-                    />
-                  ))}
-                <ChannelButton
-                  active={isUpdatesChannel}
-                  icon={Megaphone}
-                  label="DZN Updates"
-                  meta="Official"
-                  onSelect={selectUpdatesChannel}
-                />
-              </div>
-              <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/8 p-3">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>
-                <p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">
-                  English only. Do not post abuse, invites, secrets, threats or personal information. Report abuse instead of replying to it.
-                </p>
+              <div className="mt-auto border-t border-white/8 p-3">
+                <Link href="#dzn-assist" onClick={() => setLeftDrawerOpen(false)} className="flex min-h-12 items-center gap-3 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 text-xs font-black uppercase tracking-[0.11em] text-violet-100 transition hover:border-violet-200/55 hover:bg-violet-500/18"><Bot className="h-4 w-4" aria-hidden="true" /> DZN Assist <ChevronRight className="ml-auto h-4 w-4" aria-hidden="true" /></Link>
+                {ownerDiscordAccessUiEnabled ? <Link href="/login?returnTo=%2Fdiscord-owner-access" onClick={() => setLeftDrawerOpen(false)} className="mt-2 flex min-h-11 items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-300/8 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-amber-100"><ShieldCheck className="h-4 w-4" aria-hidden="true" /> Owner access</Link> : null}
               </div>
             </aside>
 
-            <section className="min-w-0 border-b border-white/10 p-3 sm:p-4 lg:border-b-0 lg:border-r">
-              {isUpdatesChannel ? <DznUpdatesFeed /> : <>
-              <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">#{payload.channel.slug}</p>
-                  <h2 className="mt-1 text-xl font-black uppercase text-white">{payload.channel.name}</h2>
-                </div>
-                <span className="w-fit rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-zinc-300">
-                  {visibleMessages.length === 1 ? "1 message" : `${visibleMessages.length} messages`}
-                </span>
-              </div>
-
-              <div role="status" aria-live="polite" className="mt-3 border-l-2 border-cyan-300/55 bg-cyan-300/6 px-3 py-2">
-                <p className="text-xs font-bold leading-5 text-cyan-50">{history.message}</p>
-              </div>
-
-              <div className="relative mt-3">
-                <div
-                  ref={messageLogRef}
-                  role="log"
-                  aria-live="polite"
-                  aria-relevant="additions text"
-                  onScroll={handleMessageLogScroll}
-                  className="h-[min(32rem,calc(100svh-18rem))] min-h-64 max-h-[46svh] divide-y divide-white/8 overflow-y-auto overscroll-contain border border-white/8 bg-black/20 px-3 [scrollbar-color:rgba(103,232,249,0.45)_rgba(255,255,255,0.03)] [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/45 [&::-webkit-scrollbar-track]:bg-[#060a12] [&::-webkit-scrollbar]:w-2 lg:max-h-[28rem]"
-                >
-                {historyReady && (payload.page.has_more || historyPageMode === "earlier") ? <div className="flex items-center justify-center gap-2 border-b border-white/8 py-3">
-                  {historyPageMode === "earlier" ? <button type="button" onClick={returnToLatestMessages} className="min-h-8 border border-white/12 bg-white/[0.035] px-3 text-xs font-bold text-zinc-300 transition hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-white">Latest messages</button> : null}
-                  {payload.page.has_more ? <button type="button" onClick={() => void loadEarlierMessages()} disabled={loadingEarlierMessages} className="min-h-8 border border-cyan-300/25 bg-cyan-300/8 px-3 text-xs font-bold text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/15 disabled:cursor-wait disabled:opacity-60">{loadingEarlierMessages ? "Loading history..." : "Load earlier messages"}</button> : null}
-                </div> : null}
-                {visibleMessages.length > 0 ? visibleMessages.map((message) => (
-                  <MessageRow
-                    key={message.id}
-                    message={message}
-                    reportEnabled={reportActionsEnabled}
-                    deleteEnabled={selfDeleteUiEnabled}
-                    reactionsEnabled={reactionsEnabled}
-                    reactionsWriteEnabled={reactionsWriteEnabled}
-                    customEmojiReactionsEnabled={customEmojiReactionsEnabled}
-                    customEmojiReactionsWriteEnabled={customEmojiReactionsWriteEnabled}
-                    onReactionChanged={(mutation) => applyReactionMutation(message.id, mutation)}
-                    onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
-                  />
-                )) : (
-                  <div className="grid min-h-28 place-items-center px-4 py-7 text-center">
-                    <div>
-                      <p className="text-sm font-black text-zinc-100">No public messages yet</p>
-                      <p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">
-                        {history.status === "ready"
-                          ? "Start the conversation when sending is available."
-                          : history.status === "static"
-                            ? "No placeholder conversation is displayed."
-                            : "DZN will reconnect automatically when message history returns."}
-                      </p>
-                    </div>
+            <section className="relative flex min-h-0 min-w-0 flex-col bg-[linear-gradient(150deg,rgba(13,14,34,0.93),rgba(4,7,16,0.98))]">
+              {isUpdatesChannel ? <div className="p-3 sm:p-5"><div className="mb-4 flex items-start gap-3 rounded-xl border border-violet-300/20 bg-violet-500/8 p-3"><Megaphone className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" aria-hidden="true" /><div><p className="text-sm font-black text-white">Official DZN Updates</p><p className="mt-1 text-xs leading-5 text-zinc-400">Verified DZN product and community release notes for players and server owners.</p></div></div><DznUpdatesFeed /></div> : <>
+                <div className="border-b border-white/8 px-3 py-4 sm:px-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0"><p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-200"># {payload.channel.slug}</p><h2 className="mt-1 text-2xl font-black text-white sm:text-3xl">{payload.channel.name}</h2><p className="mt-1 max-w-2xl text-sm font-semibold leading-5 text-zinc-400">{payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}</p></div>
+                    <span className="inline-flex min-h-9 items-center rounded-lg border border-white/10 bg-white/[0.035] px-3 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">{displayedMessages.length === 1 ? "1 message" : `${displayedMessages.length} messages`}</span>
                   </div>
-                )}
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex shrink-0 rounded-lg border border-white/10 bg-black/25 p-1" role="tablist" aria-label="Message view">
+                      <button type="button" onClick={() => setMessageFilter("all")} role="tab" aria-selected={messageFilter === "all"} className={`min-h-8 rounded-md px-3 text-xs font-black ${messageFilter === "all" ? "bg-violet-500/26 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>Everyone</button>
+                      <button type="button" onClick={() => setMessageFilter("mentions")} role="tab" aria-selected={messageFilter === "mentions"} className={`flex min-h-8 items-center gap-1 rounded-md px-3 text-xs font-black ${messageFilter === "mentions" ? "bg-violet-500/26 text-white" : "text-zinc-500 hover:text-zinc-200"}`}><AtSign className="h-3.5 w-3.5" aria-hidden="true" /> Mentions</button>
+                    </div>
+                    <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/10 bg-black/22 px-3 text-zinc-500 focus-within:border-violet-300/60"><Search className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="sr-only">Search messages</span><input value={messageSearch} onChange={(event) => setMessageSearch([...event.target.value].slice(0, 80).join(""))} placeholder="Search messages" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-zinc-100 outline-none placeholder:text-zinc-600" />{messageSearch ? <button type="button" onClick={() => setMessageSearch("")} className="text-[10px] font-black uppercase text-violet-200 hover:text-white">Clear</button> : null}</label>
+                    <button type="button" onClick={() => setRightDrawerOpen(true)} className="hidden h-10 w-10 place-items-center rounded-lg border border-white/10 text-zinc-300 hover:border-violet-300/45 hover:text-white lg:grid xl:hidden" aria-label="Open event and server panel"><PanelRightOpen className="h-4 w-4" aria-hidden="true" /></button>
+                  </div>
                 </div>
-                {unseenMessageCount > 0 ? <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3" aria-live="polite">
-                  <button type="button" onClick={scrollMessageRailToLatest} className="pointer-events-auto inline-flex min-h-9 items-center gap-2 rounded-md border border-cyan-200/55 bg-[#071421]/95 px-3 text-xs font-black text-cyan-50 shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition hover:border-cyan-100 hover:bg-cyan-300/15" aria-label={`Jump to the latest message. ${unseenMessageCount} unread ${unseenMessageCount === 1 ? "message" : "messages"}.`}>
-                    <ArrowDown className="h-4 w-4" aria-hidden="true" />
-                    {unseenMessageCount === 1 ? "1 new message" : `${unseenMessageCount} new messages`}
-                  </button>
-                </div> : null}
-              </div>
 
-              {typingReadEnabled && typingNames.length > 0 ? <p role="status" aria-live="polite" className="mt-2 min-h-5 px-1 text-xs font-semibold text-zinc-400">
-                {typingCopy(typingNames)}
-              </p> : <div className="mt-2 min-h-5" aria-hidden="true" />}
+                <div role="status" aria-live="polite" className="mx-3 mt-3 flex gap-2 rounded-lg border border-violet-300/22 bg-violet-500/10 px-3 py-2 text-xs font-bold leading-5 text-violet-50 sm:mx-5"><Pin className="mt-0.5 h-4 w-4 shrink-0 text-violet-200" aria-hidden="true" />{history.message}</div>
 
-              <form onSubmit={handleSend} className="mt-3 flex items-end gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
-                <textarea
-                  disabled={!sendingEnabled || sending}
-                  value={draft}
-                  onChange={(event) => {
-                    typingLastInputAtRef.current = Date.now();
-                    setDraft([...event.target.value].slice(0, 2_000).join(""));
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || !canSend) return;
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }}
-                  placeholder={sendingEnabled ? `Message ${payload.channel.name}` : "Sending unavailable"}
-                  rows={1}
-                  className="min-h-10 max-h-28 min-w-0 flex-1 resize-y bg-transparent px-2 py-2 text-sm font-semibold leading-5 text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={!canSend}
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-cyan-300/20 bg-cyan-400/10 text-cyan-500 opacity-60"
-                  aria-label={sendingEnabled ? "Send message" : "Send is unavailable"}
-                >
-                  <Send className="h-5 w-5" aria-hidden="true" />
-                </button>
-              </form>
-              {composerMessage ? <p role="alert" className="mt-2 text-sm font-bold text-amber-200">{composerMessage}</p> : null}
+                <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-3 sm:px-5">
+                  <div ref={messageLogRef} role="log" aria-live="polite" aria-relevant="additions text" onScroll={handleMessageLogScroll} className="h-[min(36rem,calc(100svh-22rem))] min-h-72 max-h-[46svh] w-full divide-y divide-white/[0.055] overflow-y-auto overscroll-contain rounded-xl border border-white/8 bg-[#050814]/72 px-3 [scrollbar-color:rgba(167,139,250,0.55)_rgba(255,255,255,0.03)] [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-violet-300/45 [&::-webkit-scrollbar-track]:bg-[#060a12] [&::-webkit-scrollbar]:w-2">
+                    {historyReady && (payload.page.has_more || historyPageMode === "earlier") ? <div className="flex items-center justify-center gap-2 border-b border-white/8 py-3">{historyPageMode === "earlier" ? <button type="button" onClick={returnToLatestMessages} className="min-h-8 rounded-md border border-white/12 bg-white/[0.035] px-3 text-xs font-bold text-zinc-300 transition hover:border-violet-300/35 hover:bg-violet-300/10 hover:text-white">Latest messages</button> : null}{payload.page.has_more ? <button type="button" onClick={() => void loadEarlierMessages()} disabled={loadingEarlierMessages} className="min-h-8 rounded-md border border-violet-300/25 bg-violet-300/8 px-3 text-xs font-bold text-violet-100 transition hover:border-violet-200 hover:bg-violet-300/15 disabled:cursor-wait disabled:opacity-60">{loadingEarlierMessages ? "Loading history..." : "Load earlier messages"}</button> : null}</div> : null}
+                    {displayedMessages.length > 0 ? displayedMessages.map((message) => <MessageRow key={message.id} message={message} reportEnabled={reportActionsEnabled} deleteEnabled={selfDeleteUiEnabled} reactionsEnabled={reactionsEnabled} reactionsWriteEnabled={reactionsWriteEnabled} customEmojiReactionsEnabled={customEmojiReactionsEnabled} customEmojiReactionsWriteEnabled={customEmojiReactionsWriteEnabled} onReactionChanged={(mutation) => applyReactionMutation(message.id, mutation)} onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)} onReply={(authorName) => replyToMessage(authorName)} />) : <div className="grid min-h-44 place-items-center px-4 py-7 text-center"><div><p className="text-sm font-black text-zinc-100">{visibleMessages.length > 0 ? "No messages match this view" : "No public messages yet"}</p><p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">{visibleMessages.length > 0 ? "Try another search or switch back to everyone." : history.status === "ready" ? "Start the conversation when sending is available." : history.status === "static" ? "No placeholder conversation is displayed." : "DZN will reconnect automatically when message history returns."}</p></div></div>}
+                  </div>
+                  {unseenMessageCount > 0 ? <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-3" aria-live="polite"><button type="button" onClick={scrollMessageRailToLatest} className="pointer-events-auto inline-flex min-h-9 items-center gap-2 rounded-full border border-violet-200/55 bg-[#14112b]/95 px-3 text-xs font-black text-violet-50 shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition hover:border-violet-100 hover:bg-violet-500/24" aria-label={`Jump to the latest message. ${unseenMessageCount} unread ${unseenMessageCount === 1 ? "message" : "messages"}.`}><ArrowDown className="h-4 w-4" aria-hidden="true" />{unseenMessageCount === 1 ? "1 new message" : `${unseenMessageCount} new messages`}</button></div> : null}
+                </div>
+
+                <div className="border-t border-white/8 bg-[#060a14]/94 px-3 pb-3 pt-2.5 sm:px-5 sm:pb-4">
+                  {typingReadEnabled && typingNames.length > 0 ? <p role="status" aria-live="polite" className="mb-2 min-h-5 px-1 text-xs font-semibold text-violet-200">{typingCopy(typingNames)}</p> : <div className="min-h-5" aria-hidden="true" />}
+                  <form onSubmit={handleSend} className="flex items-end gap-2 rounded-xl border border-white/10 bg-[#0a0f1d] p-2 shadow-[0_10px_30px_rgba(0,0,0,0.22)]" aria-label="DZN Comms message composer">
+                    <button type="button" disabled={!sendingEnabled || sending} onClick={() => appendEmoji("🙂")} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/8 text-zinc-400 transition enabled:hover:border-violet-300/45 enabled:hover:bg-violet-500/12 enabled:hover:text-violet-100 disabled:opacity-40" aria-label="Add a standard emoji"><Smile className="h-5 w-5" aria-hidden="true" /></button>
+                    <textarea disabled={!sendingEnabled || sending} value={draft} onChange={(event) => updateDraft(event.target.value)} onKeyDown={(event) => { if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || !canSend) return; event.preventDefault(); event.currentTarget.form?.requestSubmit(); }} placeholder={sendingEnabled ? `Message ${payload.channel.name}` : "Sending unavailable"} rows={1} className="min-h-10 max-h-28 min-w-0 flex-1 resize-y bg-transparent px-1 py-2 text-sm font-semibold leading-5 text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
+                    <button type="submit" disabled={!canSend} className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-black uppercase transition ${canSend ? "border-violet-300/50 bg-violet-500/65 text-white hover:bg-violet-500/80" : "border-white/8 bg-white/[0.03] text-zinc-600"}`} aria-label={sendingEnabled ? "Send message" : "Send is unavailable"}><Send className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">Send</span></button>
+                  </form>
+                  <p className="mt-1.5 px-1 text-[10px] font-semibold text-zinc-600">Enter to send · Shift+Enter for a new line · standard keyboard emoji supported</p>
+                  {composerMessage ? <p role="alert" className="mt-2 text-sm font-bold text-amber-200">{composerMessage}</p> : null}
+                </div>
               </>}
             </section>
 
-            <aside className="bg-black/18 p-3">
-              <PanelTitle icon={ShieldCheck} label="Channel details" />
-              <div className="mt-3 space-y-2">
-                {isUpdatesChannel ? <>
-                  <SafetyCard icon={ShieldCheck} label="Verified source" value="Entries are released with their matching DZN website change." />
-                  <SafetyCard icon={Megaphone} label="Read-only" value="Official updates do not create or imitate player activity." />
-                  <SafetyCard icon={MessageCircle} label="Global Chat" value="Player conversation stays in its own moderated channel." />
-                </> : <>
-                  <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
-                  <SafetyCard icon={AlertTriangle} label="Moderation" value="English-only filters, reports and owner actions" />
-                  <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
-                </>}
-              </div>
-              <details className="mt-4 rounded-md border border-violet-300/18 bg-violet-400/8 p-3">
-                <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.16em] text-violet-200">Fair boundary</summary>
-                <ul className="mt-3 space-y-2 text-xs font-semibold leading-5 text-zinc-300">
-                  {(isUpdatesChannel
-                    ? ["Only material DZN releases belong in this channel.", "Update entries are distinct from chat messages and private notifications.", "The feed contains no player, account, payment, or server-private information."]
-                    : payload.fairness_boundary.slice(0, 4)).map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </details>
+            <aside aria-label="Events and connected servers" className={`fixed inset-y-0 right-0 z-50 flex w-[min(88vw,24rem)] flex-col overflow-y-auto border-l border-white/10 bg-[#070b17] shadow-[-28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:shadow-none ${rightDrawerOpen ? "translate-x-0" : "translate-x-full"}`}>
+              <div className="flex items-center justify-between border-b border-white/8 p-3 lg:hidden"><p className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">Network activity</p><button type="button" onClick={() => setRightDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close event and server panel"><X className="h-4 w-4" aria-hidden="true" /></button></div>
+              <DznCommsNetworkRail onNavigate={() => setRightDrawerOpen(false)} />
+              <div className="border-t border-white/8 p-3"><details className="rounded-xl border border-violet-300/16 bg-violet-500/[0.06] p-3"><summary className="cursor-pointer text-xs font-black uppercase tracking-[0.14em] text-violet-200">Community safety</summary><p className="mt-3 text-xs font-semibold leading-5 text-zinc-400">English only. Do not post abuse, invites, secrets, threats or personal information. Report abuse instead of replying to it.</p><ul className="mt-3 space-y-2 text-xs font-semibold leading-5 text-zinc-400">{payload.fairness_boundary.slice(0, 3).map((line) => <li key={line}>{line}</li>)}</ul></details></div>
             </aside>
           </div>
         </div>
@@ -886,7 +838,7 @@ export function recentVisibleSpeakers(messages: readonly CommsHistoryMessage[]) 
   return newestDistinct.reverse();
 }
 
-function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, reactionsWriteEnabled, customEmojiReactionsEnabled, customEmojiReactionsWriteEnabled, onReactionChanged, onMessageDeleted }: {
+function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, reactionsWriteEnabled, customEmojiReactionsEnabled, customEmojiReactionsWriteEnabled, onReactionChanged, onMessageDeleted, onReply }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
   deleteEnabled: boolean;
@@ -896,6 +848,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
   customEmojiReactionsWriteEnabled: boolean;
   onReactionChanged: (mutation: CommsReactionMutation) => void;
   onMessageDeleted: (messageId: string) => void;
+  onReply: (authorName: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
   const canDelete = deleteEnabled && message.can_delete;
@@ -950,23 +903,24 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionsEnabled, r
   }
 
   return (
-    <article className={`group py-2.5 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
+    <article className={`group rounded-lg px-1 py-2.5 transition hover:bg-white/[0.025] ${muted ? "bg-amber-300/[0.035]" : ""}`}>
       <div className="flex items-start gap-2.5">
         <MessageAvatar message={message} muted={muted} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="text-sm font-black leading-5 text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
-            <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-px text-[9px] font-black uppercase tracking-[0.08em] text-cyan-100">
+            {message.author_public_profile_url ? <Link href={message.author_public_profile_url} className="text-sm font-black leading-5 text-white [overflow-wrap:anywhere] hover:text-violet-200 hover:underline" aria-label={`View public profile for ${message.author_display_name}`}>{message.author_display_name}</Link> : <h3 className="text-sm font-black leading-5 text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>}
+            <span className="rounded border border-violet-300/24 bg-violet-500/10 px-1.5 py-px text-[9px] font-black uppercase tracking-[0.08em] text-violet-100">
               {message.author_role_label}
             </span>
             <CommsMessageTime value={message.created_at} />
-            {(canDelete || (reportEnabled && !muted)) ? <div className="ml-auto flex items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+            {!muted ? <div className="ml-auto flex items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+              <button type="button" onClick={() => onReply(message.author_display_name)} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-violet-300/40 hover:text-violet-100" title="Reply with a mention" aria-label={`Reply to ${message.author_display_name}`}><Reply className="h-3.5 w-3.5" aria-hidden="true" /></button>
               {reportEnabled && !muted ? <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-amber-300/40 hover:text-amber-100 disabled:cursor-not-allowed disabled:text-zinc-600" title={reportState === "sent" ? "Message reported" : "Report this message to DZN moderation"} aria-label={reportState === "sending" ? "Reporting message" : reportState === "sent" ? "Message reported" : "Report this message"}><Flag className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
               {canDelete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
             </div> : null}
           </div>
           <p className={`mt-0.5 text-sm font-semibold leading-5 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
-          {reactionsEnabled && !muted ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {reactionsEnabled && customEmojiReactionsEnabled && !muted ? <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {message.reactions?.counts.map((reaction) => (
               <button
                 key={reaction.key}
@@ -1037,33 +991,6 @@ function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { 
       </span>
       <span className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{meta}</span>
     </button>
-  );
-}
-
-function SafetyCard({ id, icon: Icon, label, value }: { id?: string; icon: typeof ShieldCheck; label: string; value: string }) {
-  return (
-    <div id={id} className="scroll-mt-6 border-l-2 border-white/10 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-        <span className="text-xs font-black uppercase tracking-[0.14em] text-white">{label}</span>
-      </div>
-      <p className="mt-2 text-xs font-semibold text-zinc-400">{value}</p>
-    </div>
-  );
-}
-
-function StatusPill({ label, value, tone }: { label: string; value: string; tone: "cyan" | "violet" | "gold" }) {
-  const toneClass = tone === "cyan"
-    ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
-    : tone === "gold"
-      ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
-      : "border-violet-300/30 bg-violet-300/10 text-violet-100";
-
-  return (
-    <div className={`rounded-lg border px-3 py-2 ${toneClass}`}>
-      <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-80">{label}</p>
-      <p className="mt-1 text-sm font-black uppercase">{value}</p>
-    </div>
   );
 }
 

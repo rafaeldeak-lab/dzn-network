@@ -25,15 +25,20 @@ test("accepts the current Global Chat projection and strips unknown properties a
   assert.equal("author_id" in parsed.messages[0], false); assert.equal("raw_body" in parsed.messages[0], false);
 });
 
-test("projects only a consent-safe same-origin avatar route for a visible message", () => {
+test("projects only consent-safe same-origin profile routes for a visible message", () => {
   const input = commsHistoryFixture();
-  Object.assign(input.messages[0], { author_avatar_url: "/api/public/players/visible-player/avatar" });
+  Object.assign(input.messages[0], {
+    author_avatar_url: "/api/public/players/visible-player/avatar",
+    author_public_profile_url: "/players/visible-player",
+  });
   const parsed = parseCommsHistory(input);
   assert.equal(parsed.messages[0].author_avatar_url, "/api/public/players/visible-player/avatar");
+  assert.equal(parsed.messages[0].author_public_profile_url, "/players/visible-player");
 
   const hidden = commsHistoryFixture();
-  Object.assign(hidden.messages[0], { visibility_state: "hidden", author_avatar_url: "/api/public/players/visible-player/avatar" });
+  Object.assign(hidden.messages[0], { visibility_state: "hidden", author_avatar_url: "/api/public/players/visible-player/avatar", author_public_profile_url: "/players/visible-player" });
   assert.equal(parseCommsHistory(hidden).messages[0].author_avatar_url, undefined);
+  assert.equal(parseCommsHistory(hidden).messages[0].author_public_profile_url, undefined);
 
   for (const unsafeUrl of [
     "https://cdn.discordapp.com/avatars/123456789012345678/avatar_hash.webp",
@@ -44,6 +49,12 @@ test("projects only a consent-safe same-origin avatar route for a visible messag
     const untrusted = commsHistoryFixture();
     Object.assign(untrusted.messages[0], { author_avatar_url: unsafeUrl });
     assert.equal(parseCommsHistory(untrusted).messages[0].author_avatar_url, undefined);
+  }
+
+  for (const unsafeUrl of ["https://example.test/players/visible-player", "//example.test/players/visible-player", "/players/../private", "/players/visible-player?next=1"]) {
+    const untrusted = commsHistoryFixture();
+    Object.assign(untrusted.messages[0], { author_public_profile_url: unsafeUrl });
+    assert.equal(parseCommsHistory(untrusted).messages[0].author_public_profile_url, undefined);
   }
 });
 

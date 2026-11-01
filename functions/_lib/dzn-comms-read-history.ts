@@ -484,6 +484,9 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     author_avatar_url: visible
       ? publicDiscordAvatarUrl(row.author_public_handle, row.author_public_profile_enabled, row.author_discord_identity_enabled)
       : null,
+    author_public_profile_url: visible
+      ? publicProfileUrl(row.author_public_handle, row.author_public_profile_enabled)
+      : null,
     body: visible ? cleanText(moderated.body, 2000) : placeholderForState(publicVisibilityState),
     visibility_state: publicVisibilityState,
     created_at: cleanNullableText(row.created_at, 40),
@@ -498,6 +501,11 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
 function publicDiscordAvatarUrl(handle: string | null, publicProfileEnabled: number | null, discordIdentityEnabled: number | null) {
   if (publicProfileEnabled !== 1 || discordIdentityEnabled !== 1 || !handle || !/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(handle)) return null;
   return `/api/public/players/${encodeURIComponent(handle)}/avatar`;
+}
+
+function publicProfileUrl(handle: string | null, publicProfileEnabled: number | null) {
+  if (publicProfileEnabled !== 1 || !handle || !/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(handle)) return null;
+  return `/players/${encodeURIComponent(handle)}`;
 }
 
 function placeholderForState(state: DznCommsMessageRow["visibility_state"]) {

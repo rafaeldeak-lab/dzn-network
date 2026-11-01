@@ -16,6 +16,8 @@ export type CommsHistoryMessage = {
   author_display_name: string;
   author_role_label: string;
   author_avatar_url?: string | null;
+  /** Returned only when the author has elected to publish their player profile. */
+  author_public_profile_url?: string | null;
   body: string;
   visibility_state: "visible" | "hidden" | "deleted" | "quarantined" | "expired";
   created_at: string | null;
@@ -238,12 +240,14 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
       : undefined;
     if (reactions === undefined && row.reactions !== undefined) throw unavailable();
     const authorAvatarUrl = state === "visible" ? discordAvatarUrl(row.author_avatar_url) : null;
+    const authorPublicProfileUrl = state === "visible" ? publicProfileUrl(row.author_public_profile_url) : null;
     return {
       id, visibility_state: state, public_safe: true as const, read_only: true as const,
       can_delete: state === "visible" && row.can_delete === true,
       author_display_name: state === "visible" ? name : "DZN Safety",
       author_role_label: state === "visible" ? role : "System",
       ...(authorAvatarUrl ? { author_avatar_url: authorAvatarUrl } : {}),
+      ...(authorPublicProfileUrl ? { author_public_profile_url: authorPublicProfileUrl } : {}),
       body: state === "visible" ? body : placeholder,
       created_at: timestamp(row.created_at), edited_at: timestamp(row.edited_at),
       ...(reactions ? { reactions } : {}),
@@ -274,6 +278,12 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
 
 function discordAvatarUrl(value: unknown) {
   return typeof value === "string" && /^\/api\/public\/players\/[a-z0-9][a-z0-9-]{1,46}[a-z0-9]\/avatar$/.test(value)
+    ? value
+    : null;
+}
+
+function publicProfileUrl(value: unknown) {
+  return typeof value === "string" && /^\/players\/[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(value)
     ? value
     : null;
 }
