@@ -1,5 +1,5 @@
 // Atmospheric renderer adapted from the approved Events motion preview.
-export function startEventsAtmosphere(canvas, onFrame, isPaused) {
+export function startEventsAtmosphere(canvas, onFrame) {
   const ctx=canvas.getContext('2d');
   if (!ctx) return () => {};
   const W=1672,H=940,TAU=Math.PI*2,DURATION=28;
@@ -37,6 +37,14 @@ export function startEventsAtmosphere(canvas, onFrame, isPaused) {
   const fires=[{x:1417,y:510,s:1.3},{x:1215,y:415,s:.8},{x:1320,y:143,s:.5},{x:1275,y:282,s:.45}];
   const sparks=fires.flatMap((fire,j)=>Array.from({length:j<2?14:6},()=>({fire,phase:rand(),dx:rand()*24-12,rise:13+rand()*36,size:.5+rand()*.8,cycles:4+Math.floor(rand()*3)})));
 
+  // Sparse paired shots anchored on the fortress walls, as in the approved preview.
+  const shots=[
+    {t:1.65,x:1210,y:378,tx:1450,ty:455},
+    {t:5,x:1450,y:455,tx:1210,ty:378},
+    {t:8.4,x:1258,y:307,tx:1435,ty:405},
+    {t:12.15,x:1435,y:405,tx:1258,ty:307},
+    {t:16.3,x:1290,y:350,tx:1470,ty:438}
+  ];
   function beam(t,x,y,length,base,spread,offset,strength){
     const p=TAU*t/DURATION;
     const a=base+Math.sin(p+offset)*.28+Math.sin(p*2+offset)*.04;
@@ -85,13 +93,30 @@ export function startEventsAtmosphere(canvas, onFrame, isPaused) {
       g.strokeStyle=`rgba(255,200,131,${fade*.75})`;g.lineWidth=s.size*.6;
       g.beginPath();g.moveTo(x,y+1.2);g.lineTo(x+.25,y-1.2);g.stroke();
     });
+    for(const shot of shots){
+      for(const delay of [0,.22]){
+        const dt=periodic(t,shot.t+delay);
+        if(dt<.17){
+          const a=Math.sin(Math.PI*dt/.17);
+          glow(g,shot.x,shot.y,15,'255,162,73',a*.55);
+          glow(g,shot.x,shot.y,4,'255,231,166',a*.95,1.7,.5);
+        }
+        if(dt>.025&&dt<.24){
+          const q=(dt-.025)/.215,head=clamp(q),tail=clamp(q-.16);
+          g.strokeStyle=`rgba(255,195,117,${Math.sin(Math.PI*q)*.66})`;g.lineWidth=.8;
+          g.beginPath();
+          g.moveTo(shot.x+(shot.tx-shot.x)*tail,shot.y+(shot.ty-shot.y)*tail);
+          g.lineTo(shot.x+(shot.tx-shot.x)*head,shot.y+(shot.ty-shot.y)*head);g.stroke();
+        }
+      }
+    }
     g.restore();
   }
   canvas.width=W;canvas.height=H;
   let clock=0,last=performance.now(),lastPaint=0,raf=0,visible=true;
   const preference=window.matchMedia('(prefers-reduced-motion: reduce)');
   function paint(now){
-    if(visible&&!document.hidden&&!preference.matches&&!isPaused()){
+    if(visible&&!document.hidden&&!preference.matches){
       clock+=(now-last)/1000;
       if(now-lastPaint>=1000/30){draw(clock);onFrame(clock,DURATION);lastPaint=now;}
     }
