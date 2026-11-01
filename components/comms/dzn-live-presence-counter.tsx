@@ -43,14 +43,17 @@ export function DznLivePresenceCounter() {
     return () => { controller.abort(); if (timer !== undefined) window.clearTimeout(timer); };
   }, []);
 
-  if (!enabled) return null;
-
-  const label = presence.state === "live" && presence.count !== null ? `${presence.count.toLocaleString()} online` : "Presence unavailable";
+  // The label stays visible even while the controlled public aggregate is
+  // switched off. That keeps the Comms header honest instead of fabricating
+  // an online total simply to fill the design.
+  const label = enabled && presence.state === "live" && presence.count !== null
+    ? `${presence.count.toLocaleString()} online`
+    : "Presence unavailable";
   return (
-    <span className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/8 px-3 text-xs font-black uppercase text-emerald-100" data-dzn-presence-state={enabled ? presence.state : "static"}>
-      <Circle className="h-3 w-3 fill-emerald-300 text-emerald-200" aria-hidden="true" />
+    <span className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-3 text-xs font-black uppercase ${enabled && presence.state === "live" ? "border-emerald-300/25 bg-emerald-300/8 text-emerald-100" : "border-white/10 bg-white/[0.03] text-zinc-400"}`} data-dzn-presence-state={enabled ? presence.state : "static"}>
+      <Circle className={`h-3 w-3 ${enabled && presence.state === "live" ? "fill-emerald-300 text-emerald-200" : "fill-zinc-600 text-zinc-500"}`} aria-hidden="true" />
       <span aria-live="polite">{label}</span>
-      <span className="sr-only">Approximate aggregate only. No player identities are shown.</span>
+      <span className="sr-only">Approximate aggregate only. No player identities are shown. It is visible only when the controlled public presence feature is enabled.</span>
     </span>
   );
 }

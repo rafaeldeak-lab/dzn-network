@@ -90,6 +90,7 @@ assert.match(helper, /player_public_profiles AS public_profile[\s\S]*public_prof
 assert.match(helper, /player_profile_privacy_preferences AS profile_privacy[\s\S]*profile_privacy\.public_profile_enabled = 1/, "Avatar projection must require a public-profile preference.");
 assert.match(helper, /player_public_discord_identity_preferences AS discord_identity[\s\S]*discord_identity\.enabled = 1/, "Avatar projection must require explicit Discord identity consent.");
 assert.match(helper, /\/api\/public\/players\/\$\{encodeURIComponent\(handle\)\}\/avatar/, "Avatar projection must use the same-origin public-profile proxy.");
+assert.match(helper, /return `\/players\/\$\{encodeURIComponent\(handle\)\}`/, "A published Comms member profile link must remain same-origin and handle-scoped.");
 assert.doesNotMatch(helper, /cdn\.discordapp\.com|\bauthor_discord_id\b|\bauthor_avatar\b/, "Read history must never project raw Discord avatar sources or identifiers.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
 assert.match(helper, /durable_objects_or_websockets_enabled: false/, "Route payload must report WebSocket/Durable Object runtime disabled.");
@@ -355,6 +356,7 @@ async function testRuntimeContracts() {
   );
   assert.equal(publicPayload.messages.find((message) => message.id === "quarantined-1")?.body.includes("unavailable"), true);
   assert.equal(publicPayload.messages.find((message) => message.id === "visible-1")?.author_avatar_url, "/api/public/players/visible-chat-player/avatar", "A visible author with both public-profile and Discord-identity consent may receive only the same-origin avatar proxy.");
+  assert.equal(publicPayload.messages.find((message) => message.id === "visible-1")?.author_public_profile_url, "/players/visible-chat-player", "A visible author with an enabled public profile may receive only their same-origin public profile path.");
   const publicJson = JSON.stringify(publicPayload);
   for (const forbidden of ["author_user_id", "member-user", "other-user", "discord_id", "checkout_session", "ranking_score", "xp_award", "server_war", "ctf_tournament", "nigger", "Unsafe legacy row"]) {
     assert.equal(publicJson.includes(forbidden), false, `Public Comms payload must not expose ${forbidden}.`);
@@ -569,6 +571,7 @@ type CommsPayload = {
     id: string;
     author_display_name: string;
     author_avatar_url?: string | null;
+    author_public_profile_url?: string | null;
     body: string;
   }>;
   page: {

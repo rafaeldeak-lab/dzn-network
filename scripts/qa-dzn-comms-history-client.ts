@@ -48,6 +48,7 @@ try {
   ]) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), errors: string[] = [], prohibited: string[] = [], sockets: string[] = [];
+    page.setDefaultTimeout(5_000);
     let reads = 0;
     page.on("pageerror", error => errors.push(error.message)); page.on("websocket", socket => sockets.push(socket.url()));
     await context.route("**/*", async route => {
@@ -118,6 +119,28 @@ try {
     assert.deepEqual(errors, []); assert.deepEqual(prohibited, []); assert.deepEqual(sockets, []);
     assert.doesNotMatch(await page.locator("main").innerText(), /PRIVATE-LEAK-SENTINEL|PRIVATE-AUTHOR|must not render/);
     const globalChatLog = page.locator("#global-chat [role='log']");
+    if (scenario.kind === "ready") {
+      const search = page.getByPlaceholder("Search messages");
+      await search.fill("no matching message");
+      await page.getByText("No messages match this view", { exact: true }).waitFor();
+      await search.fill("Local history fixture");
+      await page.getByText("Local history fixture", { exact: true }).waitFor();
+      await search.fill("");
+      if (scenario.width < 1024) await page.getByRole("button", { name: "Open chat rooms" }).click();
+      await page.getByRole("button", { name: /DZN UPDATES/i }).click({ force: scenario.width >= 1024 });
+      await page.getByText("Official DZN Updates", { exact: true }).waitFor();
+      if (scenario.width < 1024) await page.getByRole("button", { name: "Open chat rooms" }).click();
+      await page.getByRole("button", { name: /GLOBAL CHAT/i }).click({ force: scenario.width >= 1024 });
+      await page.getByText(expectedHistoryMessage, { exact: true }).waitFor();
+    }
+    if (scenario.kind === "ready" && scenario.width < 500) {
+      await page.getByRole("button", { name: "Open chat rooms" }).click();
+      await page.getByRole("button", { name: "Close chat rooms" }).waitFor();
+      await page.getByRole("button", { name: "Close chat rooms" }).click();
+      await page.getByRole("button", { name: "Open event and server panel" }).click();
+      await page.getByRole("button", { name: "Close event and server panel" }).waitFor();
+      await page.getByRole("button", { name: "Close event and server panel" }).click();
+    }
     if (scenario.kind === "fixed-reactions-hidden") {
       assert.equal(await globalChatLog.getByLabel("Message reactions").count(), 0, "The compact chat must not render the legacy preset-reaction strip.");
       assert.equal(await globalChatLog.getByRole("button", { name: /reaction/i }).count(), 0, "The compact chat must not retain reaction mutation controls.");
@@ -149,6 +172,16 @@ try {
         return Boolean(log && log.scrollHeight - log.clientHeight - log.scrollTop <= 2);
       });
       assert.equal(await page.getByRole("button", { name: /Jump to the latest message/ }).count(), 0, "Jumping to present must clear the unread catch-up control.");
+
+      const composer = page.locator("#global-chat form textarea");
+      await composer.fill("Draft survives room changes");
+      if (scenario.width < 1024) await page.getByRole("button", { name: "Open chat rooms" }).click();
+      await page.getByRole("button", { name: /DZN UPDATES/i }).click({ force: scenario.width >= 1024 });
+      await page.getByText("Official DZN Updates", { exact: true }).waitFor();
+      if (scenario.width < 1024) await page.getByRole("button", { name: "Open chat rooms" }).click();
+      await page.getByRole("button", { name: /GLOBAL CHAT/i }).click({ force: scenario.width >= 1024 });
+      await composer.waitFor();
+      assert.equal(await composer.evaluate((element) => (element as HTMLTextAreaElement).value), "Draft survives room changes");
     }
     if (scenario.kind === "assist-anchor") {
       await page.getByRole("heading", { name: "Support conversation" }).waitFor();

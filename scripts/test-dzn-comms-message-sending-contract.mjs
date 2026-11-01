@@ -135,7 +135,9 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /typingLastInputAtRef\.current = Date\.now\(\)/, "Only actual composer input may refresh typing activity.");
   assert.match(shell, /const stop = \(\) => \{[\s\S]*void setCommsTyping\(channel, false\)/, "Typing cleanup must remove the server-side typing state.");
   assert.match(shell, /now - typingLastInputAtRef\.current > TYPING_IDLE_TIMEOUT_MS[\s\S]*stop\(\);/, "An idle draft must clear its typing state instead of renewing indefinitely.");
-  assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
+  assert.match(shell, /function selectCommsChannel\(nextChannel: string\)[\s\S]*historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = nextChannel/, "Changing channels must invalidate in-flight history reads immediately.");
+  assert.match(shell, /draftsByChannelRef\.current\[currentChannel\] = draft/, "Changing rooms must retain the current unsent draft.");
+  assert.match(shell, /messageRailByChannelRef\.current\[currentChannel\] = \{[\s\S]*scrollTop: log\.scrollTop/, "Changing rooms must retain the current scroll position.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
   assert.match(shell, /A newer deletion replaces any earlier placeholder,[\s\S]*deletionNoticeTimeoutsRef\.current\.clear\(\)/, "Repeated deletes must collapse to one brief public placeholder instead of stacking rows.");
