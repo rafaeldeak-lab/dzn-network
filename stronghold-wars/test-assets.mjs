@@ -890,6 +890,34 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Aegis Level ${level} owner-guided reference or Meshy rig changed.`);
 }
 console.log('Five DZN Aegis soldiers and ten independently moving interceptor drones verified across all tiers.');
+const trapperManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders-v4/manifest.json'), 'utf8'));
+if (!trapperManifest.complete || Object.keys(trapperManifest.assets || {}).length !== 5)
+  throw new Error('Trapper requires five complete 3D appearance and action tiers.');
+const trapperHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `trapper_l0${level}`, entry = trapperManifest.assets[name];
+  if (!entry || entry.file !== defenderAsset('trapper', level) || entry.hand !== 'mixamorig:RightHand')
+    throw new Error(`Trapper Level ${level} game mapping or hand attachment is missing.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.source));
+  const reference = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.reference));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length
+    || bytes.length !== entry.bytes || hash !== entry.sha256 || trapperHashes.has(hash)
+    || createHash('sha256').update(source).digest('hex') !== entry.sourceSha256
+    || createHash('sha256').update(reference).digest('hex') !== entry.referenceSha256)
+    throw new Error(`Trapper Level ${level} source or game GLB integrity failed.`);
+  trapperHashes.add(hash);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+  const clips = new Set((gltf.animations || []).map(clip => clip.name));
+  const nodes = new Set((gltf.nodes || []).map(node => node.name));
+  const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((sum, part) => sum + gltf.accessors[part.indices].count / 3, 0);
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 20 || !gltf.images?.length
+    || triangles !== entry.triangles || triangles > 22000 || !nodes.has('mixamorig:RightHand')
+    || !['DZN_Trapper_Idle', 'DZN_Trapper_Walk', 'DZN_Trapper_Run', 'DZN_Trapper_Deploy'].every(clip => clips.has(clip)))
+    throw new Error(`Trapper Level ${level} needs a textured humanoid rig and four playable actions.`);
+}
+console.log('Five distinct DZN Trapper levels verified with source, textured rigs and walk/run/idle/deploy actions.');
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
 if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');

@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "provenance": "The owner DZN Trapper concept informed five original tier references. Meshy T2.5 Smart Topology produced five private textured models at 15 existing credits each. An initial Level 1 variant with a held disc was rejected after its rig deformed the equipment, costing 15 additional existing credits. Meshy free rigging supplied walk/run clips. Blender authored idle and snare-deploy actions. The round handheld disc and battle snare effects are game geometry attached to the rig.",
+  "usage": "DZN Stronghold Wars game. Rights subject to the owner Meshy and ImageGen accounts and terms.",
+  "coordinateSystem": "glTF Y-up; the Trapper body faces +Z in the game",
+  "assets": {
+    "trapper_l01": {
+      "file": "assets/models/defenders-v4/trapper_l01.glb",
+      "source": "source-art/meshy-trapper-v1/trapper_l01-rig.glb",
+      "reference": "source-art/meshy-trapper-v1/trapper_l01-rig-reference.png",
+      "portrait": "assets/portraits/defenders/trapper.png",
+      "bytes": 4925504,
+      "sha256": "48af35163b01402fdd4b8673ce71e092ef69148d4e01203b5ccadc4f501140d4",
+      "sourceSha256": "3568db39a94206615477155740f4f6b734fae0efcad563e012f26a431f6de4e2",
+      "referenceSha256": "4281c89f52e2c365aa090fe483eb3074b40823f1ebb234589194bce5cd08b8e4",
+      "triangles": 15847,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Trapper_Deploy",
+        "DZN_Trapper_Idle",
+        "DZN_Trapper_Run",
+        "DZN_Trapper_Walk"
+      ],
+      "hand": "mixamorig:RightHand",
+      "meshyCredits": 15
+    },
+    "trapper_l02": {
+      "file": "assets/models/defenders-v4/trapper_l02.glb",
+      "source": "source-art/meshy-trapper-v1/trapper_l02-rig.glb",
+      "reference": "source-art/meshy-trapper-v1/trapper_l02-rig-reference.png",
+      "portrait": "assets/portraits/defenders/trapper.png",
+      "bytes": 4929556,
+      "sha256": "d1b02ff7d91a83d5746777283367f5b7f3902f67a4ab0404a7cbb3e26e167c39",
+      "sourceSha256": "2d6488d798fb351acf611cd439bb49831deb84b93cafd044df712fde1d6e646e",
+      "referenceSha256": "39ffe32e244d6f651770f3ad1e9e6d2b15e4fdf213bf62269a41dd6f0cd5203c",
+      "triangles": 15811,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Trapper_Deploy",
+        "DZN_Trapper_Idle",
+        "DZN_Trapper_Run",
+        "DZN_Trapper_Walk"
+      ],
+      "hand": "mixamorig:RightHand",
+      "meshyCredits": 15
+    },
+    "trapper_l03": {
+      "file": "assets/models/defenders-v4/trapper_l03.glb",
+      "source": "source-art/meshy-trapper-v1/trapper_l03-rig.glb",
+      "reference": "source-art/meshy-trapper-v1/trapper_l03-rig-reference.png",
+      "portrait": "assets/portraits/defenders/trapper.png",
+      "bytes": 5398980,
+      "sha256": "35233356a68dabd0ab667c2d0b1ddc2b0ed36780bc7d2b708cd159a244cead30",
+      "sourceSha256": "68e0a313bfab78b6ccddb740ebb43018a83618cd8dd6d49d446f7894c2b82c71",
+      "referenceSha256": "1ec9eefdefa857c401521e1fb82b4c7d55e943c11d8030901336cd77e7db0fb2",
+      "triangles": 15766,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Trapper_Deploy",
+        "DZN_Trapper_Idle",
+        "DZN_Trapper_Run",
+        "DZN_Trapper_Walk"
+      ],
+      "hand": "mixamorig:RightHand",
+      "meshyCredits": 15
+    },
+    "trapper_l04": {
+      "file": "assets/models/defenders-v4/trapper_l04.glb",
+      "source": "source-art/meshy-trapper-v1/trapper_l04-rig.glb",
+      "reference": "source-art/meshy-trapper-v1/trapper_l04-rig-reference.png",
+      "portrait": "assets/portraits/defenders/trapper.png",
+      "bytes": 4924140,
+      "sha256": "7ab589f68c805cf7ce7a1ce224ca470740664ec620327cdfebc35bd3f26767d3",
+      "sourceSha256": "1bed1266bbb836ac84cce9c5c9f0f604c6c0bb8fa04b1b4d8052e751ed1d9f03",
+      "referenceSha256": "91629a1c83bc5595bc677874be27a6bb085fc2744769d9d032dfcf1b8e920684",
+      "triangles": 15749,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Trapper_Deploy",
+        "DZN_Trapper_Idle",
+        "DZN_Trapper_Run",
+        "DZN_Trapper_Walk"
+      ],
+      "hand": "mixamorig:RightHand",
+      "meshyCredits": 15
+    },
+    "trapper_l05": {
+      "file": "assets/models/defenders-v4/trapper_l05.glb",
+      "source": "source-art/meshy-trapper-v1/trapper_l05-rig.glb",
+      "reference": "source-art/meshy-trapper-v1/trapper_l05-rig-reference.png",
+      "portrait": "assets/portraits/defenders/trapper.png",
+      "bytes": 5356568,
+      "sha256": "4cf206c6faeb0321cbb591843d32a6b6966a1920999104a01804cbc819ceb4a3",
+      "sourceSha256": "29524830d1220c1c023c155a6fdf2eac7e56128ddde6a10b1160cbac6488505b",
+      "referenceSha256": "fdff8ffa5af3f84639c72e4bb3d43f58cf63074fcf982e1a828a7e3c3795f4af",
+      "triangles": 15854,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Trapper_Deploy",
+        "DZN_Trapper_Idle",
+        "DZN_Trapper_Run",
+        "DZN_Trapper_Walk"
+      ],
+      "hand": "mixamorig:RightHand",
+      "meshyCredits": 15
+    }
+  }
+}
