@@ -59,7 +59,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const rows = await queryServerRail(env);
     const canonicalRows = await hydrateDuplicateCanonicalEvidence(env, rows);
     const displayRows = dedupeRailRows(canonicalRows).slice(0, 24);
-    const viewCounts = await readRailViewCounts(env, displayRows.map((row) => row.id));
+    const viewCounts = await readRailAllTimeViewCounts(env, displayRows.map((row) => row.id));
     return json({
       ok: true,
       items: displayRows.map((row) => toRailItem(row, viewCounts)),
@@ -221,10 +221,14 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(number) ? number : 0;
 }
 
-async function readRailViewCounts(env: Env, serverIds: string[]) {
+/**
+ * The public rail presents a durable listing-view total. Unlike operational
+ * analytics, it must not be a rolling seven-day number: a server's displayed
+ * total should not fall as older impressions leave a reporting window.
+ */
+async function readRailAllTimeViewCounts(env: Env, serverIds: string[]) {
   const uniqueServerIds = [...new Set(serverIds.filter(Boolean))];
   if (uniqueServerIds.length === 0) return new Map<string, number>();
-  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   try {
     const placeholders = uniqueServerIds.map(() => "?").join(", ");
@@ -232,9 +236,8 @@ async function readRailViewCounts(env: Env, serverIds: string[]) {
       `SELECT server_id, COUNT(*) AS view_count
          FROM promotion_impressions
         WHERE server_id IN (${placeholders})
-          AND occurred_at >= ?
         GROUP BY server_id`,
-    ).bind(...uniqueServerIds, cutoff).all<RailViewRow>();
+    ).bind(...uniqueServerIds).all<RailViewRow>();
     return new Map((result.results ?? []).map((row) => [row.server_id, numberOrZero(row.view_count)]));
   } catch {
     // Older read-only environments may not yet have promotion analytics. The rail remains available without the count.
@@ -258,7 +261,7 @@ function toRailItem(row: RailRow, viewCounts: Map<string, number>) {
     playerCountStatus,
     ratingAverage: numberOrNull(row.average_rating),
     reviewCount: Number(row.review_count ?? 0),
-    viewsLast7Days: viewCounts.get(row.id) ?? 0,
+    viewsAllTime: viewCounts.get(row.id) ?? 0,
     listingPlanKey,
     isPro: listingPlanKey === "pro",
     lastBumpedAt: row.last_bumped_at,

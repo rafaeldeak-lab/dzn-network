@@ -41,7 +41,9 @@ assert.equal(source.includes("SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000"), true, "
 assert.match(source, /setTimeout\(\(\)\s*=>\s*requestController\.abort\(\),\s*timeoutMs\)/, "Each rail request must abort when its timeout expires.");
 assert.match(source, /clearTimeout\(requestTimeout\)/, "Completed rail requests must clear their timeout.");
 assert.equal(source.includes("formatPublicServerName(item.name)"), true, "The rail must defensively render a clean server name.");
-assert.equal(source.includes("viewsLast7Days"), true, "Live rail cards must render their recorded discovery views.");
+assert.equal(source.includes("viewsAllTime"), true, "Live rail cards must render durable all-time discovery views.");
+assert.equal(source.includes("viewsLast7Days"), false, "The public rail must not present a rolling reporting window as a total view count.");
+assert.equal(source.includes("All-time listing views"), true, "The rail must make the durable view-total meaning available to assistive technology and hover users.");
 assert.equal(source.includes('source: "live_server_rail"'), true, "Live rail impressions must be recorded with their source.");
 assert.equal(source.includes("new IntersectionObserver"), true, "Rail impressions must wait until a card becomes visible.");
 assert.equal(formatPublicServerName("NUKETOWN DEATHMATCH- HTTPS://DAYZ-NETWORK.COM"), "NukeTown Deathmatch");
@@ -76,8 +78,8 @@ const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf
 assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");
 assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate service records must use authoritative canonical evidence.");
 assert.match(railRouteSource, /promotion_impressions/, "The rail must read its existing aggregated view ledger.");
-assert.match(railRouteSource, /toISOString\(\)/, "The rail view cutoff must match the ISO timestamp format stored by promotion analytics.");
-assert.match(railRouteSource, /\.bind\(\.\.\.uniqueServerIds, cutoff\)/, "The seven-day cutoff must be bound to the ledger query.");
+assert.match(railRouteSource, /readRailAllTimeViewCounts/, "The rail must explicitly use its durable all-time view reader.");
+assert.doesNotMatch(railRouteSource, /occurred_at\s*>=|cutoff\s*=\s*new Date/, "The public total must not discard older ledger rows through a rolling reporting cutoff.");
 assert.match(railRouteSource, /WHERE status = 'approved'/, "The rail must expose the same approved-review summary as public server listings.");
 assert.doesNotMatch(railRouteSource, /WHERE status = 'active'/, "The retired active-review status must not suppress public rail ratings.");
 assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
@@ -132,7 +134,7 @@ const duplicateDbResponse = await invokeRail({
         }),
 });
 const duplicatePayload = await duplicateDbResponse.json() as {
-  items?: Array<{ id: string; slug: string | null; currentPlayers: number | null; name: string; viewsLast7Days: number }>;
+  items?: Array<{ id: string; slug: string | null; currentPlayers: number | null; name: string; viewsAllTime: number }>;
 };
 assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
 const canonicalDuplicateItem = duplicatePayload.items?.find(({ id }) => id === "server-one");
@@ -142,7 +144,7 @@ assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug
 });
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 assert.equal(canonicalDuplicateItem?.currentPlayers, 7, "Fresh zero and non-zero player counts must remain numeric in the public payload.");
-assert.equal(canonicalDuplicateItem?.viewsLast7Days, 42, "The rail must expose the server's aggregated seven-day listing views.");
+assert.equal(canonicalDuplicateItem?.viewsAllTime, 42, "The rail must expose the server's durable aggregated listing views.");
 assert.equal(canonicalDuplicateItem?.name, "NukeTown Deathmatch", "Public rail payloads must not expose pasted URLs in server names.");
 
 const zeroPlayerResponse = await invokeRail({

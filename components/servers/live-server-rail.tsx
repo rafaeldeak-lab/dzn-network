@@ -21,7 +21,7 @@ type RailItem = {
   playerCountStatus?: string;
   ratingAverage: number | null;
   reviewCount: number;
-  viewsLast7Days: number;
+  viewsAllTime: number;
   listingPlanKey: "free" | "starter" | "pro";
   isPro: boolean;
 };
@@ -258,9 +258,9 @@ function RailCard({ item }: { item: RailItem }) {
             <Users className="h-3.5 w-3.5 text-cyan-200" aria-hidden="true" />
             {playersLabel(item)}
           </span>
-          <span className="inline-flex items-center gap-1" aria-label={`${formatViewsLabel(item.viewsLast7Days)} in the last 7 days`}>
+          <span className="inline-flex items-center gap-1" aria-label={`${formatViewsLabel(item.viewsAllTime)} all-time listing views`} title="All-time listing views">
             <Eye className="h-3.5 w-3.5 text-violet-200" aria-hidden="true" />
-            {formatViewsLabel(item.viewsLast7Days)}
+            {formatViewsLabel(item.viewsAllTime)}
           </span>
         </div>
       </div>

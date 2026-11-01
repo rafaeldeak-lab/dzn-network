@@ -35,7 +35,7 @@ export function VaultShowcaseDisplay({ showcase, displayName, scope, motion, onI
       {supporting.some(Boolean) ? <div className={styles.publicSupporting}>
         {supporting.map((item, index) => item ? <article className={styles.item} key={`supporting-${index}`} style={collectibleStyle(item)}>
           <button type="button" className={styles.itemVisual} aria-label={`Inspect ${item.name}`} onClick={() => onInspect(item)}>
-            <CollectibleArt item={item} />
+            <CollectibleArt item={item} motion={motion} />
             <span className={styles.rarity}>{item.rarity}</span><span className={styles.inspectLabel}><Scan aria-hidden="true" />Inspect</span>
           </button>
           <div className={styles.itemInfo}><h3>{item.name}</h3><p>{item.edition}</p></div>

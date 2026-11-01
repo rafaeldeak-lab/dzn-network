@@ -52,6 +52,9 @@
 .heroCard { position: relative; width: min(100%, 181px); aspect-ratio: 2 / 3; border: 1px solid #c7a4f570; border-radius: 10px; overflow: hidden; box-shadow: 0 20px 45px #0009, 0 0 38px #aa66ee15; transform: rotateZ(-1.5deg); transition: transform .45s,box-shadow .45s; z-index: 1; background: #14111a; }
 .displayBay:hover .heroCard { transform: translateY(-3px) rotateZ(.5deg); box-shadow: 0 24px 48px #000b, 0 0 42px #aa66ee24; }
 .art { position: absolute; inset: 0; background-size: 300% 200%; background-repeat: no-repeat; background-color: #15121d; }
+.sceneArt { isolation: isolate; overflow: hidden; }
+.scenePortalMotion { position: absolute; inset: 0; overflow: hidden; clip-path: ellipse(28% 20% at 50% 46%); pointer-events: none; mix-blend-mode: screen; }
+.sceneGalaxySpin { position: absolute; inset: -55%; display: block; opacity: .56; background: radial-gradient(circle at 50% 50%,#fff8e6 0 1%,#edc7ff 2.6%,#9f59ff 8%,#522483 22%,transparent 45%), url("/vault/scenes/nebula-chamber-v1.png") center 46% / 47% auto no-repeat; filter: saturate(1.22) contrast(1.1); animation: vaultGalaxySpin 19s linear infinite; transform-origin: center; }
 .artFallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: #d4badf; background: repeating-linear-gradient(135deg,transparent 0 12px,#bb91de08 12px 13px),radial-gradient(ellipse at 50% 40%,#41324c,#15121c 65%); }
 .artFallback svg { width: 52px; height: 52px; stroke-width: 1; }
 .artFallback span { font-size: 11px; letter-spacing: .17em; font-weight: 650; text-align: center; }
@@ -195,6 +198,7 @@
 .loading svg { width: 20px; height: 20px; }
 @keyframes vaultMist { from { transform: translate(-8%,9%) scale(.85); opacity: .13; } to { transform: translate(10%,-10%) scale(1.08); opacity: .29; } }
 @keyframes vaultShine { 0%,70%,100% { background-position: 160% 0; } 35% { background-position: -70% 0; } }
+@keyframes vaultGalaxySpin { from { transform: rotate(0deg) scale(1.03); } to { transform: rotate(360deg) scale(1.03); } }
 @keyframes vaultReveal { 0% { opacity:.12; transform:translateY(21px) scale(.72); filter:brightness(.3) blur(3px); } 45% { opacity:1; filter:brightness(1.55) blur(0); } 100% { opacity:1; transform:translateY(0) scale(1) rotateZ(-1.5deg); filter:brightness(1); } }
 @keyframes vaultParticleDrift { 0%,100% { transform:translate3d(0,0,0); opacity:.25; } 50% { transform:translate3d(35px,-70px,0); opacity:1; } }
 @keyframes cacheRing { 0% { opacity:0; transform:rotateX(68deg) rotateZ(0) scale(.46); } 32% { opacity:.95; } 100% { opacity:0; transform:rotateX(68deg) rotateZ(130deg) scale(1.35); } }
