@@ -524,8 +524,11 @@ export function DznCommsShell() {
     try {
       await sendCommsMessage(targetChannel, draft, pendingAttempt.requestId);
       sendAttemptRef.current = null;
+      // A completed request can resolve after the reader has changed rooms.
+      // Clear the sent room's cache even when its composer is not visible so a
+      // return visit cannot accidentally submit the same message twice.
+      draftsByChannelRef.current[targetChannel] = "";
       if (selectedChannelRef.current === targetChannel) {
-        draftsByChannelRef.current[targetChannel] = "";
         setDraft("");
         setComposerMessage(`Message sent to ${payload.channel.name}.`);
       }

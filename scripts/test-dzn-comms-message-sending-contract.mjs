@@ -9,6 +9,7 @@ const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sq
 const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
+const networkRail = read("components/comms/dzn-comms-network-rail.tsx");
 const assist = read("components/comms/dzn-assist.tsx");
 const deletionNotices = read("components/comms/deletion-notices.ts");
 const client = read("components/comms/comms-history-client.ts");
@@ -128,7 +129,10 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /!isCurrentRequest\(\)[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /if \(selectedChannel !== "global-chat"\) \{\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "Private access recovery must reset pagination before loading Global Chat.");
   assert.match(shell, /await sendCommsMessage[\s\S]*selectedChannelRef\.current !== targetChannel\) return;\s*setLoadingEarlierMessages\(false\);\s*setHistoryPageMode\("latest"\);/, "A successful message send must release an earlier-history loading state only for its original channel.");
+  assert.match(shell, /await sendCommsMessage[\s\S]*sendAttemptRef\.current = null;[\s\S]*draftsByChannelRef\.current\[targetChannel\] = "";[\s\S]*if \(selectedChannelRef\.current === targetChannel\)/, "A successful send must clear its room cache even if the reader switches rooms before completion.");
   assert.doesNotMatch(shell, /reactionAttemptRef|\bheart\b|\bboost\b|\blaugh\b|\bsalute\b|\bskull\b/, "The compact Global Chat UI must not retain a fixed reaction catalog.");
+  assert.match(networkRail, /<Metric label="Registered servers" value=\{event\.registered_servers\} \/>/, "The event rail must label the verified event count as registered servers.");
+  assert.doesNotMatch(networkRail, /total_participants|label="Players"/, "The event rail must not present the event API's server-registration total as a player count.");
   assert.match(shell, /Add an emoji reaction/, "The compact Global Chat UI must expose only an on-demand emoji reaction control.");
   assert.match(shell, /is typing\.\.\./, "The chat shell must provide an ephemeral Discord-style typing indicator.");
   assert.match(shell, /const TYPING_IDLE_TIMEOUT_MS = 5_000/, "Typing must stop after a short idle interval.");

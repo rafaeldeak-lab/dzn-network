@@ -12,7 +12,6 @@ type CommsEvent = {
   category_label: string;
   status: string;
   registered_servers: number;
-  total_participants: number;
   starts_at: string | null;
 };
 
@@ -161,9 +160,8 @@ function EventCard({ event, live, unavailable, onNavigate }: { event: CommsEvent
       <p className="mt-3 break-words text-base font-black uppercase leading-5 text-white">{event.name}</p>
       <p className="mt-1 text-xs font-bold text-zinc-400">{event.event_type_label} · {event.category_label}</p>
     </div>
-    <div className="grid grid-cols-2 divide-x divide-white/8 border-b border-white/8">
-      <Metric label="Servers" value={event.registered_servers} />
-      <Metric label="Players" value={event.total_participants} />
+    <div className="border-b border-white/8">
+      <Metric label="Registered servers" value={event.registered_servers} />
     </div>
     <Link href={`/events/${encodeURIComponent(event.slug)}`} onClick={onNavigate} className="m-3 flex min-h-11 items-center justify-center gap-2 rounded-lg border border-violet-300/34 bg-violet-500/22 px-3 text-xs font-black uppercase text-white transition hover:bg-violet-500/32">
       Open event <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -208,7 +206,7 @@ function parseEvents(value: unknown): CommsEvent[] {
     return [{
       id: row.id as string, slug: row.slug as string, name: row.name as string, event_type_label: row.event_type_label as string,
       category_label: row.category_label as string, status: String(row.status).toLowerCase(),
-      registered_servers: nonNegativeNumber(row.registered_servers), total_participants: nonNegativeNumber(row.total_participants),
+      registered_servers: nonNegativeNumber(row.registered_servers),
       starts_at: nullableDate(row.starts_at),
     }];
   }).slice(0, 4);
