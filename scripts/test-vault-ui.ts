@@ -11,6 +11,7 @@ import {
 
 const card = VAULT_CATALOG.find((item) => item.id === "void-revenant-origin")!;
 const scene = VAULT_CATALOG.find((item) => item.id === "nebula-chamber")!;
+assert.equal(scene.artUrl, "/vault/scenes/nebula-chamber-v1.png", "The welcome scene must use its curated packaged artwork.");
 const items: VaultOwnedItem[] = Array.from({ length: 6 }, (_, index) => ({
   id: `grant:owned-${index}`, catalog: { ...card, id: `catalog-${index}`, name: `Collectible ${index}` },
   acquiredAt: "2026-10-31T00:00:00Z", source: "welcome",
