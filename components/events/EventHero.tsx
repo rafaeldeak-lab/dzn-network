@@ -3,6 +3,7 @@ import { ArrowLeft, Brackets, CalendarClock, Lightbulb, ShieldCheck, Sparkles, T
 
 import type { CompetitiveEvent } from "./event-data";
 import { eventImageStyle, formatNumber } from "./event-format";
+import { EventAtmosphere } from "./EventAtmosphere";
 import { CountdownTimer } from "./CountdownTimer";
 import { EventStatusBadge } from "./EventStatusBadge";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
@@ -11,6 +12,7 @@ export function EventHero({ event, detail = false }: { event?: CompetitiveEvent 
   if (!detail) {
     return (
       <section data-events-hero className="relative min-h-[300px] overflow-hidden border border-violet-300/26 bg-[url('/media/competition-centre/competition-centre-hero-v1.png')] bg-cover bg-center shadow-[0_28px_90px_rgba(0,0,0,0.42)] sm:min-h-[350px]">
+        <EventAtmosphere />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(1,5,15,0.97)_0%,rgba(1,5,15,0.76)_48%,rgba(1,5,15,0.3)_74%,rgba(1,5,15,0.72)_100%)]" />
         <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,transparent,#02030a)]" />
         <div className="relative flex min-h-[300px] flex-col justify-end px-5 py-7 sm:min-h-[350px] sm:px-8">
