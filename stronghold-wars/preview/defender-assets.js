@@ -18,5 +18,7 @@ export function defenderBattleEffect(defenders, tactic) {
     exposureShield: hound, casualtyPressure: hound >= 3 ? 1 : 0 };
 }
 const level = value => Math.max(1, Math.min(5, Math.floor(Number(value) || 1)));
-export const defenderAsset = (key, tier) => DEFENDER_CONCEPTS[key] ? `assets/models/defenders/${key}_l0${level(tier)}.glb` : null;
+export const defenderAsset = (key, tier) => DEFENDER_CONCEPTS[key]
+  ? `assets/models/${key === 'guardian' ? 'defenders-v2' : 'defenders'}/${key}_l0${level(tier)}.glb`
+  : null;
 export const defenderPortrait = key => DEFENDER_CONCEPTS[key] ? `assets/portraits/defenders/${key}.png` : null;

@@ -1950,13 +1950,32 @@ function bindDefenderRig(model, role) {
   return limbs;
 }
 
+function loadDefenderTemplate(role, level) {
+  if (role !== 'guardian') return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
+  return loadAnimatedSquad(defenderAsset(role, level)).catch(error => {
+    console.warn(`Guardian Level ${level} animated model unavailable; retaining the original defender.`, error);
+    return loadBuildingTemplate(`assets/models/defenders/guardian_l0${level}.glb`).then(scene => ({ scene, animations: [] }));
+  });
+}
+
+function bindGuardianAnimations(patrol, asset, model) {
+  const clips = Object.fromEntries((asset.animations || []).map(clip => [clip.name, clip]));
+  const names = { idle: 'DZN_Guardian_Idle', walk: 'DZN_Guardian_Walk', block: 'DZN_Guardian_Block' };
+  if (Object.values(names).some(name => !clips[name])) throw new Error('Guardian requires idle, walk and shield-block clips.');
+  patrol.mixer = new THREE.AnimationMixer(model);
+  patrol.actions = Object.fromEntries(Object.entries(names).map(([state, name]) => [state, patrol.mixer.clipAction(clips[name])]));
+  patrol.action = patrol.actions.idle;
+  patrol.actionName = 'idle';
+  patrol.action.play();
+}
+
 function syncDefenderPatrols() {
   const assigned = service.community()?.saved.base.defenders || {};
   for (const role of Object.keys(DEFENDER_CONCEPTS)) {
     const unit = assigned[role];
     const previous = defenderPatrols.get(role);
     if (previous && unit?.level === previous.level && unit?.post === previous.post) continue;
-    if (previous) { previous.active = false; scene.remove(previous.mesh); defenderPatrols.delete(role); }
+    if (previous) { previous.active = false; previous.mixer?.stopAllAction(); scene.remove(previous.mesh); defenderPatrols.delete(role); }
     if (!unit?.level || !unit.post || fallback2D) continue;
     const mesh = new THREE.Group();
     const motion = createDefenderMotion(role, unit.post);
@@ -1964,19 +1983,34 @@ function syncDefenderPatrols() {
     scene.add(mesh);
     const patrol = { role, level: unit.level, post: unit.post, mesh, motion, active: true };
     defenderPatrols.set(role, patrol);
-    loadBuildingTemplate(defenderAsset(role, unit.level)).then(template => {
+    loadDefenderTemplate(role, unit.level).then(asset => {
       if (!patrol.active) return;
-      const model = template.clone(true);
+      const animated = role === 'guardian' && asset.animations.length > 0;
+      const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
+      if (animated) model.scale.setScalar(1.1);
       model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
       mesh.add(model);
-      patrol.limbs = bindDefenderRig(model, role);
+      if (animated) bindGuardianAnimations(patrol, asset, model);
+      else patrol.limbs = bindDefenderRig(model, role);
       patrol.model = model;
     }).catch(error => console.warn(`${DEFENDER_CONCEPTS[role].name} model could not load`, error));
   }
 }
-function animateDefender(patrol, time = elapsed, threat = 0) {
+function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
+  if (role === 'guardian' && patrol.mixer) {
+    const name = motion?.moving ? 'walk' : threat > .35 ? 'block' : 'idle';
+    if (patrol.actionName !== name) {
+      const next = patrol.actions[name];
+      next.reset().fadeIn(.18).play();
+      patrol.action?.fadeOut(.18);
+      patrol.action = next;
+      patrol.actionName = name;
+    }
+    patrol.mixer.update(Math.min(.1, Math.max(0, dt)));
+    return;
+  }
   const limbs = patrol.limbs || mesh.userData.defenderLimbs;
   if (!limbs) return;
   const moving = Boolean(motion.moving);
@@ -2025,12 +2059,12 @@ function placeDefenderPreview(role, level) {
   if (!path) return;
   const token = ++defenderPreviewToken;
   if (defenderPreview) { scene.remove(defenderPreview); defenderPreview = null; }
-  loadBuildingTemplate(path).then(template => {
+  loadDefenderTemplate(role, level).then(asset => {
     if (token !== defenderPreviewToken) return;
-    const model = template.clone(true);
+    const model = role === 'guardian' && asset.animations.length ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
     model.position.set(-2, 0.07, -8);
     model.rotation.y = -0.6;
-    model.scale.setScalar(1.25);
+    model.scale.setScalar(role === 'guardian' && asset.animations.length ? 1.38 : 1.25);
     model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
     model.userData.cosmeticConcept = true;
     defenderPreview = model;
@@ -4399,12 +4433,15 @@ function buildWarBaseVisual(side, condition = null) {
       patrol.snareField = field;
     }
     warDefenderMeshes.push(patrol);
-    loadBuildingTemplate(defenderAsset(role, defender.level)).then(template => {
+    loadDefenderTemplate(role, defender.level).then(asset => {
       if (token !== warDefenderToken) return;
-      const model = template.clone(true);
+      const animated = role === 'guardian' && asset.animations.length > 0;
+      const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
+      if (animated) model.scale.setScalar(1.1);
       mesh.add(model);
       patrol.model = model;
-      patrol.limbs = bindDefenderRig(model, role);
+      if (animated) bindGuardianAnimations(patrol, asset, model);
+      else patrol.limbs = bindDefenderRig(model, role);
     }).catch(error => console.warn(`War defender model could not load: ${role}`, error));
   }
 }
@@ -4810,7 +4847,8 @@ function updateWarBattle(dt) {
       } else if (defender.role === 'trapper' && nearest.distance < 8) spawnWarPulse(warBattle, nearest.mesh.position, 0xafff52, 1.1);
       else if (defender.role === 'hound' && nearest.distance < 3) spawnWarPulse(warBattle, nearest.mesh.position, 0xb7ff72, 0.68);
     }
-    animateDefender({ ...defender, motion: { stride: defender.stride, moving } }, warBattle.time, threat);
+    defender.motion = { stride: defender.stride, moving };
+    animateDefender(defender, warBattle.time, threat, dt);
   }
   const turretPosition = warTurretRig?.yaw.getWorldPosition(new THREE.Vector3());
   const target = turretPosition && warBattle.troops.filter((troop, index) => !warBattle.damage?.squad?.[index] || warHealthAt(warBattle.damage.squad[index], progress) > 0).reduce((nearest, troop) => {
@@ -5232,7 +5270,7 @@ renderer.setAnimationLoop(time => {
     const motion = stepPatrolMotion(patrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
     patrol.mesh.position.set(motion.x, 0, motion.z);
     patrol.mesh.rotation.y = motion.yaw;
-    animateDefender(patrol, elapsed);
+    animateDefender(patrol, elapsed, 0, dt);
   }
   if (operativeMesh.visible && operativePatrol.motion) {
     const motion = stepPatrolMotion(operativePatrol.motion, dt, activePatrolNodes, service.community()?.saved.base.layout);
