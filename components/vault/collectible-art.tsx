@@ -21,7 +21,9 @@ export function CollectibleArt({ item, motion = false }: { item: VaultCatalogIte
   return (
     <>
       {directArtwork ? (
-        <div aria-hidden="true" className={styles.art} style={{ backgroundImage: `url(${directArtwork})`, backgroundPosition: "center", backgroundSize: item.kind === "scene" ? "cover" : "contain" }} />
+        <div aria-hidden="true" className={`${styles.art} ${item.kind === "scene" ? styles.sceneArt : ""}`} style={{ backgroundImage: `url(${directArtwork})`, backgroundPosition: "center", backgroundSize: item.kind === "scene" ? "cover" : "contain" }}>
+          {item.kind === "scene" && motion ? <span className={styles.scenePortalMotion}><span className={styles.sceneGalaxySpin} /></span> : null}
+        </div>
       ) : index !== null && Number.isInteger(index) && index >= 0 && index < 6 ? (
         <div aria-hidden="true" className={styles.art} style={{
           backgroundImage: "url('/vault/dzn-atlas.webp')",
