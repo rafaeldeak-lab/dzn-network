@@ -59,7 +59,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const rows = await queryServerRail(env);
     const canonicalRows = await hydrateDuplicateCanonicalEvidence(env, rows);
     const displayRows = dedupeRailRows(canonicalRows).slice(0, 24);
-    const viewCounts = await readRailAllTimeViewCounts(env, displayRows.map((row) => row.id));
+    const viewCounts = await readRailAllTimeViewCounts(env, displayRows, canonicalRows);
     return json({
       ok: true,
       items: displayRows.map((row) => toRailItem(row, viewCounts)),
@@ -165,15 +165,19 @@ async function hydrateDuplicateCanonicalEvidence(env: Env, rows: RailRow[]) {
 function dedupeRailRows(rows: RailRow[]) {
   const unique = new Map<string, RailRow>();
   for (const row of rows) {
-    const identity = row.nitrado_service_id?.trim()
-      ? `service:${row.nitrado_service_id.trim().toLowerCase()}`
-      : row.public_slug?.trim()
-        ? `slug:${row.public_slug.trim().toLowerCase()}`
-        : `id:${row.id.trim().toLowerCase()}`;
+    const identity = railIdentity(row);
     const existing = unique.get(identity);
     if (!existing || compareCanonicalRows(row, existing) > 0) unique.set(identity, row);
   }
   return [...unique.values()].sort(compareRailPriority);
+}
+
+function railIdentity(row: RailRow) {
+  return row.nitrado_service_id?.trim()
+    ? `service:${row.nitrado_service_id.trim().toLowerCase()}`
+    : row.public_slug?.trim()
+      ? `slug:${row.public_slug.trim().toLowerCase()}`
+      : `id:${row.id.trim().toLowerCase()}`;
 }
 
 function compareCanonicalRows(left: RailRow, right: RailRow) {
@@ -226,18 +230,37 @@ function numberOrZero(value: unknown) {
  * analytics, it must not be a rolling seven-day number: a server's displayed
  * total should not fall as older impressions leave a reporting window.
  */
-async function readRailAllTimeViewCounts(env: Env, serverIds: string[]) {
-  const uniqueServerIds = [...new Set(serverIds.filter(Boolean))];
-  if (uniqueServerIds.length === 0) return new Map<string, number>();
+async function readRailAllTimeViewCounts(env: Env, displayRows: RailRow[], allRows: RailRow[]) {
+  const canonicalIdByIdentity = new Map(displayRows.map((row) => [railIdentity(row), row.id]));
+  const canonicalIdBySourceId = new Map<string, string>();
+
+  // A current duplicate can be hidden from the public rail while still owning
+  // historic impressions. Attribute those impressions to the displayed
+  // canonical listing rather than silently starting its all-time total again.
+  for (const row of allRows) {
+    const canonicalId = canonicalIdByIdentity.get(railIdentity(row));
+    if (canonicalId) canonicalIdBySourceId.set(row.id, canonicalId);
+  }
+
+  if (canonicalIdBySourceId.size === 0) return new Map<string, number>();
 
   try {
-    const placeholders = uniqueServerIds.map(() => "?").join(", ");
+    const lineageSeeds = [...canonicalIdBySourceId.entries()];
+    const seedSql = lineageSeeds.map(() => "SELECT ? AS id, ? AS canonical_id").join("\nUNION\n");
     const result = await requireDb(env).prepare(
-      `SELECT server_id, COUNT(*) AS view_count
-         FROM promotion_impressions
-        WHERE server_id IN (${placeholders})
-        GROUP BY server_id`,
-    ).bind(...uniqueServerIds).all<RailViewRow>();
+      `WITH RECURSIVE view_lineage(id, canonical_id) AS (
+         ${seedSql}
+         UNION
+         SELECT legacy.id, view_lineage.canonical_id
+           FROM linked_servers AS legacy
+           JOIN view_lineage ON legacy.merged_into_server_id = view_lineage.id
+       )
+       SELECT view_lineage.canonical_id AS server_id,
+              COUNT(promotion_impressions.id) AS view_count
+         FROM view_lineage
+         LEFT JOIN promotion_impressions ON promotion_impressions.server_id = view_lineage.id
+        GROUP BY view_lineage.canonical_id`,
+    ).bind(...lineageSeeds.flat()).all<RailViewRow>();
     return new Map((result.results ?? []).map((row) => [row.server_id, numberOrZero(row.view_count)]));
   } catch {
     // Older read-only environments may not yet have promotion analytics. The rail remains available without the count.
