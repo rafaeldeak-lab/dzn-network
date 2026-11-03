@@ -6,6 +6,7 @@ import { BUILDING_ASSETS, getBuildingAsset } from './building-assets.js';
 import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squadProfile, evaluateWarSquad } from './squad-assets.js';
 import { PATROL_NODES, PATROL_ORDERS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './patrol-routes.js';
 import { DEFENDER_CONCEPTS, DEFENDER_POSTS, defenderAsset, defenderPortrait, aegisDroneAsset } from './defender-assets.js';
+import { guardianInterceptGoal, guardianAction } from './guardian-response.js';
 import { buildingScaffoldState, reconcileBuildingSnapshot } from './game-runtime-state.js';
 import { runServiceTests } from './service-tests.js';
 import { connectedProMatches, routeBriefing } from './world-map.js';
@@ -1963,8 +1964,9 @@ function loadDefenderTemplate(role, level) {
 
 function bindGuardianAnimations(patrol, asset, model) {
   const clips = Object.fromEntries((asset.animations || []).map(clip => [clip.name, clip]));
-  const names = { idle: 'DZN_Guardian_Idle', walk: 'DZN_Guardian_Walk', block: 'DZN_Guardian_Block' };
-  if (Object.values(names).some(name => !clips[name])) throw new Error('Guardian requires idle, walk and shield-block clips.');
+  const names = { idle: 'DZN_Guardian_Idle', walk: 'DZN_Guardian_Walk', run: 'DZN_Guardian_Run',
+    block: 'DZN_Guardian_Block' };
+  if (Object.values(names).some(name => !clips[name])) throw new Error('Guardian requires idle, walk, run and shield-block clips.');
   patrol.mixer = new THREE.AnimationMixer(model);
   patrol.actions = Object.fromEntries(Object.entries(names).map(([state, name]) => [state, patrol.mixer.clipAction(clips[name])]));
   patrol.action = patrol.actions.idle;
@@ -2111,9 +2113,12 @@ function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
   if (['guardian', 'aegis', 'trapper', 'hound'].includes(role) && patrol.mixer) {
-    const name = role === 'hound'
+    const name = role === 'guardian'
+      ? guardianAction({ warActive: patrol.warActive, moving: motion?.moving, sprinting: motion?.sprinting,
+        blockUntil: patrol.blockUntil, time, threat })
+      : role === 'hound'
       ? time < (patrol.attackUntil || 0) ? 'pounce' : motion?.moving ? threat > .35 ? 'run' : 'walk' : threat > .35 ? 'alert' : 'idle'
-      : motion?.moving ? 'walk' : threat > .35 ? role === 'guardian' ? 'block' : role === 'aegis' ? 'command' : 'deploy' : 'idle';
+      : motion?.moving ? 'walk' : threat > .35 ? role === 'aegis' ? 'command' : 'deploy' : 'idle';
     if (patrol.actionName !== name) {
       const next = patrol.actions[name];
       next.reset().fadeIn(.18).play();
@@ -4400,6 +4405,28 @@ function spawnWarPulse(battle, position, colour, radius = 1.15) {
   scene.add(mesh);
   battle.effects.push({ mesh, life: 0, duration: 0.7, kind: 'pulse' });
 }
+function spawnGuardianBarrier(battle, defender, target) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const shield = defender.model?.getObjectByName('barrier_shield');
+  defender.model?.updateMatrixWorld(true);
+  const center = shield ? new THREE.Box3().setFromObject(shield).getCenter(new THREE.Vector3())
+    : defender.mesh.position.clone().add(new THREE.Vector3(0, 1.25, 0));
+  const direction = target.clone().sub(center);
+  direction.y = 0;
+  if (direction.lengthSq() < 0.001) direction.set(0, 0, 1);
+  direction.normalize();
+  const radius = 0.8 + defender.level * 0.09;
+  for (const [geometry, opacity] of [[new THREE.CircleGeometry(radius * .83, 40), .2],
+    [new THREE.RingGeometry(radius * .76, radius, 40), .85]]) {
+    const mesh = new THREE.Mesh(geometry,
+      new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity,
+        depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+    mesh.position.copy(center).addScaledVector(direction, .12);
+    mesh.lookAt(mesh.position.clone().add(direction));
+    scene.add(mesh);
+    battle.effects.push({ mesh, life: 0, duration: .62, kind: 'barrier', startOpacity: opacity });
+  }
+}
 function spawnWarTrace(battle, from, to, colour, width = 0.028) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const difference = to.clone().sub(from);
@@ -4436,8 +4463,9 @@ function updateWarEffects(battle, dt) {
     const effect = battle.effects[i];
     effect.life += dt;
     const fraction = Math.min(1, effect.life / effect.duration);
-    effect.mesh.material.opacity = (effect.kind === 'pulse' ? 0.8 : 0.9) * (1 - fraction);
+    effect.mesh.material.opacity = (effect.startOpacity ?? (effect.kind === 'pulse' ? 0.8 : 0.9)) * (1 - fraction);
     if (effect.kind === 'pulse') effect.mesh.scale.setScalar(1 + fraction * 1.5);
+    if (effect.kind === 'barrier') effect.mesh.scale.setScalar(1 + fraction * .38);
     if (effect.kind === 'snare') {
       effect.mesh.position.lerpVectors(effect.from, effect.to, fraction);
       effect.mesh.position.y += Math.sin(fraction * Math.PI) * .75;
@@ -4591,7 +4619,7 @@ function buildWarBaseVisual(side, condition = null) {
     mesh.rotation.y = -Math.PI / 2;
     scene.add(mesh);
     const patrol = { role, level: defender.level, mesh, home: mesh.position.clone(), chasePath: [], nextRepath: 0,
-      stride: 0, nextCue: 0 };
+      stride: 0, nextCue: 0, warActive: true, blockUntil: 0 };
     if (role === 'trapper') {
       const field = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 32),
         new THREE.MeshBasicMaterial({ color: 0xafff52, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
@@ -4981,6 +5009,32 @@ function updateWarBattle(dt) {
       if (step.yaw !== null) defender.mesh.rotation.y = warTurnToward(defender.mesh.rotation.y, step.yaw, dt * 4.8);
       defender.stride += step.moved * 4.8;
       moving = step.moved > 0.001;
+    } else if (defender.role === 'guardian') {
+      const current = { x: defender.mesh.position.x - OUTPOST.x, z: defender.mesh.position.z - OUTPOST.z };
+      const home = { x: defender.home.x - OUTPOST.x, z: defender.home.z - OUTPOST.z };
+      const attacker = nearest && { x: nearest.mesh.position.x - OUTPOST.x, z: nearest.mesh.position.z - OUTPOST.z };
+      const goal = guardianInterceptGoal(home, attacker, progress);
+      if (warBattle.time >= defender.nextRepath) {
+        const liveLayout = { ...warBattle.defenderSnapshot.base.layout,
+          walls: warStandingWalls(warBattle.defenderSnapshot.base.layout, warBattle.conditionAtLaunch, warBattle.damage, progress) };
+        const path = walkablePatrolPath([current.x, current.z], [goal.x, goal.z], liveLayout) || [];
+        defender.chasePath = path.every(([x, z]) => Math.hypot(x - home.x, z - home.z) <= 3.3) ? path : [];
+        defender.nextRepath = warBattle.time + .45;
+      }
+      if (warBattle.time >= defender.blockUntil) {
+        const step = stepWarRoute(current, defender.chasePath, goal.intercepting ? 3.25 : 2.4, dt);
+        defender.chasePath = step.waypoints;
+        defender.mesh.position.set(OUTPOST.x + step.x, 0, OUTPOST.z + step.z);
+        if (step.yaw !== null) defender.mesh.rotation.y = warTurnToward(defender.mesh.rotation.y, step.yaw, dt * 4.2);
+        defender.stride += step.moved * 4.8;
+        moving = step.moved > .001;
+      }
+      defender.sprinting = goal.intercepting && moving;
+      if (nearest && !moving) {
+        const direction = nearest.mesh.position.clone().sub(defender.mesh.position);
+        defender.mesh.rotation.y = warTurnToward(defender.mesh.rotation.y,
+          Math.atan2(direction.x, direction.z), dt * 3.2);
+      }
     } else if (threat) {
       const direction = nearest.mesh.position.clone().sub(defender.home);
       const facing = Math.atan2(direction.x, direction.z);
@@ -4999,7 +5053,11 @@ function updateWarBattle(dt) {
         defender.playedEvents.add(index);
         const target = warBattle.troops[event.slot]?.mesh;
         if (!target) continue;
-        if (event.role === 'guardian') spawnWarPulse(warBattle, target.position, 0xc084fc, 1.5);
+        if (event.role === 'guardian') {
+          defender.blockUntil = warBattle.time + .8;
+          spawnGuardianBarrier(warBattle, defender, target.position);
+          spawnWarPulse(warBattle, target.position, 0xc084fc, 1.5);
+        }
         else if (event.role === 'aegis') {
           const origin = aegisTraceOrigin(defender, index);
           spawnWarTrace(warBattle, origin, target.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
@@ -5011,7 +5069,11 @@ function updateWarBattle(dt) {
       }
     } else if (nearest && threat > 0.35 && progress > 0.32 && progress < 0.84 && warBattle.time >= defender.nextCue) {
       defender.nextCue = warBattle.time + (defender.role === 'aegis' ? 1.4 : 1.8);
-      if (defender.role === 'guardian' && nearest.distance < 9) spawnWarPulse(warBattle, defender.mesh.position, 0xc084fc, 1.9);
+      if (defender.role === 'guardian' && nearest.distance < 9) {
+        defender.blockUntil = warBattle.time + .8;
+        spawnGuardianBarrier(warBattle, defender, nearest.mesh.position);
+        spawnWarPulse(warBattle, defender.mesh.position, 0xc084fc, 1.9);
+      }
       else if (defender.role === 'aegis') {
         defender.droneCueIndex = (defender.droneCueIndex || 0) + 1;
         const origin = aegisTraceOrigin(defender, defender.droneCueIndex);
@@ -5022,7 +5084,7 @@ function updateWarBattle(dt) {
         spawnWarPulse(warBattle, nearest.mesh.position, 0xb7ff72, 0.68);
       }
     }
-    defender.motion = { stride: defender.stride, moving };
+    defender.motion = { stride: defender.stride, moving, sprinting: defender.sprinting };
     animateDefender(defender, warBattle.time, threat, dt);
   }
   const turretPosition = warTurretRig?.yaw.getWorldPosition(new THREE.Vector3());

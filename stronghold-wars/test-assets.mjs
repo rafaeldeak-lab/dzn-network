@@ -8,6 +8,7 @@ import { SQUAD_ROLES, squadAsset, squadPortrait, squadTier, squadUnlocked, squad
 import { PATROL_NODES, PATROL_STOPS, DEFENDER_POST_NODES, createPatrolMotion, createDefenderMotion, setPatrolOrder, shortestPatrolPath, stepPatrolMotion, patrolNodesForLayout, walkablePatrolPath } from './preview/patrol-routes.js';
 import { defaultLayout } from './preview/layout-grid.js';
 import { DEFENDER_CONCEPTS, defenderAsset, defenderPortrait, aegisDroneAsset } from './preview/defender-assets.js';
+import { guardianInterceptGoal, guardianAction } from './preview/guardian-response.js';
 import { connectedProMatches, greatCircleKm, routeBriefing } from './preview/world-map.js';
 import { FIRST_EDITION_CARDS, cardEarned } from './preview/collectible-cards.js';
 import { OPERATIVE_MODELS, operativeAsset } from './preview/operative-assets.js';
@@ -848,6 +849,18 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Guardian Level ${level} needs a textured humanoid rig, hand-bound 3D shield and four actions.`);
 }
 console.log('Five distinct DZN Guardian levels verified with source, hand-bound shields and walk/run/idle/block actions.');
+const gate = { x: -14, z: 0 };
+const approach = guardianInterceptGoal(gate, { x: -7, z: 0 }, .5);
+const far = guardianInterceptGoal(gate, { x: 4, z: 0 }, .5);
+const ended = guardianInterceptGoal(gate, { x: -7, z: 0 }, .9);
+if (!approach.intercepting || Math.hypot(approach.x - gate.x, approach.z - gate.z) > 2.801
+  || far.intercepting || far.x !== gate.x || ended.intercepting || ended.x !== gate.x
+  || guardianAction({ warActive: true, moving: true, sprinting: true, time: 5 }) !== 'run'
+  || guardianAction({ warActive: true, moving: true, sprinting: true, time: 5, blockUntil: 5.6 }) !== 'block'
+  || guardianAction({ warActive: true, threat: 1, time: 6, blockUntil: 5.6 }) !== 'idle'
+  || guardianAction({ warActive: false, threat: .7 }) !== 'block')
+  throw new Error('Guardian must stay near the gate and only block recorded war actions.');
+console.log('Guardian gate interception and event-timed shield response verified.');
 const aegisManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders-v3/manifest.json'), 'utf8'));
 if (!aegisManifest.complete || Object.keys(aegisManifest.assets || {}).length !== 10)
   throw new Error('Aegis requires five complete soldier tiers and five interceptor drone tiers.');
