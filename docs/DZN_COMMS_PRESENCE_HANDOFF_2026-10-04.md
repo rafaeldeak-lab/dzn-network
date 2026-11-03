@@ -2,7 +2,7 @@
 
 Date: 2026-10-04
 
-Status: source implemented and default-off; production migration and activation remain separate controlled operations
+Status: server-side activation remains separately controlled; the Comms UI reads the existing aggregate endpoint and displays a count only after that protected service confirms a valid response.
 
 ## Delivered source
 
@@ -33,9 +33,7 @@ Server switches:
 - `DZN_COMMS_PRESENCE_SCOPE=local_test`
 - `DZN_COMMS_PRESENCE_SECRET=`
 
-Public UI switch:
-
-- `NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false`
+The browser has no independent build-time presence switch. This avoids a stale Pages build hiding a service that the protected server-side gates have already authorized. If the endpoint is disabled or unavailable, the browser shows `Presence unavailable` and never invents a count.
 
 ## Controlled production activation
 
@@ -50,7 +48,7 @@ Public UI switch:
 9. Enable only the presence-retention switch. Seed controlled active and expired fixtures, invoke the cron-authenticated presence-retention route manually, and prove that it deletes no more than 250 expired Global Chat rows while preserving every active row.
 10. Register the authenticated presence-retention route with the existing scheduler and prove a successful scheduled run. Do not enable presence writes until both the manual and scheduled cleanup proofs pass.
 11. Enable the server write switch and run authenticated same-origin heartbeat, signed-out rejection, cross-origin rejection, same-account deduplication, second-account counting, heartbeat throttling, opportunistic cleanup and expiry tests.
-12. Enable the public UI switch last, deploy, and verify phone, tablet, desktop and reduced-motion behavior.
+12. Deploy the UI last, then verify phone, tablet, desktop and reduced-motion behavior. The UI must render a count only after a valid aggregate response and return to `Presence unavailable` if the protected endpoint is disabled or unavailable.
 13. Keep every switch off or roll it back if any ledger, schema, privacy, authorization, cleanup, count or rendering check fails.
 
 ## Cleanup boundary
