@@ -80,6 +80,9 @@ assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate se
 assert.match(railRouteSource, /promotion_impressions/, "The rail must read its existing aggregated view ledger.");
 assert.match(railRouteSource, /readRailAllTimeViewCounts/, "The rail must explicitly use its durable all-time view reader.");
 assert.doesNotMatch(railRouteSource, /occurred_at\s*>=|cutoff\s*=\s*new Date/, "The public total must not discard older ledger rows through a rolling reporting cutoff.");
+assert.match(railRouteSource, /WITH RECURSIVE lineage_seed/, "All-time views must retain the lineage of reconciled server records.");
+assert.match(railRouteSource, /legacy\.merged_into_server_id = view_lineage\.id/, "Historic merged server records must contribute their views to the canonical listing.");
+assert.match(railRouteSource, /FROM json_each\(\?\)/, "Lineage seeds must use one JSON binding rather than exceeding D1's parameter limit on duplicate-heavy listings.");
 assert.match(railRouteSource, /WHERE status = 'approved'/, "The rail must expose the same approved-review summary as public server listings.");
 assert.doesNotMatch(railRouteSource, /WHERE status = 'active'/, "The retired active-review status must not suppress public rail ratings.");
 assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
@@ -119,6 +122,7 @@ const duplicateRow = {
 const duplicateDbResponse = await invokeRail({
   DB: createRailDb([
           { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown", total_kills: 500, unique_players: 500, adm_logs_found: 0, adm_sync_status: null, latest_success_sync_status: null },
+          { ...duplicateRow, id: "retired-server", public_slug: "retired-nuketown", nitrado_service_id: null, merged_into_server_id: "legacy-duplicate" },
           duplicateRow,
           ...Array.from({ length: 24 }, (_, index) => ({
             ...duplicateRow,
@@ -130,7 +134,7 @@ const duplicateDbResponse = await invokeRail({
         ], {
           kills: { "legacy-duplicate": 0, "server-one": 5 },
           players: { "legacy-duplicate": 0, "server-one": 3 },
-          views: { "server-one": 42 },
+          views: { "server-one": 42, "legacy-duplicate": 8, "retired-server": 13 },
         }),
 });
 const duplicatePayload = await duplicateDbResponse.json() as {
@@ -144,7 +148,7 @@ assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug
 });
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 assert.equal(canonicalDuplicateItem?.currentPlayers, 7, "Fresh zero and non-zero player counts must remain numeric in the public payload.");
-assert.equal(canonicalDuplicateItem?.viewsAllTime, 42, "The rail must expose the server's durable aggregated listing views.");
+assert.equal(canonicalDuplicateItem?.viewsAllTime, 63, "The rail must retain impressions from current duplicates and reconciled historic server records.");
 assert.equal(canonicalDuplicateItem?.name, "NukeTown Deathmatch", "Public rail payloads must not expose pasted URLs in server names.");
 
 const zeroPlayerResponse = await invokeRail({
@@ -264,8 +268,48 @@ function createRailDb(
 ) {
   return {
     prepare: (query: string) => {
+      if (query.includes("WITH RECURSIVE lineage_seed")) {
+        return {
+          bind: (...bindings: string[]) => ({
+            all: async () => {
+              assert.equal(bindings.length, 1, "The lineage reader must keep its D1 parameter count constant.");
+              const seedRows = JSON.parse(bindings[0]) as Array<{ id: string; canonicalId: string }>;
+              const canonicalIdBySourceId = new Map<string, string>();
+              for (const seed of seedRows) {
+                canonicalIdBySourceId.set(seed.id, seed.canonicalId);
+              }
+
+              let addedLineage = true;
+              while (addedLineage) {
+                addedLineage = false;
+                for (const candidate of candidates) {
+                  const sourceId = String(candidate.id ?? "");
+                  const mergedInto = String(candidate.merged_into_server_id ?? "");
+                  const canonicalId = canonicalIdBySourceId.get(mergedInto);
+                  if (sourceId && canonicalId && !canonicalIdBySourceId.has(sourceId)) {
+                    canonicalIdBySourceId.set(sourceId, canonicalId);
+                    addedLineage = true;
+                  }
+                }
+              }
+
+              const counts = new Map<string, number>();
+              for (const [sourceId, canonicalId] of canonicalIdBySourceId) {
+                counts.set(canonicalId, (counts.get(canonicalId) ?? 0) + (evidence.views?.[sourceId] ?? 0));
+              }
+              return {
+                results: [...counts.entries()].map(([server_id, view_count]) => ({ server_id, view_count })),
+              };
+            },
+          }),
+        };
+      }
       if (query.includes("FROM linked_servers")) {
-        return { all: async () => ({ results: candidates }) };
+        return {
+          all: async () => ({
+            results: candidates.filter((candidate) => !String(candidate.merged_into_server_id ?? "").trim()),
+          }),
+        };
       }
       if (query.includes("FROM promotion_impressions")) {
         return {
