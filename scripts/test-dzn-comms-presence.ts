@@ -32,7 +32,6 @@ for (const flag of [
   "DZN_COMMS_PRESENCE_RETENTION_ENABLED",
   "DZN_COMMS_PRESENCE_SCOPE",
   "DZN_COMMS_PRESENCE_SECRET",
-  "NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED",
 ]) {
   assert.ok(envExample.includes(`${flag}=`), `${flag} must be documented.`);
   assert.ok(envTypes.includes(`${flag}?: string`), `${flag} must be typed.`);
@@ -41,7 +40,6 @@ assert.match(envExample, /DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false/);
 assert.match(envExample, /DZN_COMMS_PRESENCE_READ_ENABLED=false/);
 assert.match(envExample, /DZN_COMMS_PRESENCE_WRITE_ENABLED=false/);
 assert.match(envExample, /DZN_COMMS_PRESENCE_RETENTION_ENABLED=false/);
-assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false/);
 assert.match(helper, /getSessionUser\(env, request\)/, "Presence writes must use the Discord session.");
 assert.match(helper, /sameOrigin\(request\)/, "Presence writes must be same-origin.");
 assert.match(helper, /HMAC/, "Presence actor keys must use a keyed digest.");
@@ -55,14 +53,15 @@ assert.match(route, /handleDznCommsPresence/);
 assert.match(retentionRoute, /requireCronSecret\(request, env\)/, "Presence cleanup must require cron authorization.");
 assert.match(retentionRoute, /retentionEnabled/, "Presence cleanup must remain separately default-off.");
 assert.match(retentionRoute, /cleanupExpiredPresence/, "Presence cleanup route must use the bounded cleanup helper.");
-assert.match(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/);
 assert.match(component, /fetch\("\/api\/auth\/me"/);
 assert.match(component, /method: authenticated \? "POST" : "GET"/, "Authenticated refreshes must reuse the heartbeat response.");
 assert.match(component, /authenticated && !response\.ok/, "A failed heartbeat must fall back to the public aggregate read.");
-assert.match(component, /if \(!enabled\) return null/, "Disabled presence UI must not render an unavailable placeholder.");
+assert.doesNotMatch(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/, "The browser must not depend on a stale build-time presence switch.");
+assert.match(component, /presence\.state === "live"/, "Only a valid server response may render an aggregate count.");
+assert.match(component, /protected server-side presence service confirms an active result/, "The UI must describe the server as the activation authority.");
 assert.doesNotMatch(component, /localStorage|sessionStorage|sendBeacon|WebSocket|EventSource/);
 assert.match(shell, /DznLivePresenceCounter/);
-assert.match(shell, /presenceUiEnabled \? <DznLivePresenceCounter \/>/);
+assert.match(shell, /!isUpdatesChannel \? <DznLivePresenceCounter \/>/, "Global Chat must always mount the server-gated presence counter.");
 assert.equal(typeof packageJson.scripts?.["test:dzn-comms-presence"], "string");
 
 assert.deepEqual(readDznCommsPresenceFlags({} as Env), {
