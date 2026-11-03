@@ -1956,7 +1956,24 @@ function bindDefenderRig(model, role) {
 
 function loadDefenderTemplate(role, level) {
   if (!['guardian', 'aegis', 'trapper', 'hound'].includes(role)) return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
-  return loadAnimatedSquad(defenderAsset(role, level)).catch(error => {
+  return loadAnimatedSquad(defenderAsset(role, level)).then(asset => {
+    if (role === 'guardian' && !asset.scene.userData.dznArmourGraded) {
+      asset.scene.traverse(object => {
+        if (!object.isMesh) return;
+        const grade = material => {
+          if (!['Material_0', 'DZN_Guardian_Titanium'].includes(material.name)) return material;
+          const armour = material.clone();
+          if (material.name === 'Material_0') armour.color.setRGB(.22, .10, .26);
+          else armour.color.multiplyScalar(.55);
+          armour.roughness = Math.max(armour.roughness, .54);
+          return armour;
+        };
+        object.material = Array.isArray(object.material) ? object.material.map(grade) : grade(object.material);
+      });
+      asset.scene.userData.dznArmourGraded = true;
+    }
+    return asset;
+  }).catch(error => {
     console.warn(`${DEFENDER_CONCEPTS[role].name} Level ${level} animated model unavailable; retaining the original defender.`, error);
     return loadBuildingTemplate(`assets/models/defenders/${role}_l0${level}.glb`).then(scene => ({ scene, animations: [] }));
   });
