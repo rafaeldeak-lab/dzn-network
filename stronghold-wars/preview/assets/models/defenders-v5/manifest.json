@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "provenance": "The owner DZN Hound concept informed five transparent level references. Meshy T2.5 Smart Topology produced five private image-guided, textured quadruped models using 85 existing credits including one optional 10-credit Level 1 texture refinement. Blender added a four-leg, head and tail skin with five authored actions. No credits were purchased.",
+  "usage": "DZN Stronghold Wars game. Rights subject to the owner Meshy and ImageGen accounts and terms.",
+  "coordinateSystem": "glTF Y-up; the Hound faces +Z in the game",
+  "assets": {
+    "hound_l01": {
+      "file": "assets/models/defenders-v5/hound_l01.glb",
+      "source": "source-art/meshy-hound-v1/hound_l01-rig.glb",
+      "sourceMesh": "source-art/meshy-hound-v1/hound_l01-meshy-source.glb",
+      "reference": "source-art/meshy-hound-v1/hound_l01-reference.png",
+      "portrait": "assets/portraits/defenders/hound.png",
+      "bytes": 4833836,
+      "sha256": "cfa2e7e4d743f60ce56faf61584ab4cb52d4839b78adaab458fd2c78b9e1a10b",
+      "sourceSha256": "cfa2e7e4d743f60ce56faf61584ab4cb52d4839b78adaab458fd2c78b9e1a10b",
+      "sourceMeshSha256": "b43f9ebec9ce4ecce14ed3a37ce215843744fb506284f0774808af9d35218bb8",
+      "referenceSha256": "015f2fdbe58ddef56c603dbfe6e5f98a15be279c29526ead4631767e265f42f9",
+      "triangles": 15109,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Hound_Alert",
+        "DZN_Hound_Idle",
+        "DZN_Hound_Pounce",
+        "DZN_Hound_Run",
+        "DZN_Hound_Walk"
+      ],
+      "meshyCredits": 25
+    },
+    "hound_l02": {
+      "file": "assets/models/defenders-v5/hound_l02.glb",
+      "source": "source-art/meshy-hound-v1/hound_l02-rig.glb",
+      "sourceMesh": "source-art/meshy-hound-v1/hound_l02-meshy-source.glb",
+      "reference": "source-art/meshy-hound-v1/hound_l02-reference.png",
+      "portrait": "assets/portraits/defenders/hound.png",
+      "bytes": 4800008,
+      "sha256": "b24739c9cc73eb0e10956da2116bbafa9fe8e4724e47377c2b6d55320771c9fe",
+      "sourceSha256": "b24739c9cc73eb0e10956da2116bbafa9fe8e4724e47377c2b6d55320771c9fe",
+      "sourceMeshSha256": "60fafbbadfb85518feeba403315536d45d95d87713d6adceec6c939fb3a0b57a",
+      "referenceSha256": "556bfd1d0f9506ae3375119b35de8484981cce07e3544a27f9335dc0f3d6cf3a",
+      "triangles": 14995,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Hound_Alert",
+        "DZN_Hound_Idle",
+        "DZN_Hound_Pounce",
+        "DZN_Hound_Run",
+        "DZN_Hound_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "hound_l03": {
+      "file": "assets/models/defenders-v5/hound_l03.glb",
+      "source": "source-art/meshy-hound-v1/hound_l03-rig.glb",
+      "sourceMesh": "source-art/meshy-hound-v1/hound_l03-meshy-source.glb",
+      "reference": "source-art/meshy-hound-v1/hound_l03-reference.png",
+      "portrait": "assets/portraits/defenders/hound.png",
+      "bytes": 4881796,
+      "sha256": "9fda87f0bc90aa176e85c13d0454d6b906874569dd52610c8cf1907405cdaf6e",
+      "sourceSha256": "9fda87f0bc90aa176e85c13d0454d6b906874569dd52610c8cf1907405cdaf6e",
+      "sourceMeshSha256": "efc390b850b25bd349df3946c0f68e247bbc1e4acc84481e081e12ec30196e0b",
+      "referenceSha256": "ebafd174f1b86cab44df62b132c588570b37edb50c459588cd5aed8145c1d0f7",
+      "triangles": 14601,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Hound_Alert",
+        "DZN_Hound_Idle",
+        "DZN_Hound_Pounce",
+        "DZN_Hound_Run",
+        "DZN_Hound_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "hound_l04": {
+      "file": "assets/models/defenders-v5/hound_l04.glb",
+      "source": "source-art/meshy-hound-v1/hound_l04-rig.glb",
+      "sourceMesh": "source-art/meshy-hound-v1/hound_l04-meshy-source.glb",
+      "reference": "source-art/meshy-hound-v1/hound_l04-reference.png",
+      "portrait": "assets/portraits/defenders/hound.png",
+      "bytes": 4225000,
+      "sha256": "6307338473e6a24c056c7a114a9d7f77efe05e6b14ca4ae3ad976b38ede4be57",
+      "sourceSha256": "6307338473e6a24c056c7a114a9d7f77efe05e6b14ca4ae3ad976b38ede4be57",
+      "sourceMeshSha256": "4160ed3937abd56dd8a884f5235a91fa43bab5a3547f96256ffe070398eed29c",
+      "referenceSha256": "b99e260a4a79d02fdb636bd26ac3181f82839e4b373a5e2a1dccfb3807a59411",
+      "triangles": 14882,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Hound_Alert",
+        "DZN_Hound_Idle",
+        "DZN_Hound_Pounce",
+        "DZN_Hound_Run",
+        "DZN_Hound_Walk"
+      ],
+      "meshyCredits": 15
+    },
+    "hound_l05": {
+      "file": "assets/models/defenders-v5/hound_l05.glb",
+      "source": "source-art/meshy-hound-v1/hound_l05-rig.glb",
+      "sourceMesh": "source-art/meshy-hound-v1/hound_l05-meshy-source.glb",
+      "reference": "source-art/meshy-hound-v1/hound_l05-reference.png",
+      "portrait": "assets/portraits/defenders/hound.png",
+      "bytes": 5477192,
+      "sha256": "b7dc9226ddeac70a82c7fb3aa6ef80bc024b3d626f99a99d5af229206f9433d7",
+      "sourceSha256": "b7dc9226ddeac70a82c7fb3aa6ef80bc024b3d626f99a99d5af229206f9433d7",
+      "sourceMeshSha256": "ac19fd52278b4a2819ac0113daa25ef5337c5bea11dc1f2065e2a39bbb5f2061",
+      "referenceSha256": "f30a7f1d8704e8a65ea972888073a1e684ba453e073c17da3058b7f31345b39d",
+      "triangles": 14950,
+      "skins": 1,
+      "textures": 1,
+      "animations": [
+        "DZN_Hound_Alert",
+        "DZN_Hound_Idle",
+        "DZN_Hound_Pounce",
+        "DZN_Hound_Run",
+        "DZN_Hound_Walk"
+      ],
+      "meshyCredits": 15
+    }
+  }
+}

@@ -1954,7 +1954,7 @@ function bindDefenderRig(model, role) {
 }
 
 function loadDefenderTemplate(role, level) {
-  if (!['guardian', 'aegis', 'trapper'].includes(role)) return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
+  if (!['guardian', 'aegis', 'trapper', 'hound'].includes(role)) return loadBuildingTemplate(defenderAsset(role, level)).then(scene => ({ scene, animations: [] }));
   return loadAnimatedSquad(defenderAsset(role, level)).catch(error => {
     console.warn(`${DEFENDER_CONCEPTS[role].name} Level ${level} animated model unavailable; retaining the original defender.`, error);
     return loadBuildingTemplate(`assets/models/defenders/${role}_l0${level}.glb`).then(scene => ({ scene, animations: [] }));
@@ -2018,8 +2018,21 @@ function bindTrapperAnimations(patrol, asset, model) {
   patrol.action.play();
 }
 
+function bindHoundAnimations(patrol, asset, model) {
+  const clips = Object.fromEntries((asset.animations || []).map(clip => [clip.name, clip]));
+  const names = { idle: 'DZN_Hound_Idle', walk: 'DZN_Hound_Walk', run: 'DZN_Hound_Run',
+    alert: 'DZN_Hound_Alert', pounce: 'DZN_Hound_Pounce' };
+  if (Object.values(names).some(name => !clips[name])) throw new Error('Hound requires five rigged quadruped actions.');
+  patrol.mixer = new THREE.AnimationMixer(model);
+  patrol.actions = Object.fromEntries(Object.entries(names).map(([state, name]) => [state, patrol.mixer.clipAction(clips[name])]));
+  patrol.action = patrol.actions.idle;
+  patrol.actionName = 'idle';
+  patrol.action.play();
+}
+
 const bindAnimatedDefender = (patrol, asset, model) => ({
   guardian: bindGuardianAnimations, aegis: bindAegisAnimations, trapper: bindTrapperAnimations,
+  hound: bindHoundAnimations,
 })[patrol.role](patrol, asset, model);
 
 function attachAegisDrones(patrol, level, valid = () => true) {
@@ -2082,7 +2095,7 @@ function syncDefenderPatrols() {
     defenderPatrols.set(role, patrol);
     loadDefenderTemplate(role, unit.level).then(asset => {
       if (!patrol.active) return;
-      const animated = ['guardian', 'aegis', 'trapper'].includes(role) && asset.animations.length > 0;
+      const animated = ['guardian', 'aegis', 'trapper', 'hound'].includes(role) && asset.animations.length > 0;
       const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
       if (animated) model.scale.setScalar(1.1);
       model.traverse(item => { if (item.isMesh) { item.castShadow = true; item.receiveShadow = true; } });
@@ -2097,8 +2110,10 @@ function syncDefenderPatrols() {
 function animateDefender(patrol, time = elapsed, threat = 0, dt = 0) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const { mesh, motion, role } = patrol;
-  if (['guardian', 'aegis', 'trapper'].includes(role) && patrol.mixer) {
-    const name = motion?.moving ? 'walk' : threat > .35 ? role === 'guardian' ? 'block' : role === 'aegis' ? 'command' : 'deploy' : 'idle';
+  if (['guardian', 'aegis', 'trapper', 'hound'].includes(role) && patrol.mixer) {
+    const name = role === 'hound'
+      ? time < (patrol.attackUntil || 0) ? 'pounce' : motion?.moving ? threat > .35 ? 'run' : 'walk' : threat > .35 ? 'alert' : 'idle'
+      : motion?.moving ? 'walk' : threat > .35 ? role === 'guardian' ? 'block' : role === 'aegis' ? 'command' : 'deploy' : 'idle';
     if (patrol.actionName !== name) {
       const next = patrol.actions[name];
       next.reset().fadeIn(.18).play();
@@ -2167,7 +2182,7 @@ function placeDefenderPreview(role, level) {
   defenderPreviewMotion = null;
   loadDefenderTemplate(role, level).then(asset => {
     if (token !== defenderPreviewToken) return;
-    const animated = ['guardian', 'aegis', 'trapper'].includes(role) && asset.animations.length;
+    const animated = ['guardian', 'aegis', 'trapper', 'hound'].includes(role) && asset.animations.length;
     const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
     model.position.set(-2, 0.07, -8);
     model.rotation.y = -0.6;
@@ -4588,7 +4603,7 @@ function buildWarBaseVisual(side, condition = null) {
     warDefenderMeshes.push(patrol);
     loadDefenderTemplate(role, defender.level).then(asset => {
       if (token !== warDefenderToken) return;
-      const animated = ['guardian', 'aegis', 'trapper'].includes(role) && asset.animations.length > 0;
+      const animated = ['guardian', 'aegis', 'trapper', 'hound'].includes(role) && asset.animations.length > 0;
       const model = animated ? cloneSkeleton(asset.scene) : asset.scene.clone(true);
       if (animated) model.scale.setScalar(1.1);
       mesh.add(model);
@@ -4989,7 +5004,10 @@ function updateWarBattle(dt) {
           const origin = aegisTraceOrigin(defender, index);
           spawnWarTrace(warBattle, origin, target.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
         } else if (event.role === 'trapper') spawnTrapperSnare(warBattle, defender, target.position);
-        else if (event.role === 'hound') spawnWarPulse(warBattle, target.position, 0xb7ff72, 0.68);
+        else if (event.role === 'hound') {
+          defender.attackUntil = warBattle.time + .95;
+          spawnWarPulse(warBattle, target.position, 0xb7ff72, 0.68);
+        }
       }
     } else if (nearest && threat > 0.35 && progress > 0.32 && progress < 0.84 && warBattle.time >= defender.nextCue) {
       defender.nextCue = warBattle.time + (defender.role === 'aegis' ? 1.4 : 1.8);
@@ -4999,7 +5017,10 @@ function updateWarBattle(dt) {
         const origin = aegisTraceOrigin(defender, defender.droneCueIndex);
         spawnWarTrace(warBattle, origin, nearest.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x9deeff, 0.023);
       } else if (defender.role === 'trapper' && nearest.distance < 8) spawnTrapperSnare(warBattle, defender, nearest.mesh.position);
-      else if (defender.role === 'hound' && nearest.distance < 3) spawnWarPulse(warBattle, nearest.mesh.position, 0xb7ff72, 0.68);
+      else if (defender.role === 'hound' && nearest.distance < 3) {
+        defender.attackUntil = warBattle.time + .95;
+        spawnWarPulse(warBattle, nearest.mesh.position, 0xb7ff72, 0.68);
+      }
     }
     defender.motion = { stride: defender.stride, moving };
     animateDefender(defender, warBattle.time, threat, dt);
