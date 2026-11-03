@@ -5,6 +5,7 @@ import { DEFENDER_CONCEPTS, defenderBattleEffect } from './defender-assets.js';
 import { OPERATIVES, OperationsController, EXPEDITION_RULES, EXPEDITION_FIELD, expeditionFieldPath, expeditionFieldWalkable } from './operative-ops.js';
 import { createPatrolMotion, patrolNodesForLayout, setPatrolOrder, stepPatrolMotion } from './patrol-routes.js';
 import { evaluateWarPlan, evaluateWarDefenceOrder, buildWarDamageReport, simulateWarCombat, normalizeWarCondition, warConditionAfter, warSystemStatus, warDefenderPosts, warReplayTravel, warTurnToward, stepWarRoute, warReplayHealth, warStandingWalls } from './war-tactics.js';
+import { aegisInterceptPoint, aegisInterceptWeight } from './aegis-response.js';
 
 class MemoryStorage {
   constructor(seed = {}) { this.data = new Map(Object.entries(seed)); }
@@ -18,6 +19,12 @@ function assert(condition, message) {
 
 export function runServiceTests() {
   const checks = [];
+  const farIntercept = aegisInterceptPoint({ x: 0, y: 1.8, z: 0 }, { x: 20, y: 1.4, z: 0 });
+  assert(Math.abs(farIntercept.x - 4.5) < .001 && farIntercept.y === 1.4
+    && aegisInterceptWeight(0) === 0 && aegisInterceptWeight(.3) === 1
+    && aegisInterceptWeight(1.12) === 0,
+  'Aegis drone intercept remains within its leash and returns after the recorded volley');
+  checks.push('bounded Aegis drone interception replay');
   let clock = 1_900_000_000_000;
   const storage = new MemoryStorage();
   let service = new LocalGameService({ storage, now: () => clock });
