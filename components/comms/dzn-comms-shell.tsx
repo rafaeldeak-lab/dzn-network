@@ -734,8 +734,8 @@ export function DznCommsShell() {
       <section className="mx-auto flex w-full max-w-[100rem] flex-col gap-4 px-3 sm:px-5 lg:px-7">
         <div id="global-chat" className="relative overflow-hidden rounded-2xl border border-violet-300/20 bg-[radial-gradient(circle_at_45%_-18%,rgba(139,92,246,0.18),transparent_34%),linear-gradient(180deg,#070b17,#03050d)] shadow-[0_28px_94px_rgba(0,0,0,0.48)]">
           <header className="relative z-30 flex min-h-16 items-center gap-3 border-b border-white/10 bg-[#060a14]/94 px-3 backdrop-blur-xl sm:px-4">
-            <button type="button" onClick={() => setLeftDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 lg:hidden" aria-label="Open chat rooms"><Menu className="h-5 w-5" aria-hidden="true" /></button>
-            <div className="hidden min-w-[12.4rem] lg:block"><DznLogo compact /></div>
+            <button type="button" onClick={() => setLeftDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 xl:hidden" aria-label="Open chat rooms"><Menu className="h-5 w-5" aria-hidden="true" /></button>
+            <div className="hidden min-w-[12.4rem] xl:block"><DznLogo compact /></div>
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">DZN Comms</p>
               <h1 className="truncate text-lg font-black text-white sm:text-xl">{isUpdatesChannel ? "DZN Updates" : payload.channel.name}</h1>
@@ -744,14 +744,14 @@ export function DznCommsShell() {
               <span className="sr-only">Chat access: {selectedChannelAccessLabel}</span>
             </div>
             {!isUpdatesChannel ? <DznLivePresenceCounter /> : <span className="hidden min-h-10 items-center rounded-md border border-violet-300/25 bg-violet-500/10 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-violet-100 sm:inline-flex">Official feed</span>}
-            <button type="button" onClick={() => setRightDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 lg:hidden" aria-label="Open event and server panel"><PanelRightOpen className="h-5 w-5" aria-hidden="true" /></button>
+            <button type="button" onClick={() => setRightDrawerOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100 xl:hidden" aria-label="Open event and server panel"><PanelRightOpen className="h-5 w-5" aria-hidden="true" /></button>
           </header>
 
-          {leftDrawerOpen || rightDrawerOpen ? <button type="button" aria-label="Close open chat panel" onClick={() => { setLeftDrawerOpen(false); setRightDrawerOpen(false); }} className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm lg:hidden" /> : null}
+          {leftDrawerOpen || rightDrawerOpen ? <button type="button" aria-label="Close open chat panel" onClick={() => { setLeftDrawerOpen(false); setRightDrawerOpen(false); }} className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm xl:hidden" /> : null}
 
-          <div className="grid min-h-[min(52rem,calc(100svh-7rem))] lg:grid-cols-[15.5rem_minmax(0,1fr)_19rem]">
-            <aside aria-label="Chat rooms and groups" className={`fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] flex-col overflow-y-auto border-r border-white/10 bg-[#070b17] shadow-[28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:shadow-none ${leftDrawerOpen ? "translate-x-0" : "-translate-x-full"}`}>
-              <div className="flex items-center justify-between border-b border-white/8 p-4 lg:hidden"><DznLogo compact /><button type="button" onClick={() => setLeftDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close chat rooms"><X className="h-4 w-4" aria-hidden="true" /></button></div>
+          <div className="grid min-h-[min(52rem,calc(100svh-7rem))] xl:grid-cols-[15.5rem_minmax(0,1fr)_19rem]">
+            <aside aria-label="Chat rooms and groups" className={`fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] flex-col overflow-y-auto border-r border-white/10 bg-[#070b17] shadow-[28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 xl:static xl:z-auto xl:w-auto xl:translate-x-0 xl:shadow-none ${leftDrawerOpen ? "translate-x-0" : "-translate-x-full"}`}>
+              <div className="flex items-center justify-between border-b border-white/8 p-4 xl:hidden"><DznLogo compact /><button type="button" onClick={() => setLeftDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close chat rooms"><X className="h-4 w-4" aria-hidden="true" /></button></div>
               <div className="p-3">
                 <div className="flex items-center justify-between px-2 py-2"><PanelTitle icon={Hash} label="Chat rooms" /><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.8)]" aria-label="Chat connection status" /></div>
                 <div className="mt-2 space-y-1">
@@ -808,8 +808,8 @@ export function DznCommsShell() {
               </>}
             </section>
 
-            <aside aria-label="Events and connected servers" className={`fixed inset-y-0 right-0 z-50 flex w-[min(88vw,24rem)] flex-col overflow-y-auto border-l border-white/10 bg-[#070b17] shadow-[-28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:shadow-none ${rightDrawerOpen ? "translate-x-0" : "translate-x-full"}`}>
-              <div className="flex items-center justify-between border-b border-white/8 p-3 lg:hidden"><p className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">Network activity</p><button type="button" onClick={() => setRightDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close event and server panel"><X className="h-4 w-4" aria-hidden="true" /></button></div>
+            <aside aria-label="Events and connected servers" className={`fixed inset-y-0 right-0 z-50 flex w-[min(88vw,24rem)] flex-col overflow-y-auto border-l border-white/10 bg-[#070b17] shadow-[-28px_0_80px_rgba(0,0,0,0.55)] transition-transform duration-200 xl:static xl:z-auto xl:w-auto xl:translate-x-0 xl:shadow-none ${rightDrawerOpen ? "translate-x-0" : "translate-x-full"}`}>
+              <div className="flex items-center justify-between border-b border-white/8 p-3 xl:hidden"><p className="text-xs font-black uppercase tracking-[0.16em] text-violet-100">Network activity</p><button type="button" onClick={() => setRightDrawerOpen(false)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-zinc-300" aria-label="Close event and server panel"><X className="h-4 w-4" aria-hidden="true" /></button></div>
               <DznCommsNetworkRail onNavigate={() => setRightDrawerOpen(false)} />
               <div className="border-t border-white/8 p-3"><details className="rounded-xl border border-violet-300/16 bg-violet-500/[0.06] p-3"><summary className="cursor-pointer text-xs font-black uppercase tracking-[0.14em] text-violet-200">Community safety</summary><p className="mt-3 text-xs font-semibold leading-5 text-zinc-400">English only. Do not post abuse, invites, secrets, threats or personal information. Report abuse instead of replying to it.</p><ul className="mt-3 space-y-2 text-xs font-semibold leading-5 text-zinc-400">{payload.fairness_boundary.slice(0, 3).map((line) => <li key={line}>{line}</li>)}</ul></details></div>
             </aside>

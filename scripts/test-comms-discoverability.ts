@@ -101,6 +101,10 @@ assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fdashboard", 
 assert.equal(publicAccessPolicy.includes("The browser-local DZN Assist may remain public"), true, "The public access policy must permit the released local-only support desk.");
 assert.equal(publicAccessPolicy.includes("Any account-aware or generative AI runtime remains a separate release"), true, "The public access policy must keep future AI runtime activation separate.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
+assert.equal(commsSource.includes('xl:grid-cols-[15.5rem_minmax(0,1fr)_19rem]'), true, "The three-column Comms workspace must wait for an extra-wide desktop so the message rail remains readable on laptops.");
+assert.equal(commsSource.includes('xl:static xl:z-auto xl:w-auto xl:translate-x-0 xl:shadow-none'), true, "Both Comms side panels must remain usable drawers until the three-column layout has enough space.");
+assert.equal(commsSource.includes('text-violet-100 xl:hidden" aria-label="Open chat rooms"'), true, "Laptop readers must retain an explicit chat-rooms drawer control.");
+assert.equal(commsSource.includes('text-violet-100 xl:hidden" aria-label="Open event and server panel"'), true, "Laptop readers must retain an explicit event-and-server drawer control.");
 assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
 assert.equal(updatesPageSource.includes("DznUpdatesFeed"), true, "The official release feed must have a direct public page.");
 assert.equal(updatesSource.includes("source-controlled public release log"), true, "Official update entries must be source-controlled instead of fabricated chat activity.");
