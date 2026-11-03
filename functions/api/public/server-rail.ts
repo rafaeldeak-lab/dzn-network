@@ -246,10 +246,18 @@ async function readRailAllTimeViewCounts(env: Env, displayRows: RailRow[], allRo
 
   try {
     const lineageSeeds = [...canonicalIdBySourceId.entries()];
-    const seedSql = lineageSeeds.map(() => "SELECT ? AS id, ? AS canonical_id").join("\nUNION\n");
+    // D1 allows at most 100 bound parameters per query. One JSON payload keeps
+    // this query bounded even when a public server has many duplicate records.
+    const lineageSeedJson = JSON.stringify(lineageSeeds.map(([id, canonicalId]) => ({ id, canonicalId })));
     const result = await requireDb(env).prepare(
-      `WITH RECURSIVE view_lineage(id, canonical_id) AS (
-         ${seedSql}
+      `WITH RECURSIVE lineage_seed(id, canonical_id) AS (
+         SELECT json_extract(value, '$.id'),
+                json_extract(value, '$.canonicalId')
+           FROM json_each(?)
+       ),
+       view_lineage(id, canonical_id) AS (
+         SELECT id, canonical_id
+           FROM lineage_seed
          UNION
          SELECT legacy.id, view_lineage.canonical_id
            FROM linked_servers AS legacy
@@ -260,7 +268,7 @@ async function readRailAllTimeViewCounts(env: Env, displayRows: RailRow[], allRo
          FROM view_lineage
          LEFT JOIN promotion_impressions ON promotion_impressions.server_id = view_lineage.id
         GROUP BY view_lineage.canonical_id`,
-    ).bind(...lineageSeeds.flat()).all<RailViewRow>();
+    ).bind(lineageSeedJson).all<RailViewRow>();
     return new Map((result.results ?? []).map((row) => [row.server_id, numberOrZero(row.view_count)]));
   } catch {
     // Older read-only environments may not yet have promotion analytics. The rail remains available without the count.

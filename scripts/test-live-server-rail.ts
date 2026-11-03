@@ -80,8 +80,9 @@ assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate se
 assert.match(railRouteSource, /promotion_impressions/, "The rail must read its existing aggregated view ledger.");
 assert.match(railRouteSource, /readRailAllTimeViewCounts/, "The rail must explicitly use its durable all-time view reader.");
 assert.doesNotMatch(railRouteSource, /occurred_at\s*>=|cutoff\s*=\s*new Date/, "The public total must not discard older ledger rows through a rolling reporting cutoff.");
-assert.match(railRouteSource, /WITH RECURSIVE view_lineage/, "All-time views must retain the lineage of reconciled server records.");
+assert.match(railRouteSource, /WITH RECURSIVE lineage_seed/, "All-time views must retain the lineage of reconciled server records.");
 assert.match(railRouteSource, /legacy\.merged_into_server_id = view_lineage\.id/, "Historic merged server records must contribute their views to the canonical listing.");
+assert.match(railRouteSource, /FROM json_each\(\?\)/, "Lineage seeds must use one JSON binding rather than exceeding D1's parameter limit on duplicate-heavy listings.");
 assert.match(railRouteSource, /WHERE status = 'approved'/, "The rail must expose the same approved-review summary as public server listings.");
 assert.doesNotMatch(railRouteSource, /WHERE status = 'active'/, "The retired active-review status must not suppress public rail ratings.");
 assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
@@ -267,13 +268,15 @@ function createRailDb(
 ) {
   return {
     prepare: (query: string) => {
-      if (query.includes("WITH RECURSIVE view_lineage")) {
+      if (query.includes("WITH RECURSIVE lineage_seed")) {
         return {
           bind: (...bindings: string[]) => ({
             all: async () => {
+              assert.equal(bindings.length, 1, "The lineage reader must keep its D1 parameter count constant.");
+              const seedRows = JSON.parse(bindings[0]) as Array<{ id: string; canonicalId: string }>;
               const canonicalIdBySourceId = new Map<string, string>();
-              for (let index = 0; index < bindings.length; index += 2) {
-                canonicalIdBySourceId.set(bindings[index], bindings[index + 1]);
+              for (const seed of seedRows) {
+                canonicalIdBySourceId.set(seed.id, seed.canonicalId);
               }
 
               let addedLineage = true;
