@@ -190,7 +190,7 @@ export function detectDestructiveMigration(content: string, file = "") {
   const normalizedFile = normalizePath(file);
   const isMigrationLike = isMigration(normalizedFile) || /\.sql$/i.test(normalizedFile);
   if (!isMigrationLike && !/CREATE\s+TABLE|DROP\s+TABLE|DELETE\s+FROM|ALTER\s+TABLE|UPDATE\s+player_profiles/i.test(text) && !DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) return findings;
-  if (/DROP\s+TABLE/i.test(text) && !isVerifiedCommsPrivacyCopyAndSwap(content, text, normalizedFile)) findings.push("destructive DROP TABLE detected");
+  if (/DROP\s+TABLE/i.test(text) && !isVerifiedCommsPrivacyCopyAndSwap(content, text, normalizedFile) && !isVerifiedCipherGridSpecialistCopyAndSwap(content, text, normalizedFile)) findings.push("destructive DROP TABLE detected");
   if (DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) findings.push("destructive TRUNCATE detected");
   if (new RegExp(`DELETE\\s+FROM\\s+(${PROTECTED_DELETE_TABLES.join("|")})\\b`, "i").test(text)) findings.push("destructive DELETE FROM protected table detected");
   if (/ALTER\s+TABLE[\s\S]{0,200}\bDROP\s+COLUMN\b/i.test(text)) findings.push("destructive ALTER TABLE DROP COLUMN detected");
@@ -248,6 +248,27 @@ function isVerifiedCommsPrivacyCopyAndSwap(content: string, text: string, file: 
     && /FROM\s+dzn_comms_attempt_slots[\s\S]{0,200}minute_bucket\s*=\s*strftime\('%Y-%m-%dT%H:%M',\s*'now'\)/i.test(text)
     && /FROM\s+dzn_comms_send_slots[\s\S]{0,300}julianday\(accepted_at\)\s*>\s*julianday\('now',\s*'-5 seconds'\)/i.test(text)
     && /CREATE\s+TABLE\s+dzn_comms_attempt_actor_map\b/i.test(text);
+}
+
+/**
+ * This historical migration rebuilds the inactive Cipher Grid session table so
+ * SQLite can widen its answer constraint without altering player profiles or
+ * reward ledgers. It is allowed only when every byte matches the reviewed,
+ * data-preserving source migration; renamed, edited, or expanded copies remain
+ * destructive and must fail the audit.
+ */
+function isVerifiedCipherGridSpecialistCopyAndSwap(content: string, text: string, file: string) {
+  if (file !== "migrations/0106_games_hub_cipher_grid_specialist.sql") return false;
+  const canonicalHash = createHash("sha256").update(content.replace(/\r\n/g, "\n")).digest("hex");
+  if (canonicalHash !== "80554d1d221ce9eeb560c202b978e8376f4f1bd0315681a44e78627f347afb47") return false;
+  if (DESTRUCTIVE_TRUNCATE_PATTERN.test(text) || /ALTER\s+TABLE[\s\S]{0,200}\bDROP\s+COLUMN\b/i.test(text)) return false;
+
+  const drops = [...text.matchAll(/\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][\w$]*)\s*;/gi)].map((match) => match[1].toLowerCase());
+  if (drops.length !== 1 || drops[0] !== "dzn_cipher_grid_sessions") return false;
+
+  return /CREATE\s+TABLE\s+dzn_cipher_grid_sessions_next\b/i.test(text)
+    && /INSERT\s+INTO\s+dzn_cipher_grid_sessions_next\b[\s\S]{0,1200}FROM\s+dzn_cipher_grid_sessions\b/i.test(text)
+    && /ALTER\s+TABLE\s+dzn_cipher_grid_sessions_next\s+RENAME\s+TO\s+dzn_cipher_grid_sessions\b/i.test(text);
 }
 
 export function classifyRecoverableProductionStatus(status: string | null | undefined) {
