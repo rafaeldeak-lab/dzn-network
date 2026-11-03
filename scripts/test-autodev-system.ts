@@ -109,6 +109,12 @@ assert.equal(classifyPath("migrations/0072_dzn_comms_private_rate_ledgers.sql", 
 assert.equal(detectDestructiveMigration(commsPrivacyMigration, "migrations/9999_renamed.sql").length > 0, true, "The copy-and-swap exemption must be filename-bound.");
 assert.equal(detectDestructiveMigration(commsPrivacyMigration.replace("FROM dzn_comms_send_receipts;", "FROM dzn_comms_channels;"), "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject a missing source-table copy.");
 assert.equal(detectDestructiveMigration(`${commsPrivacyMigration}\nDROP TABLE users;`, "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject any additional dropped table.");
+const cipherGridSpecialistMigration = read("migrations/0106_games_hub_cipher_grid_specialist.sql");
+assert.deepEqual(detectDestructiveMigration(cipherGridSpecialistMigration, "migrations/0106_games_hub_cipher_grid_specialist.sql"), [], "The exact reviewed Cipher Grid copy-and-swap migration must pass the scheduled audit.");
+assert.equal(classifyPath("migrations/0106_games_hub_cipher_grid_specialist.sql", cipherGridSpecialistMigration).risk, "medium");
+assert.equal(detectDestructiveMigration(cipherGridSpecialistMigration, "migrations/9999_renamed.sql").length > 0, true, "The Cipher Grid exemption must be filename-bound.");
+assert.equal(detectDestructiveMigration(cipherGridSpecialistMigration.replace("FROM dzn_cipher_grid_sessions;", "FROM users;"), "migrations/0106_games_hub_cipher_grid_specialist.sql").length > 0, true, "The Cipher Grid exemption must reject a changed source-table copy.");
+assert.equal(detectDestructiveMigration(`${cipherGridSpecialistMigration}\nDROP TABLE users;`, "migrations/0106_games_hub_cipher_grid_specialist.sql").length > 0, true, "The Cipher Grid exemption must reject any additional dropped table.");
 
 assert.equal(classifyRecoverableProductionStatus("nitrado_upstream_down"), true);
 assert.equal(classifyRecoverableProductionStatus("waiting_for_nitrado"), true);
