@@ -918,6 +918,39 @@ for (let level = 1; level <= 5; level++) {
     throw new Error(`Trapper Level ${level} needs a textured humanoid rig and four playable actions.`);
 }
 console.log('Five distinct DZN Trapper levels verified with source, textured rigs and walk/run/idle/deploy actions.');
+const houndManifest = JSON.parse(readFileSync(join(root, 'assets/models/defenders-v5/manifest.json'), 'utf8'));
+if (!houndManifest.complete || Object.keys(houndManifest.assets || {}).length !== 5)
+  throw new Error('Hound requires five complete quadruped 3D tiers.');
+const houndHashes = new Set();
+for (let level = 1; level <= 5; level++) {
+  const name = `hound_l0${level}`, entry = houndManifest.assets[name];
+  if (!entry || entry.file !== defenderAsset('hound', level))
+    throw new Error(`Hound Level ${level} game mapping is missing.`);
+  const bytes = readFileSync(join(root, ...entry.file.split('/')));
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.source));
+  const sourceMesh = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.sourceMesh));
+  const reference = readFileSync(join(dirname(fileURLToPath(import.meta.url)), entry.reference));
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.toString('ascii', 0, 4) !== 'glTF' || bytes.readUInt32LE(8) !== bytes.length
+    || bytes.length !== entry.bytes || hash !== entry.sha256 || houndHashes.has(hash)
+    || createHash('sha256').update(source).digest('hex') !== entry.sourceSha256
+    || createHash('sha256').update(sourceMesh).digest('hex') !== entry.sourceMeshSha256
+    || createHash('sha256').update(reference).digest('hex') !== entry.referenceSha256)
+    throw new Error(`Hound Level ${level} source or game GLB integrity failed.`);
+  houndHashes.add(hash);
+  const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+  const clips = new Set((gltf.animations || []).map(clip => clip.name));
+  const nodes = new Set((gltf.nodes || []).map(node => node.name));
+  const triangles = gltf.meshes?.flatMap(mesh => mesh.primitives).reduce((sum, part) => sum + gltf.accessors[part.indices].count / 3, 0);
+  if (!gltf.meshes?.length || !gltf.skins?.length || gltf.skins[0].joints?.length < 15
+    || !gltf.images?.length || triangles !== entry.triangles || triangles > 22000
+    || !['Core', 'Head', 'Tail', 'FrontUpper_L', 'FrontLower_L', 'FrontPaw_L',
+      'FrontUpper_R', 'FrontLower_R', 'FrontPaw_R', 'RearUpper_L', 'RearLower_L', 'RearPaw_L',
+      'RearUpper_R', 'RearLower_R', 'RearPaw_R'].every(part => nodes.has(part))
+    || !['DZN_Hound_Idle', 'DZN_Hound_Walk', 'DZN_Hound_Run', 'DZN_Hound_Alert', 'DZN_Hound_Pounce'].every(clip => clips.has(clip)))
+    throw new Error(`Hound Level ${level} needs four skinned legs, textured armour and five actions.`);
+}
+console.log('Five distinct DZN Hound levels verified with skinned legs, textures and idle/walk/run/alert/pounce actions.');
 const portraitManifest = JSON.parse(readFileSync(join(root, 'assets/portraits/squads-final/manifest.json'), 'utf8'));
 const portraits = Object.entries(portraitManifest.assets);
 if (portraits.length !== 25 || portraitManifest.outputSize?.join('x') !== '768x768') throw new Error('DZN squad kit requires all 25 final detailed character portraits.');
