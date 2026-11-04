@@ -42,6 +42,9 @@ async function run() {
   assert.match(storefrontSource, /payload\?\.error === "ORDER_EXPIRED"/);
   assert.match(storefrontSource, /retryKeys\.current\.delete\(product\.publication_id\)/);
   assert.match(storefrontSource, /sessionStorage\.removeItem\(key\)/);
+  assert.match(storefrontSource, /state === "closed"\s*\?\s*"Preview catalogue"/);
+  assert.match(storefrontSource, /Store is in preparation/);
+  assert.match(storefrontSource, /No items are published and no payment can be started from this page yet\./);
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }",
     compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
