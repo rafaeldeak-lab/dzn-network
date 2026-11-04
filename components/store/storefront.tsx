@@ -48,6 +48,12 @@ export function Storefront() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const retryKeys = useRef(new Map<string, string>());
+  const storeSectionStatus = state === "ready" && products.length > 0
+    ? "Available now"
+    : state === "closed"
+      ? "Preview catalogue"
+      : "Catalogue status";
+  const storeSectionTitle = state === "closed" ? "Store opening soon" : "Store items";
 
   const load = useCallback(async () => {
     setState("loading");
@@ -138,14 +144,14 @@ export function Storefront() {
 
       <section aria-labelledby="store-products" className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-5">
-          <div><p className="text-xs font-black uppercase text-violet-200">Available now</p><h2 id="store-products" className="mt-1 text-2xl font-black uppercase">Store items</h2></div>
+          <div><p className="text-xs font-black uppercase text-violet-200">{storeSectionStatus}</p><h2 id="store-products" className="mt-1 text-2xl font-black uppercase">{storeSectionTitle}</h2></div>
           <button type="button" onClick={() => void load()} disabled={state === "loading"} className="inline-flex min-h-11 items-center gap-2 border border-white/15 px-4 text-sm font-bold text-zinc-200 hover:border-cyan-300/40 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${state === "loading" ? "animate-spin" : ""}`} aria-hidden="true" />Refresh
           </button>
         </div>
 
         {state === "loading" ? <StoreStatus icon={LoaderCircle} title="Loading Store" detail="Checking the current catalog and checkout status." spinning /> : null}
-        {state === "closed" ? <StoreStatus icon={ShoppingBag} title="Store opening soon" detail="The public Store is not open yet. No payment can be started from this page." /> : null}
+        {state === "closed" ? <StoreStatus icon={ShoppingBag} title="Store is in preparation" detail="This DZN Beta catalogue is being completed and independently checked before it opens. No items are published and no payment can be started from this page yet." /> : null}
         {state === "error" ? <StoreStatus icon={RefreshCw} title="Store temporarily unavailable" detail="The catalog could not be checked. No payment has been started." /> : null}
         {state === "ready" && products.length === 0 ? <StoreStatus icon={PackageCheck} title="No items published" detail="There are no Store items available right now." /> : null}
 
